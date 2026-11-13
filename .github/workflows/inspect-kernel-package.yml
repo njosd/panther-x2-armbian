@@ -14,12 +14,12 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Download and verify outer kernel archive
+      - name: Download, verify and inspect kernel package
         shell: bash
         run: |
           set -euo pipefail
           source config/versions.env
-          mkdir -p inspection/inner
+          mkdir -p inspection/inner inspection/extracted
 
           outer="inspection/${KERNEL_PACKAGE_ASSET}"
           curl --fail --location --retry 3 --retry-delay 3 "${KERNEL_PACKAGE_URL}" -o "${outer}"
@@ -31,32 +31,27 @@ jobs:
             echo "::error::Outer kernel archive SHA-256 mismatch"
             exit 1
           }
-
           gzip -t "${outer}"
           tar -tzf "${outer}" > inspection/outer-archive-list.txt
 
-          echo "Outer archive entries:"
-          cat inspection/outer-archive-list.txt
-
-          mapfile -t inner_members < <(grep -E '^6\.18\.63/[^/]+\.tar\.gz$' inspection/outer-archive-list.txt || true)
-          if [[ "${#inner_members[@]}" -eq 0 ]]; then
-            echo "::error::No nested kernel tar.gz packages found in outer archive"
-            exit 1
-          fi
-
+          checksum_member="6.18.63/sha256sums"
+          tar -xOzf "${outer}" "${checksum_member}" > inspection/published-sha256sums.txt
           : > inspection/inner-archive-list.txt
           : > inspection/inner-package-checksums.txt
+          mapfile -t inner_members < <(grep -E '^6\.18\.63/[^/]+\.tar\.gz$' inspection/outer-archive-list.txt || true)
+          [[ "${#inner_members[@]}" -gt 0 ]] || {
+            echo "::error::No nested kernel packages found"
+            exit 1
+          }
+
           for member in "${inner_members[@]}"; do
             name="${member##*/}"
             extracted="inspection/inner/${name}"
             listing="inspection/inner/${name}.list"
-
-            echo "Extracting nested package: ${member}"
             tar -xOzf "${outer}" "${member}" > "${extracted}"
             gzip -t "${extracted}"
             sha256sum "${extracted}" >> inspection/inner-package-checksums.txt
             tar -tzf "${extracted}" > "${listing}"
-
             {
               echo "===== ${name} ====="
               cat "${listing}"
@@ -64,49 +59,84 @@ jobs:
             } >> inspection/inner-archive-list.txt
           done
 
-          {
-            echo "Ophub kernel package inspection"
-            echo "Kernel package: ${KERNEL_PACKAGE_VERSION}"
-            echo "Outer archive SHA256: ${actual}"
-            echo "Nested packages inspected: ${#inner_members[@]}"
-            echo
-            echo "Nested package integrity:"
-            echo "All nested gzip streams passed gzip -t."
-            echo
-            echo "Target file discovery:"
-            if grep -E '(^|/)rk3566-panther-x2\.dtb$' inspection/inner-archive-list.txt; then
-              echo "Panther X2 DTB: FOUND"
-            else
-              echo "Panther X2 DTB: NOT FOUND"
-            fi
-            if grep -E '(^|/)(Image|Image\.gz|vmlinuz)(\.\w+)?$' inspection/inner-archive-list.txt; then
-              echo "Kernel image candidate: FOUND"
-            else
-              echo "Kernel image candidate: NOT FOUND"
-            fi
-            if grep -E '(^|/)lib/modules/[^/]+/' inspection/inner-archive-list.txt; then
-              echo "Kernel modules tree: FOUND"
-            elif grep -E '(^|/)modules/[^/]+/' inspection/inner-archive-list.txt; then
-              echo "Kernel modules tree: FOUND (modules-prefixed layout)"
-            else
-              echo "Kernel modules tree: NOT FOUND"
-            fi
-            echo
-            echo "Nested package checksums:"
-            cat inspection/inner-package-checksums.txt
-          } | tee inspection/inspection-report.txt
+          # Verify nested archives against the checksum manifest shipped in the outer package.
+          python3 - <<'PY'
+          import hashlib, pathlib, re, sys
+          root = pathlib.Path("inspection")
+          manifest = (root / "published-sha256sums.txt").read_text(errors="replace").splitlines()
+          expected = {}
+          for line in manifest:
+              m = re.match(r"^\s*([0-9a-fA-F]{64})\s+\*?(.+?)\s*$", line)
+              if m:
+                  expected[pathlib.PurePosixPath(m.group(2)).name] = m.group(1).lower()
+          files = sorted((root / "inner").glob("*.tar.gz"))
+          report = []
+          failed = False
+          for path in files:
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              exp = expected.get(path.name)
+              status = "MATCH" if exp == digest else ("MISSING_IN_MANIFEST" if exp is None else "MISMATCH")
+              report.append(f"{path.name}: {status} expected={exp or 'N/A'} actual={digest}")
+              if status != "MATCH":
+                  failed = True
+          (root / "checksum-verification.txt").write_text("\n".join(report) + "\n")
+          print("\n".join(report))
+          if failed:
+              sys.exit("Nested package checksum verification failed")
+          PY
 
-          echo "Outer archive bytes: $(stat -c %s "${outer}")"
-          echo "Nested package count: ${#inner_members[@]}"
+          # Extract boot package files and inspect the exact kernel config/image.
+          boot_pkg="inspection/inner/boot-${KERNEL_PACKAGE_VERSION}-ophub.tar.gz"
+          tar -xzf "${boot_pkg}" -C inspection/extracted
+          config_file="inspection/extracted/config-${KERNEL_PACKAGE_VERSION}-ophub"
+          image_file="inspection/extracted/vmlinuz-${KERNEL_PACKAGE_VERSION}-ophub"
+          [[ -s "${config_file}" ]] || { echo "::error::Kernel config file missing"; exit 1; }
+          [[ -s "${image_file}" ]] || { echo "::error::Kernel image file missing"; exit 1; }
+          file "${image_file}" | tee inspection/kernel-image-file.txt
+          sha256sum "${image_file}" "${config_file}" > inspection/boot-file-checksums.txt
+
+          # Record relevant kernel configuration symbols, including unset options.
+          config_keys='CONFIG_ARM64=|CONFIG_STMMAC=|CONFIG_DWMAC_ROCKCHIP=|CONFIG_REALTEK_PHY=|CONFIG_USB=|CONFIG_USB_XHCI_HCD=|CONFIG_USB_EHCI_HCD=|CONFIG_USB_OHCI_HCD=|CONFIG_USB_DWC2=|CONFIG_USB_DWC3=|CONFIG_MMC=|CONFIG_MMC_DW=|CONFIG_MMC_DW_ROCKCHIP=|CONFIG_MMC_SDHCI=|CONFIG_MMC_SDHCI_OF_DWCMSHC=|CONFIG_ROCKCHIP_RGA=|CONFIG_ROCKCHIP_VDEC=|CONFIG_ROCKCHIP_VENC=|CONFIG_ROCKCHIP_MPP=|CONFIG_ROCKCHIP_IOMMU=|CONFIG_ROCKCHIP_RKNPU=|CONFIG_ROCKCHIP_NPU='
+          grep -E "^${config_keys}|^# ${config_keys%%|*} is not set" "${config_file}" > inspection/relevant-kernel-config.txt || true
+          for key in CONFIG_STMMAC CONFIG_DWMAC_ROCKCHIP CONFIG_REALTEK_PHY CONFIG_USB_XHCI_HCD CONFIG_USB_EHCI_HCD CONFIG_USB_OHCI_HCD CONFIG_USB_DWC2 CONFIG_USB_DWC3 CONFIG_MMC CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP CONFIG_MMC_SDHCI CONFIG_MMC_SDHCI_OF_DWCMSHC CONFIG_ROCKCHIP_RGA CONFIG_ROCKCHIP_VDEC CONFIG_ROCKCHIP_VENC CONFIG_ROCKCHIP_MPP CONFIG_ROCKCHIP_IOMMU CONFIG_ROCKCHIP_RKNPU; do
+            grep -q "^${key}=" "${config_file}" || grep -q "^# ${key} is not set" "${config_file}" || echo "${key}=NOT_RECORDED" >> inspection/relevant-kernel-config.txt
+          done
+
+          # Match modules using the package's real top-level directory.
+          grep -Ei '^6\.18\.63-ophub/kernel/.*(stmmac|dwmac|realtek|phy|r8169|usb|xhci|ehci|ohci|dwc2|dwc3|mmc|sdhci|rockchip.*(rga|vdec|venc|mpp|npu)|rknpu)'             inspection/inner/modules-6.18.63-ophub.tar.gz.list > inspection/relevant-module-paths.txt || true
+
+          {
+            echo "Ophub kernel package deep inspection"
+            echo "Kernel version: ${KERNEL_PACKAGE_VERSION}"
+            echo "Outer SHA256: ${actual}"
+            echo "Nested packages inspected: ${#inner_members[@]}"
+            echo "Panther X2 DTB:"
+            grep -E '(^|/)rk3566-panther-x2\.dtb$' inspection/inner-archive-list.txt
+            echo
+            echo "Kernel image:"
+            cat inspection/kernel-image-file.txt
+            echo
+            echo "Kernel config: ${config_file}"
+            echo "Relevant config saved in relevant-kernel-config.txt"
+            echo
+            echo "Relevant module-path matches:"
+            cat inspection/relevant-module-paths.txt
+          } | tee inspection/inspection-report.txt
 
       - name: Upload complete inspection results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ophub-kernel-6.18.63-deep-inspection
+          name: ophub-kernel-6.18.63-driver-inspection
           path: |
             inspection/outer-archive-list.txt
+            inspection/published-sha256sums.txt
             inspection/inner-archive-list.txt
             inspection/inner-package-checksums.txt
+            inspection/checksum-verification.txt
+            inspection/relevant-kernel-config.txt
+            inspection/relevant-module-paths.txt
+            inspection/kernel-image-file.txt
+            inspection/boot-file-checksums.txt
             inspection/inspection-report.txt
           if-no-files-found: error
           retention-days: 14
