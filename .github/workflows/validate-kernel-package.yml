@@ -1,0 +1,71 @@
+name: Validate Ophub kernel package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-kernel-package
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout project metadata
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download and verify pinned kernel asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p validation
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "$KERNEL_PACKAGE_URL" -o "validation/$KERNEL_PACKAGE_ASSET"
+          actual_size="$(stat -c '%s' "validation/$KERNEL_PACKAGE_ASSET")"
+          actual_sha="$(sha256sum "validation/$KERNEL_PACKAGE_ASSET" | awk '{print $1}')"
+          {
+            echo "Kernel package: $KERNEL_PACKAGE_ASSET"
+            echo "Expected size: $KERNEL_PACKAGE_SIZE_BYTES"
+            echo "Actual size: $actual_size"
+            echo "Expected SHA256: $KERNEL_PACKAGE_SHA256"
+            echo "Actual SHA256: $actual_sha"
+          } | tee validation/asset-check.txt
+          test "$actual_size" = "$KERNEL_PACKAGE_SIZE_BYTES"
+          test "$actual_sha" = "$KERNEL_PACKAGE_SHA256"
+
+      - name: Inspect archive structure and Panther X2 DTB
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          archive="validation/$KERNEL_PACKAGE_ASSET"
+          tar -tzf "$archive" > validation/archive-file-list.txt
+          {
+            echo "Archive entry count: $(wc -l < validation/archive-file-list.txt)"
+            echo
+            echo "Top-level entries:"
+            awk -F/ 'NF {print $1}' validation/archive-file-list.txt | sort -u | head -n 80
+            echo
+            echo "Kernel / module / DTB candidates:"
+            grep -Ei '(^|/)(Image|vmlinuz|linux-image[^/]*\.deb|modules[^/]*\.deb|.*\.ko([.].*)?|rk3566-panther-x2\.dtb)$' \
+              validation/archive-file-list.txt | head -n 300 || true
+          } | tee validation/archive-inspection.txt
+
+          if ! grep -Fq "$TARGET_DTB" validation/archive-file-list.txt; then
+            echo "Panther X2 DTB not found as a direct archive entry."
+            echo "This may be a nested Debian package; inspect package contents before approving the kernel."
+            exit 2
+          fi
+
+      - name: Upload validation report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ophub-kernel-${{ github.run_id }}-validation
+          path: validation/*.txt
+          if-no-files-found: error
+          retention-days: 30
