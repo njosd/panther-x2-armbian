@@ -82,11 +82,22 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 
 必须检查最终镜像实际使用的网络管理器和接口名；不要假定设备一定叫 eth0。网络配置不应写死 Panther X2 的 IP，先由 hEX DHCP 分配地址。密码、Token、私钥不得提交到公开仓库。
 
-## 5. 构建前检查清单
+## 5. 内核包检查工作流
+
+已新增 `.github/workflows/inspect-kernel-package.yml`：
+- 仅 `workflow_dispatch` 手动触发；
+- checkout 与 artifact upload Action 固定到完整 commit SHA；
+- 下载 `6.18.63.tar.gz` 并与仓库记录的 SHA-256 比对；
+- 执行 gzip 完整性检查，生成归档文件清单并上传为 Actions artifact；
+- 不运行 rebuild、不写入镜像、不操作任何设备。
+
+该工作流尚未运行。需在 GitHub Actions 页面手动触发，检查通过后再根据 artifact 判断包内是否含 Panther X2 DTB、arm64 内核及模块。
+
+## 6. 构建前检查清单
 
 - [x] Ophub stable kernel Release 中存在 6.18.63 资产，远端 SHA-256 已记录。
-- [ ] 在构建环境下载归档并核对 SHA-256。
-- [ ] 检查归档结构及 Panther X2 DTB/模块内容。
+- [ ] 手动运行 `.github/workflows/inspect-kernel-package.yml`，下载归档并核对 SHA-256。
+- [ ] 根据 inspection artifact 检查归档结构及 Panther X2 DTB/模块内容。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
 - [ ] 构建 workflow 仅手动触发，不配置 push 自动构建。
@@ -95,7 +106,7 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - [ ] 构建输出包含 manifest、日志和 SHA-256。
 - [ ] 目标 TF 卡容量与写入设备已由用户确认。
 
-## 6. 明确不做
+## 7. 明确不做
 
 - 不在首版镜像中部署 Immich。
 - 不启用 RKNN/NPU/VPU 加速。
