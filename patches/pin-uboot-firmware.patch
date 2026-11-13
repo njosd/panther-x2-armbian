@@ -10,7 +10,7 @@
 +firmware_commit="a9d0e8337cc8aa2ca4b482acd7b19c74ce05860f"
  
  # Set the kernel download repository from github.com
-@@ -446,32 +448,35 @@
+@@ -446,33 +448,35 @@
  git_pull_dir() {
      cd "${current_path}"
  
@@ -48,7 +48,7 @@
  
      # Copy the files to the storage directory
      mkdir -p "${git_path}"
-@@ -482,7 +487,7 @@
+@@ -482,7 +486,7 @@
      # Download Armbian u-boot files
      uboot_num="$(find "${uboot_path}/rockchip" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
      if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then
@@ -57,7 +57,7 @@
          echo -e "${INFO} u-boot download completed."
      else
          echo -e "${INFO} u-boot files exist, skip downloading."
-@@ -491,7 +496,7 @@
+@@ -491,7 +495,7 @@
      # Download Armbian firmware files
      firmware_num="$(find "${firmware_path}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
      if [[ -n "${firmware_num}" && "${firmware_num}" -le "5" ]]; then
