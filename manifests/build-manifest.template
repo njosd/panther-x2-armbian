@@ -1,0 +1,68 @@
+# Panther X2 Armbian Build Manifest
+
+> Copy this file for each build and fill in actual values. Never mark an untested item as passed.
+
+## Build identity
+
+- Build ID:
+- Build date/time (UTC):
+- GitHub workflow run URL:
+- Builder runner image:
+- Build result:
+
+## Source revisions
+
+- Project repository commit:
+- Ophub Armbian commit:
+- Armbian Build commit:
+- Ophub Action commit:
+- Linux source commit:
+- Kernel binary package version:
+- U-Boot commit:
+- Firmware commit:
+- Upload Action commit:
+- Other Action commits:
+
+## Target configuration
+
+- Board: panther-x2
+- SoC: RK3566
+- Release: noble
+- Kernel series: stable 6.18.y
+- DTB: rk3566-panther-x2.dtb
+- Filesystem: ext4
+- Edition: server
+- Architecture: arm64
+- Boot files: idbloader.img, u-boot.itb
+
+## Build dependencies
+
+- APT package inventory artifact:
+- Build log artifact:
+- Kernel package URL / release asset:
+- Kernel package SHA-256:
+- Rootfs/image compression:
+
+## Output
+
+- Image filename:
+- Image size:
+- Image SHA-256:
+- Compressed image SHA-256:
+- Release tag:
+- Release URL:
+
+## Hardware validation
+
+- TF card model/capacity:
+- eMMC left untouched: yes/no
+- First boot: pass/fail/not tested
+- PHY link: pass/fail/not tested
+- DHCP: pass/fail/not tested
+- ARP and bidirectional LAN: pass/fail/not tested
+- SSH: pass/fail/not tested
+- Reboot: pass/fail/not tested
+- Cold boot: pass/fail/not tested
+- UART removed and management works: pass/fail/not tested
+- Stability duration:
+- Notes / logs:
