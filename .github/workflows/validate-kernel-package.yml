@@ -13,7 +13,7 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout project metadata
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -38,13 +38,16 @@ jobs:
           test "$actual_size" = "$KERNEL_PACKAGE_SIZE_BYTES"
           test "$actual_sha" = "$KERNEL_PACKAGE_SHA256"
 
-      - name: Inspect archive structure and Panther X2 DTB
+      - name: Inspect archive and nested Debian packages
         shell: bash
         run: |
           set -euo pipefail
           source config/versions.env
           archive="validation/$KERNEL_PACKAGE_ASSET"
-          tar -tzf "$archive" > validation/archive-file-list.txt
+          mkdir -p validation/extracted
+          tar -xzf "$archive" -C validation/extracted
+          find validation/extracted -type f -printf '%P\n' | sort > validation/archive-file-list.txt
+
           {
             echo "Archive entry count: $(wc -l < validation/archive-file-list.txt)"
             echo
@@ -52,20 +55,43 @@ jobs:
             awk -F/ 'NF {print $1}' validation/archive-file-list.txt | sort -u | head -n 80
             echo
             echo "Kernel / module / DTB candidates:"
-            grep -Ei '(^|/)(Image|vmlinuz|linux-image[^/]*\.deb|modules[^/]*\.deb|.*\.ko([.].*)?|rk3566-panther-x2\.dtb)$' \
-              validation/archive-file-list.txt | head -n 300 || true
+            grep -Ei '(^|/)(Image|vmlinuz|config-[^/]*|System.map-[^/]*|.*\.ko([.].*)?|rk3566-panther-x2\.dtb)$|linux-(image|headers|dtb).*\.deb$' \
+              validation/archive-file-list.txt | head -n 400 || true
           } | tee validation/archive-inspection.txt
 
-          if ! grep -Fq "$TARGET_DTB" validation/archive-file-list.txt; then
-            echo "Panther X2 DTB not found as a direct archive entry."
-            echo "This may be a nested Debian package; inspect package contents before approving the kernel."
+          mapfile -t debs < <(find validation/extracted -type f -name '*.deb' -print | sort)
+          if (("${#debs[@]}" > 0)); then
+            : > validation/deb-package-inspection.txt
+            for deb in "${debs[@]}"; do
+              {
+                echo "===== $deb ====="
+                dpkg-deb -f "$deb" Package Version Architecture
+                dpkg-deb -c "$deb" | grep -E 'rk3566-panther-x2\.dtb|/boot/(Image|vmlinuz|System.map|config)|/lib/modules/|/usr/src/' | head -n 250 || true
+                echo
+              } >> validation/deb-package-inspection.txt
+            done
+          else
+            echo "No nested .deb packages found." | tee validation/deb-package-inspection.txt
+          fi
+
+          if ! grep -Fq "$TARGET_DTB" validation/archive-file-list.txt && \
+             ! grep -Fq "$TARGET_DTB" validation/deb-package-inspection.txt; then
+            echo "ERROR: Panther X2 DTB was not found in archive files or nested Debian package listings."
             exit 2
           fi
+
+          {
+            echo "Archive format: gzip-compressed tar"
+            echo "Nested Debian packages: ${#debs[@]}"
+            echo "Panther X2 DTB: found"
+            echo "Note: this validates package contents only; it does not prove boot or network operation on hardware."
+          } | tee validation/validation-summary.txt
 
       - name: Upload validation report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ophub-kernel-${{ github.run_id }}-validation
-          path: validation/*.txt
+          path: |
+            validation/*.txt
           if-no-files-found: error
           retention-days: 30
