@@ -11,21 +11,30 @@
 | 设备 | Panther X2 / RK3566 |
 | 系统 | Ubuntu 24.04 LTS Noble |
 | 内核系列 | Ophub stable 6.18.y |
+| 已选二进制包 | 6.18.63（固定资产及 SHA-256 已记录） |
 | 根文件系统 | EXT4 |
 | 镜像类型 | Server |
 | DTB | rk3566-panther-x2.dtb |
 | 启动固件 | Panther X2 专用 idbloader.img + u-boot.itb |
 | 首轮介质 | 独立 TF 卡 |
 
-## 2. 已确认的源码基线
+## 2. 已确认的源码与内核包
 
-具体 commit 见 `config/versions.env`。这些是源码快照，不是已经构建或实机验证的镜像。
+具体 commit、资产 URL、大小及 SHA-256 见 `config/versions.env`。
 
-源码核查已确认：
+已确认：
 - Ophub 设备数据库包含 Panther-X2 项目条目，指向 stable 6.18.y 和 Panther X2 DTB。
 - 固定的 U-Boot 源码快照包含 Panther X2 的 `idbloader.img` 和 `u-boot.itb`。
 - 固定的 Linux DTS 源码包含 GMAC1、RGMII PHY 模式、时钟、供电及复位相关节点。
-- 这些源码事实不能证明实际 PHY 协商、DHCP、ARP、SSH 或长期网络稳定性。
+- Ophub kernel 的 `kernel_stable` Release 已发布 `6.18.63.tar.gz`，GitHub Release API 提供了资产 SHA-256：`47e3f46636594cbf212474a13bac97e1310c3ee51007dee3fa20f93d8659f1ca`，资产大小 124,360,986 bytes。
+- Ophub rebuild 的参数解析支持关闭自动查询，并通过 `-k` 指定精确版本；Action 将 `armbian_kernel` 映射为 `-k`，`auto_kernel` 映射为 `-a`。因此预期可用 `armbian_kernel: 6.18.63` 与 `auto_kernel: false` 固定下载版本。
+
+重要区别：
+- `9bbed252...` 是 Linux 源码参考 commit；其提交时间晚于 6.18.63 Release 资产的更新时间。当前没有证据证明该二进制包就是由这个源码 commit 构建。
+- 因此本项目分别记录源码参考快照与二进制发布资产，不声称两者存在已验证的一一对应关系。
+- Release API 的 digest 是远端资产元数据；构建下载后仍必须自行计算 SHA-256 并比对。
+
+这些源码事实和发布资产存在性不能证明内核包在 Panther X2 实机上启动成功，也不能证明网络正常。
 
 ## 3. 当前构建阻塞项（未解决前不启动构建）
 
@@ -35,7 +44,7 @@
 - Armbian Build 从 `main` 克隆；
 - Ophub Action 使用 `@main`；
 - Release 上传 Action 使用 `@main`；
-- `auto_kernel: true` 自动查询内核版本。
+- 默认配置 `auto_kernel: true` 自动查询内核版本。
 
 因此不能直接复制并运行原工作流，否则无法保证本项目构建链固定。
 
@@ -43,23 +52,19 @@
 
 当前 rebuild 脚本的 `git_pull_dir` 使用分支名克隆，下载依赖时默认拉取 U-Boot 和 firmware 的 `main`。虽然本仓库记录了已核实的 commit，但仅记录 commit 并不会让原脚本自动使用它们。
 
-下一步必须对 rebuild 逻辑做最小补丁：将 U-Boot、firmware 的分支克隆改为固定 commit checkout，或直接从固定 commit 下载所需目录；构建日志中记录实际 HEAD。补丁应尽量小并单独保存、审查。
+下一步必须对 rebuild 逻辑做最小补丁：将 U-Boot、firmware 的下载改为固定 commit checkout，或直接从固定 commit 下载所需目录；构建日志中记录实际 HEAD。补丁应尽量小并单独保存、审查。
 
-### 3.3 内核二进制包版本尚未锁定
+### 3.3 Kernel package 的内容和兼容性仍需检查
 
-Linux 源码 commit 与 Ophub 发布的 kernel package 版本不是同一标识。固定源码 commit 不等于固定 `linux-image` 二进制包。
-
-必须先确认 Ophub kernel 仓库中真实存在、适用于 RK3566/目标架构的 6.18 stable 发布包，并确认 rebuild 脚本如何选择该包。随后：
-1. 在 `config/versions.env` 填入实际版本和发布资产信息；
-2. 将自动查询关闭；
-3. 将精确版本传入 rebuild；
-4. 构建时校验下载包版本/校验值。
-
-在此之前 `KERNEL_PACKAGE_VERSION=UNLOCKED`，工作流不得执行打包步骤。
+已确认 6.18.63 发布资产存在，并记录了版本、URL、大小和远端 SHA-256；但还没有在本项目构建环境中下载并检查归档内容。构建前需要确认：
+- 归档结构符合 rebuild 脚本预期；
+- 包内包含所需的 arm64 内核、模块、DTB/相关文件；
+- DTB 中包含 Panther X2 所需的 `rk3566-panther-x2.dtb`；
+- 下载后 SHA-256 与记录值一致。
 
 ### 3.4 GitHub Actions 依赖
 
-Action 必须固定到完整 commit SHA，而不是 `@main` 或可移动标签。当前记录了 checkout 与 upload-artifact 的候选 commit；正式 workflow 仍需逐一核实所用 Action 的接口、权限及兼容性。
+Action 必须固定到完整 commit SHA，而不是 `@main` 或可移动标签。当前记录了 checkout、upload-artifact 和 Ophub upload Action 的候选 commit；正式 workflow 仍需逐一核实所用 Action 的接口、权限及兼容性。Armbian Build 也必须 checkout 到记录的 commit，而非克隆 main。
 
 ### 3.5 Ubuntu 构建依赖并非完全可复现
 
@@ -79,7 +84,9 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 
 ## 5. 构建前检查清单
 
-- [ ] 内核二进制包精确版本已确认且可下载。
+- [x] Ophub stable kernel Release 中存在 6.18.63 资产，远端 SHA-256 已记录。
+- [ ] 在构建环境下载归档并核对 SHA-256。
+- [ ] 检查归档结构及 Panther X2 DTB/模块内容。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
 - [ ] 构建 workflow 仅手动触发，不配置 push 自动构建。
