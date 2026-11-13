@@ -1,13 +1,16 @@
 --- a/rebuild
 +++ b/rebuild
-@@
+@@ -79,6 +79,8 @@
+ 
  # U-BOOT files download repository
  uboot_repo="https://github.com/ophub/u-boot"
 +uboot_commit="6e70f41585f15c43f45fcae609adec1865e83eb5"
  # Firmware files download repository
  firmware_repo="https://github.com/ophub/firmware"
 +firmware_commit="a9d0e8337cc8aa2ca4b482acd7b19c74ce05860f"
-@@
+ 
+ # Set the kernel download repository from github.com
+@@ -446,32 +448,35 @@
  git_pull_dir() {
      cd "${current_path}"
  
@@ -45,13 +48,21 @@
  
      # Copy the files to the storage directory
      mkdir -p "${git_path}"
-@@
-     # Delete temporary files
-     rm -rf "${git_tmp_path}" 2>/dev/null
- }
-@@
+@@ -482,7 +487,7 @@
+     # Download Armbian u-boot files
+     uboot_num="$(find "${uboot_path}/rockchip" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+     if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then
 -        git_pull_dir "${uboot_repo}" main u-boot "${uboot_path}"
 +        git_pull_dir "${uboot_repo}" "${uboot_commit}" u-boot "${uboot_path}"
-@@
+         echo -e "${INFO} u-boot download completed."
+     else
+         echo -e "${INFO} u-boot files exist, skip downloading."
+@@ -491,7 +496,7 @@
+     # Download Armbian firmware files
+     firmware_num="$(find "${firmware_path}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+     if [[ -n "${firmware_num}" && "${firmware_num}" -le "5" ]]; then
 -        git_pull_dir "${firmware_repo}" main firmware "${firmware_path}"
 +        git_pull_dir "${firmware_repo}" "${firmware_commit}" firmware "${firmware_path}"
+         echo -e "${INFO} firmware download completed."
+     else
+         echo -e "${INFO} firmware files exist, skip downloading."
