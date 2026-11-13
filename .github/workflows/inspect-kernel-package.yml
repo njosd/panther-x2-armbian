@@ -1,0 +1,55 @@
+name: Inspect Ophub 6.18.63 kernel package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Download and verify published kernel archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p inspection
+          curl --fail --location --retry 3 --retry-delay 3 \
+            "${KERNEL_PACKAGE_URL}" -o inspection/"${KERNEL_PACKAGE_ASSET}"
+
+          actual="$(sha256sum inspection/"${KERNEL_PACKAGE_ASSET}" | awk '{print $1}')"
+          echo "Expected SHA256: ${KERNEL_PACKAGE_SHA256}"
+          echo "Actual   SHA256: ${actual}"
+          [[ "${actual}" == "${KERNEL_PACKAGE_SHA256}" ]] || {
+            echo "::error::Kernel archive SHA-256 mismatch"
+            exit 1
+          }
+
+          gzip -t inspection/"${KERNEL_PACKAGE_ASSET}"
+          tar -tzf inspection/"${KERNEL_PACKAGE_ASSET}" > inspection/archive-list.txt
+
+          echo "Archive top-level entries:"
+          awk -F/ 'NF {print $1}' inspection/archive-list.txt | sort -u | head -80
+
+          echo "Potential Panther X2 DTB entries:"
+          grep -E 'rk3566-panther-x2\.dtb$' inspection/archive-list.txt || true
+
+          echo "Kernel, modules and DTB-related entries (sample):"
+          grep -E '(^|/)(Image|vmlinuz|modules/|dtb/|dtbs/|rockchip/)' inspection/archive-list.txt | head -120 || true
+
+          echo "Total archive entries: $(wc -l < inspection/archive-list.txt)"
+          echo "Archive compressed bytes: $(stat -c %s inspection/"${KERNEL_PACKAGE_ASSET}")"
+
+      - name: Upload inspection listing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ophub-kernel-6.18.63-inspection
+          path: inspection/archive-list.txt
+          if-no-files-found: error
+          retention-days: 14
