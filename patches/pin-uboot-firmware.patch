@@ -1,0 +1,57 @@
+--- a/rebuild
++++ b/rebuild
+@@
+ # U-BOOT files download repository
+ uboot_repo="https://github.com/ophub/u-boot"
++uboot_commit="6e70f41585f15c43f45fcae609adec1865e83eb5"
+ # Firmware files download repository
+ firmware_repo="https://github.com/ophub/firmware"
++firmware_commit="a9d0e8337cc8aa2ca4b482acd7b19c74ce05860f"
+@@
+ git_pull_dir() {
+     cd "${current_path}"
+ 
+     # Check git_pull_dir parameters
+     git_repo="${1}"
+-    git_branch="${2}"
++    git_ref="${2}"
+     git_dir="${3}"
+     git_path="${4}"
+-    [[ -n "${git_repo}" && -n "${git_branch}" && -n "${git_dir}" && -n "${git_path}" ]] || {
+-        error_msg "git_pull_dir parameter is missing: [ ${git_repo}, ${git_branch}, ${git_dir}, ${git_path} ]"
++    [[ -n "${git_repo}" && -n "${git_ref}" && -n "${git_dir}" && -n "${git_path}" ]] || {
++        error_msg "git_pull_dir parameter is missing: [ ${git_repo}, ${git_ref}, ${git_dir}, ${git_path} ]"
+     }
+ 
+-    # Clone the repository to the temporary directory. If it fails, wait 1 minute and try again, try 10 times.
++    # Download the exact source snapshot. The ref must be an immutable commit SHA.
+     git_tmp_path="$(mktemp -d)"
+-    local clone_ok=0
++    repo_slug="${git_repo#https://github.com/}"
++    repo_slug="${repo_slug%.git}"
++    local download_ok=0
+     for i in {1..10}; do
+-        if git clone --quiet --single-branch --depth=1 --branch="${git_branch}" "${git_repo}" "${git_tmp_path}"; then
+-            clone_ok=1
++        if curl -fsSL --retry 2 "https://codeload.github.com/${repo_slug}/tar.gz/${git_ref}" -o "${git_tmp_path}/source.tar.gz" &&
++            tar -xzf "${git_tmp_path}/source.tar.gz" --strip-components=1 -C "${git_tmp_path}"; then
++            download_ok=1
+             break
+         fi
+         sleep 60
+     done
+-    [[ "${clone_ok}" -eq 1 ]] || error_msg "Failed to clone the [ ${git_repo} ] repository."
++    [[ "${download_ok}" -eq 1 ]] || error_msg "Failed to download [ ${git_repo} ] at commit [ ${git_ref} ]."
+ 
+     # Copy the files to the storage directory
+     mkdir -p "${git_path}"
+@@
+     # Delete temporary files
+     rm -rf "${git_tmp_path}" 2>/dev/null
+ }
+@@
+-        git_pull_dir "${uboot_repo}" main u-boot "${uboot_path}"
++        git_pull_dir "${uboot_repo}" "${uboot_commit}" u-boot "${uboot_path}"
+@@
+-        git_pull_dir "${firmware_repo}" main firmware "${firmware_path}"
++        git_pull_dir "${firmware_repo}" "${firmware_commit}" firmware "${firmware_path}"
