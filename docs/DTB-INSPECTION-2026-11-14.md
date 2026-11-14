@@ -21,7 +21,7 @@
 
 ## 2. 不能据此宣称已验证的事项
 
-本次上传的 inspection artifact 包含归档清单、校验结果、内核配置和报告，**没有包含 Panther X2 DTB 的原始二进制内容**。因此目前只能确认包内存在目标 DTB 文件，尚未完成：
+此前 run #43526258367 的 inspection artifact 未包含 Panther X2 DTB 原始二进制；随后 run [#43543451274](https://github.com/njosd/panther-x2-armbian/actions/runs/43543451274) 已补充上传 DTB、反编译 DTS 和 SHA-256。因此本节以下旧记录应以新 run 为准：
 
 - 目标 DTB 的独立 SHA-256；
 - DTB 反编译后的设备树节点审查；
@@ -32,7 +32,7 @@
 
 另外，`CONFIG_ROCKCHIP_RKNPU` 在本次报告中为 `NOT_RECORDED`，不能判定 NPU 驱动已启用或未启用；第一版不以 NPU 为验收条件。
 
-## 3. 当前判定
+## 3. 后续 run #43543451274 的补充结果\n\n- DTB 已从 Rockchip DTB 包提取，SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。\n- `dtc` 反编译成功，警告文件为空。\n- Panther X2 板型、GMAC1、SDHCI/eMMC、SDMMC/TF、USB 等关键节点与固定 Ophub DTS 快照高度吻合，但尚未完成全量属性 diff 和精确源码—二进制 provenance 证明。\n- 模块归档含 `rockchip-rga.ko`、`rockchip-vdec.ko`；RGA/VDEC 静态存在。未发现 RKNPU 驱动模块，也未在反编译 DTB 中发现 NPU 设备节点。DTB 中的 `vdd_npu` regulator/QoS 信息不代表 NPU 驱动已启用。\n- 旧报告中的 `CONFIG_ROCKCHIP_RGA`、`CONFIG_ROCKCHIP_VDEC` 等符号名称不准确；检查工作流已在 commit `1ce47d772e26becadab4b773e32150d8a054a52c` 修正符号并计划上传完整 `.config`，待下一次手动运行验证。\n\n## 4. 当前判定
 
 | 项目 | 状态 |
 |---|---|
@@ -46,7 +46,7 @@
 | Panther X2 实机启动、DHCP、SSH | 未验证 |
 | NPU/RKNN | 未验证，非第一版阻塞项 |
 
-## 4. 下一步（保持最小范围）
+## 5. 下一步（保持最小范围）
 
 1. 获取 6.18.63 发布包中的原始 `rk3566-panther-x2.dtb`。
 2. 计算 DTB SHA-256，并用 dtc 反编译。
