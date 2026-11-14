@@ -155,11 +155,14 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - DT overlay 仍可生成 DTBO，但存在 reg_format、默认 address/size cells 及 interrupt-parent 警告，不能认定设备树适配完成；
 - 本轮没有生成最终 `rknpu.ko`，没有加载模块，也没有修改任何设备。
 
-**第七轮针对性修正：** 工作流提交 `3158c9d0d972ecb8aca6ee1f892e4b0b3767e240`。在成功执行通用 `scripts` 后，显式调用 Kbuild 的 `scripts/mod/modpost` host-program 目标，再核验输出树中的 `modpost` 是 x86_64 ELF，才继续外置模块构建。此改动尚未运行验证。
+**本轮复核发现的工作流版本差异与修正：**
+- 本次 run 实际 checkout 的仓库 commit 是 `ffb630a6114f5150183b2a344cdfbe1c5b64fb52`。该 commit 中的 workflow 只执行通用 `scripts`，并没有执行此前文档所述的显式 modpost 构建命令；因此不能把本次失败解释为显式目标已验证失败。此前记录的“第七轮针对性修正”与本次实际运行的 workflow 版本不一致，现以 job 日志中的 checkout SHA 和 artifact 为准。
+- 对照 Linux 6.18 Kbuild：`scripts/Makefile` 的通用目标不会自动进入 `scripts/mod`；`scripts/mod/Makefile` 才声明 `modpost`、`mk_elfconfig` 等 host program。直接请求不带文件后缀的 `scripts/mod/modpost` 并非最稳妥的目录构建方式。
+- 已将当前 workflow 调整为显式构建目录目标 `scripts/mod/`，让 Kbuild 在正确的输出树中构建该目录及其生成依赖，再对 `modpost` 做 x86_64 ELF 检查。该修正尚未运行验证。
 
 下一轮重点：
-1. 确认 `scripts/mod/modpost` 目标在该源码树中是否有效；
-2. 确认 `fixdep` 与 `modpost` 均为 x86_64；
+1. 确认 `scripts/mod/` 构建成功，并生成输出树中的 `modpost`、`mk_elfconfig` 及所需生成文件；
+2. 确认 `fixdep` 与 `modpost` 均为 x86_64 ELF；
 3. 是否完成 `MODPOST` 并生成 `rknpu.ko`；
 4. 如成功，核对 vermagic、depends、符号版本及源码/header provenance；
 5. DT overlay 警告单独处理，不把 DTBO 生成成功等同于 Panther X2 设备树兼容。
