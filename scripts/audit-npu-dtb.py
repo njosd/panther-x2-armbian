@@ -38,8 +38,16 @@ PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
 
 def run_fdtget(dtb: Path, *args: str, required: bool = True) -> str:
+    # fdtget requires command-line options before the DTB filename.
+    split = 0
+    while split < len(args) and args[split].startswith("-"):
+        option = args[split]
+        split += 1
+        if option == "-t":
+            split += 1  # consume the type selector (x, d, s, ...)
+    command = ["fdtget", *args[:split], str(dtb), *args[split:]]
     proc = subprocess.run(
-        ["fdtget", str(dtb), *args], text=True,
+        command, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if proc.returncode:
