@@ -791,3 +791,34 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - provider 缺少 cell-count、phandle 无法解析或 specifier 截断时 fail closed，不以放宽白名单跳过。
 
 下一步重新运行 `Audit Panther X2 NPU DTB source readiness`。只有新运行明确输出 `SEMANTIC_DTB_AUDIT=PASS` 才能将语义审计标记为通过。还需检查两份候选的实际差异报告和 DTC warnings。
+
+
+### 3.31 Second semantic audit run: missing helper functions and fdtget argv order（2026-11-15）
+
+运行记录：GitHub Actions run `43652224306`，job `132623006169`，执行仓库提交 `d8a9005986c18055cf9b6008e1a8f67e4f4f33e3`。
+
+#### 本轮结果
+
+- 固定 Ophub 6.12.81 源码获取、未修改基线 DTB 构建：通过；
+- 发布内核包 SHA-256 校验、发布 DTB 提取及反编译：通过；
+- Vendor-equivalent 候选、IRQ-name 候选 DTB：均成功编译；
+- 语义比较器启动失败：`name 'walk_nodes' is not defined`。因此仍未执行语义比较。
+
+#### 根因与修复
+
+上次替换引用解析逻辑时误删了 `run_fdtget`、`walk_nodes`、`property_names`、`phandle_map` 四个辅助函数。先在提交 `2475195015ce621f1a97a92bac4c08a5f248ac1f` 恢复这些函数。
+
+随后对照 `fdtget` 命令行语法再次审查，发现原 helper 还把 DTB 文件路径放在选项之前。提交 `350300ca7cc8d570d54e25a3990a47fd33787cb3` 修正为选项在前、DTB 路径居中、节点/属性参数在后，并正确处理 `-t x` 的类型参数。
+
+#### 当前判定与下一步
+
+这是审计器实现错误，不是 DTS 候选或内核驱动失败。两份候选的编译证据仍然有效；语义一致性依旧未验证。
+
+下一轮需重新运行同一 workflow，确认：
+1. 脚本能遍历 DTB 节点和读取属性；
+2. provider specifier 的 phandle 与参数 cell 被正确解析；
+3. 完整节点树和属性比较通过；
+4. 两个候选的差异白名单准确，IRQ-name variant 相对 Vendor variant 只有 `interrupt-names`；
+5. 两份候选 DTC warnings 和 SHA-256 均保存进 artifact。
+
+若仍出现脚本错误，先用小型合成 DTB 对 helper 做独立单元测试，再跑完整 kernel/DTB 构建工作流，避免浪费 Actions 时间。没有 `SEMANTIC_DTB_AUDIT=PASS` 之前，不将语义审计标记为通过。
