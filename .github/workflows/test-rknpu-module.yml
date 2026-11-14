@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y             bc bison build-essential device-tree-compiler dpkg-dev             flex gcc-aarch64-linux-gnu libelf-dev libssl-dev
+          sudo apt-get install -y             bc bison build-essential device-tree-compiler dpkg-dev             file flex gcc-aarch64-linux-gnu libelf-dev libssl-dev
 
       - name: Install matching Arm GNU Toolchain 15.3.1
         shell: bash
@@ -120,6 +120,31 @@ jobs:
           kdir="$(cat work/reports/kernel-build-dir.txt)"
           src="$PWD/work/rknpu/unpack"
           mkdir -p work/reports
+
+          # Rebuild host-side Kbuild helpers: packaged binaries may target ARM64,
+          # while this cross-build runs on an x86_64 GitHub-hosted runner.
+          {
+            echo "Before rebuild:"
+            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost" 2>&1 || true
+          } | tee work/reports/host-tools-before.txt
+
+          rm -f \
+            "$kdir/scripts/basic/fixdep" \
+            "$kdir/scripts/mod/modpost" \
+            "$kdir/scripts/genksyms/genksyms" \
+            "$kdir/scripts/recordmcount"
+
+          make -C "$kdir" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-none-linux-gnu- \
+            HOSTCC=gcc HOSTCXX=g++ V=1 scripts \
+            2>&1 | tee work/reports/host-tools-rebuild.log
+
+          {
+            echo "After rebuild:"
+            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost"
+            readelf -h "$kdir/scripts/basic/fixdep" | grep -E 'Class:|Machine:'
+            readelf -h "$kdir/scripts/mod/modpost" | grep -E 'Class:|Machine:'
+          } | tee work/reports/host-tools-after.txt
 
           set +e
           make -C "$kdir" M="$src" ARCH=arm64 \
