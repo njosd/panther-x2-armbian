@@ -1,0 +1,149 @@
+name: Audit Ophub RK35xx kernel package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install audit tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils curl file git
+
+      - name: Download and audit the dedicated RK35xx package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p work/package work/header work/boot work/modules work/reports
+
+          curl --fail --location --retry 3 --retry-delay 3 \
+            "$OPHUB_RK35XX_PACKAGE_URL" -o work/package/kernel.tar.gz
+          echo "$OPHUB_RK35XX_PACKAGE_SHA256  work/package/kernel.tar.gz" | sha256sum --check
+          stat -c 'Package size: %s bytes' work/package/kernel.tar.gz | tee work/reports/package-metadata.txt
+          echo "Expected SHA256: $OPHUB_RK35XX_PACKAGE_SHA256" >> work/reports/package-metadata.txt
+          echo "Release asset updated: $OPHUB_RK35XX_PACKAGE_UPDATED_AT" >> work/reports/package-metadata.txt
+
+          tar -tzf work/package/kernel.tar.gz > work/reports/package-members.txt
+
+          mapfile -t header_members < <(
+            grep -E "(^|/)6\\.12\\.81/header-[^/]+\\.tar\\.gz$" work/reports/package-members.txt || true
+          )
+          if [[ "${#header_members[@]}" -ne 1 ]]; then
+            echo "::error::Expected one 6.12.81 headers archive; found ${#header_members[@]}"
+            grep -Ei 'header|headers' work/reports/package-members.txt || true
+            exit 1
+          fi
+          tar -xOzf work/package/kernel.tar.gz "${header_members[0]}" > work/package/headers.tar.gz
+          gzip -t work/package/headers.tar.gz
+          tar -xzf work/package/headers.tar.gz -C work/header
+
+          mapfile -t symvers < <(find work/header -type f -name Module.symvers -print)
+          mapfile -t configs < <(find work/header -type f -name .config -print)
+          mapfile -t releases < <(find work/header -type f -path '*/include/config/kernel.release' -print)
+          {
+            echo "Header archive: ${header_members[0]}"
+            echo "Module.symvers files: ${#symvers[@]}"
+            echo "Kernel .config files: ${#configs[@]}"
+            echo "kernel.release files: ${#releases[@]}"
+            if [[ "${#symvers[@]}" -eq 1 ]]; then
+              echo
+              echo "=== PM runtime exported symbols ==="
+              grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
+              echo
+              echo "=== RKNPU-related exported symbols ==="
+              grep -Ei 'rknpu|npu' "${symvers[0]}" | head -n 100 || true
+              cp "${symvers[0]}" work/reports/Module.symvers
+            fi
+            if [[ "${#configs[@]}" -eq 1 ]]; then
+              echo
+              echo "=== Relevant kernel configuration ==="
+              grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
+              cp "${configs[0]}" work/reports/kernel.config
+            fi
+            if [[ "${#releases[@]}" -eq 1 ]]; then
+              echo
+              echo "=== kernel.release ==="
+              cat "${releases[0]}"
+            fi
+            echo
+            echo "=== Header tree size and top-level entries ==="
+            du -sh work/header
+            find work/header -maxdepth 2 -mindepth 1 -printf '%y %p\n' | sort | head -n 200
+          } | tee work/reports/header-audit.txt
+
+          mapfile -t boot_members < <(
+            grep -E "(^|/)6\\.12\\.81/boot-[^/]+\\.tar\\.gz$" work/reports/package-members.txt || true
+          )
+          mapfile -t module_members < <(
+            grep -E "(^|/)6\\.12\\.81/modules-[^/]+\\.tar\\.gz$" work/reports/package-members.txt || true
+          )
+          {
+            echo "Boot archives: ${#boot_members[@]}"
+            echo "Module archives: ${#module_members[@]}"
+          } | tee work/reports/bsp-content-audit.txt
+
+          if [[ "${#boot_members[@]}" -eq 1 ]]; then
+            tar -xOzf work/package/kernel.tar.gz "${boot_members[0]}" > work/package/boot.tar.gz
+            tar -tzf work/package/boot.tar.gz > work/reports/boot-members.txt
+            echo "=== Panther X2 / RK3566 DTB candidates ===" >> work/reports/bsp-content-audit.txt
+            grep -Ei 'rk3566.*panther|panther.*rk3566|rk3566.*\.dtb$' work/reports/boot-members.txt >> work/reports/bsp-content-audit.txt || true
+          fi
+
+          if [[ "${#module_members[@]}" -eq 1 ]]; then
+            tar -xOzf work/package/kernel.tar.gz "${module_members[0]}" > work/package/modules.tar.gz
+            tar -tzf work/package/modules.tar.gz > work/reports/module-members.txt
+            echo >> work/reports/bsp-content-audit.txt
+            echo "=== NPU / RKNPU module candidates ===" >> work/reports/bsp-content-audit.txt
+            grep -Ei 'rknpu|rknn|/npu|npu.*\\.ko' work/reports/module-members.txt >> work/reports/bsp-content-audit.txt || true
+          fi
+
+      - name: Verify source and config reference snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p work/source work/reports
+
+          git clone --filter=blob:none --no-checkout \
+            "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
+          git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
+          git -C work/source/kernel checkout --detach FETCH_HEAD
+          {
+            echo "=== Reference source ==="
+            git -C work/source/kernel remote -v
+            git -C work/source/kernel rev-parse HEAD
+            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
+            echo
+            echo "=== Config reference ==="
+            curl --fail --location --retry 3 \
+              "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" \
+              -o work/reports/config-6.12
+            config_blob="$(git -C work/source/kernel hash-object work/reports/config-6.12)"
+            echo "Config blob SHA: $config_blob"
+            echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
+            [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
+            grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(RKNPU|ROCKCHIP_IOMMU))' work/reports/config-6.12 || true
+            echo
+            echo "NOTE: This is a source/config reference snapshot, not proven package provenance."
+          } | tee work/reports/source-config-reference.txt
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ophub-rk35xx-6.12.81-audit
+          path: work/reports/
+          if-no-files-found: warn
+          retention-days: 30
