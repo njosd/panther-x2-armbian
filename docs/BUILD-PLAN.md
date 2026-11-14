@@ -306,3 +306,41 @@ RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并�
 4. 决定后续主验证基线应是“通用 6.18 主线”还是“RK35xx 专用 6.12 BSP”，再对该确切版本进行 RKNPU/DTB 审计。
 
 不做内核安装、不改 9.6、不补写符号表、不忽略 MODPOST 错误。
+
+
+### 3.14 RK35xx 专用 6.12.81 基线锁定（待 CI 审计）
+
+基于前述分流结论，新增独立的 RK35xx 专用包审计，不再把通用 `kernel_stable/6.18.63` 当作 RK3566 BSP 的唯一代表。
+
+#### 已从 Ophub 当前公开发布元数据确认
+
+- Release：`kernel_rk35xx`，说明明确称其为 RK3528/RK3566/RK3568 专用 BSP 内核。
+- 最新候选资产：`6.12.81.tar.gz`，更新于 `2026-11-13T11:14:40Z`，大小 `141437450` bytes。
+- SHA-256：`72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`。
+- 对应 Ophub RK35xx workflow 当前允许的源码仓库为 `ophub/linux-6.12.y-rockchip`，配置路径为 `kernel-config/release/rk35xx/config-6.12`。
+- 当前源码分支 `main` 的观测 commit：`661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；其 Makefile 版本为 6.12.81。
+- 当前配置文件 blob SHA：`dee127c6c644f38426eeb28000d73536084d34a3`；配置中已确认 `CONFIG_PM=y`、`CONFIG_PM_SLEEP=y`、`CONFIG_MODULES=y`、`CONFIG_ARM64=y`。
+- RK35xx 专用 workflow 定义的构建输入包括 kernel source、kernel version、kernel_auto、toolchain、config path 等；工作流在调用 composite action 前读取 source branch SHA，但底层构建脚本仍通过分支浅克隆源码，预取 SHA 主要用于 ccache key，不能单独作为实际构建 commit 的证明。
+
+#### 重要限制
+
+上述 package、source 和 config 是当前候选参考值，**尚未证明 6.12.81 发布资产就是由 commit `661b2d8...` 与 config blob `dee127c...` 构建**。因此在变量文件中明确标记为 reference/audit candidate，不作为已确认 provenance。
+
+#### 新增只读 CI 审计
+
+新增 workflow：`.github/workflows/audit-rk35xx-kernel.yml`，手动触发，不部署、不写入任何设备。该工作流将：
+1. 下载固定的 RK35xx `6.12.81.tar.gz` 并验证 SHA-256；
+2. 列出发布包内部文件，解出 headers、boot、modules 子包；
+3. 审计 `.config`、`Module.symvers`、`kernel.release`，重点核对 PM runtime 符号；
+4. 搜索是否含 Panther X2/RK3566 DTB、RKNPU/NPU 模块；
+5. 固定检出参考源码 commit，并验证版本号；
+6. 下载固定 config reference，核对 blob SHA，输出关键配置；
+7. 上传报告 artifact，不尝试加载模块或安装内核。
+
+下一步：手动运行该 workflow，根据实际资产内容判断 6.12.81 是否包含适合 Panther X2 的 BSP/DTB/NPU 基础，再决定是否构建 RKNPU 外置模块。即使包中有 RK3566 相关内容，也必须单独核对 Panther X2 DTS 的 NPU 节点、IOMMU、clocks、power-domains、resets、OPP/devfreq 和中断资源；包中存在通用 rk3566 DTB 或 NPU 模块，不等于 Panther X2 硬件适配完成。
+
+### 3.15 版本路线说明修正
+
+- `kernel_stable/6.18.63`：通用 stable 内核线，之前的 RKNPU 编译实验属于该线；其结果不能代表 RK35xx 专用 BSP。
+- `kernel_rk35xx/6.12.81`：当前更有针对性的 RK3566 专用 BSP 候选，优先进行离线包内容和 provenance 审计。
+- 两条路线都尚未在 Panther X2 实机启动验证；也没有证明 RKNN runtime 与 Immich 可调用 NPU。
