@@ -748,3 +748,15 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - 下一步在 Actions 手动运行 `Audit Panther X2 NPU DTB source readiness`，检查 `SEMANTIC_DTB_AUDIT=PASS`、两份候选 DTB 的 SHA256、DTC warnings 以及工作流完整日志。
 - 若失败，先修复审计工具或明确的 DTS 差异，不扩大白名单、不绕过检查。
 - 仍不修改 9.6，不制作可刷写补丁；驱动 probe、NPU 实际推理及 RKNN/Immich 兼容性仍未验证。
+
+
+### 3.29 Recheck 6.12.81 RKNPU IRQ lookup behavior（2026-11-14）
+
+重新读取固定 Ophub 源码仓库 `ophub/linux-6.12.y-rockchip`、commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `drivers/rknpu/rknpu_drv.c`，确认 `rknpu_register_irq()`：
+
+- Linux 6.1 及以上代码路径先通过 `platform_get_irq_byname(pdev, config->irqs[i].name)` 查找命名 IRQ；
+- 若返回负值，则回退到 `platform_get_irq(pdev, i)`；
+- 因而对当前 RK3566 单 IRQ 配置，缺少 `interrupt-names = "npu_irq"` 时会尝试第 0 个 IRQ；显式命名不是该代码路径的绝对 probe 前置条件。
+- 这只证明驱动的 IRQ 获取回退逻辑，不证明目标 DTB 中 IRQ specifier 正确、IRQ 能成功申请或硬件中断工作正常。
+
+因此保留两个独立候选：Vendor-equivalent 不加 IRQ name；IRQ-name variant 只额外加该名称。由 CI 语义审计比较两者，不预先把可选属性升级为强制要求。
