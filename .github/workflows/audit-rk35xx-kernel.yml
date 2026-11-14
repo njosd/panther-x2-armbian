@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y binutils curl device-tree-compiler file git
 
-      - name: Download and compare both official RK35xx assets
+      - name: Download and inspect both official RK35xx assets
         shell: bash
         run: |
           set -euo pipefail
@@ -31,7 +31,7 @@ jobs:
           audit_one() {
             local label="$1" asset="$2" url="$3" expected_sha="$4" expected_size="$5" updated="$6"
             local root="work/$label"
-            mkdir -p "$root/package" "$root/header" "$root/boot" "$root/modules" "$root/reports"
+            mkdir -p "$root/package" "$root/nested" "$root/reports"
 
             echo "=== Download $label ==="
             curl --fail --location --retry 3 --retry-delay 3 "$url" -o "$root/package/kernel.tar.gz"
@@ -53,108 +53,121 @@ jobs:
               echo "Asset updated: $updated"
             } | tee "$root/reports/package-metadata.txt"
 
+            # Preserve the complete outer archive listing. Do not assume a fixed
+            # directory layout or naming convention for nested archives.
             tar -tzf "$root/package/kernel.tar.gz" > "$root/reports/package-members.txt"
             cp "$root/reports/package-members.txt" "work/reports/$label-package-members.txt"
-            sed -n '1,160p' "$root/reports/package-members.txt" > "$root/reports/package-members-first160.txt"
+            sed -n '1,240p' "$root/reports/package-members.txt" > "$root/reports/package-members-first240.txt"
 
-            # Do not assume one fixed version-directory layout. Discover embedded archives
-            # by their filenames, preserve the full listing, and report every candidate.
-            mapfile -t header_members < <(grep -Ei '(^|/)[^/]*(header|headers)[^/]*\.(tar\.gz|tgz)
-            {
-              echo "Header archives: ${#header_members[@]}"
-              printf '  %s\n' "${header_members[@]}"
-              echo "Boot/DTB archives: ${#boot_members[@]}"
-              printf '  %s\n' "${boot_members[@]}"
-              echo "Module archives: ${#module_members[@]}"
-              printf '  %s\n' "${module_members[@]}"
-              echo "Payload candidates:"
-              cat "$root/reports/package-payload-candidates.txt"
-            } | tee "$root/reports/archive-layout.txt"
+            : > "$root/reports/nested-archive-index.txt"
+            : > "$root/reports/nested-content-index.txt"
+            : > "$root/reports/dtb-audit.txt"
+            : > "$root/reports/dtb-npu-properties.txt"
+            : > "$root/reports/rknpu-builtin-audit.txt"
 
-            if [[ "${#header_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${header_members[0]}" > "$root/package/headers.tar.gz"
-              gzip -t "$root/package/headers.tar.gz"
-              tar -xzf "$root/package/headers.tar.gz" -C "$root/header"
-              find "$root/header" -maxdepth 4 -type f | sort > "$root/reports/header-file-list.txt"
-              mapfile -t configs < <(find "$root/header" -type f -name .config -print)
-              mapfile -t symvers < <(find "$root/header" -type f -name Module.symvers -print)
-              mapfile -t releases < <(find "$root/header" -type f -path '*/include/config/kernel.release' -print)
-              mapfile -t builtins < <(find "$root/header" -type f -name modules.builtin -print)
+            local index=0
+            while IFS= read -r member; do
+              [[ "$member" =~ \.(tar\.gz|tgz)$ ]] || continue
+              index=$((index + 1))
+              local nested="$root/nested/archive-$index.tar.gz"
+              local listing="$root/nested/archive-$index.members.txt"
+              echo "$index $member" >> "$root/reports/nested-archive-index.txt"
+
+              if ! tar -xOzf "$root/package/kernel.tar.gz" "$member" > "$nested" 2>/dev/null; then
+                echo "UNREADABLE $member" >> "$root/reports/nested-content-index.txt"
+                continue
+              fi
+              if ! gzip -t "$nested" 2>/dev/null || ! tar -tzf "$nested" > "$listing" 2>/dev/null; then
+                echo "NOT_GZIP_TAR $member" >> "$root/reports/nested-content-index.txt"
+                continue
+              fi
+
               {
-                echo "config files: ${#configs[@]}"
-                echo "Module.symvers files: ${#symvers[@]}"
-                echo "kernel.release files: ${#releases[@]}"
-                echo "modules.builtin files in headers: ${#builtins[@]}"
-                if [[ "${#configs[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Relevant config ==="
-                  grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
-                  cp "${configs[0]}" "$root/reports/kernel.config"
-                fi
-                if [[ "${#releases[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== kernel.release ==="
-                  cat "${releases[0]}"
-                fi
-                if [[ "${#symvers[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== PM runtime symbols ==="
-                  grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
-                fi
-                if [[ "${#builtins[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Built-in RKNPU entries ==="
-                  grep -Ei 'rknpu|rknn' "${builtins[0]}" || true
-                fi
-              } | tee "$root/reports/header-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one headers archive"
-            fi
+                echo "=== $member ==="
+                echo "entries=$(wc -l < "$listing")"
+                grep -Ei '(^|/)(Module.symvers|modules\.builtin|modules\.order|kernel\.release|\.config)$|\.dtb(\.gz)?$|(^|/)(Image|Image\.gz|vmlinuz)(-|$)' "$listing" | head -n 160 || true
+              } >> "$root/reports/nested-content-index.txt"
 
-            if [[ "${#boot_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
-              tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              cp "$root/reports/boot-members.txt" "work/reports/$label-boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
-              {
-                echo "DTB count: ${#dtbs[@]}"
-                echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
-              } | tee "$root/reports/dtb-audit.txt"
+              local extracted="$root/nested/extract-$index"
+              mkdir -p "$extracted"
+              tar -xzf "$nested" -C "$extracted"
 
-              # Decompile only DTBs from the published package. No overlays are applied.
-              while IFS= read -r member; do
-                [[ -n "$member" ]] || continue
-                case "$member" in
+              # Header/build-tree evidence.
+              if grep -Eq '(^|/)Module\.symvers$|(^|/)include/config/kernel\.release$' "$listing"; then
+                {
+                  echo "=== Header candidate: $member ==="
+                  find "$extracted" -type f \( -name .config -o -name Module.symvers -o -name modules.builtin -o -path '*/include/config/kernel.release' \) -print
+                  while IFS= read -r f; do
+                    case "$f" in
+                      */include/config/kernel.release)
+                        echo "kernel.release: $(cat "$f")"
+                        ;;
+                      */Module.symvers)
+                        echo "PM runtime exported symbols:"
+                        grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "$f" || true
+                        ;;
+                      */.config)
+                        echo "Relevant .config:"
+                        grep -E '^(CONFIG_(ARM64|MODULES|PM_DEVFREQ|ROCKCHIP_RKNPU|ROCKCHIP_RKNPU_DRM_GEM|ROCKCHIP_RKNPU_SRAM|IOMMU|ROCKCHIP_IOMMU)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "$f" || true
+                        ;;
+                    esac
+                  done < <(find "$extracted" -type f \( -name .config -o -name Module.symvers -o -path '*/include/config/kernel.release' \))
+                } >> "$root/reports/header-audit.txt"
+              fi
+
+              # Module archive evidence: modules.builtin is authoritative for
+              # drivers compiled into vmlinux; a listed *.ko path is not a loadable .ko.
+              while IFS= read -r f; do
+                {
+                  echo "=== $member :: $f ==="
+                  grep -Ei 'rknpu|rknn' "$f" || true
+                } >> "$root/reports/rknpu-builtin-audit.txt"
+              done < <(find "$extracted" -type f -name modules.builtin)
+
+              # Boot/DTB evidence. Search every nested archive rather than only
+              # archives whose outer filename happens to contain 'boot'.
+              while IFS= read -r dtb; do
+                [[ -n "$dtb" ]] || continue
+                local base
+                base="$(basename "$dtb")"
+                echo "$member :: $dtb" >> "$root/reports/dtb-audit.txt"
+                case "$base" in
                   *panther*|*rk3566*)
-                    local dtb_name
-                    dtb_name="$(basename "$member")"
-                    tar -xOzf "$root/package/boot.tar.gz" "$member" > "$root/boot/$dtb_name"
-                    dtc -I dtb -O dts -o "$root/reports/$dtb_name.dts" "$root/boot/$dtb_name" 2> "$root/reports/$dtb_name.dtc.log" || true
-                    if [[ -s "$root/reports/$dtb_name.dts" ]]; then
+                    local dtb_file="$root/nested/$index-$base"
+                    tar -xOzf "$nested" "$dtb" > "$dtb_file" 2>/dev/null || continue
+                    dtc -I dtb -O dts -o "$root/reports/$base.dts" "$dtb_file" 2> "$root/reports/$base.dtc.log" || true
+                    if [[ -s "$root/reports/$base.dts" ]]; then
                       {
-                        echo "=== $dtb_name NPU-related properties ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$dtb_name.dts" | head -n 240 || true
+                        echo "=== $base ==="
+                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$base.dts" | head -n 240 || true
                       } >> "$root/reports/dtb-npu-properties.txt"
                     fi
                     ;;
                 esac
-              done < "$root/reports/boot-members.txt"
-            else
-              echo "::warning::$label: expected exactly one boot archive"
-            fi
+              done < <(grep -Ei '\.dtb$' "$listing" || true)
+            done < "$root/reports/package-members.txt"
 
-            if [[ "${#module_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
-              tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              cp "$root/reports/module-members.txt" "work/reports/$label-module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
-              mkdir -p "$root/modules/extract"
-              tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
-              find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one modules archive"
-            fi
+            {
+              echo "Nested archives: $index"
+              echo
+              echo "=== Nested archive index ==="
+              cat "$root/reports/nested-archive-index.txt"
+              echo
+              echo "=== Candidate payloads ==="
+              cat "$root/reports/nested-content-index.txt"
+              echo
+              echo "=== Header audit ==="
+              cat "$root/reports/header-audit.txt" 2>/dev/null || true
+              echo
+              echo "=== Built-in RKNPU audit ==="
+              cat "$root/reports/rknpu-builtin-audit.txt" 2>/dev/null || true
+              echo
+              echo "=== DTB audit ==="
+              cat "$root/reports/dtb-audit.txt" 2>/dev/null || true
+              echo
+              echo "=== DTB NPU properties ==="
+              cat "$root/reports/dtb-npu-properties.txt" 2>/dev/null || true
+            } > "$root/reports/summary.txt"
           }
 
           audit_one standard "$OPHUB_RK35XX_PACKAGE_ASSET" "$OPHUB_RK35XX_PACKAGE_URL" "$OPHUB_RK35XX_PACKAGE_SHA256" "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_PACKAGE_UPDATED_AT"
@@ -167,15 +180,7 @@ jobs:
               echo "## $label"
               cat "work/$label/reports/package-metadata.txt"
               echo
-              cat "work/$label/reports/archive-layout.txt"
-              echo
-              cat "work/$label/reports/header-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-npu-properties.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/modules-builtin-audit.txt" 2>/dev/null || true
+              cat "work/$label/reports/summary.txt"
               echo
             done
           } > work/reports/combined-comparison.md
@@ -189,6 +194,8 @@ jobs:
           git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
           git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
           git -C work/source/kernel checkout --detach FETCH_HEAD
+          curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
+          config_blob="$(git -C work/source/kernel hash-object "$GITHUB_WORKSPACE/work/reports/config-6.12")"
           {
             echo "=== Reference source ==="
             git -C work/source/kernel remote -v
@@ -196,12 +203,9 @@ jobs:
             grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
             echo
             echo "=== Config reference ==="
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
-            config_blob="$(git -C work/source/kernel hash-object "$GITHUB_WORKSPACE/work/reports/config-6.12")"
             echo "Config blob SHA: $config_blob"
             echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
             [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
-            echo
             echo "NOTE: Source/config references are not proven package provenance."
           } | tee work/reports/source-config-reference.txt
 
@@ -210,597 +214,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: |
-            work/reports/
-            work/standard/reports/
-            work/flippy/reports/
-          if-no-files-found: warn
-          retention-days: 30
- "$root/reports/package-members.txt" || true)
-            mapfile -t boot_members < <(grep -Ei '(^|/)[^/]*(boot|dtb|device-tree)[^/]*\.(tar\.gz|tgz)
-            {
-              echo "Header archives: ${#header_members[@]}"
-              echo "Boot archives: ${#boot_members[@]}"
-              echo "Module archives: ${#module_members[@]}"
-            } | tee "$root/reports/archive-layout.txt"
-
-            if [[ "${#header_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${header_members[0]}" > "$root/package/headers.tar.gz"
-              gzip -t "$root/package/headers.tar.gz"
-              tar -xzf "$root/package/headers.tar.gz" -C "$root/header"
-              mapfile -t configs < <(find "$root/header" -type f -name .config -print)
-              mapfile -t symvers < <(find "$root/header" -type f -name Module.symvers -print)
-              mapfile -t releases < <(find "$root/header" -type f -path '*/include/config/kernel.release' -print)
-              mapfile -t builtins < <(find "$root/header" -type f -name modules.builtin -print)
-              {
-                echo "config files: ${#configs[@]}"
-                echo "Module.symvers files: ${#symvers[@]}"
-                echo "kernel.release files: ${#releases[@]}"
-                echo "modules.builtin files in headers: ${#builtins[@]}"
-                if [[ "${#configs[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Relevant config ==="
-                  grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
-                  cp "${configs[0]}" "$root/reports/kernel.config"
-                fi
-                if [[ "${#releases[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== kernel.release ==="
-                  cat "${releases[0]}"
-                fi
-                if [[ "${#symvers[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== PM runtime symbols ==="
-                  grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
-                fi
-                if [[ "${#builtins[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Built-in RKNPU entries ==="
-                  grep -Ei 'rknpu|rknn' "${builtins[0]}" || true
-                fi
-              } | tee "$root/reports/header-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one headers archive"
-            fi
-
-            if [[ "${#boot_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
-              tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
-              {
-                echo "DTB count: ${#dtbs[@]}"
-                echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
-              } | tee "$root/reports/dtb-audit.txt"
-
-              # Decompile only DTBs from the published package. No overlays are applied.
-              while IFS= read -r member; do
-                [[ -n "$member" ]] || continue
-                case "$member" in
-                  *panther*|*rk3566*)
-                    local dtb_name
-                    dtb_name="$(basename "$member")"
-                    tar -xOzf "$root/package/boot.tar.gz" "$member" > "$root/boot/$dtb_name"
-                    dtc -I dtb -O dts -o "$root/reports/$dtb_name.dts" "$root/boot/$dtb_name" 2> "$root/reports/$dtb_name.dtc.log" || true
-                    if [[ -s "$root/reports/$dtb_name.dts" ]]; then
-                      {
-                        echo "=== $dtb_name NPU-related properties ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$dtb_name.dts" | head -n 240 || true
-                      } >> "$root/reports/dtb-npu-properties.txt"
-                    fi
-                    ;;
-                esac
-              done < "$root/reports/boot-members.txt"
-            else
-              echo "::warning::$label: expected exactly one boot archive"
-            fi
-
-            if [[ "${#module_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
-              tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
-              mkdir -p "$root/modules/extract"
-              tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
-              find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one modules archive"
-            fi
-          }
-
-          audit_one standard "$OPHUB_RK35XX_PACKAGE_ASSET" "$OPHUB_RK35XX_PACKAGE_URL" "$OPHUB_RK35XX_PACKAGE_SHA256" "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_PACKAGE_UPDATED_AT"
-          audit_one flippy "$OPHUB_RK35XX_FLIPPY_PACKAGE_ASSET" "$OPHUB_RK35XX_FLIPPY_PACKAGE_URL" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SHA256" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_FLIPPY_PACKAGE_UPDATED_AT"
-
-          {
-            echo "# Ophub RK35xx 6.12.81 asset comparison"
-            echo
-            for label in standard flippy; do
-              echo "## $label"
-              cat "work/$label/reports/package-metadata.txt"
-              echo
-              cat "work/$label/reports/archive-layout.txt"
-              echo
-              cat "work/$label/reports/header-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-npu-properties.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/modules-builtin-audit.txt" 2>/dev/null || true
-              echo
-            done
-          } > work/reports/combined-comparison.md
-
-      - name: Verify source and config reference snapshots
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/versions.env
-          mkdir -p work/source work/reports
-          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
-          git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
-          git -C work/source/kernel checkout --detach FETCH_HEAD
-          {
-            echo "=== Reference source ==="
-            git -C work/source/kernel remote -v
-            git -C work/source/kernel rev-parse HEAD
-            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
-            echo
-            echo "=== Config reference ==="
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
-            config_blob="$(git -C work/source/kernel hash-object work/reports/config-6.12)"
-            echo "Config blob SHA: $config_blob"
-            echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
-            [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
-            echo
-            echo "NOTE: Source/config references are not proven package provenance."
-          } | tee work/reports/source-config-reference.txt
-
-      - name: Upload package comparison
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: work/reports/
-          if-no-files-found: warn
-          retention-days: 30
- "$root/reports/package-members.txt" || true)
-            mapfile -t module_members < <(grep -Ei '(^|/)[^/]*(module|modules)[^/]*\.(tar\.gz|tgz)
-            {
-              echo "Header archives: ${#header_members[@]}"
-              echo "Boot archives: ${#boot_members[@]}"
-              echo "Module archives: ${#module_members[@]}"
-            } | tee "$root/reports/archive-layout.txt"
-
-            if [[ "${#header_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${header_members[0]}" > "$root/package/headers.tar.gz"
-              gzip -t "$root/package/headers.tar.gz"
-              tar -xzf "$root/package/headers.tar.gz" -C "$root/header"
-              mapfile -t configs < <(find "$root/header" -type f -name .config -print)
-              mapfile -t symvers < <(find "$root/header" -type f -name Module.symvers -print)
-              mapfile -t releases < <(find "$root/header" -type f -path '*/include/config/kernel.release' -print)
-              mapfile -t builtins < <(find "$root/header" -type f -name modules.builtin -print)
-              {
-                echo "config files: ${#configs[@]}"
-                echo "Module.symvers files: ${#symvers[@]}"
-                echo "kernel.release files: ${#releases[@]}"
-                echo "modules.builtin files in headers: ${#builtins[@]}"
-                if [[ "${#configs[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Relevant config ==="
-                  grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
-                  cp "${configs[0]}" "$root/reports/kernel.config"
-                fi
-                if [[ "${#releases[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== kernel.release ==="
-                  cat "${releases[0]}"
-                fi
-                if [[ "${#symvers[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== PM runtime symbols ==="
-                  grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
-                fi
-                if [[ "${#builtins[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Built-in RKNPU entries ==="
-                  grep -Ei 'rknpu|rknn' "${builtins[0]}" || true
-                fi
-              } | tee "$root/reports/header-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one headers archive"
-            fi
-
-            if [[ "${#boot_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
-              tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
-              {
-                echo "DTB count: ${#dtbs[@]}"
-                echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
-              } | tee "$root/reports/dtb-audit.txt"
-
-              # Decompile only DTBs from the published package. No overlays are applied.
-              while IFS= read -r member; do
-                [[ -n "$member" ]] || continue
-                case "$member" in
-                  *panther*|*rk3566*)
-                    local dtb_name
-                    dtb_name="$(basename "$member")"
-                    tar -xOzf "$root/package/boot.tar.gz" "$member" > "$root/boot/$dtb_name"
-                    dtc -I dtb -O dts -o "$root/reports/$dtb_name.dts" "$root/boot/$dtb_name" 2> "$root/reports/$dtb_name.dtc.log" || true
-                    if [[ -s "$root/reports/$dtb_name.dts" ]]; then
-                      {
-                        echo "=== $dtb_name NPU-related properties ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$dtb_name.dts" | head -n 240 || true
-                      } >> "$root/reports/dtb-npu-properties.txt"
-                    fi
-                    ;;
-                esac
-              done < "$root/reports/boot-members.txt"
-            else
-              echo "::warning::$label: expected exactly one boot archive"
-            fi
-
-            if [[ "${#module_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
-              tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
-              mkdir -p "$root/modules/extract"
-              tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
-              find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one modules archive"
-            fi
-          }
-
-          audit_one standard "$OPHUB_RK35XX_PACKAGE_ASSET" "$OPHUB_RK35XX_PACKAGE_URL" "$OPHUB_RK35XX_PACKAGE_SHA256" "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_PACKAGE_UPDATED_AT"
-          audit_one flippy "$OPHUB_RK35XX_FLIPPY_PACKAGE_ASSET" "$OPHUB_RK35XX_FLIPPY_PACKAGE_URL" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SHA256" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_FLIPPY_PACKAGE_UPDATED_AT"
-
-          {
-            echo "# Ophub RK35xx 6.12.81 asset comparison"
-            echo
-            for label in standard flippy; do
-              echo "## $label"
-              cat "work/$label/reports/package-metadata.txt"
-              echo
-              cat "work/$label/reports/archive-layout.txt"
-              echo
-              cat "work/$label/reports/header-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-npu-properties.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/modules-builtin-audit.txt" 2>/dev/null || true
-              echo
-            done
-          } > work/reports/combined-comparison.md
-
-      - name: Verify source and config reference snapshots
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/versions.env
-          mkdir -p work/source work/reports
-          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
-          git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
-          git -C work/source/kernel checkout --detach FETCH_HEAD
-          {
-            echo "=== Reference source ==="
-            git -C work/source/kernel remote -v
-            git -C work/source/kernel rev-parse HEAD
-            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
-            echo
-            echo "=== Config reference ==="
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
-            config_blob="$(git -C work/source/kernel hash-object work/reports/config-6.12)"
-            echo "Config blob SHA: $config_blob"
-            echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
-            [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
-            echo
-            echo "NOTE: Source/config references are not proven package provenance."
-          } | tee work/reports/source-config-reference.txt
-
-      - name: Upload package comparison
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: work/reports/
-          if-no-files-found: warn
-          retention-days: 30
- "$root/reports/package-members.txt" || true)
-            grep -Ei '\.(tar\.gz|tgz|tar\.xz|txz|tar\.zst|tzst|deb|img|dtb|dtb\.gz)
-            {
-              echo "Header archives: ${#header_members[@]}"
-              echo "Boot archives: ${#boot_members[@]}"
-              echo "Module archives: ${#module_members[@]}"
-            } | tee "$root/reports/archive-layout.txt"
-
-            if [[ "${#header_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${header_members[0]}" > "$root/package/headers.tar.gz"
-              gzip -t "$root/package/headers.tar.gz"
-              tar -xzf "$root/package/headers.tar.gz" -C "$root/header"
-              mapfile -t configs < <(find "$root/header" -type f -name .config -print)
-              mapfile -t symvers < <(find "$root/header" -type f -name Module.symvers -print)
-              mapfile -t releases < <(find "$root/header" -type f -path '*/include/config/kernel.release' -print)
-              mapfile -t builtins < <(find "$root/header" -type f -name modules.builtin -print)
-              {
-                echo "config files: ${#configs[@]}"
-                echo "Module.symvers files: ${#symvers[@]}"
-                echo "kernel.release files: ${#releases[@]}"
-                echo "modules.builtin files in headers: ${#builtins[@]}"
-                if [[ "${#configs[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Relevant config ==="
-                  grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
-                  cp "${configs[0]}" "$root/reports/kernel.config"
-                fi
-                if [[ "${#releases[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== kernel.release ==="
-                  cat "${releases[0]}"
-                fi
-                if [[ "${#symvers[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== PM runtime symbols ==="
-                  grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
-                fi
-                if [[ "${#builtins[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Built-in RKNPU entries ==="
-                  grep -Ei 'rknpu|rknn' "${builtins[0]}" || true
-                fi
-              } | tee "$root/reports/header-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one headers archive"
-            fi
-
-            if [[ "${#boot_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
-              tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
-              {
-                echo "DTB count: ${#dtbs[@]}"
-                echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
-              } | tee "$root/reports/dtb-audit.txt"
-
-              # Decompile only DTBs from the published package. No overlays are applied.
-              while IFS= read -r member; do
-                [[ -n "$member" ]] || continue
-                case "$member" in
-                  *panther*|*rk3566*)
-                    local dtb_name
-                    dtb_name="$(basename "$member")"
-                    tar -xOzf "$root/package/boot.tar.gz" "$member" > "$root/boot/$dtb_name"
-                    dtc -I dtb -O dts -o "$root/reports/$dtb_name.dts" "$root/boot/$dtb_name" 2> "$root/reports/$dtb_name.dtc.log" || true
-                    if [[ -s "$root/reports/$dtb_name.dts" ]]; then
-                      {
-                        echo "=== $dtb_name NPU-related properties ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$dtb_name.dts" | head -n 240 || true
-                      } >> "$root/reports/dtb-npu-properties.txt"
-                    fi
-                    ;;
-                esac
-              done < "$root/reports/boot-members.txt"
-            else
-              echo "::warning::$label: expected exactly one boot archive"
-            fi
-
-            if [[ "${#module_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
-              tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
-              mkdir -p "$root/modules/extract"
-              tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
-              find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one modules archive"
-            fi
-          }
-
-          audit_one standard "$OPHUB_RK35XX_PACKAGE_ASSET" "$OPHUB_RK35XX_PACKAGE_URL" "$OPHUB_RK35XX_PACKAGE_SHA256" "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_PACKAGE_UPDATED_AT"
-          audit_one flippy "$OPHUB_RK35XX_FLIPPY_PACKAGE_ASSET" "$OPHUB_RK35XX_FLIPPY_PACKAGE_URL" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SHA256" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_FLIPPY_PACKAGE_UPDATED_AT"
-
-          {
-            echo "# Ophub RK35xx 6.12.81 asset comparison"
-            echo
-            for label in standard flippy; do
-              echo "## $label"
-              cat "work/$label/reports/package-metadata.txt"
-              echo
-              cat "work/$label/reports/archive-layout.txt"
-              echo
-              cat "work/$label/reports/header-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-npu-properties.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/modules-builtin-audit.txt" 2>/dev/null || true
-              echo
-            done
-          } > work/reports/combined-comparison.md
-
-      - name: Verify source and config reference snapshots
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/versions.env
-          mkdir -p work/source work/reports
-          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
-          git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
-          git -C work/source/kernel checkout --detach FETCH_HEAD
-          {
-            echo "=== Reference source ==="
-            git -C work/source/kernel remote -v
-            git -C work/source/kernel rev-parse HEAD
-            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
-            echo
-            echo "=== Config reference ==="
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
-            config_blob="$(git -C work/source/kernel hash-object work/reports/config-6.12)"
-            echo "Config blob SHA: $config_blob"
-            echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
-            [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
-            echo
-            echo "NOTE: Source/config references are not proven package provenance."
-          } | tee work/reports/source-config-reference.txt
-
-      - name: Upload package comparison
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: work/reports/
-          if-no-files-found: warn
-          retention-days: 30
- "$root/reports/package-members.txt" > "$root/reports/package-payload-candidates.txt" || true
-
-            {
-              echo "Header archives: ${#header_members[@]}"
-              echo "Boot archives: ${#boot_members[@]}"
-              echo "Module archives: ${#module_members[@]}"
-            } | tee "$root/reports/archive-layout.txt"
-
-            if [[ "${#header_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${header_members[0]}" > "$root/package/headers.tar.gz"
-              gzip -t "$root/package/headers.tar.gz"
-              tar -xzf "$root/package/headers.tar.gz" -C "$root/header"
-              mapfile -t configs < <(find "$root/header" -type f -name .config -print)
-              mapfile -t symvers < <(find "$root/header" -type f -name Module.symvers -print)
-              mapfile -t releases < <(find "$root/header" -type f -path '*/include/config/kernel.release' -print)
-              mapfile -t builtins < <(find "$root/header" -type f -name modules.builtin -print)
-              {
-                echo "config files: ${#configs[@]}"
-                echo "Module.symvers files: ${#symvers[@]}"
-                echo "kernel.release files: ${#releases[@]}"
-                echo "modules.builtin files in headers: ${#builtins[@]}"
-                if [[ "${#configs[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Relevant config ==="
-                  grep -E '^(CONFIG_(ARM64|MODULES|PM|PM_SLEEP|IOMMU|ROCKCHIP|DEVFREQ|PM_DEVFREQ|OPP|OF|REGULATOR|COMMON_CLK)|# CONFIG_(ROCKCHIP_RKNPU|ROCKCHIP_IOMMU))' "${configs[0]}" || true
-                  cp "${configs[0]}" "$root/reports/kernel.config"
-                fi
-                if [[ "${#releases[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== kernel.release ==="
-                  cat "${releases[0]}"
-                fi
-                if [[ "${#symvers[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== PM runtime symbols ==="
-                  grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume)([[:space:]]|$)' "${symvers[0]}" || true
-                fi
-                if [[ "${#builtins[@]}" -eq 1 ]]; then
-                  echo
-                  echo "=== Built-in RKNPU entries ==="
-                  grep -Ei 'rknpu|rknn' "${builtins[0]}" || true
-                fi
-              } | tee "$root/reports/header-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one headers archive"
-            fi
-
-            if [[ "${#boot_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
-              tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
-              {
-                echo "DTB count: ${#dtbs[@]}"
-                echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
-              } | tee "$root/reports/dtb-audit.txt"
-
-              # Decompile only DTBs from the published package. No overlays are applied.
-              while IFS= read -r member; do
-                [[ -n "$member" ]] || continue
-                case "$member" in
-                  *panther*|*rk3566*)
-                    local dtb_name
-                    dtb_name="$(basename "$member")"
-                    tar -xOzf "$root/package/boot.tar.gz" "$member" > "$root/boot/$dtb_name"
-                    dtc -I dtb -O dts -o "$root/reports/$dtb_name.dts" "$root/boot/$dtb_name" 2> "$root/reports/$dtb_name.dtc.log" || true
-                    if [[ -s "$root/reports/$dtb_name.dts" ]]; then
-                      {
-                        echo "=== $dtb_name NPU-related properties ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$dtb_name.dts" | head -n 240 || true
-                      } >> "$root/reports/dtb-npu-properties.txt"
-                    fi
-                    ;;
-                esac
-              done < "$root/reports/boot-members.txt"
-            else
-              echo "::warning::$label: expected exactly one boot archive"
-            fi
-
-            if [[ "${#module_members[@]}" -eq 1 ]]; then
-              tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
-              tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
-              mkdir -p "$root/modules/extract"
-              tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
-              find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
-            else
-              echo "::warning::$label: expected exactly one modules archive"
-            fi
-          }
-
-          audit_one standard "$OPHUB_RK35XX_PACKAGE_ASSET" "$OPHUB_RK35XX_PACKAGE_URL" "$OPHUB_RK35XX_PACKAGE_SHA256" "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_PACKAGE_UPDATED_AT"
-          audit_one flippy "$OPHUB_RK35XX_FLIPPY_PACKAGE_ASSET" "$OPHUB_RK35XX_FLIPPY_PACKAGE_URL" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SHA256" "$OPHUB_RK35XX_FLIPPY_PACKAGE_SIZE_BYTES" "$OPHUB_RK35XX_FLIPPY_PACKAGE_UPDATED_AT"
-
-          {
-            echo "# Ophub RK35xx 6.12.81 asset comparison"
-            echo
-            for label in standard flippy; do
-              echo "## $label"
-              cat "work/$label/reports/package-metadata.txt"
-              echo
-              cat "work/$label/reports/archive-layout.txt"
-              echo
-              cat "work/$label/reports/header-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-audit.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/dtb-npu-properties.txt" 2>/dev/null || true
-              echo
-              cat "work/$label/reports/modules-builtin-audit.txt" 2>/dev/null || true
-              echo
-            done
-          } > work/reports/combined-comparison.md
-
-      - name: Verify source and config reference snapshots
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/versions.env
-          mkdir -p work/source work/reports
-          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/source/kernel
-          git -C work/source/kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
-          git -C work/source/kernel checkout --detach FETCH_HEAD
-          {
-            echo "=== Reference source ==="
-            git -C work/source/kernel remote -v
-            git -C work/source/kernel rev-parse HEAD
-            grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) =' work/source/kernel/Makefile
-            echo
-            echo "=== Config reference ==="
-            curl --fail --location --retry 3 "https://raw.githubusercontent.com/ophub/kernel/$OPHUB_RK35XX_CONFIG_REF/$OPHUB_RK35XX_CONFIG_PATH" -o work/reports/config-6.12
-            config_blob="$(git -C work/source/kernel hash-object work/reports/config-6.12)"
-            echo "Config blob SHA: $config_blob"
-            echo "Expected config blob SHA: $OPHUB_RK35XX_CONFIG_BLOB_SHA"
-            [[ "$config_blob" == "$OPHUB_RK35XX_CONFIG_BLOB_SHA" ]]
-            echo
-            echo "NOTE: Source/config references are not proven package provenance."
-          } | tee work/reports/source-config-reference.txt
-
-      - name: Upload package comparison
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: work/reports/
+          path: work/
           if-no-files-found: warn
           retention-days: 30
