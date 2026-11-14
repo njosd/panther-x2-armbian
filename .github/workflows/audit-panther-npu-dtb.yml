@@ -181,7 +181,7 @@ jobs:
           block = s[start:end]
           if 'interrupt-names = "npu_irq";' in block:
               raise SystemExit("unexpected pre-existing interrupt-names")
-          s = s[:start] + block.replace("\\n", '\\n    interrupt-names = "npu_irq";', 1) + s[end:]
+          s = s[:start] + block.replace("\n", '\n    interrupt-names = "npu_irq";', 1) + s[end:]
           Path("work/reports/rk3566-panther-x2.irqname-candidate.dts").write_text(s)
           PY
             cp work/reports/rk3566-panther-x2.irqname-candidate.dts "$board_dts"
