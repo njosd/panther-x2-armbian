@@ -688,3 +688,36 @@ Actions run `43600205650` / job `132463126060`：
 4. 候选 DTB 反编译，确认 NPU/IOMMU/bus 节点属性。
 
 目前仍未将候选 DTS 写入产品文件，所有改动只在 CI 临时 checkout 中进行。
+
+
+### 3.27 Ophub RK35xx 6.12.81 Panther X2 NPU candidate DTB successfully built and inspected（2026-11-14）
+
+Actions run `43600749020` / job `132464761260` succeeded. Artifact `14116073830` was downloaded and its actual contents inspected, not just inferred from the job's exit code.
+
+**Strong source/package correspondence result**
+- Fixed source commit: `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`, Makefile version 6.12.81.
+- Unmodified Panther X2 DTB built from this source: SHA256 `00220c6cabc02573099e74dec912787dcb629ff5904f280f25bc782e92332185`.
+- Panther X2 DTB extracted from the SHA256-verified Ophub 6.12.81 RK35xx package: exactly the same SHA256 `00220c6cabc02573099e74dec912787dcb629ff5904f280f25bc782e92332185`.
+- Therefore the published Panther X2 DTB is bit-for-bit identical to the DTB built from this pinned source snapshot. This proves DTB source correspondence for this asset, but does not by itself prove the provenance of the kernel Image or every other package component.
+
+**Candidate DTB**
+- CI-only candidate SHA256: `b58722d035e4f9c18406c46e1498c03b679ae8df4cd56d14e45d3bd3be19cb34`.
+- Candidate decompilation confirms:
+  - `/bus-npu`: `status = "okay"`, `bus-supply` resolves to the existing `vdd_logic` regulator, `pvtm-supply` resolves to `vdd_cpu`, existing bus clock and bus OPP table retained.
+  - `/npu@fde40000`: `status = "okay"`, `rknpu-supply` resolves to existing `vdd_npu` (PMIC DCDC_REG4), existing IRQ specifier, clocks, resets, power-domain, OPP table and `iommus = <&rknpu_mmu>` retained. Candidate adds `interrupt-names = "npu_irq"`.
+  - `/iommu@fde4b000`: `status = "okay"`; existing `rockchip,iommu-v2`, clocks, IRQ and power-domain retained.
+  - No new `mem-supply` or reserved-memory region was added. This follows the audited Panther BSP board fragment and the exact 6.12.81 driver's optional single-`rknpu` regulator path; do not add a generic RK3566 board's memory rail or IOMMU workaround without Panther-specific evidence.
+- The candidate is 92 bytes larger than the baseline DTB. Decompiled comparison shows the intended NPU bus/NPU/MMU enablement and supply/IRQ-name properties, plus automatic phandle renumbering with corresponding references adjusted by DTC. A future automated semantic tree comparison should explicitly validate references and ensure no unrelated effective node changes.
+
+**Warnings**
+- Candidate DTB decompilation reports the same 14 warning classes/paths as the unmodified source-built baseline and published DTB; no new DTC warning class or path was introduced by the NPU fragment. Existing warnings include duplicate unit addresses and graph/address-cell notices in unrelated display, PHY, NAND, reserved-memory and OTP nodes. They are pre-existing DTS warnings, not proof of NPU correctness.
+
+**Status**
+- 6.12.81 source DTB build: passed.
+- Published package DTB extraction and SHA256 verification: passed.
+- Published DTB == pinned source-built DTB byte-for-byte: passed.
+- CI-only NPU candidate DTB build: passed.
+- Candidate static node/supply/IRQ inspection: passed at DTS structural level.
+- Driver probe, regulator voltage behavior, NPU/IOMMU DMA behavior, NVMEM/OPP calibration, sustained inference, RKNN runtime compatibility and Immich integration: not tested.
+
+Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/runs/43600749020) / [job 132464761260](https://github.com/njosd/panther-x2-armbian/actions/runs/43600749020/job/132464761260), artifact ID `14116073830`.
