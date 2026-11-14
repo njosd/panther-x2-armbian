@@ -344,3 +344,25 @@ RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并�
 - `kernel_stable/6.18.63`：通用 stable 内核线，之前的 RKNPU 编译实验属于该线；其结果不能代表 RK35xx 专用 BSP。
 - `kernel_rk35xx/6.12.81`：当前更有针对性的 RK3566 专用 BSP 候选，优先进行离线包内容和 provenance 审计。
 - 两条路线都尚未在 Panther X2 实机启动验证；也没有证明 RKNN runtime 与 Immich 可调用 NPU。
+
+
+### 3.16 最早 Panther X2 BSP 与 RK35xx 6.12.81 对照：驱动来源和构建模型已初步查明
+
+详细审计见 [`docs/BSP-SOURCE-AUDIT.md`](BSP-SOURCE-AUDIT.md)。
+
+重要结论：
+- 最早 BSP 的 RKNPU v0.9.8（日期 20240828）有明确 Rockchip 上游来源：`rockchip-linux/kernel` commit `736d89f344156b75393b01ab2c0e3a06c39e110f`，由 Rockchip 工程师 Shuangjie Lin 签署，修复多进程运行和 IOMMU domain switch。
+- Armbian `linux-rockchip` 6.1.115 BSP 树继承这条 Rockchip 驱动线；不是 Panther 项目自行编写的 NPU 驱动。
+- Panther BSP 和 Ophub RK35xx 6.12.81 都使用内核树内的 RKNPU 驱动构建路径。Panther 镜像验证明确要求 `CONFIG_ROCKCHIP_RKNPU=y`；6.12.81 的配置参考也启用 `CONFIG_ROCKCHIP_RKNPU=y`、`CONFIG_PM_DEVFREQ=y`、`CONFIG_ROCKCHIP_RKNPU_DRM_GEM=y`。
+- 两条路线均调用 `pm_runtime_force_resume()`，但它由同一完整内核构建树内的 `drivers/base/power/runtime.o` 提供并在内核链接时解析。因此此前通用 6.18.63 外置模块测试遇到的 `Module.symvers` 缺符号，不是原 BSP 的构建方法，也不是 RK35xx 6.12.81 候选所要求的构建方式。此前外置模块实验的失败不能作为“BSP RKNPU 无法构建”的结论。
+- RKNPU devfreq 源码使用内核内部头文件 `../drivers/devfreq/governor.h`，进一步说明它应在完整内核源码树内编译；不适合仅凭裁剪 headers 包来构建外置模块。
+- Panther X2 基础板级 DTS 的可追溯来源为 `unifreq/linux-6.1.y`，最初由 Ophub 于 2023-07-07 添加，tdleiyao 于 2023-07-11 修改 USB host/GPU；但当前 Panther BSP 仓库中的 7,546 行扁平 DTS/DTB 输入文件来源仍未完全追溯。
+- Panther BSP 曾专门修正 NPU IRQ binding，增加 `interrupt-names = "npu_irq"`。这与 Rockchip driver 按该名称获取中断的代码相吻合。
+- 外部社区报告显示 RK3566 即使已初始化 RKNPU 0.9.8，也可能因 `npu_irq`、mem-supply、reg resource、IOMMU、power model 或 OPP/regulator 与 DTB 不匹配而无法正常使用。不能把其他 RK3566 板的 overlay 原样套到 Panther X2。
+
+路线调整：
+1. RKNPU 主验证改为完整 in-tree kernel CI build（`CONFIG_ROCKCHIP_RKNPU=y`、`CONFIG_PM_DEVFREQ=y`），不再以必须生成独立 `rknpu.ko` 作为成功条件。
+2. 继续执行 RK35xx 6.12.81 发布包审计，但包中没有独立 `rknpu.ko` 可能正是 built-in 设计的正常结果；要看配置、`modules.builtin`、启动 DTB 和驱动日志。
+3. 优先追查 Panther 专用扁平 DTS 的原始 DTB/DTS（仓库 `reference/source-input.sha256` 所列的两个输入目前未随仓库保存），并与 unifreq Panther DTS、Rockchip `rk356x.dtsi` / `rk3566-box.dtsi` 对照。
+4. 对照 NPU `reg`、IRQ name/number、`rknpu-supply`、mem-supply、clocks、resets、power-domain、IOMMU、NPU OPP/bus OPP 和 regulator。
+5. 仍需证明 6.12.81 发布资产与所观察源码 commit/config 的 provenance；仍未在 9.6 实机验证 probe 或 RKNN inference。
