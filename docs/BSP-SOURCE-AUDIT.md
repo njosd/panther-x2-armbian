@@ -263,3 +263,10 @@ The community reports strongly support the following diagnostic order for Panthe
 6. only then test RKNN runtime/Toolkit2 ABI and execute an inference workload.
 
 No community workaround should be copied verbatim without comparing the Panther X2 board wiring and the exact driver/DTS revision.
+
+
+### 9.6 Hashed Panther BSP DTS inputs: public search result
+
+A global GitHub code search for the two SHA-256 values recorded in `reference/source-input.sha256` finds the same hash manifest in a second repository, `theflegend/pantherx2-build`. That repository has a single initial commit dated 2026-09-14. Its BSP patch blob SHA is exactly the same as the `clfang666/Panther-x2-NPU-VPU` repository (`84ee74c07cba9cace4f7cb6b205ce2fc8ba1900f`), and its README blob is also identical. This is a byte-identical copy/mirror, not an independent origin for the DTB/DTS.
+
+The two original hashed inputs remain absent from both repository trees. The matching hashes narrow the search terms but do not yet identify the original board-vendor DTB or source project. Keep the flattened DTS provenance as unresolved; do not label it as Rockchip official or vendor-provided until its exact hash is found in an upstream package/repository or the original file is recovered.
