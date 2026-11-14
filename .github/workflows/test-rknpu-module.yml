@@ -172,11 +172,12 @@ jobs:
             helper_rc=${PIPESTATUS[0]}
           fi
           if [[ "$helper_rc" -eq 0 ]]; then
-            # The generic scripts target omits modpost in this tree.
-            # Request the exact host-program target explicitly.
+            # The generic scripts target does not descend into scripts/mod.
+            # Build that directory so Kbuild creates modpost, mk_elfconfig,
+            # elfconfig.h and the generated device-table offsets together.
             make -C "$kernel_source" O="$builddir" ARCH=arm64 \
               CROSS_COMPILE=aarch64-none-linux-gnu- HOSTCC=gcc HOSTCXX=g++ \
-              V=1 scripts/mod/modpost \
+              V=1 scripts/mod/ \
               2>&1 | tee -a work/reports/host-tools-rebuild.log
             helper_rc=${PIPESTATUS[0]}
           fi
