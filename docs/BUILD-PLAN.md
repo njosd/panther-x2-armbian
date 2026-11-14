@@ -159,7 +159,7 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 因此当前编译失败尚不能说明核心 DRM GEM、IOMMU、job/fence 路径不兼容；需要先禁用可选 devfreq，再观察其余源码的编译结果；
 - DT overlay CPP/DTC 返回成功并生成 DTBO，但 `reg_format`、`avoid_default_addr_size`、`interrupts_property` 警告持续存在。不能将其视为设备树已适配 Panther X2。
 
-**第六轮验证调整：** 工作流提交 `25bbc0ad662c092a8e373e7dca43706cc7732ae0`。仅在 CI 解包后的临时 RKNPU 源码副本中：
+**第六轮验证调整：** 工作流提交 `25bbc0ad662c092a8e373e7dca43706cc7732ae0`，随后修正 Kbuild 标志追加命令的换行转义，最终工作流提交为 `324045da07fb1b2debd13d5b900bef7354b337fc`。仅在 CI 解包后的临时 RKNPU 源码副本中：
 1. 从 Kbuild 对象列表移除 `src/rknpu_devfreq.o`；
 2. 添加 `-DRKNPU_NO_DEVFREQ`，启用该项目头文件已提供的 no-op 接口；
 3. 归档原始 Kbuild 与禁用 devfreq 的差异补丁；
