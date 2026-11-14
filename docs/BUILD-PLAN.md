@@ -54,13 +54,18 @@
 
 下一步必须对 rebuild 逻辑做最小补丁：将 U-Boot、firmware 的下载改为固定 commit checkout，或直接从固定 commit 下载所需目录；构建日志中记录实际 HEAD。补丁应尽量小并单独保存、审查。
 
-### 3.3 Kernel package 的内容和兼容性仍需检查
+### 3.3 Kernel package 与 DTB 状态
 
-已确认 6.18.63 发布资产存在，并记录了版本、URL、大小和远端 SHA-256；但还没有在本项目构建环境中下载并检查归档内容。构建前需要确认：
-- 归档结构符合 rebuild 脚本预期；
-- 包内包含所需的 arm64 内核、模块、DTB/相关文件；
-- DTB 中包含 Panther X2 所需的 `rk3566-panther-x2.dtb`；
-- 下载后 SHA-256 与记录值一致。
+6.18.63 发布资产已通过检查工作流下载并核验：
+- 外层归档 SHA-256 与 `config/versions.env` 记录一致；
+- 6 个内部归档校验值全部 MATCH；
+- ARM64 Image 存在；
+- Rockchip DTB 包清单包含 `rk3566-panther-x2.dtb`；
+- 内核配置包含 Rockchip GMAC、Realtek PHY、Rockchip MMC 等基础驱动选项。
+
+DTB 仍有一项未完成：本次 artifact 只上传清单与配置摘要，没有包含 DTB 二进制，因此尚不能反编译并与 DTS 逐项比对。固定 DTS 参考源为 `Lyric-c/panther-x2` 的 `userpatches/kernel/rockchip64-6.18/dt/rk3566-panther-x2.dts`，blob SHA `52cbb88552dcae7d15a18682c7a77ec0888dbdc3`。GMAC/PHY 地址、时序、复位，eMMC/TF 与 USB host 的节点摘要见 `docs/DTB-AUDIT.md`。
+
+因此，当前结论是“内核包中存在目标 DTB 文件且驱动配置具备”，不是“DTB 二进制已证明与参考 DTS 一致”。后续检查只需补取 DTB 二进制并核对启动关键节点，不需要重新审计整个内核包。
 
 ### 3.4 GitHub Actions 依赖
 
@@ -84,14 +89,14 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 
 ## 5. 内核包检查工作流
 
-已新增 `.github/workflows/inspect-kernel-package.yml`：
+已新增并手动运行 `.github/workflows/inspect-kernel-package.yml`：
 - 仅 `workflow_dispatch` 手动触发；
 - checkout 与 artifact upload Action 固定到完整 commit SHA；
 - 下载 `6.18.63.tar.gz` 并与仓库记录的 SHA-256 比对；
-- 执行 gzip 完整性检查，生成归档文件清单并上传为 Actions artifact；
+- 执行 gzip 完整性检查，生成归档文件清单、内核配置摘要和相关模块路径清单；
 - 不运行 rebuild、不写入镜像、不操作任何设备。
 
-该工作流尚未运行。需在 GitHub Actions 页面手动触发，检查通过后再根据 artifact 判断包内是否含 Panther X2 DTB、arm64 内核及模块。
+运行记录：`43526258367`。检查通过，artifact 已下载并审阅。注意该 artifact 不含原始 DTB 字节，DTB 二进制比对仍列为待办。
 
 ## 6. 构建前检查清单
 
