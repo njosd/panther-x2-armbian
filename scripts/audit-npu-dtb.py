@@ -28,8 +28,8 @@ PROVIDER_CELL_PROPERTIES = {
     "mboxes": "#mbox-cells",
     "pwms": "#pwm-cells",
     "io-channels": "#io-channel-cells",
-    "nvmem-cells": "#nvmem-cell-cells",
 }
+SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells"}
 SINGLE_PHANDLE_PROPERTIES = {
     "interrupt-parent", "operating-points-v2", "memory-region",
     "cpu", "rockchip,grf", "rockchip,pmu",
@@ -94,6 +94,7 @@ def phandle_map(dtb: Path) -> dict[int, str]:
 def is_reference_property(name: str) -> bool:
     return (
         name in PROVIDER_CELL_PROPERTIES
+        or name in SINGLE_PHANDLE_ARRAY_PROPERTIES
         or name in SINGLE_PHANDLE_PROPERTIES
         or name.endswith("-supply")
         or name.endswith("-gpios")
@@ -142,6 +143,19 @@ def normalized_property(dtb: Path, node: str, name: str,
     raw = [int(token, 16) for token in raw_text.split()]
     if not raw:
         return ""
+
+    if name in SINGLE_PHANDLE_ARRAY_PROPERTIES:
+        targets = []
+        for value in raw:
+            target = handles.get(value)
+            if target is None:
+                raise RuntimeError(
+                    f"{dtb}:{node}:{name}: unknown nvmem-cell phandle 0x{value:x}"
+                )
+            # NVMEM consumer references identify the cell node directly;
+            # unlike clocks/resets/IRQs, no provider argument cells follow.
+            targets.append(f"@{target}")
+        return " ".join(targets)
 
     if name in PROVIDER_CELL_PROPERTIES:
         return normalize_specifier_list(
