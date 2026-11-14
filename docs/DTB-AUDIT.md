@@ -140,3 +140,66 @@
 | 实机启动及 Immich 硬件加速 | 未验证 |
 
 本阶段仍不安装、不修改 Panther X2，不制作或写入镜像。下一步优先审计 RKNPU 驱动来源和可移植补丁边界；首版启动验收不等待 NPU。
+
+
+## 2026-11-14：RKNPU BSP 来源与 Mainline 可移植路线（新增）
+
+### 1. Panther X2 Vendor 6.1 路线的直接证据
+
+参考仓库：[`Lyric-c/panther-x2`](https://github.com/Lyric-c/panther-x2)，固定参考 commit `2ceb614fc294b4832268ec3e50716e7e9d3f1e8b`。
+
+- 分支说明将 `vendor` 定义为 Rockchip BSP 6.1.y，内核源为 `armbian/linux-rockchip` 的 `rk-6.1-rkr5.1`；`current` 则为 mainline 6.18.y。
+- Vendor 设备树 `userpatches/kernel/rk35xx-vendor-6.1/dt/rk3566-panther-x2.dts` 明确启用 `&rknpu`、`&rknpu_mmu`、`&bus_npu`，并设置 `rknpu-supply = <&vdd_npu>`；同时启用 `&mpp_srv`、`&rkvdec`、`&rkvenc` 等多媒体节点。
+- 对应 Vendor SoC DTSI `arch/arm64/boot/dts/rockchip/rk356x.dtsi` 定义 `npu@fde40000`，compatible 为 `rockchip,rk3568-rknpu`、`rockchip,rknpu`，并定义 NPU 时钟、复位、电源域、OPP 和 IOMMU。
+- 同一 Vendor 内核树包含 `drivers/rknpu/`，其 `Kconfig` 定义 `CONFIG_ROCKCHIP_RKNPU`，`drivers/Kconfig` 和 `drivers/Makefile` 分别接入该驱动目录。
+- `rknpu_drv.c` 中的 `rk356x_rknpu_config` 被 `compatible = "rockchip,rknpu"` 使用；这为 RK3566/RK3568 共用的 RKNPU 驱动路径提供了源码证据。
+
+以上证明 Vendor 6.1 方案不只是给设备树加一个节点，而是由 SoC DTSI、板级 DTS、RKNPU 驱动源码、Kconfig/Makefile 和 Rockchip IOMMU/电源/时钟等内核子系统共同组成。
+
+### 2. 已发现的 Mainline 外置驱动路线
+
+参考项目：[`w568w/rknpu-module`](https://github.com/w568w/rknpu-module)。该项目将 Rockchip Vendor RKNPU 驱动移植为 mainline Linux 的 out-of-tree 模块，并提供 RK3566 设备树 overlay。
+
+其 README 声明的实测环境为 OrangePi 3B v1.1（RK3566）、Armbian mainline `6.19.3-edge-rockchip64` / `7.0.0-rc7-edge-rockchip64`，配套 `librknnrt v2.3.2`。这比直接移植整套 Vendor 内核更接近本项目所需的独立驱动包路线，但当前没有证据证明它可直接编译运行于 Ophub 6.18.63。
+
+该项目 overlay `dts/rk3566-rknpu-overlay.dts` 的设计特点：
+- 以 overlay 添加 `npu@fde40000`、NPU power domain 和 OPP 表，不必替换整份 Panther X2 DTB；
+- NPU 使用 `rockchip,rk3568-rknpu` / `rockchip,rknpu` compatible；
+- overlay 将 NPU IOMMU 节点保持 disabled，先以 non-IOMMU 模式运行；
+- 项目明确记录 RK3566 IOMMU v2 页表可能被分配到 4GB 以上物理地址、导致总线错误的问题；其临时规避方式是禁用 NPU IOMMU，而不是直接启用 Panther X2 Vendor DTS 中的 `&rknpu_mmu`。
+
+**特别注意：** Panther X2 实机内存为 4GB，不能把该项目针对 OrangePi 3B 的 IOMMU 结论未经验证地直接套用；但它足以说明第一轮移植/编译验证不应默认启用 NPU IOMMU。应先核对 Panther X2 的 RAM 地址布局、NPU DMA mask、CMA 和驱动实际模式。
+
+### 3. Rocket 与 RKNN Runtime 不是同一套接口
+
+Linux 6.18 官方 Rocket 文档列出的硬件支持对象为 RK3588；Rocket 使用 Mesa/Teflon 用户态栈，不是 Vendor RKNPU 驱动 ABI。Immich 的 RKNN 后端讨论也记录了 `librknnrt` 需要 Vendor `rknpu` 模块，不能仅因系统存在 Rocket 设备节点就认为 RKNN Runtime 可用。
+
+因此本项目需要区分：
+- Mainline Rocket：不能作为 RK3566 的 RKNN 路线依据；
+- Vendor `rknpu`：RK3566 BSP 路线，具备官方 RKNN Runtime 生态；
+- `w568w/rknpu-module`：将 Vendor ABI 驱动移植到 mainline 的外置模块，已报告在 RK3566 + 6.19.3 实测，但对本项目 6.18.63 尚未验证。
+
+### 4. 当前技术判断
+
+优先级调整如下：
+1. **保留 Ophub 6.18.y 主线作为基础系统候选。**
+2. 将 `w568w/rknpu-module` 作为优先审计的独立 RKNPU 模块候选，而不是立即移植完整 Vendor 6.1 内核。
+3. 单独审计其代码、许可证、内核 API 依赖、DKMS/Kbuild、设备树 overlay、IOMMU 规避方式及 RKNN Runtime 版本要求。
+4. 先在 GitHub Actions 中使用固定模块源码 commit 和 Ophub 6.18.63 header 包做纯编译验证；只有编译通过后，才考虑制作独立补丁/模块包。编译通过仍不等于实机 probe 或 RKNN 推理成功。
+5. 如果 6.18.63 API 差异导致移植成本过高，再评估升至已被该模块验证的 6.19.y Ophub 内核，或保留 Vendor 6.1 作为 NPU 专用备选；暂不改变已选主线。
+
+### 5. 证据与限制
+
+- Vendor 6.1 驱动源与 Panther X2 DTS：静态源码已读取；未在本项目重新构建或实机验证。
+- `w568w/rknpu-module`：上游 README 报告 RK3566 + 6.19.3 实测；这是第三方项目声明，不是 Panther X2 实测。
+- 6.18.63：当前包未发现 RKNPU 模块或 NPU 节点；尚未尝试移植外置模块。
+- RKNN Runtime：官方 `rknn-toolkit2` 文档列出 RK3566 支持平台；具体运行库版本与外置驱动 ABI 仍需配套验证。
+- Immich：RKNN 后端与 Vendor `rknpu` ABI 的关系有公开项目讨论记录；尚未在本项目 Immich 部署环境验证。
+
+参考链接：
+- [Panther X2 Vendor/Mainline 分支与构建说明](https://github.com/Lyric-c/panther-x2/blob/2ceb614fc294b4832268ec3e50716e7e9d3f1e8b/README.md)
+- [Panther X2 Vendor 6.1 DTS](https://github.com/Lyric-c/panther-x2/blob/2ceb614fc294b4832268ec3e50716e7e9d3f1e8b/userpatches/kernel/rk35xx-vendor-6.1/dt/rk3566-panther-x2.dts)
+- [w568w RKNPU mainline module](https://github.com/w568w/rknpu-module)
+- [Linux 6.18 Rocket documentation](https://docs.kernel.org/6.18/accel/rocket/index.html)
+- [RKNN Toolkit2](https://github.com/rockchip-linux/rknn-toolkit2)
+- [Immich RKNN backend discussion](https://github.com/immich-app/immich/discussions/30970)
