@@ -168,3 +168,28 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 5. DT overlay 警告单独处理，不把 DTBO 生成成功等同于 Panther X2 设备树兼容。
 
 仍须强调：Ophub 源码 commit 的 6.18.63 版本号并未证明它就是发布二进制内核包的精确源码。模块成功编译也不能单独证明 ABI 匹配。全部操作仍仅限 GitHub Actions 纯编译验证，不触碰 Panther X2（192.168.9.6）。
+
+
+### 3.8 RKNPU 6.18.63 纯编译验证（第七轮：MODPOST 已运行，符号解析失败）
+
+第七轮运行：[43591812356](https://github.com/njosd/panther-x2-armbian/actions/runs/43591812356)，Job [132437950866](https://github.com/njosd/panther-x2-armbian/actions/runs/43591812356/job/132437950866)，artifact ID `14112229131`。实际 checkout commit：`fb4b83cd9fa2cc61a5fd834d0d949d025e6c2f05`。
+
+结果：
+- `scripts/mod/` 目录构建成功；`fixdep` 与 `modpost` 均已重建为 x86_64 host ELF，证明上一轮缺少 modpost 的问题已解决；
+- RKNPU 核心对象再次全部完成 ARM64 编译，并链接为 `rknpu.o`；
+- MODPOST 已执行，但因 `pm_runtime_force_resume` 未能在当前 `Module.symvers` 中解析而失败，未生成最终 `rknpu.ko`；
+- DTBO 仍能生成，但原有 reg_format、address/size cells 和 interrupt-parent 警告仍在，设备树适配未验证；
+- 没有加载模块或修改 Panther X2 实机。
+
+符号初步源码审计：
+- 固定 Ophub 源码 commit `9bbed25243be8b43df410ebb9a8bbb1992234114` 的 `drivers/base/power/runtime.c` 在 `CONFIG_PM_SLEEP` 条件下定义并 `EXPORT_SYMBOL_GPL(pm_runtime_force_resume)`；
+- 同一源码的 `include/linux/pm_runtime.h` 在 `CONFIG_PM_SLEEP` 开启时声明外部函数，关闭时提供 inline stub；
+- 因此当前错误不能简单归结为“Linux 6.18 没有该 API”。更可能的调查方向是：headers build tree 的 `CONFIG_PM_SLEEP` 与 `Module.symvers` 是否一致、该发布内核是否实际导出了该符号，以及当前 prepared headers 与源码快照是否匹配。以上仍是待验证假设，不能提前定论。
+
+已在 workflow 增加只读诊断报告 `pm-runtime-symbol-audit.txt`，下一轮记录：
+1. `CONFIG_PM`、`CONFIG_PM_SLEEP`、`CONFIG_PM_RUNTIME` 的实际值；
+2. 发布 headers 包 `Module.symvers` 是否包含 `pm_runtime_force_resume` 及相关 runtime PM 符号；
+3. Ophub 源码中的条件编译、导出声明和 Makefile 选择；
+4. 若配置启用但符号仍不在 Module.symvers，优先调查发布包 headers/符号表来源与源码快照 provenance，不通过 `KBUILD_MODPOST_WARN`、`KBUILD_MODPOST_NOFINAL` 或伪造符号表绕过错误。
+
+本轮仅增加 CI 诊断，不修改驱动源码、不改内核配置、不在 9.6 实机操作。
