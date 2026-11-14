@@ -139,10 +139,13 @@ jobs:
             } >> "$report"
             echo "candidate_status=skipped_missing_soc_nodes" >> "$GITHUB_OUTPUT"
           else
-            cp "$board_dts" work/reports/rk3566-panther-x2.candidate.dts
-            cat >> work/reports/rk3566-panther-x2.candidate.dts <<'EOF'
+            cp "$board_dts" "$board_dts.ci-original"
 
-          /* CI-only candidate: Panther X2 NPU enablement, not a product patch. */
+            # Candidate A mirrors the audited Panther Vendor 6.1 board fragment.
+            cp "$board_dts" work/reports/rk3566-panther-x2.vendor-candidate.dts
+            cat >> work/reports/rk3566-panther-x2.vendor-candidate.dts <<'EOF'
+
+          /* CI-only candidate: Panther X2 NPU enablement, no IRQ name extension. */
           &bus_npu {
               bus-supply = <&vdd_logic>;
               pvtm-supply = <&vdd_cpu>;
@@ -150,7 +153,6 @@ jobs:
           };
 
           &rknpu {
-              interrupt-names = "npu_irq";
               rknpu-supply = <&vdd_npu>;
               status = "okay";
           };
@@ -159,20 +161,50 @@ jobs:
               status = "okay";
           };
           EOF
-            cp "$board_dts" "$board_dts.ci-original"
-            cp work/reports/rk3566-panther-x2.candidate.dts "$board_dts"
+            cp work/reports/rk3566-panther-x2.vendor-candidate.dts "$board_dts"
             make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
               rockchip/rk3566-panther-x2.dtb
             cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
-              work/reports/rk3566-panther-x2.candidate.dtb
+              work/reports/rk3566-panther-x2.vendor-candidate.dtb
             dtc -I dtb -O dts -s \
-              -o work/reports/rk3566-panther-x2.candidate.decompiled.dts \
-              work/reports/rk3566-panther-x2.candidate.dtb \
-              2> work/reports/candidate-dtc-warnings.txt
+              -o work/reports/rk3566-panther-x2.vendor-candidate.decompiled.dts \
+              work/reports/rk3566-panther-x2.vendor-candidate.dtb \
+              2> work/reports/vendor-candidate-dtc-warnings.txt
+
+            # Candidate B adds only interrupt-names to the NPU fragment.
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path("work/reports/rk3566-panther-x2.vendor-candidate.dts")
+          s = p.read_text()
+          start = s.index("&rknpu {")
+          end = s.index("};", start)
+          block = s[start:end]
+          if 'interrupt-names = "npu_irq";' in block:
+              raise SystemExit("unexpected pre-existing interrupt-names")
+          s = s[:start] + block.replace("\\n", '\\n    interrupt-names = "npu_irq";', 1) + s[end:]
+          Path("work/reports/rk3566-panther-x2.irqname-candidate.dts").write_text(s)
+          PY
+            cp work/reports/rk3566-panther-x2.irqname-candidate.dts "$board_dts"
+            make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              rockchip/rk3566-panther-x2.dtb
+            cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
+              work/reports/rk3566-panther-x2.irqname-candidate.dtb
+            dtc -I dtb -O dts -s \
+              -o work/reports/rk3566-panther-x2.irqname-candidate.decompiled.dts \
+              work/reports/rk3566-panther-x2.irqname-candidate.dtb \
+              2> work/reports/irqname-candidate-dtc-warnings.txt
+
+            # Restore disposable source checkout, then compare DTB semantics.
+            cp "$board_dts.ci-original" "$board_dts"
+            python3 scripts/audit-npu-dtb.py \
+              --baseline work/reports/rk3566-panther-x2.source-baseline.dtb \
+              --vendor-candidate work/reports/rk3566-panther-x2.vendor-candidate.dtb \
+              --irqname-candidate work/reports/rk3566-panther-x2.irqname-candidate.dtb \
+              | tee work/reports/semantic-dtb-audit.txt
             {
               echo
-              echo "CANDIDATE_STATUS=BUILT"
-              echo "Candidate DTB was built in a disposable CI checkout only."
+              echo "CANDIDATE_STATUS=BUILT_AND_SEMANTICALLY_AUDITED"
+              echo "Both DTB variants were built and passed the semantic audit."
               echo "=== Candidate NPU nodes ==="
               grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' work/reports/rk3566-panther-x2.candidate.decompiled.dts || true
             } >> "$report"
@@ -182,9 +214,11 @@ jobs:
           {
             echo "=== SHA256 ==="
             cat work/reports/source-baseline-dtb.sha256 work/reports/published-dtb.sha256
-            if [[ -s work/reports/rk3566-panther-x2.candidate.dtb ]]; then
-              sha256sum work/reports/rk3566-panther-x2.candidate.dtb
-            fi
+            for candidate in vendor-candidate irqname-candidate; do
+              if [[ -s "work/reports/rk3566-panther-x2.${candidate}.dtb" ]]; then
+                sha256sum "work/reports/rk3566-panther-x2.${candidate}.dtb"
+              fi
+            done
           } >> "$report"
 
       - name: Upload DTB audit report
