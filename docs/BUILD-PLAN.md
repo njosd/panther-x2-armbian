@@ -760,3 +760,34 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - 这只证明驱动的 IRQ 获取回退逻辑，不证明目标 DTB 中 IRQ specifier 正确、IRQ 能成功申请或硬件中断工作正常。
 
 因此保留两个独立候选：Vendor-equivalent 不加 IRQ name；IRQ-name variant 只额外加该名称。由 CI 语义审计比较两者，不预先把可选属性升级为强制要求。
+
+
+### 3.30 First semantic audit failure and provider-cell parser correction（2026-11-15）
+
+运行记录：GitHub Actions run `43605172495`，job `132478182685`，对应仓库提交 `3a6f30c953025c689cb210be10fde7ee2d3ed38c`。
+
+#### 已通过的阶段
+
+- 固定 Ophub 6.12.81 源码获取成功；
+- 未修改源码的 Panther X2 baseline DTB 构建成功；
+- 发布包下载成功，外层包 SHA-256 校验成功；
+- 发布 DTB 提取和反编译成功；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 均编译成功。
+
+#### 失败原因
+
+语义比较器在 `/audpwm@fe470000:clocks` 报出引用目标变化。检查比较器实现后确认：旧逻辑把引用属性中的每个 32-bit cell 都视为 phandle，错误地把 clock/reset/power-domain 等 provider 后面的参数 cell 也解析成 phandle。此错误会在不同 DTB 的 phandle 编号变化时制造假差异。
+
+因此本次结果应标记为：
+- DTB 构建：通过；
+- 语义审计：未通过（审计器实现缺陷导致，不能据此判定 DTS 候选错误）；
+- 设备运行/NPU 推理：未验证。
+
+#### 修正
+
+提交 `dec5835f6784bc2372ccae5525a9deb25d633723` 修正 `scripts/audit-npu-dtb.py`：
+- 按 provider 节点的 `#clock-cells`、`#reset-cells`、`#power-domain-cells`、`#iommu-cells`、`#interrupt-cells`、`#phy-cells`、`#dma-cells` 等属性解析 phandle + argument cells；
+- 对单 phandle 引用与 GPIO、pinctrl 引用分别处理；
+- provider 缺少 cell-count、phandle 无法解析或 specifier 截断时 fail closed，不以放宽白名单跳过。
+
+下一步重新运行 `Audit Panther X2 NPU DTB source readiness`。只有新运行明确输出 `SEMANTIC_DTB_AUDIT=PASS` 才能将语义审计标记为通过。还需检查两份候选的实际差异报告和 DTC warnings。
