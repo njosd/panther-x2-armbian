@@ -107,11 +107,11 @@ jobs:
             if [[ "${#boot_members[@]}" -eq 1 ]]; then
               tar -xOzf "$root/package/kernel.tar.gz" "${boot_members[0]}" > "$root/package/boot.tar.gz"
               tar -tzf "$root/package/boot.tar.gz" > "$root/reports/boot-members.txt"
-              mapfile -t dtbs < <(grep -Ei '\\.dtb$' "$root/reports/boot-members.txt" || true)
+              mapfile -t dtbs < <(grep -Ei '\.dtb$' "$root/reports/boot-members.txt" || true)
               {
                 echo "DTB count: ${#dtbs[@]}"
                 echo "=== Panther X2 / RK3566 DTBs ==="
-                grep -Ei 'panther|rk3566.*\\.dtb$' "$root/reports/boot-members.txt" || true
+                grep -Ei 'panther|rk3566.*\.dtb$' "$root/reports/boot-members.txt" || true
               } | tee "$root/reports/dtb-audit.txt"
 
               # Decompile only DTBs from the published package. No overlays are applied.
@@ -139,7 +139,7 @@ jobs:
             if [[ "${#module_members[@]}" -eq 1 ]]; then
               tar -xOzf "$root/package/kernel.tar.gz" "${module_members[0]}" > "$root/package/modules.tar.gz"
               tar -tzf "$root/package/modules.tar.gz" > "$root/reports/module-members.txt"
-              grep -Ei 'rknpu|rknn|modules\\.builtin|/modules\\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
+              grep -Ei 'rknpu|rknn|modules\.builtin|/modules\.order$' "$root/reports/module-members.txt" > "$root/reports/module-npu-audit.txt" || true
               mkdir -p "$root/modules/extract"
               tar -xzf "$root/package/modules.tar.gz" -C "$root/modules/extract"
               find "$root/modules/extract" -type f \( -name modules.builtin -o -name modules.order \) -print -exec sh -c 'echo "=== $1 ==="; grep -Ei "rknpu|rknn" "$1" || true' _ {} \; > "$root/reports/modules-builtin-audit.txt"
