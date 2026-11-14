@@ -721,3 +721,30 @@ Actions run `43600749020` / job `132464761260` succeeded. Artifact `14116073830`
 - Driver probe, regulator voltage behavior, NPU/IOMMU DMA behavior, NVMEM/OPP calibration, sustained inference, RKNN runtime compatibility and Immich integration: not tested.
 
 Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/runs/43600749020) / [job 132464761260](https://github.com/njosd/panther-x2-armbian/actions/runs/43600749020/job/132464761260), artifact ID `14116073830`.
+
+
+### 3.28 NPU DTB semantic audit harness added（2026-11-14）
+
+在 3.27 的两个 DTB 候选已成功编译后，继续补上自动化语义差异审计。此次只修改 GitHub 仓库中的审计脚本和手动触发 CI，不修改产品 DTS、内核包或任何设备。
+
+- 新增/修正 `scripts/audit-npu-dtb.py`，提交：`bcacdd42fafb84c108de213fa3e9e97932877040`。
+- 更新 `.github/workflows/audit-panther-npu-dtb.yml`，提交：`23b9a60d0f74b7db36f83d30fc97a56a49a79ec4`；随后修正 IRQ-name 插入逻辑，提交：`fd862c396dd379390c48b9cf3794041330d1cd4c`。
+
+#### 本轮审计逻辑
+
+1. 将候选分成两份独立 DTB：
+   - Vendor-equivalent：只包含 Panther Vendor DTS 已有的 `bus_npu`、`rknpu`、`rknpu_mmu` 启用及供电属性；
+   - IRQ-name variant：在前者基础上只额外增加 `interrupt-names = "npu_irq"`。
+2. 对比基线与候选的完整节点树；任何节点新增/删除均失败。
+3. 对比所有属性；只有三个目标节点的明确白名单属性允许变化。
+4. phandle 与 linux,phandle 数值不直接比较；对供电、时钟、复位、电源域、IOMMU、OPP 等引用，先解析到目标节点路径，再比较引用语义，避免 DTC 因新增引用而自动重排 phandle 时产生误报。
+5. 显式验证 `bus-supply -> vdd_logic`、`pvtm-supply -> vdd_cpu`、`rknpu-supply -> vdd_npu`，并确认 NPU IRQ specifier、clocks、resets、power-domain、OPP、IOMMU 引用及 bus 时钟/OPP 引用与基线保持一致。
+6. 验证两个候选之间唯一差异为 `interrupt-names = "npu_irq"`。
+
+#### 当前状态
+
+- 脚本和 workflow 已提交到仓库。
+- **语义审计尚未执行**：当前 GitHub connector 未提供 workflow_dispatch 触发动作，因此不能把静态脚本审查写成 CI 通过。
+- 下一步在 Actions 手动运行 `Audit Panther X2 NPU DTB source readiness`，检查 `SEMANTIC_DTB_AUDIT=PASS`、两份候选 DTB 的 SHA256、DTC warnings 以及工作流完整日志。
+- 若失败，先修复审计工具或明确的 DTS 差异，不扩大白名单、不绕过检查。
+- 仍不修改 9.6，不制作可刷写补丁；驱动 probe、NPU 实际推理及 RKNN/Immich 兼容性仍未验证。
