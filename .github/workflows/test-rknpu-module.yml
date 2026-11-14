@@ -51,6 +51,20 @@ jobs:
           source config/versions.env
           mkdir -p work/kernel work/headers work/rknpu work/reports
 
+          # Obtain the matching 6.18.63 source tree for HOST-side Kbuild tools.
+          # The binary package's prepared headers are retained as the output tree.
+          git clone --filter=blob:none --no-checkout \
+            "$OPHUB_KERNEL_SOURCE_REPO" work/kernel-source
+          git -C work/kernel-source fetch --depth=1 origin "$OPHUB_KERNEL_SOURCE_COMMIT"
+          git -C work/kernel-source checkout --detach FETCH_HEAD
+          source_version="$(sed -n 's/^SUBLEVEL = //p' work/kernel-source/Makefile | head -n1)"
+          patchlevel="$(sed -n 's/^PATCHLEVEL = //p' work/kernel-source/Makefile | head -n1)"
+          version="$(sed -n 's/^VERSION = //p' work/kernel-source/Makefile | head -n1)"
+          if [[ "$version.$patchlevel.$source_version" != "6.18.63" ]]; then
+            echo "::error::Kernel source checkout is not 6.18.63"
+            exit 1
+          fi
+
           curl --fail --location --retry 3 --retry-delay 3 \
             "${KERNEL_PACKAGE_URL}" -o work/kernel/kernel.tar.gz
           echo "${KERNEL_PACKAGE_SHA256}  work/kernel/kernel.tar.gz" | sha256sum --check
@@ -119,57 +133,63 @@ jobs:
           set -uo pipefail
           kdir="$(cat work/reports/kernel-build-dir.txt)"
           src="$PWD/work/rknpu/unpack"
+          kernel_source="$PWD/work/kernel-source"
+          builddir="$PWD/work/kernel-build"
           mkdir -p work/reports
+          cp -a "$kdir/." "$builddir/"
+          echo "$builddir" > work/reports/kernel-build-dir-used.txt
 
           # Rebuild host-side Kbuild helpers: packaged binaries may target ARM64,
           # while this cross-build runs on an x86_64 GitHub-hosted runner.
           {
             echo "Before rebuild:"
-            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost" 2>&1 || true
+            file "$builddir/scripts/basic/fixdep" "$builddir/scripts/mod/modpost" 2>&1 || true
           } | tee work/reports/host-tools-before.txt
 
           rm -f \
-            "$kdir/scripts/basic/fixdep" \
-            "$kdir/scripts/mod/modpost" \
-            "$kdir/scripts/genksyms/genksyms" \
-            "$kdir/scripts/recordmcount"
+            "$builddir/scripts/basic/fixdep" \
+            "$builddir/scripts/mod/modpost" \
+            "$builddir/scripts/mod/mk_elfconfig" \
+            "$builddir/scripts/genksyms/genksyms" \
+            "$builddir/scripts/recordmcount"
 
-          # Build only the required host helper subdirectories. Calling the
-          # top-level "scripts" target forces Kconfig sync and fails because
-          # the distributable headers intentionally omit the full .config.
+          # The headers archive is a prepared output tree, not a full source
+          # tree: helper dependencies such as scripts/gen-randstruct-seed.sh
+          # are absent. Pair it with the matching 6.18.63 source checkout.
           set +e
           : > work/reports/host-tools-rebuild.log
-          for helper_dir in scripts/basic scripts/mod; do
-            echo "===== Building $helper_dir with host GCC =====" \
-              | tee -a work/reports/host-tools-rebuild.log
-            make -C "$kdir/$helper_dir" HOSTCC=gcc HOSTCXX=g++ V=1 \
+          cp "$builddir/include/config/auto.conf" "$builddir/.config"
+          make -C "$kernel_source" O="$builddir" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-none-linux-gnu- HOSTCC=gcc HOSTCXX=g++ \
+            V=1 olddefconfig \
+            2>&1 | tee -a work/reports/host-tools-rebuild.log
+          helper_rc=${PIPESTATUS[0]}
+          if [[ "$helper_rc" -eq 0 ]]; then
+            make -C "$kernel_source" O="$builddir" ARCH=arm64 \
+              CROSS_COMPILE=aarch64-none-linux-gnu- HOSTCC=gcc HOSTCXX=g++ \
+              V=1 scripts \
               2>&1 | tee -a work/reports/host-tools-rebuild.log
             helper_rc=${PIPESTATUS[0]}
-            if [[ "$helper_rc" -ne 0 ]]; then
-              echo "FAILED: $helper_dir exit=$helper_rc" \
-                | tee -a work/reports/host-tools-rebuild.log
-              break
-            fi
-          done
-          host_tools_rc=${helper_rc:-0}
+          fi
+          host_tools_rc=$helper_rc
           echo "host_tools_rc=$host_tools_rc" >> "$GITHUB_OUTPUT"
           set -e
 
           {
             echo "After rebuild:"
-            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost" 2>&1 || true
-            if [[ -x "$kdir/scripts/basic/fixdep" ]]; then
-              readelf -h "$kdir/scripts/basic/fixdep" | grep -E 'Class:|Machine:'
+            file "$builddir/scripts/basic/fixdep" "$builddir/scripts/mod/modpost" 2>&1 || true
+            if [[ -x "$builddir/scripts/basic/fixdep" ]]; then
+              readelf -h "$builddir/scripts/basic/fixdep" | grep -E 'Class:|Machine:'
             fi
-            if [[ -x "$kdir/scripts/mod/modpost" ]]; then
-              readelf -h "$kdir/scripts/mod/modpost" | grep -E 'Class:|Machine:'
+            if [[ -x "$builddir/scripts/mod/modpost" ]]; then
+              readelf -h "$builddir/scripts/mod/modpost" | grep -E 'Class:|Machine:'
             fi
           } | tee work/reports/host-tools-after.txt
 
           set +e
           if [[ "$host_tools_rc" -eq 0 ]]; then
-            make -C "$kdir" M="$src" ARCH=arm64 \
-              CROSS_COMPILE=aarch64-none-linux-gnu- V=1 modules \
+            make -C "$kernel_source" O="$builddir" M="$src" ARCH=arm64 \
+              CROSS_COMPILE=aarch64-none-linux-gnu- HOSTCC=gcc HOSTCXX=g++ V=1 modules \
               2>&1 | tee work/reports/module-build.log
             module_rc=${PIPESTATUS[0]}
           else
