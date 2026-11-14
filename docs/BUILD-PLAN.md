@@ -143,25 +143,26 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 不因首次网络失败就反复刷写；先保留日志并定位 U-Boot、DTB、GMAC/PHY、NetworkManager 各层。
 
 
-### 3.7 RKNPU 6.18.63 纯编译验证工作流（第三轮已定位主机工具重建问题）
+### 3.7 RKNPU 6.18.63 纯编译验证工作流（第四轮已确认 headers 缺少完整源码）
 
 首轮运行：[43561086372](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372)，Job [132344685076](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372/job/132344685076)。
 第二轮运行：[43561337246](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246)，Job [132345466091](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246/job/132345466091)。
-第三轮运行：[43561699157](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157)，Job [132346621276](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157/job/132346621276)，artifact ID `14100263084`。
+第三轮运行：[43561699157](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157)，Job [132346621276](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157/job/132346621276)。
+第四轮运行：[43562266807](https://github.com/njosd/panther-x2-armbian/actions/runs/43562266807)，Job [132348334717](https://github.com/njosd/panther-x2-armbian/actions/runs/43562266807/job/132348334717)，artifact ID `14100383227`。
 
-第三轮已确认：
-- Ophub 6.18.63 headers/build tree、`Module.symvers` 和 GCC 15.3.1 均可用；
-- headers 内预编译 `fixdep` 与 `modpost` 均为 ARM aarch64 ELF，不能直接在 x86_64 runner 执行；
-- 删除这两个 ARM64 helper 后，工作流调用顶层 `make ... scripts` 试图重建，但因 headers 包不含完整 `.config` 而触发 Kconfig 检查并失败；
-- 因此本轮仍未进入 RKNPU 驱动源码编译，不能据此判断 6.18 API 兼容性；
-- DT overlay 编译步骤因前置 shell 提前退出而未执行。
+第四轮已确认：
+- GCC 15.3.1、Ophub 6.18.63 prepared headers、`Module.symvers` 均成功识别；
+- headers 内 `fixdep`、`modpost` 是 ARM64 ELF，必须在 x86_64 runner 上重建；
+- 局部重建失败的具体依赖为 `scripts/gen-randstruct-seed.sh`，报错 `No rule to make target '/scripts/gen-randstruct-seed.sh'`。这进一步证明该 header archive 是准备好的输出树，不是可独立重建 host tools 的完整源码树；
+- RKNPU 模块源码编译仍未开始，不能对 Linux 6.18 API 兼容性下结论；
+- overlay CPP/DTC 再次生成 DTBO，但 `reg_format`、`avoid_default_addr_size`、`interrupts_property` 等警告仍存在，不能视为设备树兼容性通过。
 
-**修正：** 新提交 `969d3c0bd65acca435ef52c49ec77ebcc70761e9` 将 helper 重建改为分别调用 `scripts/basic` 与 `scripts/mod` 子目录的局部 Makefile，避免顶层 `scripts` 目标触发完整 Kconfig 配置同步。工作流还会单独记录 `host_tools_rc`，仅在 helper 成功重建后尝试模块编译。该修正尚未运行验证。
+**下一轮构建方法调整：** 工作流已提交 `16761ef04d334237c2de5217671f87f90b6b1a26`。它将：
+1. 获取 `config/versions.env` 锁定的 Ophub Linux 6.18.y 源码 commit `9bbed25243be8b43df410ebb9a8bbb1992234114`，并检查源码 Makefile 版本为 6.18.63；
+2. 保留发布包提供的 prepared headers 作为独立输出树副本；
+3. 使用完整源码树 + headers 输出树，尝试重新生成 x86_64 host tools；
+4. 在 host tools 成功后才构建外置 RKNPU 模块。
 
-下一轮重点检查：
-1. `scripts/basic/fixdep` 与 `scripts/mod/modpost` 是否重建为 x86_64 ELF；
-2. 局部构建是否仍需要缺失的生成头文件或配置宏；
-3. 是否真正进入 RKNPU 源码编译并暴露内核 API/符号问题；
-4. 若模块阶段仍失败，独立检查 DT overlay 编译日志。
+**重要限制：** 虽然源码 checkout 的 Makefile 版本为 6.18.63，但目前尚未证明该源码 commit 就是发布二进制内核包的精确构建源码（`config/versions.env` 已明确标记 source-to-binary provenance 未证实）。因此本轮只能验证“该 6.18.63 源码 + 发布 headers/配置”的构建可行性，不能把成功直接等同于与发布内核完全 ABI 匹配。必须检查源码与 headers 的 `UTS_RELEASE`、配置、符号版本及生成头文件一致性；如发现不一致，应停止并先追溯精确源码。
 
-全过程仅在 GitHub Actions runner 中操作，不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
+当前工作流提交已更新，尚未运行。仍为 CI 纯编译验证，不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
