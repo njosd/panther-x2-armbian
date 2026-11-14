@@ -29,9 +29,9 @@ PROVIDER_CELL_PROPERTIES = {
     "pwms": "#pwm-cells",
     "io-channels": "#io-channel-cells",
 }
-SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells"}
+SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells", "memory-region"}
 SINGLE_PHANDLE_PROPERTIES = {
-    "interrupt-parent", "operating-points-v2", "memory-region",
+    "interrupt-parent", "operating-points-v2",
     "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
 }
 PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
@@ -150,10 +150,10 @@ def normalized_property(dtb: Path, node: str, name: str,
             target = handles.get(value)
             if target is None:
                 raise RuntimeError(
-                    f"{dtb}:{node}:{name}: unknown nvmem-cell phandle 0x{value:x}"
+                    f"{dtb}:{node}:{name}: unknown phandle 0x{value:x}"
                 )
-            # NVMEM consumer references identify the cell node directly;
-            # unlike clocks/resets/IRQs, no provider argument cells follow.
+            # These properties are direct phandle lists, not provider
+            # specifiers with trailing argument cells.
             targets.append(f"@{target}")
         return " ".join(targets)
 
