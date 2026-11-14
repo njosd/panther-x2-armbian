@@ -443,3 +443,16 @@ Ophub kernel_rk35xx release 同时发布：
 #### F. 下一项只读验证
 
 更新 RK35xx package audit：对标准和 flippy 两个 6.12.81 资产分别下载并校验 SHA256，提取实际 header config、kernel.release、modules.builtin、boot DTB；反编译实际 rk3566-panther-x2.dtb（若资产包含），检查 rknpu、rknpu_mmu、rknpu-supply、interrupt-names 和 status。该 CI 只读取发布资产，不加载驱动、不部署系统、不接触 9.6。
+
+
+#### CI workflow update
+
+已将 .github/workflows/audit-rk35xx-kernel.yml 扩展为标准版与 Flippy 版双资产只读比较，并在 config/versions.env 中固定 Flippy 资产 URL、大小、SHA256 和更新时间。新 workflow 会：
+- 分别下载并严格核对两个发布资产的 SHA256/文件大小；
+- 比较嵌套 headers、boot、modules 包；
+- 提取实际 headers 中的 .config、kernel.release、Module.symvers；
+- 从 headers/modules 包检查 modules.builtin 和 RKNPU 相关条目；
+- 对发布包内 Panther X2 / RK3566 DTB 进行反编译，提取 NPU 节点、IOMMU、供电、中断和 status 属性；
+- 上传两种资产的独立报告及合并比较报告。
+
+当前 workflow 只做下载、解包和静态审计，不安装内核、不加载模块、不应用 DTB、不接触 Panther X2 实机。请手动运行 Actions：Audit Ophub RK35xx 6.12.81 kernel assets。完成后再根据 artifact 结果决定是否需要继续研究 Flippy 变体或最小板级适配。
