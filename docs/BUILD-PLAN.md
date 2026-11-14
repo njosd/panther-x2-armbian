@@ -421,7 +421,7 @@ Ophub kernel-config/release/rk35xx/config-6.12 blob SHA dee127c6c644f38426eeb280
 - CONFIG_ROCKCHIP_RKNPU_SRAM=y
 - CONFIG_PM_DEVFREQ=y
 
-在 Ophub linux-6.12.y-rockchip commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c 中，Panther X2 DTS 存在，blob SHA 为 d517c99841cf9d724a61cd31acf9437acbb131e6。SoC 公共文件 rk356x.dtsi 定义了 NPU 节点 npu@fde40000 和 IOMMU iommu@fde4b000，但两者默认均为 status = "disabled"。Panther X2 板级 DTS 虽定义 vdd_npu regulator，却没有覆盖 &rknpu / &rknpu_mmu 将其启用，也没有补上该 RKNPU 驱动所需的板级 supply/IRQ-name 绑定。
+在 Ophub linux-6.12.y-rockchip commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c 中，Panther X2 DTS 存在，blob SHA 为 d517c99841cf9d724a61cd31acf9437acbb131e6。SoC 公共文件 rk356x.dtsi 定义了 NPU 节点 npu@fde40000 和 IOMMU iommu@fde4b000，但两者默认均为 status = "disabled"。Panther X2 板级 DTS 虽定义 vdd_npu regulator，却没有覆盖 &rknpu / &rknpu_mmu 将其启用，也没有把该 regulator 通过 rknpu-supply 连接到 NPU 节点。该 6.12 驱动在没有 interrupt-names 时会回退到按序号获取 IRQ，因此不能把 npu_irq 名称缺失单独判定为必然 probe 失败；但中断映射仍需按实际 DTB 和驱动路径核实。mem-supply 是可选的第二路 regulator，驱动仅在同时提供 rknpu-supply 与 mem-supply 时启用双 regulator OPP helper。
 
 **阶段判断：** RK35xx 6.12.81 在内核配置和 SoC 驱动层具备 NPU 基础，但当前可见的 Panther X2 DTS 尚未启用 NPU 节点。不能把 CONFIG_ROCKCHIP_RKNPU=y 当作 Panther X2 NPU 已可用。
 
