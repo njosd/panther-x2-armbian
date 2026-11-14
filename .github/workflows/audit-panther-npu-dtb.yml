@@ -1,0 +1,197 @@
+name: Audit Panther X2 NPU DTB source readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install device-tree build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential device-tree-compiler flex gcc-aarch64-linux-gnu libssl-dev
+
+      - name: Fetch fixed Ophub source and audit NPU SoC definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p work/source work/reports work/package
+          git clone --filter=blob:none --no-checkout "$OPHUB_KERNEL_SOURCE_REPO" work/kernel-source
+          git -C work/kernel-source fetch --depth=1 origin "$OPHUB_KERNEL_SOURCE_COMMIT"
+          git -C work/kernel-source checkout --detach FETCH_HEAD
+
+          source_tree=work/kernel-source
+          board_dts="$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
+          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x-base.dtsi"
+          [[ -s "$board_dts" ]] || { echo "::error::Panther X2 DTS missing from pinned source"; exit 1; }
+          [[ -s "$soc_dtsi" ]] || { echo "::error::RK356x base DTSI missing"; exit 1; }
+
+          source_version="$(sed -n 's/^SUBLEVEL = //p' "$source_tree/Makefile" | head -n1)"
+          patchlevel="$(sed -n 's/^PATCHLEVEL = //p' "$source_tree/Makefile" | head -n1)"
+          version="$(sed -n 's/^VERSION = //p' "$source_tree/Makefile" | head -n1)"
+          [[ "$version.$patchlevel.$source_version" == "6.18.63" ]] || {
+            echo "::error::Pinned source version is not 6.18.63"
+            exit 1
+          }
+
+          {
+            echo "Pinned source commit: $OPHUB_KERNEL_SOURCE_COMMIT"
+            echo "Kernel Makefile version: $version.$patchlevel.$source_version"
+            echo
+            echo "=== Panther board DTS NPU references ==="
+            grep -nE 'rknpu|bus_npu|npu@fde40000|iommu@fde4b000' "$board_dts" || true
+            echo
+            echo "=== RK356x base DTSI NPU definitions ==="
+            grep -nE 'rknpu|bus_npu|npu@fde40000|iommu@fde4b000|npu_opp' "$soc_dtsi" || true
+            echo
+            echo "=== All RK356x-family DTSI NPU references ==="
+            grep -R -nE 'rknpu|bus_npu|npu@fde40000|iommu@fde4b000' "$source_tree/arch/arm64/boot/dts/rockchip"/rk356*.dtsi || true
+          } | tee work/reports/source-npu-definition-audit.txt
+
+          if grep -RqE 'npu@fde40000|rknpu:' "$source_tree/arch/arm64/boot/dts/rockchip"/rk356*.dtsi; then
+            echo "source_soc_npu_nodes=present" >> "$GITHUB_OUTPUT"
+          else
+            echo "source_soc_npu_nodes=absent" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build unmodified source DTB baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_tree=work/kernel-source
+          make -C "$source_tree" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb
+          cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
+            work/reports/rk3566-panther-x2.source-baseline.dtb
+          dtc -I dtb -O dts -s \
+            -o work/reports/rk3566-panther-x2.source-baseline.dts \
+            work/reports/rk3566-panther-x2.source-baseline.dtb \
+            2> work/reports/source-baseline-dtc-warnings.txt
+          sha256sum work/reports/rk3566-panther-x2.source-baseline.dtb \
+            > work/reports/source-baseline-dtb.sha256
+
+      - name: Extract and decompile published Ophub DTB
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          outer=work/package/kernel.tar.gz
+          curl --fail --location --retry 3 --retry-delay 3 "$KERNEL_PACKAGE_URL" -o "$outer"
+          echo "$KERNEL_PACKAGE_SHA256  $outer" | sha256sum --check
+          mapfile -t members < <(tar -tzf "$outer" | grep -E '^6\.18\.63/dtb-rockchip-[^/]+\.tar\.gz$')
+          [[ "${#members[@]}" -eq 1 ]] || {
+            echo "::error::Expected exactly one Panther-compatible DTB archive, found ${#members[@]}"
+            tar -tzf "$outer" | grep -E 'dtb-rockchip|dtb' || true
+            exit 1
+          }
+          tar -xOzf "$outer" "${members[0]}" > work/package/dtb.tar.gz
+          tar -tzf work/package/dtb.tar.gz > work/reports/published-dtb-archive-list.txt
+          tar -xOzf work/package/dtb.tar.gz "$TARGET_DTB" > work/reports/rk3566-panther-x2.published.dtb
+          [[ -s work/reports/rk3566-panther-x2.published.dtb ]] || {
+            echo "::error::Published Panther X2 DTB missing or empty"
+            exit 1
+          }
+          dtc -I dtb -O dts -s \
+            -o work/reports/rk3566-panther-x2.published.dts \
+            work/reports/rk3566-panther-x2.published.dtb \
+            2> work/reports/published-dtb-dtc-warnings.txt
+          sha256sum work/reports/rk3566-panther-x2.published.dtb \
+            > work/reports/published-dtb.sha256
+
+      - name: Evaluate candidate readiness and build temporary candidate if possible
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_tree=work/kernel-source
+          board_dts="$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
+          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x-base.dtsi"
+          published=work/reports/rk3566-panther-x2.published.dts
+          baseline=work/reports/rk3566-panther-x2.source-baseline.dts
+          report=work/reports/candidate-readiness.txt
+
+          {
+            echo "=== NPU nodes in published package DTB ==="
+            grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' "$published" || true
+            echo
+            echo "=== NPU nodes in source-built baseline DTB ==="
+            grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' "$baseline" || true
+          } > "$report"
+
+          if ! grep -RqE 'npu@fde40000|rknpu:' "$source_tree/arch/arm64/boot/dts/rockchip"/rk356*.dtsi; then
+            {
+              echo
+              echo "CANDIDATE_STATUS=SKIPPED"
+              echo "Reason: pinned 6.18.63 source has no RK356x RKNPU SoC node definition."
+              echo "Board-level &rknpu/&rknpu_mmu/&bus_npu fragments cannot be safely applied until the missing SoC-level definitions are sourced and audited."
+            } >> "$report"
+            echo "candidate_status=skipped_missing_soc_nodes" >> "$GITHUB_OUTPUT"
+          else
+            cp "$board_dts" work/reports/rk3566-panther-x2.candidate.dts
+            cat >> work/reports/rk3566-panther-x2.candidate.dts <<'EOF'
+
+          /* CI-only candidate: Panther X2 NPU enablement, not a product patch. */
+          &bus_npu {
+              bus-supply = <&vdd_logic>;
+              pvtm-supply = <&vdd_cpu>;
+              status = "okay";
+          };
+
+          &rknpu {
+              interrupt-names = "npu_irq";
+              rknpu-supply = <&vdd_npu>;
+              status = "okay";
+          };
+
+          &rknpu_mmu {
+              status = "okay";
+          };
+          EOF
+            cp "$board_dts" "$board_dts.ci-original"
+            cp work/reports/rk3566-panther-x2.candidate.dts "$board_dts"
+            make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb
+            cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
+              work/reports/rk3566-panther-x2.candidate.dtb
+            dtc -I dtb -O dts -s \
+              -o work/reports/rk3566-panther-x2.candidate.decompiled.dts \
+              work/reports/rk3566-panther-x2.candidate.dtb \
+              2> work/reports/candidate-dtc-warnings.txt
+            {
+              echo
+              echo "CANDIDATE_STATUS=BUILT"
+              echo "Candidate DTB was built in a disposable CI checkout only."
+              echo "=== Candidate NPU nodes ==="
+              grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' work/reports/rk3566-panther-x2.candidate.decompiled.dts || true
+            } >> "$report"
+            echo "candidate_status=built" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "=== SHA256 ==="
+            cat work/reports/source-baseline-dtb.sha256 work/reports/published-dtb.sha256
+            if [[ -s work/reports/rk3566-panther-x2.candidate.dtb ]]; then
+              sha256sum work/reports/rk3566-panther-x2.candidate.dtb
+            fi
+          } >> "$report"
+
+      - name: Upload DTB audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-npu-dtb-source-audit
+          path: work/reports/
+          if-no-files-found: warn
+          retention-days: 14
