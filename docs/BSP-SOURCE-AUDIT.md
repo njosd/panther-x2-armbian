@@ -161,7 +161,7 @@ interrupt-names = "npu_irq";
 
 to the NPU node and adds a CI assertion for that property.
 
-This is meaningful: the Rockchip RKNPU driver requests its core IRQ by the name `npu_irq`. The generic Rockchip `rk356x.dtsi` NPU node has the IRQ number but does not declare this `interrupt-names` entry in the inspected version. The Panther-specific fix supplies the name expected by the driver.
+The exact driver source at the pinned Armbian/Rockchip BSP commit `5280f9b4336199c4025c8eed894d2b4e2268dcc6` was then inspected. Its `rknpu_register_irq()` first tries `platform_get_irq_byname(..., "npu_irq")`; for Linux >= 6.1 it falls back to `platform_get_irq(pdev, 0)` when the name is absent. The exact Ophub 6.12.81 driver at `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` has the same fallback. Therefore the Panther BSP commit's explicit `interrupt-names` addition is useful for unambiguous binding and its CI contract, but it is not proven to be strictly required for probe on these exact >=6.1 driver revisions. It may address older driver variants, improve resource-name clarity, or be a defensive correction. The actual IRQ specifier and successful `devm_request_irq()` still require validation.
 
 ## 6. Similar community failure: driver present does not mean NPU usable
 
@@ -304,3 +304,64 @@ The exact RKNPU source at Ophub `linux-6.12.y-rockchip` commit `661b2d8bf1284556
 This makes the presently visible 6.12 Panther X2 gap more specific: NPU and MMU are disabled in the board's effective DTS, and the existing `vdd_npu` regulator is not linked to the NPU device for its devfreq/OPP regulator path. Do not assume `mem-supply` is mandatory; the exact driver supports a single-regulator path. Do not add an IRQ name mechanically; first inspect the actual packaged DTB and this driver's IRQ fallback logic.
 
 This is source-level evidence only. The effective DTB shipped in either standard or Flippy package has not yet been decompiled in CI, and no Panther X2 hardware probe has been performed.
+
+
+## 11. Panther X2 NPU DTS source trace against the official/maintained board lineage
+
+### 11.1 Original Panther X2 board DTS does not enable NPU
+
+The Panther X2 board DTS was added to `unifreq/linux-6.1.y` by Ophub commit `afaa1a194f812e30a9faedd88d6c09e7a49d909a` on 2023-07-07. The original file copyright identifies `tdleiyao`. Follow-up commit `80101d21c55ec1c87a00a52a0c3e137a37ac7a80` on 2023-07-11 explicitly enabled GPU and adjusted USB host mode. The subsequent 2024 Ophub update is `ffffa29dfec714c7b2682625faff73111174e783`.
+
+The original/current unifreq Panther X2 board DTS defines the PMIC `vdd_npu` regulator, but contains no board-level `&rknpu`, `&rknpu_mmu`, or `&bus_npu` enable fragments. The generic Rockchip `rk356x.dtsi` defines those SoC nodes and their clocks/resets/power-domain/OPP/IOMMU references, but defaults NPU, NPU MMU and NPU bus to disabled.
+
+This explains why the ordinary Panther X2 DTS lineage can contain a `vdd_npu` rail without exposing an active NPU platform device.
+
+### 11.2 Later Panther X2 Vendor BSP board enablement
+
+The later Panther X2 Vendor 6.1 board DTS in `Lyric-c/panther-x2` (snapshot commit `2ceb614fc294b4832268ec3e50716e7e9d3f1e8b`) adds the following board-level configuration:
+
+```dts
+&bus_npu {
+    bus-supply = <&vdd_logic>;
+    pvtm-supply = <&vdd_cpu>;
+    status = "okay";
+};
+
+&rknpu {
+    rknpu-supply = <&vdd_npu>;
+    status = "okay";
+};
+
+&rknpu_mmu {
+    status = "okay";
+};
+```
+
+The same file's PMIC already defines `vdd_logic`, `vdd_cpu`, and `vdd_npu`. The NPU board fragment does not set `mem-supply`. This is consistent with the exact Ophub 6.12.81 RKNPU driver, which uses the single-`rknpu` regulator path when the optional `mem` supply is absent. It is not consistent with blindly copying the H96 Max V56 dual-supply fragment; H96 is a useful RK3566 example but its board-specific memory-supply wiring is not the Panther X2 reference.
+
+The corresponding generic SoC DTSI already supplies the NPU node's register range, IRQ number, SCMI/CRU clocks, reset lines, power domain, OPP table and IOMMU phandle. The board fragment therefore activates and binds existing SoC resources rather than re-declaring the whole NPU node.
+
+### 11.3 What the earliest Panther BSP patch contributes
+
+The earliest audited BSP integration patch contains a flattened Panther X2 DTS with:
+- `npu@fde40000`, `iommu@fde4b000`, and `bus-npu` enabled;
+- NPU regulator phandle pointing to the board's DCDC_REG4 `vdd_npu`;
+- NPU bus supply pointing to DCDC_REG1 `vdd_logic`;
+- NPU bus PVTM supply pointing to `vdd_cpu`;
+- an explicit `interrupt-names = "npu_irq"` property;
+- the RK356x SoC NPU OPP and bus OPP tables.
+
+The original `reference/source-input.sha256` files are still missing from that integration repository. The flattened DTS patch is therefore evidence of the resulting configuration, not proof of the original generator/source file's provenance. The later symbolic Panther X2 Vendor DTS is independently inspectable and contains the same three board-level enablement fragments, but it should not be asserted to be the exact authoring source of the earlier flattened patch without a matching hash or commit link.
+
+### 11.4 What this tells us about the Ophub 6.12.81 gap
+
+The Ophub 6.12.81 `rk356x.dtsi` already has the same generic SoC NPU structure as the Armbian Rockchip 6.1 BSP reference. The Panther X2 6.12 board DTS already defines the same `vdd_npu`, `vdd_logic`, and `vdd_cpu` regulator labels. The observed difference is primarily the missing board-level enablement/binding fragments above.
+
+This narrows the likely minimal board-DTS delta to those fragments, but does **not** yet authorize applying them. Before any patch is authored, still verify:
+- exact 6.12.81 packaged DTB and source revision relationship;
+- that the board's `vdd_logic` and `vdd_cpu` OPP ranges match the RK356x NPU/bus OPP tables;
+- whether `bus_npu` devfreq/OPP is supported and expected by this exact kernel config;
+- NPU IOMMU behavior with Panther X2's 4 GB RAM and DMA address constraints;
+- actual regulator, IRQ, clocks and power-domain probe behavior on hardware.
+
+No DTS patch has been created or applied. All conclusions here are source-level/static comparisons only.
