@@ -225,3 +225,25 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 对象和完整映像不存在：headers 包不足以证明实际内核导出情况，应寻找对应的完整构建产物或可信二进制符号信息。
 
 本步骤只读取已有 CI 下载的 build tree，不重建内核、不生成伪造符号、不绕过 MODPOST。
+
+
+### 3.12 RKNPU 6.18.63 纯编译验证（第十轮：headers 包不含可核对的完整内核构建对象）
+
+第十轮运行：[43593110032](https://github.com/njosd/panther-x2-armbian/actions/runs/43593110032)，Job [132441838951](https://github.com/njosd/panther-x2-armbian/actions/runs/43593110032/job/132441838951)，artifact ID `14113256837`。
+
+结果：
+- host tools 和 RKNPU 核心对象编译继续成功；MODPOST 仍因 `pm_runtime_force_resume` 不在 headers 的 `Module.symvers` 而失败，未生成 `rknpu.ko`；
+- 配置仍为 `CONFIG_PM=y`、`CONFIG_PM_SLEEP=y`，源码中有函数定义和 GPL 导出；
+- 关键的新发现：headers/build output 中不仅没有 `Module.symvers` 所需的 resume 记录，也没有以下可用于核验真实内核构建结果的对象/文件：`drivers/base/power/runtime.o`、`.runtime.o.cmd`、`vmlinux`、`System.map`、`modules.builtin`、`modules.order`。本轮逐项检查均显示 MISSING；
+- 因此不能从该 headers 包判断实际发布内核是否包含该实现，也不能证明 `Module.symvers` 是单独生成时漏项，还是 headers 本来就只保留了外置模块编译所需的裁剪文件；
+- DTBO 仍可生成，但 reg_format、address/size cells 和 interrupt-parent 警告未解决。
+
+**结论更新：** 当前已知的直接阻塞是 Ophub 6.18.63 headers 包提供的 `Module.symvers` 缺少 RKNPU 所需符号；但“发布内核符号表损坏”尚未证实。更准确的描述是：当前 headers 包是裁剪后的 prepared build tree，不包含足以独立审计内核本体符号实现的对象/映像。先前将其表述为“符号表异常/不完整”应保留为现象描述，不应推断为发布内核错误。
+
+下一步建议从构建来源入手，而不是继续在缺失产物的 headers 包上重复 grep：
+1. 找出 Ophub 发布该内核与 headers 包的 workflow、构建脚本及 artifact/package 生成逻辑；
+2. 确认 `Module.symvers` 是在完整内核构建后生成，再被 headers 包原样携带，还是在打包/裁剪阶段重新生成或修改；
+3. 尝试取得同一发布版本的完整内核构建产物或可复现的完整 build config/source commit；
+4. 只有取得可信匹配的 `Module.symvers` 后，才重新做 RKNPU MODPOST。禁止手工补写导出项或关闭 unresolved-symbol 检查。
+
+本轮没有修改 RKNPU 驱动、内核配置或 Panther X2 实机。
