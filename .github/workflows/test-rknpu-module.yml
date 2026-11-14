@@ -33,9 +33,15 @@ jobs:
           mkdir -p "$toolchain_root"
           tar -xJf "$toolchain_archive" --strip-components=1 -C "$toolchain_root"
           echo "$toolchain_root/bin" >> "$GITHUB_PATH"
+          compiler_version="$("$toolchain_root/bin/aarch64-none-linux-gnu-gcc" -dumpfullversion)"
+          if [[ "$compiler_version" != "15.3.1" ]]; then
+            echo "::error::Expected GCC 15.3.1, found $compiler_version"
+            exit 1
+          fi
           {
             echo "Arm GNU Toolchain archive SHA256: $(sha256sum "$toolchain_archive" | awk '{print $1}')"
             "$toolchain_root/bin/aarch64-none-linux-gnu-gcc" --version | head -n1
+            echo "Verified GCC version: $compiler_version"
           } | tee "$RUNNER_TEMP/arm-toolchain-version.txt"
 
       - name: Fetch fixed kernel package and RKNPU source
