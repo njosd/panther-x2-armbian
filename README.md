@@ -19,7 +19,7 @@
 
 - SoC：RK3566；实机内存 4GB；单有线网口。
 - OS：Ubuntu 24.04 LTS（Noble）。
-- 内核系列：Ophub stable 6.18.y；具体二进制内核包版本尚未锁定。
+- 内核系列：Ophub stable 6.18.y；候选二进制内核包固定为 6.18.63（SHA-256 已核验）。
 - 文件系统：EXT4。
 - 镜像类型：Server。
 - 设备 DTB：`rk3566-panther-x2.dtb`。
@@ -30,10 +30,11 @@
 
 - `config/versions.env`：已知源码快照和待锁定项目。
 - `docs/BUILD-PLAN.md`：构建链风险与后续步骤。
+- `docs/DTB-AUDIT.md`：6.18.63 Panther X2 DTB 与驱动配置审计记录。
 - `docs/NETWORK-ACCEPTANCE.md`：首启网络与 SSH 验收标准。
 - `manifests/build-manifest.template`：每次构建的记录模板。
 
-当前**没有可直接运行的构建工作流**。在确认具体 kernel package 版本、固定 U-Boot/firmware 下载行为、锁定全部 GitHub Actions 依赖并审查首次启动配置前，不启用自动构建。这样可以避免把动态上游依赖误当成固定版本。
+当前**没有可直接运行的镜像构建工作流**。内核包 6.18.63 已完成归档校验和内容清单检查；DTB 文件名已确认存在，但二进制内容与 DTS 的逐项比对仍未完成。U-Boot/firmware 固定下载、Actions 依赖锁定及首启配置审查仍是构建前工作。后续构建只允许手动触发。
 
 ## 安全边界
 
