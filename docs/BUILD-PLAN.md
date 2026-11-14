@@ -526,3 +526,57 @@ CI run 43596798887 / job 132452929530：
 - 将此前 `grep | head` 改为 `grep | sed`，避免大文件扫描时大量 Broken pipe 噪声。
 
 下一轮应重点人工核对标准版与 Flippy 版各自的 `modules.builtin`、实际 Panther X2/RK3566 DTB、`rknpu` 与 `rknpu_mmu` 状态、电源绑定和 IRQ 映射。source-to-binary provenance 仍未闭环。整个流程仍为 CI 只读审计，不接触 Panther X2 实机。
+
+
+### 3.21 Ophub 6.12.81 双资产报告复核：Panther X2 NPU 的实际阻断点（2026-11-14）
+
+CI run 43597391230 / job 132454730145 成功；artifact `14114622745` 已下载并解包人工复核（约 2.88 MB）。本节结论以两个发布包内部实际文件为准，不再只依据日志摘要。
+
+#### 资产完整性和归档结构
+
+| 项目 | 标准版 | Flippy 版 |
+|---|---|---|
+| 文件大小 | 141,437,450 bytes | 119,018,056 bytes |
+| SHA256 | `72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b` | `a5b0bc5d3c8311cee472c105e5ee2d1c9e6395a94efb4488253a0faae132d064` |
+| 嵌套归档 | DTB / boot / modules / headers | DTB / boot / modules / headers |
+| Panther X2 DTB | `rk3566-panther-x2.dtb` | `rk3566-panther-x2.dtb` |
+
+两包的 Panther X2 DTB 反编译结果相同（DTS 文本 SHA256：`d701f187e2a4a06723b7f33cf4e3ec731a461f0942dd863b9bc5e86ad2e9b033`）。这是反编译文本哈希，不是原始 DTB 哈希。
+
+#### 两个发布包的 RKNPU 驱动配置
+
+- 标准版 `modules.builtin`：`kernel/drivers/rknpu/rknpu.ko`。
+- Flippy 版 `modules.builtin`：同时包含 `kernel/drivers/rknpu/rknpu.ko` 与 `kernel/drivers/soc/rockchip/rknpu3/rknpu3.ko`。
+- Flippy headers 内有真实 `.config`，确认 `CONFIG_ROCKCHIP_RKNPU=y`、`CONFIG_ROCKCHIP_RKNPU3=y`、`CONFIG_ROCKCHIP_IOMMU=y`、`CONFIG_PM_DEVFREQ=y`。
+- 标准版 headers 没有 `.config`；Ophub 官方 6.12 配置快照包含 `CONFIG_ROCKCHIP_RKNPU=y`、`CONFIG_ROCKCHIP_IOMMU=y`、`CONFIG_PM_DEVFREQ=y`。标准版发布包的 `modules.builtin` 也直接证明 RKNPU built-in。
+- 两个版本的 kernel.release 分别为 `6.12.81-rk35xx-ophub` 和 `6.12.81-rk35xx-flippy-2611b`。两者 headers 的 Module.symvers 均包含 PM runtime force suspend/resume 导出符号。
+
+因此，两个 Ophub 6.12.81 发布变体都包含 Rockchip RKNPU 核心驱动；Flippy 版还额外启用了 RKNPU3 驱动。注意：`modules.builtin` 是 built-in 清单，不代表存在可单独 insmod 的模块文件。
+
+#### 实际 Panther X2 DTB 的决定性发现
+
+两个包内 `rk3566-panther-x2.dtb` 反编译后关键内容一致：
+
+- `npu@fde40000` 节点具有 RK3568 RKNPU compatible、寄存器、中断、时钟、reset、power-domain、OPP 和 IOMMU 引用，但 `status = "disabled"`。
+- `iommu@fde4b000` 节点也为 `status = "disabled"`。
+- PMIC 中确实存在 `regulator-name = "vdd_npu"`，但 NPU 节点没有 `rknpu-supply` 属性将该 regulator 绑定给驱动。
+- NPU 节点的 IRQ specifier 是 GIC SPI 0x97；IOMMU 节点也使用相同中断号并有 `interrupt-names = "rknpu_mmu"`。需结合精确驱动的中断处理方式再确认共享/映射语义；不能仅因没有 NPU `interrupt-names` 就断言必然失败。
+- DTB 中存在 NPU OPP table 与 reserved-memory 的 `rknpu` shared-dma-pool 节点，但这些资源存在不等于设备已启用。
+
+**结论：目前阻断 Panther X2 NPU 开箱工作的首要问题不是缺驱动，而是两个 Ophub 发布包使用的 Panther X2 DTB 都把 RKNPU 和其 IOMMU 关闭了。** 即使内核已内建 RKNPU，Linux 也不会按正常 platform-device 流程 probe 这个 disabled 节点。其次，NPU 电源 regulator 尚未在节点中建立 `rknpu-supply` 绑定，属于启用前必须审查的板级电源描述问题。
+
+#### 对主线选择的影响
+
+1. Ophub RK35xx 6.12.81 标准版：内建 RKNPU，带 Panther X2 DTB，但该 DTB 禁用 NPU/MMU；不能称为 NPU-ready。
+2. Ophub RK35xx 6.12.81 Flippy 版：同样内建 RKNPU，额外内建 RKNPU3，但 Panther X2 DTB 与标准版相同且禁用 NPU/MMU；额外驱动并未解决 Panther X2 的设备树问题。
+3. Ophub stable 6.18.y：当前仍是 Panther X2 板型维护路线候选，但对应参考源码没有 RKNPU 驱动目录；需要后续关注上游/官方支持是否补齐。
+4. 目前不建议为了 Flippy 多出的 RKNPU3 而优先选 Flippy。Panther X2 是 RK3566，应先确认其 NPU 对应 RKNPU 代际及 runtime ABI；RKNPU3 不能直接视为该板 NPU 必需项。
+
+#### 下一步研究（仍只读，不生成可刷写补丁）
+
+- 比较 Ophub RK35xx 6.12.81 的 Panther X2 DTS 与其同源 RK356x SoC DTS、Ophub 其他 RK3566 板级 DTS，确认启用节点所需的最小属性、regulator、IOMMU、OPP、clocks/resets/power-domain 与 IRQ 绑定。
+- 对照 Rockchip 官方 Linux 6.1/6.6 BSP 或公开 RK3566 Panther X2 BSP 的驱动和 DTS 变更，追溯 `rknpu-supply` 与 NPU enable 的来源及适用硬件；第三方 BSP 只作来源/差异参考，不直接移植。
+- 在确定设备树差异前，不修改仓库中的产品 DTS、不生成部署补丁、不触碰 9.6。
+- 后续若确认可做最小板级补丁，先在 CI 编译 DTB 并做静态 binding/资源核查，再评估实机验证所需的回滚与备份条件。
+
+本轮结论状态：发布包驱动存在、DTB 中 NPU/MMU disabled、两个变体 DTB 相同，均为已验证；NPU 实际硬件 probe、RKNN runtime 兼容、Immich 能否调用 NPU 仍未验证。
