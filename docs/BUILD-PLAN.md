@@ -70,11 +70,24 @@
 
 当前判断是“内核包与 DTB 静态审计已完成一轮，启动关键节点初步吻合”，不是“已证明镜像可在实机启动”。NPU/RKNN 不作为第一版 TF 启动、DHCP、SSH 验收的前置条件，但应在后续 BSP 来源审计中单独评估。
 
-### 3.4 GitHub Actions 依赖
+### 3.4 BSP/NPU 路线与独立模块候选
+
+已确认 Panther X2 专用 Vendor 6.1 路线在板级 DTS 中启用 `rknpu`、`rknpu_mmu`、`bus_npu`，对应 Rockchip Vendor 内核树包含 `drivers/rknpu`、Kconfig/Makefile 接入和 RK356x 驱动配置。
+
+同时发现第三方项目 [w568w/rknpu-module](https://github.com/w568w/rknpu-module)，将 Vendor RKNPU 驱动移植为 mainline 外置模块，并提供 RK3566 NPU overlay。其 README 报告 OrangePi 3B（RK3566）在 Armbian mainline 6.19.3 和 7.0.0 上运行，使用 librknnrt 2.3.2；**没有证据证明可直接用于当前 Ophub 6.18.63**。
+
+该项目还记录 RK3566 IOMMU v2 页表地址可能超过 4GB 并造成总线错误，当前以禁用 NPU IOMMU 的 non-IOMMU 模式规避。不能未经验证照搬到 Panther X2，但首轮移植评估不应默认启用 NPU IOMMU。
+
+Linux 6.18 的 Rocket 驱动支持范围与 RK3566 Vendor RKNPU/RKNN ABI 不同；不能把 Rocket 模块存在等同于 Immich RKNN 后端可用。Immich RKNN 后端依赖 Vendor `rknpu` ABI 的公开讨论也已记录在 `docs/DTB-AUDIT.md`。
+
+**路线决定：** 暂时保持 Ophub 6.18.y 主线候选不变；优先审计 `w568w/rknpu-module` 的源码、许可证、API 依赖、overlay 和 RKNN Runtime 配套，随后在 GitHub Actions 中固定其源码 commit，使用 Ophub 6.18.63 headers 做纯编译验证。编译验证通过仍不代表实机 probe 或 RKNN 推理成功。若 6.18 API 差异过大，再比较升至该模块已验证的 6.19.y 与保留 Vendor 6.1 备选路线。
+
+
+### 3.5 GitHub Actions 依赖
 
 Action 必须固定到完整 commit SHA，而不是 `@main` 或可移动标签。当前记录了 checkout、upload-artifact 和 Ophub upload Action 的候选 commit；正式 workflow 仍需逐一核实所用 Action 的接口、权限及兼容性。Armbian Build 也必须 checkout 到记录的 commit，而非克隆 main。
 
-### 3.5 Ubuntu 构建依赖并非完全可复现
+### 3.6 Ubuntu 构建依赖并非完全可复现
 
 Armbian 构建会使用动态 APT 软件源。固定 Git commit 不能保证未来 bit-for-bit 可复现。第一阶段的目标应定义为“可追溯、可重复重建”，保存：
 - 所有源码 commit；
@@ -107,7 +120,10 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - [x] 手动运行 `.github/workflows/inspect-kernel-package.yml`，下载归档并核对 SHA-256（run 43526258367）。
 - [x] 检查归档结构：6 个内部包校验值匹配；确认 ARM64 Image、Panther X2 DTB 文件名及相关驱动配置存在。
 - [x] 提取 DTB 二进制并反编译；启动关键节点已与固定 Ophub DTS 静态抽查，完整等价与 provenance 仍待验证。详见 `docs/DTB-AUDIT.md`。
-- [ ] BSP/NPU 驱动、设备树补丁及 RKNN 用户态库来源审计。
+- [x] 已找到 Vendor 6.1 RKNPU 驱动源码及 Panther X2 DTS 启用证据。
+- [x] 已找到 RK3566 mainline 外置 RKNPU 模块候选及其 6.19.3 实测声明。
+- [ ] 审计外置模块的固定 commit、许可证、内核 API 依赖、overlay 与 RKNN Runtime 配套。
+- [ ] 在 GitHub Actions 中以 Ophub 6.18.63 headers 进行纯编译验证。
 - [ ] TF/SD 控制器与 USB host 节点按 Panther X2 实际板级映射进一步核对。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
