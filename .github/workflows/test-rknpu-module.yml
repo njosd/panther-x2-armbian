@@ -235,7 +235,8 @@ jobs:
             fi
             echo
             echo "=== Source declaration/export ==="
-            grep -n -B3 -A5 'pm_runtime_force_resume' "$kernel_source/drivers/base/power/runtime.c" || true
+            grep -n -B5 -A45 '^int pm_runtime_force_resume' "$kernel_source/drivers/base/power/runtime.c" || true
+            grep -n -B3 -A3 'EXPORT_SYMBOL_GPL(pm_runtime_force_resume)' "$kernel_source/drivers/base/power/runtime.c" || true
             echo
             echo "=== Source build selection ==="
             grep -n 'CONFIG_PM' "$kernel_source/drivers/base/power/Makefile" || true
