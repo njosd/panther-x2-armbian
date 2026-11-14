@@ -247,3 +247,62 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 4. 只有取得可信匹配的 `Module.symvers` 后，才重新做 RKNPU MODPOST。禁止手工补写导出项或关闭 unresolved-symbol 检查。
 
 本轮没有修改 RKNPU 驱动、内核配置或 Panther X2 实机。
+
+
+### 3.13 Ophub 内核构建与 headers 打包链审计（源码级，已完成第一轮）
+
+本轮按“追查 Ophub 构建链，而不是继续修 RKNPU 模块”方向审计了 Ophub 上游公开脚本和 workflow。证据来源及边界如下。
+
+#### A. headers 包如何生成
+
+审计来源：
+- `ophub/amlogic-s9xxx-armbian` 的 `compile-kernel/tools/script/armbian_compile_kernel.sh`（上游仓库当时可见版本；函数 `get_kernel_source()`、`collect_headers()`、`compile_kernel()`、`packit_kernel()`、`create_debs_headers()`）。
+- `ophub/kernel` 的 Rockchip RK35xx workflow：`.github/workflows/compile-rockchip-rk35xx-kernel.yml`。
+
+脚本流程已经核实：
+1. `get_kernel_source()` 以浅克隆方式获取指定 kernel source repository 的分支（`--single-branch --depth=1 --branch=...`），不是固定 commit SHA 克隆。
+2. `compile_kernel()` 运行 `make Image modules dtbs`，然后运行 `modules_install`。
+3. 内核编译后调用 `collect_headers()`。该函数从当前内核源码/构建树收集外置模块构建需要的文件，并把 `Module.symvers`、`.config`、`include/config`、`include/generated`、架构生成头文件及部分 scripts/对象文件复制到 header staging 目录。
+4. `packit_kernel()` 将 header staging 目录原样打包为 `header-<kernel>.tar.gz`。
+5. Debian headers 包生成函数将同一 header staging 目录复制到 `/usr/src/linux-headers-<kernel>`，不重新生成 `Module.symvers`。
+
+由此得到一个重要修正：
+- headers 包中没有 `vmlinux`、`System.map`、`drivers/base/power/runtime.o` 等完整内核对象，符合其“外置模块开发 headers”裁剪打包设计，**不能据此认定包损坏或构建失败**。
+- `Module.symvers` 是从编译树直接复制进 headers staging 的；在已审计脚本中没有单独过滤或删除 `pm_runtime_force_resume` 的步骤。因此该符号缺失应在下一步追查其进入 `collect_headers()` 之前的构建输出、实际源码 commit、实际配置和模块符号生成阶段。现阶段仍不能区分：源树实际构建产生的 Module.symvers 本来就没有该符号，还是测试下载的 headers 与我们用于源码审计的 commit 不一致。
+
+#### B. 当前测试的 6.18.63 与 RK35xx 专用内核路线不是同一条发布线
+
+审计 `ophub/kernel/README.cn.md` 与 `.github/workflows/compile-rockchip-rk35xx-kernel.yml` 后确认：
+- Ophub 将通用主线系列（包含 `ophub/linux-6.18.y`）与 RK35xx 专用 BSP 系列分开说明。
+- README 将 `kernel_rk35xx` 定义为 RK3528/RK3566/RK3568 专用内核；列出的 Rockchip 专用源码包括 `ophub/linux-6.12.y-rockchip`、`ophub/linux-6.1.y-rockchip`、`ophub/linux-5.10.y-rk35xx` 等。
+- 当前 RK35xx 专用 workflow 的 kernel source 选项仅包含 5.10.y、6.1.y、6.12.y，没有 6.18.y；其默认 config 路径为 `kernel-config/release/rk35xx`，本轮可读取到的 6.12 配置明确启用 `CONFIG_PM=y`、`CONFIG_PM_SLEEP=y`、`CONFIG_MODULES=y`。
+- 因此此前用 `ophub/linux-6.18.y` 6.18.63 headers 做的 RKNPU 测试，不能代表 Ophub 的 RK35xx 专用 BSP 内核线已验证通过或失败。它是通用 6.18 主线系列上的模块兼容性试验。该 6.18.63 包是否确实属于通用 stable release、以及其二进制/headers 对应的精确源码 commit，仍需与此前 package manifest、release asset 和 SHA-256 记录关联后确认。
+
+#### C. 当前构建 provenance 的薄弱点
+
+RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并用于 ccache key；但它将 repository 名称、版本和 `kernel_auto` 参数传给 Ophub composite Action。底层脚本仍按分支浅克隆源码，并在 auto 模式下查询分支最新版本。workflow 捕获的 SHA 没有作为不可变 commit 参数传入实际 clone/checkout。
+
+这意味着：
+- workflow 中记录的预取 source hash 不自动等于最终编译时 checkout 的 commit；
+- 如果分支在 hash 查询与 clone 之间前进，或者 auto 逻辑重新同步分支，可能出现 provenance 不一致；
+- 对我们自己的可复现构建，必须在 clone 后立即记录 `git rev-parse HEAD`、remote URL、branch/tag、Makefile kernel version、配置文件 SHA，并将该 commit 固定到后续构建步骤；不能只记录编译前读取的 branch head。
+
+#### D. 当前结论与下一步
+
+已验证：
+- Ophub headers staging 从构建树复制 `Module.symvers`，打包脚本没有发现对单个导出符号的过滤；
+- 缺少 `runtime.o`、`vmlinux`、`System.map` 属于 headers 包的预期裁剪；
+- 6.18.63 通用系列与 RK35xx 专用 BSP 系列是不同发布路线；RK35xx 专用 workflow 当前列出的最高系列是 6.12.y。
+
+未验证：
+- 第十轮所下载的 6.18.63 headers 对应的准确 Ophub release tag、源码 commit、配置文件及其生成时的完整 `Module.symvers`；
+- `pm_runtime_force_resume` 缺失是在上游构建时产生，还是当前测试包/测试树不匹配；
+- 6.12.y RK35xx 专用内核对 Panther X2 的 NPU 节点、驱动和 Immich/RKNN 实际可用性。
+
+下一步不继续在 6.18.63 headers 上重复编译。先做一个只读 provenance 对照：
+1. 回看已审计的 6.18.63 release 包 manifest/内部文件名和 SHA-256，定位精确 release tag 与资产；
+2. 检查同一 release 的 header tar 中 `Module.symvers` 与其包元数据，不以另一条源码分支代替；
+3. 同时检查 `kernel_rk35xx` release 当前可用的 6.12.y Rockchip 内核资产及其对应 source/config；
+4. 决定后续主验证基线应是“通用 6.18 主线”还是“RK35xx 专用 6.12 BSP”，再对该确切版本进行 RKNPU/DTB 审计。
+
+不做内核安装、不改 9.6、不补写符号表、不忽略 MODPOST 错误。
