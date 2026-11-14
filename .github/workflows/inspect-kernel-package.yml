@@ -103,7 +103,7 @@ jobs:
           # Extract boot package files and inspect the exact kernel config/image.
           boot_pkg="inspection/inner/boot-${KERNEL_PACKAGE_VERSION}-ophub.tar.gz"
           tar -xzf "${boot_pkg}" -C inspection/extracted
-          config_file="inspection/extracted/config-${KERNEL_PACKAGE_VERSION}-ophub"
+          config_file="inspection/extracted/config-*-ophub"
           image_file="inspection/extracted/vmlinuz-${KERNEL_PACKAGE_VERSION}-ophub"
           [[ -s "${config_file}" ]] || { echo "::error::Kernel config file missing"; exit 1; }
           [[ -s "${image_file}" ]] || { echo "::error::Kernel image file missing"; exit 1; }
