@@ -143,19 +143,25 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 不因首次网络失败就反复刷写；先保留日志并定位 U-Boot、DTB、GMAC/PHY、NetworkManager 各层。
 
 
-### 3.7 RKNPU 6.18.63 纯编译验证工作流（首轮运行已完成，工具链修正待复测）
+### 3.7 RKNPU 6.18.63 纯编译验证工作流（第三轮已定位主机工具重建问题）
 
-新增 `.github/workflows/test-rknpu-module.yml`，仅允许 `workflow_dispatch`，不会因 push 自动运行。工作流下载固定 Ophub 6.18.63 内核包、提取 headers/build tree、下载固定 RKNPU 源码、交叉编译模块及独立编译 overlay，并归档日志。
+首轮运行：[43561086372](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372)，Job [132344685076](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372/job/132344685076)。
+第二轮运行：[43561337246](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246)，Job [132345466091](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246/job/132345466091)。
+第三轮运行：[43561699157](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157)，Job [132346621276](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157/job/132346621276)，artifact ID `14100263084`。
 
-首轮运行：[43561086372](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372)，Job [132344685076](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372/job/132344685076)，artifact ID `14100460631`。
+第三轮已确认：
+- Ophub 6.18.63 headers/build tree、`Module.symvers` 和 GCC 15.3.1 均可用；
+- headers 内预编译 `fixdep` 与 `modpost` 均为 ARM aarch64 ELF，不能直接在 x86_64 runner 执行；
+- 删除这两个 ARM64 helper 后，工作流调用顶层 `make ... scripts` 试图重建，但因 headers 包不含完整 `.config` 而触发 Kconfig 检查并失败；
+- 因此本轮仍未进入 RKNPU 驱动源码编译，不能据此判断 6.18 API 兼容性；
+- DT overlay 编译步骤因前置 shell 提前退出而未执行。
 
-**首轮已确认：**
-- 内核包 SHA-256 校验通过；headers/build tree 可用，`Module.symvers` 存在；
-- kernel release 为 `6.18.63-ophub`；
-- 固定 RKNPU 源码 commit 正确下载；
-- 首轮模块编译未进入驱动 API 兼容性判断：Ophub 内核由 Arm GNU Toolchain GCC 15.3.1 构建，而测试误用 Ubuntu GCC 13.3.0，后者不识别内核编译参数 `-fmin-function-alignment=4`；
-- DT overlay CPP 与 DTC 均返回成功并生成 DTBO，但有 `reg_format`、`avoid_default_addr_size`、`interrupts_property` 等警告。该结果只证明语法产物生成，不证明 overlay 与 Panther X2 基础 DTB 合并正确或硬件资源映射正确。
+**修正：** 新提交 `969d3c0bd65acca435ef52c49ec77ebcc70761e9` 将 helper 重建改为分别调用 `scripts/basic` 与 `scripts/mod` 子目录的局部 Makefile，避免顶层 `scripts` 目标触发完整 Kconfig 配置同步。工作流还会单独记录 `host_tools_rc`，仅在 helper 成功重建后尝试模块编译。该修正尚未运行验证。
 
-**工具链修正：** 后续工作流已改为下载 Arm GNU Toolchain 15.3.Rel1（目标前缀 `aarch64-none-linux-gnu-`），与内核构建器报告的 GCC 15.3.1 对齐。修正提交：`9c0ef930af035307d60006c7ae03b3ff3a630a6d`。该下载步骤尚未由 Actions 实际执行验证。
+下一轮重点检查：
+1. `scripts/basic/fixdep` 与 `scripts/mod/modpost` 是否重建为 x86_64 ELF；
+2. 局部构建是否仍需要缺失的生成头文件或配置宏；
+3. 是否真正进入 RKNPU 源码编译并暴露内核 API/符号问题；
+4. 若模块阶段仍失败，独立检查 DT overlay 编译日志。
 
-下一次运行应先确认工具链下载成功且版本确为 15.3.1，再观察真正的驱动编译错误。overlay 警告必须独立处理，后续还要将 overlay 与 Panther X2 实际基础 DTB 做合并/反编译审查。全过程仍然不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
+全过程仅在 GitHub Actions runner 中操作，不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
