@@ -117,7 +117,7 @@ jobs:
           set -euo pipefail
           source_tree=work/kernel-source
           board_dts="$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
-          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x-base.dtsi"
+          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x.dtsi"
           published=work/reports/rk3566-panther-x2.published.dts
           baseline=work/reports/rk3566-panther-x2.source-baseline.dts
           report=work/reports/candidate-readiness.txt
