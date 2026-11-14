@@ -30,11 +30,11 @@
 
 - `config/versions.env`：已知源码快照和待锁定项目。
 - `docs/BUILD-PLAN.md`：构建链风险与后续步骤。
-- `docs/DTB-AUDIT.md`：6.18.63 Panther X2 DTB 与驱动配置审计记录。
+- `docs/DTB-AUDIT.md`：6.18.63 Panther X2 DTB 与驱动配置审计记录。\n- `docs/RKNPU-BSP-AUDIT.md`：RK3566 RKNPU 独立驱动来源、6.18.63 兼容性和 Panther X2 overlay 风险审计。
 - `docs/NETWORK-ACCEPTANCE.md`：首启网络与 SSH 验收标准。
 - `manifests/build-manifest.template`：每次构建的记录模板。
 
-当前**没有可直接运行的镜像构建工作流**。内核包 6.18.63 已完成归档校验和内容清单检查；DTB 文件名已确认存在，但二进制内容与 DTS 的逐项比对仍未完成。U-Boot/firmware 固定下载、Actions 依赖锁定及首启配置审查仍是构建前工作。后续构建只允许手动触发。
+当前**没有可直接运行的镜像构建工作流**。内核包 6.18.63 已完成归档校验和内容清单检查；DTB 二进制已提取并反编译，关键节点与固定 Ophub DTS 快照高度吻合，但全量差异及精确构建来源仍未证明。RGA/VDEC 模块已确认存在；RKNPU 驱动和 NPU 设备节点尚未发现，已找到独立 RK3566 驱动候选，需先做离线兼容性验证。U-Boot/firmware 固定下载、Actions 依赖锁定及首启配置审查仍是构建前工作。后续构建只允许手动触发。
 
 ## 安全边界
 
