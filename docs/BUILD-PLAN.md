@@ -385,3 +385,61 @@ RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并�
 - 如果确实需要 Panther X2 专用补丁，能否把必要差异独立、最小化地维护，并持续应用到 Ophub 后续内核？
 
 **本原则覆盖此前文档中任何可能被理解为“以最早 Panther BSP 为目标基线”的表述。** 历史 BSP 只用于反向审计和交叉验证，不改变 Ophub / 官方渠道优先的主线。
+
+### 3.18 Ophub 官方主线与 RK35xx NPU 配置的差异：发现真实适配缺口
+
+本轮直接检查 Ophub 自己的板型数据库、两条内核源码和官方配置参考，确认目前不是简单的“选 6.18 或 6.12”问题。
+
+#### A. Ophub 当前 Panther X2 正式板型路径
+
+在 Ophub amlogic-s9xxx-armbian 固定参考 commit 9e71b57f73683f9c4d14a30311e4c2ccbff29566 的 model_database.conf 中，Panther-X2 条目为：
+
+- SoC：RK3566
+- DTB：rk3566-panther-x2.dtb
+- kernel tags：stable/6.18.y
+- platform/family：rockchip/rk3566
+- build：yes
+
+这表示 Ophub 当前给 Panther X2 的正式板型构建路径是 stable/6.18.y，而不是直接把它列入 rk35xx/all 的通用 RK35xx kernel tag。
+
+对应板级 DTS 在 Ophub linux-6.18.y 固定参考 commit 9bbed25243be8b43df410ebb9a8bbb1992234114 中存在，DTS blob SHA 为 a0a08476f45fb2d602fd7312def6f587f33fb91e。
+
+#### B. Ophub stable 6.18.63：Panther 板型支持存在，但官方配置没有 RKNPU
+
+Ophub kernel-config/release/stable/config-6.18 当前 blob SHA 为 57d061b9c4228c438b354ba58f09013d9f52f603，其配置包含 CONFIG_PM_DEVFREQ=y，但没有 CONFIG_ROCKCHIP_RKNPU 配置项。
+
+在对应 linux-6.18.y 的 Panther X2 DTS 中可以看到 vdd_npu regulator 定义，但该板级 DTS 没有显式启用 NPU 节点，也没有板级 rknpu-supply / NPU IRQ-name 绑定。该源码的 RK3566 DTS 组织结构已不同于 6.12 vendor tree；不能仅凭存在 vdd_npu regulator 就推断内核有 RKNPU 驱动或 NPU 可用。
+
+**阶段判断：** stable/6.18.y 是 Ophub 正式支持 Panther X2 的系统/内核路线候选，但按当前配置快照，不能作为已具备 RK3566 NPU 支持的路线。
+
+#### C. Ophub RK35xx 6.12.81：驱动配置存在，但 Panther X2 NPU 节点默认未启用
+
+Ophub kernel-config/release/rk35xx/config-6.12 blob SHA dee127c6c644f38426eeb28000d73536084d34a3 明确包含：
+
+- CONFIG_ROCKCHIP_RKNPU=y
+- CONFIG_ROCKCHIP_RKNPU_DRM_GEM=y
+- CONFIG_ROCKCHIP_RKNPU_SRAM=y
+- CONFIG_PM_DEVFREQ=y
+
+在 Ophub linux-6.12.y-rockchip commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c 中，Panther X2 DTS 存在，blob SHA 为 d517c99841cf9d724a61cd31acf9437acbb131e6。SoC 公共文件 rk356x.dtsi 定义了 NPU 节点 npu@fde40000 和 IOMMU iommu@fde4b000，但两者默认均为 status = "disabled"。Panther X2 板级 DTS 虽定义 vdd_npu regulator，却没有覆盖 &rknpu / &rknpu_mmu 将其启用，也没有补上该 RKNPU 驱动所需的板级 supply/IRQ-name 绑定。
+
+**阶段判断：** RK35xx 6.12.81 在内核配置和 SoC 驱动层具备 NPU 基础，但当前可见的 Panther X2 DTS 尚未启用 NPU 节点。不能把 CONFIG_ROCKCHIP_RKNPU=y 当作 Panther X2 NPU 已可用。
+
+#### D. 两种 6.12.81 发布资产不可混为一谈
+
+Ophub kernel_rk35xx release 同时发布：
+- 标准 6.12.81.tar.gz：141,437,450 bytes，SHA256 72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b；
+- 6.12.81-rk35xx-flippy-2611b.tar.gz：119,018,056 bytes，SHA256 a5b0bc5d3c8311cee472c105e5ee2d1c9e6395a94efb4488253a0faae132d064。
+
+两者属于同一 release tag 下的不同资产，不能假定配置、模块集、DTB 或用途相同。当前审计 workflow 只下载标准包；下一轮 CI 应比较两个包的实际 .config、kernel.release、modules.builtin、DTB 和模块清单，再决定是否保留 flippy 变体作为候选。flippy 变体不因名字或体积而被默认选用。
+
+#### E. 当前路线判断
+
+- 如果优先要稳定获得 Ophub 已登记的 Panther X2 板级启动支持：stable/6.18.y 是目前最直接的官方构建路径；但 RKNPU 支持尚未出现在对应配置快照中。
+- 如果优先验证 Rockchip RKNPU 驱动：RK35xx 6.12.81 有内置驱动配置和 SoC NPU 节点；但 Panther X2 板级 DTS 当前未启用该节点，仍有明确的板级适配缺口。
+- 因此当前不存在“已确认同时满足 Panther X2 官方板型支持 + NPU 开箱可用”的 Ophub 方案。最小补丁可能是未来选项，但在确认发布包 DTB、完整 DTS 资源和驱动绑定之前不创建、不应用。
+- 继续优先以 Ophub 官方源码/配置为主线；不采用最早第三方 Panther BSP 的扁平 DTS，也不把其他 RK3566 板的 DTB/overlay 直接移植过来。
+
+#### F. 下一项只读验证
+
+更新 RK35xx package audit：对标准和 flippy 两个 6.12.81 资产分别下载并校验 SHA256，提取实际 header config、kernel.release、modules.builtin、boot DTB；反编译实际 rk3566-panther-x2.dtb（若资产包含），检查 rknpu、rknpu_mmu、rknpu-supply、interrupt-names 和 status。该 CI 只读取发布资产，不加载驱动、不部署系统、不接触 9.6。
