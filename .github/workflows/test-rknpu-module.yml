@@ -240,6 +240,37 @@ jobs:
             echo
             echo "=== Source build selection ==="
             grep -n 'CONFIG_PM' "$kernel_source/drivers/base/power/Makefile" || true
+            echo
+            echo "=== Prepared build artifacts ==="
+            for f in \
+              "$builddir/drivers/base/power/runtime.o" \
+              "$builddir/drivers/base/power/.runtime.o.cmd" \
+              "$builddir/vmlinux" \
+              "$builddir/System.map" \
+              "$builddir/modules.builtin" \
+              "$builddir/modules.order"; do
+              if [[ -e "$f" ]]; then
+                ls -l "$f"
+                file "$f" || true
+              else
+                echo "MISSING: $f"
+              fi
+            done
+            if [[ -f "$builddir/drivers/base/power/runtime.o" ]]; then
+              echo
+              echo "=== runtime.o symbol table ==="
+              aarch64-none-linux-gnu-nm -A "$builddir/drivers/base/power/runtime.o" 2>/dev/null | grep -E 'pm_runtime_force_(suspend|resume)' || true
+            fi
+            if [[ -f "$builddir/System.map" ]]; then
+              echo
+              echo "=== System.map PM runtime symbols ==="
+              grep -E 'pm_runtime_force_(suspend|resume)' "$builddir/System.map" || true
+            fi
+            if [[ -f "$builddir/vmlinux" ]]; then
+              echo
+              echo "=== vmlinux PM runtime symbols ==="
+              aarch64-none-linux-gnu-nm -n "$builddir/vmlinux" 2>/dev/null | grep -E 'pm_runtime_force_(suspend|resume)' || true
+            fi
           } | tee work/reports/pm-runtime-symbol-audit.txt
 
           # First baseline: omit optional devfreq implementation. The pinned
