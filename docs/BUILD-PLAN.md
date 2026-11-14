@@ -618,3 +618,19 @@ Ophub 6.12.81 Panther X2 DTS 已有 `vdd_npu`、`vdd_logic`、`vdd_cpu`；SoC DT
 - 实机 probe、RKNN runtime 与实际推理。
 
 没有生成或应用 DTS patch，没有修改 9.6。后续优先做固定版本的 DTS/DTB 离线构建和静态资源检查；实机验证另行授权。
+
+
+### 3.23 NPU OPP、电源、bus_npu 与 DMA/IOMMU 审计（2026-11-14）
+
+本轮对固定 Ophub 6.12.81 源码与 Panther X2 Vendor 6.1 DTS 做了静态交叉核对。
+
+- NPU OPP 表启用档位的标称电压约 0.85–1.0 V；Panther X2 `vdd_npu` 声明范围 0.5–1.35 V、初始 0.9 V，静态范围覆盖。不能据此证明真实供电稳定或芯片 OPP bin 正确。
+- NPU bus OPP 标称电压约 0.875–0.95 V；`vdd_logic` 声明范围 0.5–1.35 V、初始 0.9 V，静态范围覆盖。NPU bus 通过 `bus-supply=vdd_logic`、`pvtm-supply=vdd_cpu` 与 RK356x `clkfreq` policy 驱动匹配。
+- 固定版本 `rockchip_bus.c` 对 `rockchip,rk3568-bus` 获取 `bus` clock、`bus` regulator，并用 `pvtm` supply 初始化 OPP/PVTM；升频前和降频后调节 bus 电压。故 Vendor DTS 的 bus supplies 与驱动实现是相互对应的。
+- 固定版本 RKNPU driver 对 `rknpu` 和 `mem` regulator 都采用 optional 获取；OPP helper 只有在 DT 节点存在 `mem-supply` 时才添加第二 regulator。Panther X2 单 `rknpu-supply` 是驱动支持的拓扑，不应照搬 H96 双供电。
+- RK356x RKNPU config 使用 `DMA_BIT_MASK(32)`。4GB RAM 本身覆盖 32-bit 地址空间 0..0xffffffff，不能单凭“4GB”认定 IOMMU 不兼容。启用 IOMMU 时需验证 32-bit IOVA 与物理页映射；禁用 IOMMU 时驱动走 reserved-memory 初始化，发布 DTB 已发现 rknpu shared-dma-pool，但仍需核实其地址、大小和 CMA 交互。
+- NPU OPP 引用的六个 NVMEM cell phandle 均在 RK356x DTSI 定义，源码层面没有悬空引用；实际 OTP/eFuse 数据是否有效未验证。
+
+**风险判断修正：** 删除“4GB RAM 很可能阻止启用 IOMMU”的笼统推断。当前已证实的限制是 32-bit DMA mask；兼容性取决于实际物理内存图、IOVA、IOMMU 驱动和 reserved pool。现阶段没有理由预先建议关闭 IOMMU。
+
+下一步可在 CI 临时工作目录中应用候选板级 DTS fragment，编译 DTB 并做静态差异检查；不修改产品 DTS、不生成可部署补丁、不触碰 9.6。只有 CI 静态检查通过后，才进入明确授权的后续阶段。
