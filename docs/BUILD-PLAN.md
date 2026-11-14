@@ -193,3 +193,23 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 4. 若配置启用但符号仍不在 Module.symvers，优先调查发布包 headers/符号表来源与源码快照 provenance，不通过 `KBUILD_MODPOST_WARN`、`KBUILD_MODPOST_NOFINAL` 或伪造符号表绕过错误。
 
 本轮仅增加 CI 诊断，不修改驱动源码、不改内核配置、不在 9.6 实机操作。
+
+
+### 3.9 RKNPU 6.18.63 纯编译验证（第八轮：定位到 headers 符号表缺项）
+
+第八轮运行：[43592220424](https://github.com/njosd/panther-x2-armbian/actions/runs/43592220424)，Job [132439173554](https://github.com/njosd/panther-x2-armbian/actions/runs/43592220424/job/132439173554)，artifact ID `14112663495`。实际 checkout 的仓库 commit：`68409d30acaf2022bd9dfc9e3c926712153ad886`。
+
+本轮新增审计给出了明确结果：
+- headers build tree 的 `.config` 与 `include/config/auto.conf` 均为 `CONFIG_PM=y`、`CONFIG_PM_SLEEP=y`；
+- 同一 headers 包的 `Module.symvers` 有 `pm_runtime_force_suspend`，但没有 `pm_runtime_force_resume`；
+- 固定 Ophub 源码 commit `9bbed25243be8b43df410ebb9a8bbb1992234114` 的 `drivers/base/power/runtime.c` 第 2052 行起，在 `CONFIG_PM_SLEEP` 下实现 `pm_runtime_force_resume()`，并于第 2110 行执行 `EXPORT_SYMBOL_GPL(pm_runtime_force_resume)`；该文件也包含 `pm_runtime_force_suspend` 导出；
+- 因而，按这份源码和这份配置构建时，两个导出符号理应同时出现在 Module.symvers。现在只存在 suspend、不存在 resume，是 headers 符号表与源码/配置组合不自洽的直接证据。
+
+当前最有根据的判断：**RKNPU 的 MODPOST 错误来自目标 headers 包的 Module.symvers 缺项，或 headers 包与固定源码快照并非同一构建产物**。尚不能断言实际运行中的内核缺少该符号；也不能仅凭当前信息区分符号表不完整、构建源码差异或发布包制作错误。之前仅 grep 注释附近的源码审计范围太窄，容易漏掉实际函数定义；已修正 workflow，下一次完整打印函数实现及导出行。
+
+本轮其他结果不变：
+- host tools 与 RKNPU 核心对象编译成功，MODPOST 仍因 `pm_runtime_force_resume` 缺项失败，未生成 `rknpu.ko`；
+- DTBO 编译成功但有 reg_format、address/size cells、interrupt-parent 警告；
+- 纯 CI 编译验证，未在 Panther X2 加载或安装模块。
+
+下一步不应通过伪造 Module.symvers 条目或忽略 unresolved symbol 让模块“通过”。应先验证 headers 包本身的符号表完整性及其构建来源；如果能取得与目标内核完全匹配的完整源码/构建输出，再用其真实 Module.symvers 重新构建外置模块。即使如此，仍需后续检查 vermagic、modversions、模块依赖、设备树资源和实机驱动加载。
