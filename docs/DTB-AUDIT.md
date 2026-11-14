@@ -80,3 +80,63 @@
 已更新 `.github/workflows/inspect-kernel-package.yml`：下一次手动运行时，会从固定的 `dtb-rockchip-6.18.63-ophub.tar.gz` 中提取 `rk3566-panther-x2.dtb`，记录文件 SHA-256，并使用 `dtc` 反编译为 DTS，将原始 DTB、反编译文本和警告日志一并上传为 artifact。**该新增步骤尚未运行，结果待验证。**
 
 拿到 artifact 后，只对启动关键节点（GMAC/MDIO/PHY、SDHCI/eMMC、SDMMC/TF、USB host）做差异审查。不因这项检查重新编译内核，也不把 NPU/GPU/多媒体节点列为第一版启动阻塞项。检查通过后继续最小 BSP 补丁集和手动 TF 镜像构建。
+
+
+## 2026-11-14：6.18.63 DTB 实物提取与加速器静态审计（新增）
+
+本节基于 Actions run [43543451274](https://github.com/njosd/panther-x2-armbian/actions/runs/43543451274) 的 artifact（artifact id: 14093500129）。本次 artifact 已包含 DTB 二进制、反编译 DTS、DTB SHA-256 和模块归档清单；此前“未取得 DTB 二进制”的状态已更新。
+
+### DTB 实物
+
+- 文件：`rk3566-panther-x2.dtb`
+- SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`
+- `dtc` 反编译成功；`dtc-warnings.txt` 为空。
+- 反编译结果识别为 `model = "Panther X2"`、`compatible = "panther,x2", "rockchip,rk3566"`。
+
+### 与固定 Ophub DTS 源码快照的关系
+
+固定源码：`ophub/linux-6.18.y` commit `9bbed25243be8b43df410ebb9a8bbb1992234114`，文件 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`，blob SHA `a0a08476f45fb2d602fd7312def6f587f33fb91e`。
+
+静态抽查显示，包内 DTB 与该源码在 Panther X2 板型识别、GMAC1/RGMII/PHY reset/延时、SDHCI eMMC、SDMMC TF/SDIO、USB 控制器等关键硬件描述上高度吻合。DTB 的 alias 展开结果也显示 `mmc0` 指向 `/mmc@fe310000`（SDHCI/eMMC），与 Ophub 源码的 `mmc0 = &sdhci` 一致。
+
+但这仍是关键节点的静态抽查，不是对 DTS 全部属性、所有 include 展开结果的逐字节/逐属性完整 diff；也不能单凭相似性证明二进制一定由上述 commit 构建。二进制与源码的构建来源关系继续标记为“高度吻合、精确 provenance 未证实”。
+
+### 多媒体与 NPU 证据（重要更正）
+
+此前检查脚本使用了不准确的配置符号名称（例如 `CONFIG_ROCKCHIP_RGA`），导致结果显示 `NOT_RECORDED`。从实际 modules 归档中的生成配置头和模块文件可进一步确认：
+
+- `include/config/VIDEO_ROCKCHIP_RGA` 存在，且 `drivers/media/platform/rockchip/rga/rockchip-rga.ko` 存在：RGA 驱动已编译为模块并打包。
+- `include/config/VIDEO_ROCKCHIP_VDEC` 存在，且 `drivers/media/platform/rockchip/rkvdec/rockchip-vdec.ko` 存在：Rockchip VDEC 驱动已编译为模块并打包。
+- `drivers/media/platform/verisilicon/hantro-vpu.ko` 也存在，但它不能直接等同于 RK3566 的 RKNPU。
+- 在本次 modules 归档完整文件清单及相关模块路径筛选中，未发现 RKNPU 驱动模块或明确的 Rockchip MPP/VENC 模块。
+- DTB 反编译文本包含 `vdd_npu` 电源轨、`qos_npu` 节点及 NPU pin group 相关信息，但未发现可识别的 NPU 设备节点（例如 `npu@...`）。这说明板级 DTS/BSP 留有 NPU 相关资源描述，**不等于 Linux NPU 驱动已启用**。
+
+因此当前结论：
+- RGA：软件包中存在驱动模块，静态证据已确认；尚未在 Panther X2 实机验证驱动成功 probe 或用户态调用。
+- VDEC：软件包中存在驱动模块，静态证据已确认；尚未验证硬件解码路径和应用兼容性。
+- VENC：当前归档未找到对应 Rockchip 编码驱动模块，待确认是否以其他驱动形式提供。
+- RKNPU/RKNN：当前没有可用驱动证据；不能把 NPU 电源/QoS 描述当成驱动支持。
+- MPP：当前未找到明确的 MPP 服务/驱动证据；用户态 MPP 库与内核驱动还需分开审计。
+
+### 检查脚本修正
+
+在 commit `1ce47d772e26becadab4b773e32150d8a054a52c` 中修正配置符号审计：
+- 使用实际的 `CONFIG_STMMAC_ETH`、`CONFIG_VIDEO_ROCKCHIP_RGA`、`CONFIG_VIDEO_ROCKCHIP_VDEC` 等符号；
+- 将完整内核 `.config` 纳入 artifact，避免以后只凭 `NOT_RECORDED` 摘要判断。
+- 该修正提交尚未由新的 Actions run 验证；下一次手动运行后再将完整配置结果标为已验证。
+
+### 更新后的状态
+
+| 项目 | 状态 |
+|---|---|
+| DTB 原始二进制与 SHA-256 | 已取得并验证文件存在 |
+| DTB 反编译 | 已完成，无 dtc 警告 |
+| 板型/GMAC/PHY/eMMC/TF/USB 关键节点 | 已静态抽查，与固定 Ophub DTS 高度吻合 |
+| DTB 与 DTS 精确构建来源 | 未证实 |
+| RGA 模块及配置头 | 已确认存在，实机未验证 |
+| VDEC 模块及配置头 | 已确认存在，实机未验证 |
+| VENC / MPP 内核支持 | 未发现明确模块，继续审计 |
+| RKNPU/RKNN 驱动 | 未发现，未验证 |
+| 实机启动及 Immich 硬件加速 | 未验证 |
+
+本阶段仍不安装、不修改 Panther X2，不制作或写入镜像。下一步优先审计 RKNPU 驱动来源和可移植补丁边界；首版启动验收不等待 NPU。
