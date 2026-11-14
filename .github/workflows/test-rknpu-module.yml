@@ -134,25 +134,52 @@ jobs:
             "$kdir/scripts/genksyms/genksyms" \
             "$kdir/scripts/recordmcount"
 
-          make -C "$kdir" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-none-linux-gnu- \
-            HOSTCC=gcc HOSTCXX=g++ V=1 scripts \
-            2>&1 | tee work/reports/host-tools-rebuild.log
+          # Build only the required host helper subdirectories. Calling the
+          # top-level "scripts" target forces Kconfig sync and fails because
+          # the distributable headers intentionally omit the full .config.
+          set +e
+          : > work/reports/host-tools-rebuild.log
+          for helper_dir in scripts/basic scripts/mod; do
+            echo "===== Building $helper_dir with host GCC =====" \
+              | tee -a work/reports/host-tools-rebuild.log
+            make -C "$kdir/$helper_dir" HOSTCC=gcc HOSTCXX=g++ V=1 \
+              2>&1 | tee -a work/reports/host-tools-rebuild.log
+            helper_rc=${PIPESTATUS[0]}
+            if [[ "$helper_rc" -ne 0 ]]; then
+              echo "FAILED: $helper_dir exit=$helper_rc" \
+                | tee -a work/reports/host-tools-rebuild.log
+              break
+            fi
+          done
+          host_tools_rc=${helper_rc:-0}
+          echo "host_tools_rc=$host_tools_rc" >> "$GITHUB_OUTPUT"
+          set -e
 
           {
             echo "After rebuild:"
-            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost"
-            readelf -h "$kdir/scripts/basic/fixdep" | grep -E 'Class:|Machine:'
-            readelf -h "$kdir/scripts/mod/modpost" | grep -E 'Class:|Machine:'
+            file "$kdir/scripts/basic/fixdep" "$kdir/scripts/mod/modpost" 2>&1 || true
+            if [[ -x "$kdir/scripts/basic/fixdep" ]]; then
+              readelf -h "$kdir/scripts/basic/fixdep" | grep -E 'Class:|Machine:'
+            fi
+            if [[ -x "$kdir/scripts/mod/modpost" ]]; then
+              readelf -h "$kdir/scripts/mod/modpost" | grep -E 'Class:|Machine:'
+            fi
           } | tee work/reports/host-tools-after.txt
 
           set +e
-          make -C "$kdir" M="$src" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-none-linux-gnu- V=1 modules \
-            2>&1 | tee work/reports/module-build.log
-          module_rc=${PIPESTATUS[0]}
-          set -e
+          if [[ "$host_tools_rc" -eq 0 ]]; then
+            make -C "$kdir" M="$src" ARCH=arm64 \
+              CROSS_COMPILE=aarch64-none-linux-gnu- V=1 modules \
+              2>&1 | tee work/reports/module-build.log
+            module_rc=${PIPESTATUS[0]}
+          else
+            module_rc=98
+            echo "Skipping module build because host helper rebuild failed." \
+              | tee work/reports/module-build.log
+          fi
           echo "module_rc=$module_rc" >> "$GITHUB_OUTPUT"
+          echo "host_tools_rc=$host_tools_rc" >> "$GITHUB_OUTPUT"
+          set -e
 
           if [[ "$module_rc" -eq 0 ]]; then
             find "$src" -maxdepth 2 -type f -name 'rknpu.ko' -exec cp {} work/reports/ \;
@@ -187,6 +214,7 @@ jobs:
           echo "overlay_dtc_rc=$dtc_rc" >> "$GITHUB_OUTPUT"
 
           {
+            echo "Host helper rebuild exit: $host_tools_rc"
             echo "RKNPU module build exit: $module_rc"
             echo "DT overlay CPP exit: $cpp_rc"
             echo "DT overlay DTC exit: $dtc_rc"
