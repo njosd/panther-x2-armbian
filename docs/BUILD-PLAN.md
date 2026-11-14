@@ -892,3 +892,35 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 #### 状态
 
 候选 DTB 构建通过；语义比较仍未完成。此次失败是比较器对字符串属性的类型误判，不代表 DTS 不一致。下一步重跑 workflow，继续根据真实属性类型逐项修正比较器。
+
+
+### 3.34 Fifth semantic audit run: Rockchip private single-phandle property（2026-11-15）
+
+运行记录：GitHub Actions run `43655322545`，job `132632452049`，执行提交 `8b0920ce659041f592e4ed1b3449a9bb4a3b89f8`。
+
+#### 本轮已通过
+
+- 固定 Ophub 6.12.81 源码获取；
+- SoC/板级 DTS 审查；
+- baseline DTB 构建；
+- 发布内核包 SHA-256 校验及发布 DTB 提取；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 编译；
+- 前几轮发现的 NVMEM、pinctrl 字符串属性误判已不再出现。
+
+#### 失败原因
+
+语义比较器报告：
+`/csi2-dphy0:rockchip,hw: '268' -> '269'`。
+
+固定 Ophub commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `rk356x.dtsi` 显示 `rockchip,hw` 是单 phandle 引用，例如 CSI2 DPHY 节点指向 `csi2_dphy_hw`。候选 DTB 新增 phandle 引用后，DTC 可重新分配 phandle 数值；直接比较数字会产生误报。
+
+#### 修复
+
+提交 `c674ae278b6830834b7da6c70b38ed5c1c95c217`：
+- 将 `rockchip,hw` 加入单 phandle 属性集合；
+- 解析为目标节点路径后比较，而非比较 phandle 整数；
+- 不忽略该属性，也不放宽属性变化白名单。
+
+#### 当前状态
+
+两份候选 DTB 构建通过；语义审计仍未通过。当前失败属于比较器对 Rockchip 私有 phandle 属性覆盖不完整。下一步重新运行 workflow；若通过，需继续检查输出的全部允许变化、IRQ-name-only delta、DTC warnings 与 DTB 哈希，之后再判断是否可进入 BSP patch 最小化阶段。
