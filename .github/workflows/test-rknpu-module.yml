@@ -186,6 +186,20 @@ jobs:
             fi
           } | tee work/reports/host-tools-after.txt
 
+          # First baseline: omit optional devfreq implementation. The pinned
+          # module source includes a non-mainline governor header
+          # (linux/devfreq-governor.h); its own rknpu_devfreq.h provides
+          # no-op stubs when RKNPU_NO_DEVFREQ is defined. Keep this CI-only:
+          # do not mutate the pinned upstream source or claim DVFS support.
+          if [[ "$host_tools_rc" -eq 0 ]]; then
+            cp "$src/Kbuild" work/reports/Kbuild.upstream
+            sed -i 's@src/rknpu_debugger.o src/rknpu_devfreq.o@src/rknpu_debugger.o@' "$src/Kbuild"
+            printf '\\nccflags-y += -DRKNPU_NO_DEVFREQ\\n' >> "$src/Kbuild"
+            diff -u work/reports/Kbuild.upstream "$src/Kbuild" \
+              > work/reports/Kbuild.devfreq-disabled.patch || true
+            cat work/reports/Kbuild.devfreq-disabled.patch
+          fi
+
           set +e
           if [[ "$host_tools_rc" -eq 0 ]]; then
             make -C "$kernel_source" O="$builddir" M="$src" ARCH=arm64 \
