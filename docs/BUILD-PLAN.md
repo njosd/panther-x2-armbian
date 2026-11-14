@@ -861,3 +861,34 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - 设备启动、NPU probe、RKNN 推理：未验证。
 
 下一步重跑同一 workflow。若继续遇到其它 provider 特例，按固定源码 binding/实际 DTS 节点定义逐项核实，不做猜测式通用化。
+
+
+### 3.33 Fourth semantic audit run: pinctrl-names misclassified as a phandle list（2026-11-15）
+
+运行记录：GitHub Actions run `43654212624`，job `132629065231`，执行提交 `e6ea92a3aa05d6bc26bc8d2bcdba58beff071414`。
+
+#### 已通过
+
+- 固定 Ophub 6.12.81 源码获取；
+- SoC/板级 DTS 审查；
+- 未修改 baseline DTB 构建；
+- 发布内核包 SHA-256 校验、发布 DTB 提取及反编译；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 编译。
+
+#### 失败原因
+
+比较器报告：
+`/codec-digital@fe478000:pinctrl-names: unknown phandle 0x64656661`。
+
+`0x64656661` 是字符串 `"defa"` 的字节内容，并非 phandle。原因是旧分类条件将所有 `pinctrl-*` 属性都当作 phandle 列表，错误包含字符串属性 `pinctrl-names`。
+
+#### 修复
+
+提交 `e0bd21564a41ccd27894bdac9e845901379d6557`：
+- 只将符合 `pinctrl-[0-9]+` 格式的属性按 phandle 列表处理；
+- `pinctrl-names` 回归普通字符串属性比较；
+- 不改变属性差异白名单，不忽略任何节点或引用。
+
+#### 状态
+
+候选 DTB 构建通过；语义比较仍未完成。此次失败是比较器对字符串属性的类型误判，不代表 DTS 不一致。下一步重跑 workflow，继续根据真实属性类型逐项修正比较器。
