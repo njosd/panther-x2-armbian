@@ -822,3 +822,42 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 5. 两份候选 DTC warnings 和 SHA-256 均保存进 artifact。
 
 若仍出现脚本错误，先用小型合成 DTB 对 helper 做独立单元测试，再跑完整 kernel/DTB 构建工作流，避免浪费 Actions 时间。没有 `SEMANTIC_DTB_AUDIT=PASS` 之前，不将语义审计标记为通过。
+
+
+### 3.32 Third semantic audit run: NVMEM cell reference format corrected（2026-11-15）
+
+运行记录：GitHub Actions run `43653950234`，job `132628257858`，执行提交 `b2e0b1c6959b3cdb1c9159d6e93b854f15fca41d`。
+
+#### 本轮已通过
+
+- 6.12.81 固定源码获取及 SoC/板级 DTB 源码审查；
+- 未修改基线 DTB 构建；
+- 发布内核包外层 SHA-256 校验；
+- 发布 DTB 提取、反编译；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 编译。
+
+审计器已成功开始解析真实设备树引用。失败于：
+`/bus-npu-opp-table:nvmem-cells`，报告 NVMEM cell 节点 `/otp@fe38c000/core-pvtm@2a` 缺少 `#nvmem-cell-cells`。
+
+#### 根因确认
+
+对固定 Ophub commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `rk356x.dtsi` 进行源码核对：
+- `core-pvtm@2a` 是 OTP 节点内部的 NVMEM cell，定义含 `reg = <0x2a 0x2>`，并未定义 `#nvmem-cell-cells`；
+- `bus-npu-opp-table` 通过 `nvmem-cells = <&core_pvtm>` 直接引用该 cell；
+- 此属性是 cell phandle 列表，不是带 provider 参数 cell 的 clock/reset/interrupt 类 specifier。
+因此旧解析器错误地把 NVMEM cell 引用当作 provider + argument-cells 列表。
+
+#### 修复
+
+提交 `2d4536444647d20e4e303983b3c94d8e4edafecc`：
+- 将 `nvmem-cells` 从通用 provider-cell 解析表移出；
+- 作为直接 cell-phandle 列表解析，映射为目标节点路径；
+- 未添加任何默认参数数量，也未扩大 DTS 属性变化白名单。
+
+#### 当前状态
+
+- 候选 DTB 编译：通过；
+- 引用语义审计：运行中，仍未通过；
+- 设备启动、NPU probe、RKNN 推理：未验证。
+
+下一步重跑同一 workflow。若继续遇到其它 provider 特例，按固定源码 binding/实际 DTS 节点定义逐项核实，不做猜测式通用化。
