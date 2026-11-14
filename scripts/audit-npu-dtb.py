@@ -98,7 +98,7 @@ def is_reference_property(name: str) -> bool:
         or name in SINGLE_PHANDLE_PROPERTIES
         or name.endswith("-supply")
         or name.endswith("-gpios")
-        or name.startswith("pinctrl-")
+        or re.fullmatch(r"pinctrl-\d+", name) is not None
         or name.endswith("-parent")
     )
 
@@ -167,7 +167,7 @@ def normalized_property(dtb: Path, node: str, name: str,
             raw, handles, dtb, f"{node}:{name}", "#gpio-cells"
         )
 
-    if name.startswith("pinctrl-"):
+    if re.fullmatch(r"pinctrl-\d+", name):
         targets = []
         for value in raw:
             target = handles.get(value)
