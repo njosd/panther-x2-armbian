@@ -216,6 +216,31 @@ jobs:
             fi
           } | tee work/reports/host-tools-after.txt
 
+          # Diagnose external symbol availability against the exact prepared
+          # headers/config shipped in the kernel package. Do not suppress
+          # modpost undefined-symbol errors: PM_SLEEP controls whether this
+          # API is a real exported symbol or an inline stub.
+          {
+            echo "=== Power-management config ==="
+            for key in CONFIG_PM CONFIG_PM_SLEEP CONFIG_PM_RUNTIME; do
+              grep -E "^${key}=" "$builddir/.config" "$builddir/include/config/auto.conf" 2>/dev/null || true
+            done
+            echo
+            echo "=== Export metadata ==="
+            if [[ -s "$builddir/Module.symvers" ]]; then
+              grep -E '[[:space:]]pm_runtime_force_resume([[:space:]]|$)' "$builddir/Module.symvers" || echo "pm_runtime_force_resume absent from Module.symvers"
+              grep -E '[[:space:]]pm_runtime_(force_suspend|force_resume|resume|put_sync)([[:space:]]|$)' "$builddir/Module.symvers" || true
+            else
+              echo "Module.symvers missing or empty"
+            fi
+            echo
+            echo "=== Source declaration/export ==="
+            grep -n -B3 -A5 'pm_runtime_force_resume' "$kernel_source/drivers/base/power/runtime.c" || true
+            echo
+            echo "=== Source build selection ==="
+            grep -n 'CONFIG_PM' "$kernel_source/drivers/base/power/Makefile" || true
+          } | tee work/reports/pm-runtime-symbol-audit.txt
+
           # First baseline: omit optional devfreq implementation. The pinned
           # module source includes a non-mainline governor header
           # (linux/devfreq-governor.h); its own rknpu_devfreq.h provides
