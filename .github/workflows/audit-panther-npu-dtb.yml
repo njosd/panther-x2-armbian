@@ -27,32 +27,32 @@ jobs:
           set -euo pipefail
           source config/versions.env
           mkdir -p work/source work/reports work/package
-          git clone --filter=blob:none --no-checkout "$OPHUB_KERNEL_SOURCE_REPO" work/kernel-source
-          git -C work/kernel-source fetch --depth=1 origin "$OPHUB_KERNEL_SOURCE_COMMIT"
+          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" work/kernel-source
+          git -C work/kernel-source fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
           git -C work/kernel-source checkout --detach FETCH_HEAD
 
           source_tree=work/kernel-source
           board_dts="$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
-          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x-base.dtsi"
+          soc_dtsi="$source_tree/arch/arm64/boot/dts/rockchip/rk356x.dtsi"
           [[ -s "$board_dts" ]] || { echo "::error::Panther X2 DTS missing from pinned source"; exit 1; }
-          [[ -s "$soc_dtsi" ]] || { echo "::error::RK356x base DTSI missing"; exit 1; }
+          [[ -s "$soc_dtsi" ]] || { echo "::error::RK356x DTSI missing"; exit 1; }
 
           source_version="$(sed -n 's/^SUBLEVEL = //p' "$source_tree/Makefile" | head -n1)"
           patchlevel="$(sed -n 's/^PATCHLEVEL = //p' "$source_tree/Makefile" | head -n1)"
           version="$(sed -n 's/^VERSION = //p' "$source_tree/Makefile" | head -n1)"
-          [[ "$version.$patchlevel.$source_version" == "6.18.63" ]] || {
-            echo "::error::Pinned source version is not 6.18.63"
+          [[ "$version.$patchlevel.$source_version" == "$OPHUB_RK35XX_KERNEL_VERSION" ]] || {
+            echo "::error::Pinned source version does not match selected RK35xx baseline"
             exit 1
           }
 
           {
-            echo "Pinned source commit: $OPHUB_KERNEL_SOURCE_COMMIT"
+            echo "Pinned source commit: $OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
             echo "Kernel Makefile version: $version.$patchlevel.$source_version"
             echo
             echo "=== Panther board DTS NPU references ==="
             grep -nE 'rknpu|bus_npu|npu@fde40000|iommu@fde4b000' "$board_dts" || true
             echo
-            echo "=== RK356x base DTSI NPU definitions ==="
+            echo "=== RK356x DTSI NPU definitions ==="
             grep -nE 'rknpu|bus_npu|npu@fde40000|iommu@fde4b000|npu_opp' "$soc_dtsi" || true
             echo
             echo "=== All RK356x-family DTSI NPU references ==="
@@ -88,8 +88,8 @@ jobs:
           set -euo pipefail
           source config/versions.env
           outer=work/package/kernel.tar.gz
-          curl --fail --location --retry 3 --retry-delay 3 "$KERNEL_PACKAGE_URL" -o "$outer"
-          echo "$KERNEL_PACKAGE_SHA256  $outer" | sha256sum --check
+          curl --fail --location --retry 3 --retry-delay 3 "$OPHUB_RK35XX_PACKAGE_URL" -o "$outer"
+          echo "$OPHUB_RK35XX_PACKAGE_SHA256  $outer" | sha256sum --check
           mapfile -t members < <(tar -tzf "$outer" | grep -E '^6\.18\.63/dtb-rockchip-[^/]+\.tar\.gz$')
           [[ "${#members[@]}" -eq 1 ]] || {
             echo "::error::Expected exactly one Panther-compatible DTB archive, found ${#members[@]}"
@@ -134,7 +134,7 @@ jobs:
             {
               echo
               echo "CANDIDATE_STATUS=SKIPPED"
-              echo "Reason: pinned 6.18.63 source has no RK356x RKNPU SoC node definition."
+              echo "Reason: pinned Ophub RK35xx 6.12.81 source has no RK356x RKNPU SoC node definition."
               echo "Board-level &rknpu/&rknpu_mmu/&bus_npu fragments cannot be safely applied until the missing SoC-level definitions are sourced and audited."
             } >> "$report"
             echo "candidate_status=skipped_missing_soc_nodes" >> "$GITHUB_OUTPUT"
