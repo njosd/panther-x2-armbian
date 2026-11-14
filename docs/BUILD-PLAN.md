@@ -924,3 +924,37 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 #### 当前状态
 
 两份候选 DTB 构建通过；语义审计仍未通过。当前失败属于比较器对 Rockchip 私有 phandle 属性覆盖不完整。下一步重新运行 workflow；若通过，需继续检查输出的全部允许变化、IRQ-name-only delta、DTC warnings 与 DTB 哈希，之后再判断是否可进入 BSP patch 最小化阶段。
+
+
+### 3.35 Sixth semantic audit run: memory-region is a phandle list, not a scalar（2026-11-15）
+
+运行记录：GitHub Actions run `43655620433`，job `132633351477`，执行提交 `17aae45af5b3945f025d18d22f97881ab95aa5f9`。
+
+#### 已通过阶段
+
+- 固定 Ophub 6.12.81 源码获取；
+- SoC/板级 DTS 审查；
+- 未修改 source baseline DTB 构建；
+- 发布包外层 SHA-256 校验及发布 DTB 提取；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 均成功编译；
+- 前序发现的 NVMEM、pinctrl-names、Rockchip rockchip,hw phandle 编号误判已消除。
+
+#### 本轮失败
+
+比较器报告：
+`/display-subsystem:memory-region: expected a single phandle, got 10 11`。
+
+`memory-region` 在该 DTS 中是直接 phandle 列表，可同时引用多个 reserved-memory 区域；不能归入单 phandle 属性。
+
+#### 修复
+
+提交 `07b5571b2a0b2e389d0b096a9e6239a060793db8`：
+- 将 `memory-region` 从单 phandle 集合移到直接 phandle 列表集合；
+- 对每个 phandle 分别解析目标节点路径；
+- 不丢弃列表项，不放宽差异白名单。
+
+#### 额外发现
+
+当前 workflow 的成功分支报告仍引用旧文件名 `rk3566-panther-x2.candidate.decompiled.dts`，而实际产物已拆分为 `vendor-candidate` 与 `irqname-candidate`。该 grep 只影响附加报告内容，不影响 DTB 构建或比较器本身；应在下一次 workflow 清理中改为分别检查两份 decompiled DTS。
+
+当前判定：两份候选编译通过；语义审计尚未完成。下一步继续用真实 DTB 暴露属性 schema 覆盖缺口，但每次修正均需以 DTS 实际结构为依据。
