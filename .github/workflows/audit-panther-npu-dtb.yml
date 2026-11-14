@@ -73,7 +73,7 @@ jobs:
           make -C "$source_tree" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
           make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             rockchip/rk3566-panther-x2.dtb
-          cp "$source_tree/rockchip/rk3566-panther-x2.dtb" \
+          cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
             work/reports/rk3566-panther-x2.source-baseline.dtb
           dtc -I dtb -O dts -s \
             -o work/reports/rk3566-panther-x2.source-baseline.dts \
@@ -163,7 +163,7 @@ jobs:
             cp work/reports/rk3566-panther-x2.candidate.dts "$board_dts"
             make -C "$source_tree" -j2 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
               rockchip/rk3566-panther-x2.dtb
-            cp "$source_tree/rockchip/rk3566-panther-x2.dtb" \
+            cp "$source_tree/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb" \
               work/reports/rk3566-panther-x2.candidate.dtb
             dtc -I dtb -O dts -s \
               -o work/reports/rk3566-panther-x2.candidate.decompiled.dts \
