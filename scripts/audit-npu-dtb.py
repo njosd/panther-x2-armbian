@@ -32,7 +32,7 @@ PROVIDER_CELL_PROPERTIES = {
 SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells"}
 SINGLE_PHANDLE_PROPERTIES = {
     "interrupt-parent", "operating-points-v2", "memory-region",
-    "cpu", "rockchip,grf", "rockchip,pmu",
+    "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
 }
 PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
