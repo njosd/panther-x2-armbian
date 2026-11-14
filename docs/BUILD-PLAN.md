@@ -649,3 +649,17 @@ Ophub 6.12.81 Panther X2 DTS 已有 `vdd_npu`、`vdd_logic`、`vdd_cpu`；SoC DT
 工作流先构建未修改的 6.12.81 Panther X2 DTB，提取并反编译校验过 SHA256 的 6.12.81 RK35xx 发布包 DTB，再核对源码 DTSI、源码构建 DTB、发布 DTB。只有在 6.12.81 源码确实具备 SoC 级 NPU 节点时，才会在 CI 临时副本追加板级候选 fragment；如果节点缺失则报告 `SKIPPED`，不拼接不完整节点。
 
 本工作流只做 CI source-readiness audit，不修改产品 DTS、内核包或 9.6。6.18.63 仍仅属于此前外置 RKNPU 模块构建研究线，不参与本次 NPU DTB 适配决策。
+
+
+### 3.25 6.12.81 NPU DTB 审计第 1 次运行结果（2026-11-14）
+
+Actions run `43599704496` / job `132461624075` 使用固定源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，确认 Makefile 版本为 6.12.81。
+
+**本轮明确验证：**
+- Panther X2 板级 DTS 文件存在，但本身没有 `rknpu` / `bus_npu` 启用片段。
+- RK356x SoC DTSI（`rk356x.dtsi`）确实定义 `rknpu`、NPU OPP 表、`bus_npu`、bus OPP 表和 `rknpu_mmu`。此前报告称 6.12.81 缺少 SoC NPU 节点，是路径检查错误，现已纠正。
+- NPU 与 MMU 默认状态均为 disabled；bus_npu 默认 disabled。这与 Panther X2 板级需要显式启用的判断一致。
+- 源码审计步骤成功；DTB 构建步骤失败于 Kbuild 目标写法：从 kernel top-level Makefile 调用时传入了完整 `arch/arm64/boot/dts/rockchip/...` 路径，顶层规则又拼接架构目录，最终产生重复路径 `arch/arm64/boot/dts/arch/arm64/boot/dts/rockchip/...`。这不是 DTS 语法或 NPU 硬件兼容错误。
+- 已将目标改为顶层 Kbuild 接受的 `rockchip/rk3566-panther-x2.dtb`，提交 `b369638c6f3db80c11f6dd8f59261beb5c0c7b8b`。
+
+**重要补充：** 当前 workflow 中候选板级片段尚未编译成功，因此不能声称候选 DTB 已生成。下一轮应重新运行，确认基线 DTB、发布包 DTB 提取与候选 DTB 编译结果；若出现 DTC warnings，再逐项分析是否来自原 DTS 或新增 NPU 片段。
