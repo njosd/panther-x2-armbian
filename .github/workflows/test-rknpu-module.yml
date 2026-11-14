@@ -1,0 +1,170 @@
+name: Test RK3566 RKNPU module against Ophub 6.18.63
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install cross-build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y             bc bison build-essential device-tree-compiler dpkg-dev             flex gcc-aarch64-linux-gnu libelf-dev libssl-dev
+
+      - name: Fetch fixed kernel package and RKNPU source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p work/kernel work/headers work/rknpu work/reports
+
+          curl --fail --location --retry 3 --retry-delay 3 \
+            "${KERNEL_PACKAGE_URL}" -o work/kernel/kernel.tar.gz
+          echo "${KERNEL_PACKAGE_SHA256}  work/kernel/kernel.tar.gz" | sha256sum --check
+
+          mapfile -t header_members < <(
+            tar -tzf work/kernel/kernel.tar.gz |
+              grep -E "^6\\.18\\.63/header-[^/]+\\.tar\\.gz$"
+          )
+          if [[ "${#header_members[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one 6.18.63 header archive; found ${#header_members[@]}"
+            tar -tzf work/kernel/kernel.tar.gz | grep -E 'header|headers' | tee work/reports/header-members.txt || true
+            exit 1
+          fi
+
+          tar -xOzf work/kernel/kernel.tar.gz "${header_members[0]}" > work/kernel/headers.tar.gz
+          gzip -t work/kernel/headers.tar.gz
+          tar -xzf work/kernel/headers.tar.gz -C work/headers
+
+          mapfile -t debs < <(find work/headers -type f -name '*.deb' -print)
+          if [[ "${#debs[@]}" -gt 0 ]]; then
+            mkdir -p work/headers/root
+            for deb in "${debs[@]}"; do
+              dpkg-deb -x "$deb" work/headers/root
+            done
+            header_root=work/headers/root
+          else
+            header_root=work/headers
+          fi
+
+          mapfile -t auto_conf < <(
+            find -L "$header_root" -type f -path '*/include/config/auto.conf' -print
+          )
+          if [[ "${#auto_conf[@]}" -ne 1 ]]; then
+            echo "::error::Could not identify exactly one prepared kernel build tree"
+            find work/headers -maxdepth 5 -type f \( -name Makefile -o -name Module.symvers -o -name kernel.release \) -print | tee work/reports/header-layout.txt
+            exit 1
+          fi
+          kdir="$(dirname "$(dirname "$(dirname "${auto_conf[0]}")")")"
+          [[ -s "$kdir/Makefile" ]] || { echo "::error::Kernel Makefile missing at $kdir"; exit 1; }
+          echo "$kdir" > work/reports/kernel-build-dir.txt
+
+          curl --fail --location --retry 3 \
+            "https://codeload.github.com/w568w/rknpu-module/tar.gz/${RKNPU_MODULE_COMMIT}" \
+            -o work/rknpu-source.tar.gz
+          mkdir -p work/rknpu/unpack
+          tar -xzf work/rknpu-source.tar.gz --strip-components=1 -C work/rknpu/unpack
+
+          {
+            echo "Kernel package: ${KERNEL_PACKAGE_VERSION}"
+            echo "Kernel package SHA256: ${KERNEL_PACKAGE_SHA256}"
+            echo "Header member: ${header_members[0]}"
+            echo "Kernel build tree: $kdir"
+            echo "RKNPU repository: https://github.com/w568w/rknpu-module"
+            echo "RKNPU commit: ${RKNPU_MODULE_COMMIT}"
+            echo "RKNPU package version: 0.9.8"
+            echo "Cross compiler: $(aarch64-linux-gnu-gcc --version | head -n1)"
+            echo "Kernel release: $(cat "$kdir/include/config/kernel.release" 2>/dev/null || true)"
+            echo "Module.symvers: $([[ -s "$kdir/Module.symvers" ]] && echo present || echo missing)"
+          } | tee work/reports/build-inputs.txt
+
+      - name: Build RKNPU module and device-tree overlay
+        id: build
+        shell: bash
+        run: |
+          set -uo pipefail
+          kdir="$(cat work/reports/kernel-build-dir.txt)"
+          src="$PWD/work/rknpu/unpack"
+          mkdir -p work/reports
+
+          set +e
+          make -C "$kdir" M="$src" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- V=1 modules \
+            2>&1 | tee work/reports/module-build.log
+          module_rc=${PIPESTATUS[0]}
+          set -e
+          echo "module_rc=$module_rc" >> "$GITHUB_OUTPUT"
+
+          if [[ "$module_rc" -eq 0 ]]; then
+            find "$src" -maxdepth 2 -type f -name 'rknpu.ko' -exec cp {} work/reports/ \;
+            if [[ -s work/reports/rknpu.ko ]]; then
+              modinfo work/reports/rknpu.ko > work/reports/module-modinfo.txt
+              modinfo -F vermagic work/reports/rknpu.ko > work/reports/module-vermagic.txt
+              modinfo -F depends work/reports/rknpu.ko > work/reports/module-depends.txt
+            else
+              echo "::warning::Build returned success but rknpu.ko was not found"
+              module_rc=2
+              echo "module_rc=$module_rc" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          set +e
+          cpp -nostdinc -I "$kdir/include" -undef -x assembler-with-cpp \
+            "$src/dts/rk3566-rknpu-overlay.dts" \
+            work/reports/rk3566-rknpu-overlay.preprocessed.dts \
+            2>&1 | tee work/reports/overlay-cpp.log
+          cpp_rc=${PIPESTATUS[0]}
+          if [[ "$cpp_rc" -eq 0 ]]; then
+            dtc -@ -I dts -O dtb \
+              -o work/reports/rk3566-rknpu.dtbo \
+              work/reports/rk3566-rknpu-overlay.preprocessed.dts \
+              2>&1 | tee work/reports/overlay-dtc.log
+            dtc_rc=${PIPESTATUS[0]}
+          else
+            dtc_rc=99
+          fi
+          set -e
+          echo "overlay_cpp_rc=$cpp_rc" >> "$GITHUB_OUTPUT"
+          echo "overlay_dtc_rc=$dtc_rc" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "RKNPU module build exit: $module_rc"
+            echo "DT overlay CPP exit: $cpp_rc"
+            echo "DT overlay DTC exit: $dtc_rc"
+            echo
+            echo "This is a compile-only test. No module was loaded and no device was modified."
+          } | tee work/reports/result-summary.txt
+
+      - name: Upload compile report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rknpu-6.18.63-cross-build-report
+          path: |
+            work/reports/
+            work/rknpu-source.tar.gz
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce compile result
+        if: always()
+        shell: bash
+        env:
+          MODULE_RC: ${{ steps.build.outputs.module_rc }}
+          OVERLAY_CPP_RC: ${{ steps.build.outputs.overlay_cpp_rc }}
+          OVERLAY_DTC_RC: ${{ steps.build.outputs.overlay_dtc_rc }}
+        run: |
+          set -euo pipefail
+          [[ "${MODULE_RC:-99}" == "0" ]] || { echo "::error::RKNPU module build failed"; exit 1; }
+          [[ "${OVERLAY_CPP_RC:-99}" == "0" ]] || { echo "::error::DT overlay preprocessing failed"; exit 1; }
+          [[ "${OVERLAY_DTC_RC:-99}" == "0" ]] || { echo "::error::DT overlay compilation failed"; exit 1; }
