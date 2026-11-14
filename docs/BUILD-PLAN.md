@@ -122,8 +122,9 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - [x] 提取 DTB 二进制并反编译；启动关键节点已与固定 Ophub DTS 静态抽查，完整等价与 provenance 仍待验证。详见 `docs/DTB-AUDIT.md`。
 - [x] 已找到 Vendor 6.1 RKNPU 驱动源码及 Panther X2 DTS 启用证据。
 - [x] 已找到 RK3566 mainline 外置 RKNPU 模块候选及其 6.19.3 实测声明。
-- [ ] 审计外置模块的固定 commit、许可证、内核 API 依赖、overlay 与 RKNN Runtime 配套。
-- [ ] 在 GitHub Actions 中以 Ophub 6.18.63 headers 进行纯编译验证。
+- [x] 锁定外置模块 commit、许可证并完成第一轮源码结构审计；内核 API 兼容性仍待正确工具链复测。
+- [ ] 使用 GCC 15.3.1 在 GitHub Actions 重新编译 RKNPU 模块，并审查真实 API/符号错误。
+- [ ] 对 overlay 警告做基树上下文分析，并与 Panther X2 基础 DTB 合并验证。
 - [ ] TF/SD 控制器与 USB host 节点按 Panther X2 实际板级映射进一步核对。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
@@ -142,17 +143,19 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 不因首次网络失败就反复刷写；先保留日志并定位 U-Boot、DTB、GMAC/PHY、NetworkManager 各层。
 
 
-### 3.7 RKNPU 6.18.63 纯编译验证工作流（已创建，待手动运行）
+### 3.7 RKNPU 6.18.63 纯编译验证工作流（首轮运行已完成，工具链修正待复测）
 
-新增 `.github/workflows/test-rknpu-module.yml`，仅允许 `workflow_dispatch`，不会因 push 自动运行。工作流：
-- 下载 Ophub 6.18.63 kernel package，并再次校验固定 SHA-256；
-- 从内层 `header-6.18.63-ophub.tar.gz` 提取 headers/build tree；
-- 下载固定 RKNPU module commit `a8792fe6b633f90cf2c6808267cac327537ab4cf`；
-- 使用 Ubuntu 24.04 x86_64 runner 和 AArch64 交叉编译器尝试构建 `rknpu.ko`；
-- 独立预处理并编译 RK3566 NPU DT overlay；
-- 保存编译日志、模块 vermagic/depends、DTBO 和结果摘要 artifact；
-- 不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
+新增 `.github/workflows/test-rknpu-module.yml`，仅允许 `workflow_dispatch`，不会因 push 自动运行。工作流下载固定 Ophub 6.18.63 内核包、提取 headers/build tree、下载固定 RKNPU 源码、交叉编译模块及独立编译 overlay，并归档日志。
 
-输入版本已写入 `config/versions.env`：`RKNPU_MODULE_COMMIT=a8792fe6b633f90cf2c6808267cac327537ab4cf`。工作流创建于 commit `d743ef36a78786647db5b2e9b42a4d8189028f9d`；固定源码变量补齐于 `fe89c25054838c7b7af6953cdccb410102d75641`。
+首轮运行：[43561086372](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372)，Job [132344685076](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372/job/132344685076)，artifact ID `14100460631`。
 
-**状态：工作流文件和固定输入已提交，尚未执行。** 只有手动运行并审阅 artifact 后，才能判断 6.18.63 编译兼容性。若失败，先根据首个编译错误定位 API/headers 问题，不自动切换内核版本或修改 BSP。
+**首轮已确认：**
+- 内核包 SHA-256 校验通过；headers/build tree 可用，`Module.symvers` 存在；
+- kernel release 为 `6.18.63-ophub`；
+- 固定 RKNPU 源码 commit 正确下载；
+- 首轮模块编译未进入驱动 API 兼容性判断：Ophub 内核由 Arm GNU Toolchain GCC 15.3.1 构建，而测试误用 Ubuntu GCC 13.3.0，后者不识别内核编译参数 `-fmin-function-alignment=4`；
+- DT overlay CPP 与 DTC 均返回成功并生成 DTBO，但有 `reg_format`、`avoid_default_addr_size`、`interrupts_property` 等警告。该结果只证明语法产物生成，不证明 overlay 与 Panther X2 基础 DTB 合并正确或硬件资源映射正确。
+
+**工具链修正：** 后续工作流已改为下载 Arm GNU Toolchain 15.3.Rel1（目标前缀 `aarch64-none-linux-gnu-`），与内核构建器报告的 GCC 15.3.1 对齐。修正提交：`9c0ef930af035307d60006c7ae03b3ff3a630a6d`。该下载步骤尚未由 Actions 实际执行验证。
+
+下一次运行应先确认工具链下载成功且版本确为 15.3.1，再观察真正的驱动编译错误。overlay 警告必须独立处理，后续还要将 overlay 与 Panther X2 实际基础 DTB 做合并/反编译审查。全过程仍然不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
