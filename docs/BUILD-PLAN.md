@@ -213,3 +213,15 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 纯 CI 编译验证，未在 Panther X2 加载或安装模块。
 
 下一步不应通过伪造 Module.symvers 条目或忽略 unresolved symbol 让模块“通过”。应先验证 headers 包本身的符号表完整性及其构建来源；如果能取得与目标内核完全匹配的完整源码/构建输出，再用其真实 Module.symvers 重新构建外置模块。即使如此，仍需后续检查 vermagic、modversions、模块依赖、设备树资源和实机驱动加载。
+
+
+### 3.11 第九轮后续：追查 prepared kernel build artifacts（待运行）
+
+第九轮已证实配置与源码声明/导出一致，但 headers 的 `Module.symvers` 缺少 `pm_runtime_force_resume`。为避免仅凭符号表作出过早结论，下一轮只读检查 prepared build tree 中的 `drivers/base/power/runtime.o`、`.runtime.o.cmd`、`System.map`、`vmlinux`、`modules.builtin` 和 `modules.order`，并尝试提取 suspend/resume 符号。
+
+判断方法：
+- runtime.o 或 vmlinux 中存在 resume、而 Module.symvers 缺少：重点调查 Module.symvers 生成或发布打包；
+- runtime.o 中没有 resume：检查对象构建时实际使用的配置、源码及命令记录，确认是否复用了旧对象；
+- 对象和完整映像不存在：headers 包不足以证明实际内核导出情况，应寻找对应的完整构建产物或可信二进制符号信息。
+
+本步骤只读取已有 CI 下载的 build tree，不重建内核、不生成伪造符号、不绕过 MODPOST。
