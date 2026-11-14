@@ -365,3 +365,59 @@ This narrows the likely minimal board-DTS delta to those fragments, but does **n
 - actual regulator, IRQ, clocks and power-domain probe behavior on hardware.
 
 No DTS patch has been created or applied. All conclusions here are source-level/static comparisons only.
+
+
+## 12. Panther X2 NPU OPP, regulator and DMA/IOMMU static audit (2026-11-14)
+
+All checks below compare the pinned Ophub 6.12.81 source commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` with the Panther X2 Vendor 6.1 DTS snapshot `2ceb614fc294b4832268ec3e50716e7e9d3f1e8b`. These are source-level checks, not electrical or hardware validation.
+
+### 12.1 NPU OPP and PMIC voltage envelopes
+
+The shared RK356x NPU OPP table in `rk356x.dtsi` provides:
+- NPU frequency points from 200 MHz through 1 GHz (the 1 GHz point is marked disabled in the inspected table);
+- nominal NPU voltage requirements from 850 mV through 1.0 V for the enabled high-frequency points;
+- OPP selection based on supported-hardware, leakage/PVTM/MBIST and NPU OPP-info NVMEM cells.
+
+Panther X2's `vdd_npu` regulator is declared with a 500 mV minimum, 1.35 V maximum and 900 mV initial voltage. Its declared voltage envelope therefore includes the NPU OPP nominal range (up to 1.0 V). This is a static DT range comparison only; it does not prove the physical PMIC rail, board power integrity, silicon bin or actual voltage transitions are correct.
+
+The NPU bus OPP table has 700/900/1000 MHz entries with nominal voltage requirements of 875–950 mV (1 GHz entry exists in the table). Panther X2 `vdd_logic` is declared 500 mV–1.35 V with 900 mV initial voltage, so its declared range also covers those nominal values. The `bus_npu` node uses `bus-supply = <&vdd_logic>` and `pvtm-supply = <&vdd_cpu>`; `vdd_cpu` is declared 800 mV–1.15 V.
+
+### 12.2 Exact bus_npu policy and driver path
+
+The RK356x SoC DTSI sets `rockchip,busfreq-policy = "clkfreq"` and provides the `bus` clock plus the bus OPP table. The pinned 6.12.81 `drivers/devfreq/rockchip_bus.c`:
+- matches `rockchip,rk3568-bus`;
+- obtains clock `bus` and regulator `bus`;
+- initializes the OPP table using regulator name `pvtm`;
+- selects the current OPP and registers a clock-rate notifier;
+- adjusts the bus regulator voltage before an upward clock-rate change and after a downward change.
+
+Thus the Panther Vendor board fragment's `bus-supply` and `pvtm-supply` are not decorative properties: they satisfy the exact `clkfreq` driver's regulator and OPP/PVTM path. The source-level configuration is internally coherent. Whether the boot firmware/SCMI clock provider exposes the expected clock and whether PVTM calibration values are valid on this particular board remain runtime questions.
+
+### 12.3 Single NPU regulator is supported
+
+The pinned 6.12.81 RKNPU driver calls `devm_regulator_get_optional(dev, "rknpu")` and separately attempts optional `"mem"`. The Rockchip OPP helper adds the second regulator name only if the device node has `mem-supply`. Panther X2 Vendor DTS provides `rknpu-supply` and no `mem-supply`, which is a supported single-regulator topology. H96's second memory rail must not be copied to Panther X2 without board evidence.
+
+### 12.4 DMA mask and 4 GB RAM: correct the risk statement
+
+The RK356x RKNPU driver config explicitly sets `dma_mask = DMA_BIT_MASK(32)`. This means the driver/device is limited to a 32-bit DMA address aperture. A 4 GB physical address space spans 0x00000000–0xffffffff, so “the board has 4 GB RAM” alone does **not** prove an incompatibility or require disabling IOMMU. With IOMMU enabled, the device normally uses a 32-bit IOVA aperture while the IOMMU maps backing physical pages; the exact DMA/IOMMU integration and reserved-memory fallback still need verification.
+
+When IOMMU is disabled, this driver attempts `of_reserved_mem_device_init()`; the packaged Panther X2 DTB audit found an `rknpu` shared-dma-pool reservation. Therefore an IOMMU-disabled fallback may be described by the DTB, but its exact base/size, placement below the 32-bit DMA limit, CMA interaction and usable capacity must be inspected before treating it as a viable fallback.
+
+**Correction to the earlier risk list:** do not carry forward the blanket claim that 4 GB RAM is a likely IOMMU blocker. The confirmed constraint is the driver's 32-bit DMA mask; actual compatibility depends on the memory map, IOVA configuration, IOMMU driver and reserved pool. No basis currently exists to recommend disabling IOMMU pre-emptively.
+
+### 12.5 NVMEM OPP references
+
+All six NPU OPP NVMEM phandles referenced by the shared RK356x DTSI (`npu_leakage`, `core_pvtm`, `mbist_vmin`, `npu_opp_info`, `specification_serial_number`, `remark_spec_serial_number`) are defined in the same SoC DTSI. There is no unresolved phandle at source level. Whether the Panther X2's OTP/eFuse data is populated and decoded as expected still requires runtime logs and silicon validation.
+
+### 12.6 Current risk disposition
+
+| Topic | Static result | Still unverified |
+|---|---|---|
+| NPU OPP vs vdd_npu | Declared voltage ranges overlap | Actual rail stability and silicon bin |
+| bus OPP vs vdd_logic | Declared voltage ranges overlap | Actual transitions and clock provider |
+| bus_npu driver | `clkfreq` path and supplies match source | Probe success on board |
+| NPU supply | Single `rknpu` supply supported | Physical rail behavior |
+| 4 GB RAM / IOMMU | 32-bit DMA aperture; 4 GB alone is not proof of failure | IOVA, memory map, pool placement |
+| OPP NVMEM cells | All phandles defined | Actual OTP contents and calibration |
+
+No DTS changes or deployable patches were made. The next safe engineering step is a temporary CI-only candidate-DTS build and static DTB comparison, keeping the product DTS untouched. Hardware probe and RKNN runtime tests remain separate, explicitly authorized stages.
