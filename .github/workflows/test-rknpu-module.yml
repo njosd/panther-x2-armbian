@@ -194,7 +194,7 @@ jobs:
           if [[ "$host_tools_rc" -eq 0 ]]; then
             cp "$src/Kbuild" work/reports/Kbuild.upstream
             sed -i 's@src/rknpu_debugger.o src/rknpu_devfreq.o@src/rknpu_debugger.o@' "$src/Kbuild"
-            printf '\\nccflags-y += -DRKNPU_NO_DEVFREQ\\n' >> "$src/Kbuild"
+            printf '\nccflags-y += -DRKNPU_NO_DEVFREQ\n' >> "$src/Kbuild"
             diff -u work/reports/Kbuild.upstream "$src/Kbuild" \
               > work/reports/Kbuild.devfreq-disabled.patch || true
             cat work/reports/Kbuild.devfreq-disabled.patch
