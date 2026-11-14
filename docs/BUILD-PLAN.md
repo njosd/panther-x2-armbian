@@ -506,3 +506,23 @@ CI 下载的 Ophub RK35xx config-6.12 快照长度为 258,639 bytes，其 Git bl
 本次修正提交：`10fdd8961df8ecd21b2988501b8e18f00584de61`。尚未运行新版 workflow，所有 Flippy 和 DTB 结论待下一轮 CI。
 
 **当前判断更新：** Ophub RK35xx 标准 6.12.81 内建 RKNPU 的证据已经成立（发布包 modules.builtin + 官方 config 快照双重佐证）；但 Panther X2 实际发布 DTB 是否启用 NPU/MMU、供电绑定是否正确仍未知。因此“内核驱动存在”已从推测升级为已验证；“Panther X2 NPU 可正常 probe/运行”仍未验证。继续不安装内核、不加载模块、不修改 9.6。
+
+
+### 3.20 双资产扫描第二轮结果与审计产物优化（2026-11-14）
+
+CI run 43596798887 / job 132452929530：
+
+- 标准版发布包 SHA256 与预期一致：`72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`；文件大小 141,437,450 bytes。
+- Flippy 版在同一轮也通过了下载与完整性校验（具体值沿用 config/versions.env 中固定资产记录）。
+- source/config reference 阶段通过：源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，Makefile 版本 6.12.81；配置快照 Git blob SHA `dee127c6c644f38426eeb28000d73536084d34a3` 与预期一致。
+- workflow 成功完成嵌套归档扫描、汇总文件生成和 artifact 上传；但当轮脚本没有将扫描摘要输出到 job log，且 artifact 上传范围误包含解包树及源码树，最终 artifact 达 1,147,037,510 bytes。GitHub 提示存在大量同路径文件覆盖，导致无法通过当前 artifact 下载工具（单文件上限 512 MiB）直接取回并复核摘要。
+- 因此本轮**尚不记录** Flippy 的 RKNPU 状态、两个包的 DTB 内容或 NPU 节点属性；不能把“扫描执行完成”误写成“结果已人工复核”。
+
+#### 下一轮审计脚本调整
+
+提交 `8dece11a5307176ed59c8c98e32b7c54cbd9f010`：
+- artifact 仅上传 `work/reports/`、`work/standard/reports/`、`work/flippy/reports/`，不再上传原始内核包、完整解包树或源码 checkout；
+- 新增 concise findings 日志步骤，将标准版与 Flippy 版的资产元数据、嵌套归档索引、kernel.release、Module.symvers、modules.builtin/RKNPU、DTB 清单及 NPU 属性直接输出到 job log；
+- 将此前 `grep | head` 改为 `grep | sed`，避免大文件扫描时大量 Broken pipe 噪声。
+
+下一轮应重点人工核对标准版与 Flippy 版各自的 `modules.builtin`、实际 Panther X2/RK3566 DTB、`rknpu` 与 `rknpu_mmu` 状态、电源绑定和 IRQ 映射。source-to-binary provenance 仍未闭环。整个流程仍为 CI 只读审计，不接触 Panther X2 实机。
