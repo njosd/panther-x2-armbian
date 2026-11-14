@@ -580,3 +580,41 @@ CI run 43597391230 / job 132454730145 成功；artifact `14114622745` 已下载�
 - 后续若确认可做最小板级补丁，先在 CI 编译 DTB 并做静态 binding/资源核查，再评估实机验证所需的回滚与备份条件。
 
 本轮结论状态：发布包驱动存在、DTB 中 NPU/MMU disabled、两个变体 DTB 相同，均为已验证；NPU 实际硬件 probe、RKNN runtime 兼容、Immich 能否调用 NPU 仍未验证。
+
+
+### 3.22 Panther X2 NPU board-DTS source trace（2026-11-14）
+
+本轮对照了 Ophub 6.12.81、Armbian Rockchip Vendor 6.1、unifreq Panther X2 原始 DTS、后续 Panther X2 Vendor BSP DTS，以及最早 BSP 集成 patch。
+
+#### 已确认的来源关系
+
+1. Panther X2 原始板级 DTS 由 Ophub 于 2023-07-07 通过 `unifreq/linux-6.1.y` commit `afaa1a194f812e30a9faedd88d6c09e7a49d909a` 加入；文件版权标识为 `tdleiyao`。2023-07-11 commit `80101d21c55ec1c87a00a52a0c3e137a37ac7a80` 明确调整 USB host 并启用 GPU。原始 Panther DTS 定义了 PMIC 的 `vdd_npu`，但没有启用 `&rknpu`、`&rknpu_mmu` 或 `&bus_npu`。
+2. Ophub 6.12.81 的 SoC `rk356x.dtsi` 已定义 NPU、IOMMU、NPU bus、时钟、复位、电源域、OPP 等资源，但这些 SoC 节点默认 disabled。
+3. Panther X2 Vendor 6.1 板级 DTS（Lyric-c/panther-x2 固定快照）后来加入：
+   - `&rknpu`: `rknpu-supply = <&vdd_npu>` + `status = "okay"`
+   - `&rknpu_mmu`: `status = "okay"`
+   - `&bus_npu`: `bus-supply = <&vdd_logic>`、`pvtm-supply = <&vdd_cpu>`、`status = "okay"`
+4. 同一 Panther X2 Vendor DTS 没有设置 `mem-supply`。因此不能把 H96 Max V56 的 `mem-supply = <&vdd_logic>` 复制到 Panther X2；H96 的双 regulator 连接是板型特定实现。
+5. 最早 Panther BSP flattened patch 也包含相同的 NPU/MMU/bus enablement 和 supply phandle，并额外写入 `interrupt-names = "npu_irq"`。该 patch 的原始 DTS/DTB 输入哈希文件仍未找到，因此结果配置可审计，但其精确作者来源仍未闭环。
+
+#### IRQ 绑定更正
+
+对比了固定的 Armbian/Rockchip 6.1 BSP 驱动 commit `5280f9b4336199c4025c8eed894d2b4e2268dcc6` 与 Ophub 6.12.81 驱动 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `rknpu_register_irq()`：
+
+- 两者均优先按 `npu_irq` 名称查找；
+- 在 Linux >= 6.1 的代码路径中，如果没有命名资源，会回退到 `platform_get_irq(pdev, 0)`；
+- 因此显式 `interrupt-names = "npu_irq"` 是更清晰、可审计的绑定，也被最早 BSP 的 CI 明确检查，但不能据此断言它是这两个确切驱动版本 probe 成功的硬性条件。
+- 实际 IRQ specifier、资源映射和 IRQ request 仍需后续验证。
+
+#### 当前可推导的最小 DTS 差异（候选，不是补丁）
+
+Ophub 6.12.81 Panther X2 DTS 已有 `vdd_npu`、`vdd_logic`、`vdd_cpu`；SoC DTSI 已有 NPU、IOMMU、bus_npu、OPP、clock/reset/power-domain 节点。对照 Panther Vendor 6.1 后，候选板级差异收敛到上述三个 fragment，而不是重新定义完整 NPU 节点或导入整套扁平 BSP DTS。
+
+这仍只是静态来源比较，不是可以直接应用的补丁。还需审查：
+- 6.12.81 包内 DTB 与参考源码 commit 的精确 provenance；
+- Panther X2 PMIC 电压范围与 NPU/bus OPP 表；
+- bus_npu devfreq/OPP 驱动路径；
+- 4 GB RAM 下启用 IOMMU 的 DMA 地址风险；
+- 实机 probe、RKNN runtime 与实际推理。
+
+没有生成或应用 DTS patch，没有修改 9.6。后续优先做固定版本的 DTS/DTB 离线构建和静态资源检查；实机验证另行授权。
