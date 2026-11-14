@@ -13,83 +13,113 @@ import subprocess
 import sys
 from pathlib import Path
 
-REFERENCE_PROPERTIES = {
-    "clocks", "assigned-clocks", "assigned-clock-parents", "resets",
-    "power-domains", "iommus", "interrupt-parent", "interrupts-extended",
-    "operating-points-v2", "memory-region", "phys", "dmas", "dma-names",
-    "mboxes", "pwms", "io-channels", "io-channel-names", "nvmem-cells",
-    "cpu", "cpu-supply", "rockchip,grf", "rockchip,pmu",
+# Provider-backed specifier arrays: each entry is a phandle followed by
+# exactly the number of argument cells declared by that provider.
+PROVIDER_CELL_PROPERTIES = {
+    "clocks": "#clock-cells",
+    "assigned-clocks": "#clock-cells",
+    "assigned-clock-parents": "#clock-cells",
+    "resets": "#reset-cells",
+    "power-domains": "#power-domain-cells",
+    "iommus": "#iommu-cells",
+    "interrupts-extended": "#interrupt-cells",
+    "phys": "#phy-cells",
+    "dmas": "#dma-cells",
+    "mboxes": "#mbox-cells",
+    "pwms": "#pwm-cells",
+    "io-channels": "#io-channel-cells",
+    "nvmem-cells": "#nvmem-cell-cells",
+}
+SINGLE_PHANDLE_PROPERTIES = {
+    "interrupt-parent", "operating-points-v2", "memory-region",
+    "cpu", "rockchip,grf", "rockchip,pmu",
 }
 PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
 
-def run_fdtget(dtb: Path, *args: str, required: bool = True) -> str:
-    proc = subprocess.run(
-        ["fdtget", str(dtb), *args], text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    if proc.returncode:
-        if required:
-            raise RuntimeError(
-                f"fdtget failed ({' '.join(args)}): {proc.stderr.strip()}"
-            )
-        return ""
-    return proc.stdout.strip()
-
-
-def walk_nodes(dtb: Path, node: str = "/") -> list[str]:
-    children = run_fdtget(dtb, "-l", node, required=False).split()
-    found = [node]
-    for child in children:
-        path = ("/" + child) if node == "/" else (node.rstrip("/") + "/" + child)
-        found.extend(walk_nodes(dtb, path))
-    return found
-
-
-def property_names(dtb: Path, node: str) -> list[str]:
-    return run_fdtget(dtb, "-p", node, required=False).split()
-
-
-def phandle_map(dtb: Path) -> dict[int, str]:
-    result: dict[int, str] = {}
-    for node in walk_nodes(dtb):
-        raw = run_fdtget(dtb, "-t", "x", node, "phandle", required=False)
-        if not raw:
-            raw = run_fdtget(dtb, "-t", "x", node, "linux,phandle", required=False)
-        if raw:
-            value = int(raw.split()[0], 16)
-            if value in result:
-                raise RuntimeError(
-                    f"Duplicate phandle 0x{value:x}: {result[value]} and {node}"
-                )
-            result[value] = node
-    return result
-
-
 def is_reference_property(name: str) -> bool:
     return (
-        name in REFERENCE_PROPERTIES
+        name in PROVIDER_CELL_PROPERTIES
+        or name in SINGLE_PHANDLE_PROPERTIES
         or name.endswith("-supply")
         or name.endswith("-gpios")
         or name.startswith("pinctrl-")
-        or name.endswith("-parent") and name != "interrupt-parent"
+        or name.endswith("-parent")
     )
+
+
+def normalize_specifier_list(
+    raw: list[int], handles: dict[int, str], dtb: Path, prop_name: str,
+    cell_property: str,
+) -> str:
+    out: list[str] = []
+    pos = 0
+    while pos < len(raw):
+        phandle = raw[pos]
+        target = handles.get(phandle)
+        if target is None:
+            raise RuntimeError(
+                f"{dtb}:{prop_name}: unknown provider phandle 0x{phandle:x}"
+            )
+        cell_raw = run_fdtget(dtb, "-t", "x", target, cell_property, required=False)
+        if not cell_raw:
+            raise RuntimeError(
+                f"{dtb}:{prop_name}: provider {target} lacks {cell_property}"
+            )
+        nargs = int(cell_raw.split()[0], 16)
+        if pos + 1 + nargs > len(raw):
+            raise RuntimeError(
+                f"{dtb}:{prop_name}: truncated specifier for provider {target}"
+            )
+        args = raw[pos + 1:pos + 1 + nargs]
+        out.append(f"@{target}(" + ",".join(f"0x{x:x}" for x in args) + ")")
+        pos += 1 + nargs
+    return " ".join(out)
 
 
 def normalized_property(dtb: Path, node: str, name: str,
                         handles: dict[int, str]) -> str | None:
     if name in PHANDLE_PROPERTIES:
-        # The numeric handle itself is an implementation detail, not semantics.
         return None
-    if is_reference_property(name):
-        raw = run_fdtget(dtb, "-t", "x", node, name, required=False)
-        cells = []
-        for token in raw.split():
-            value = int(token, 16)
+    if not is_reference_property(name):
+        return run_fdtget(dtb, node, name, required=False)
+
+    raw_text = run_fdtget(dtb, "-t", "x", node, name, required=False)
+    raw = [int(token, 16) for token in raw_text.split()]
+    if not raw:
+        return ""
+
+    if name in PROVIDER_CELL_PROPERTIES:
+        return normalize_specifier_list(
+            raw, handles, dtb, f"{node}:{name}", PROVIDER_CELL_PROPERTIES[name]
+        )
+
+    if name.endswith("-gpios"):
+        return normalize_specifier_list(
+            raw, handles, dtb, f"{node}:{name}", "#gpio-cells"
+        )
+
+    if name.startswith("pinctrl-"):
+        targets = []
+        for value in raw:
             target = handles.get(value)
-            cells.append(f"@{target}" if target else f"0x{value:x}")
-        return " ".join(cells)
-    return run_fdtget(dtb, node, name, required=False)
+            if target is None:
+                raise RuntimeError(
+                    f"{dtb}:{node}:{name}: unknown phandle 0x{value:x}"
+                )
+            targets.append(f"@{target}")
+        return " ".join(targets)
+
+    if len(raw) != 1:
+        raise RuntimeError(
+            f"{dtb}:{node}:{name}: expected a single phandle, got {raw_text}"
+        )
+    target = handles.get(raw[0])
+    if target is None:
+        raise RuntimeError(
+            f"{dtb}:{node}:{name}: unknown phandle 0x{raw[0]:x}"
+        )
+    return f"@{target}"
 
 
 def node_props(dtb: Path, node: str,
