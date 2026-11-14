@@ -90,7 +90,7 @@ jobs:
           outer=work/package/kernel.tar.gz
           curl --fail --location --retry 3 --retry-delay 3 "$OPHUB_RK35XX_PACKAGE_URL" -o "$outer"
           echo "$OPHUB_RK35XX_PACKAGE_SHA256  $outer" | sha256sum --check
-          mapfile -t members < <(tar -tzf "$outer" | grep -E '^6\.18\.63/dtb-rockchip-[^/]+\.tar\.gz$')
+          mapfile -t members < <(tar -tzf "$outer" | grep -E '^6\.12\.81/dtb-rockchip-[^/]+\.tar\.gz$')
           [[ "${#members[@]}" -eq 1 ]] || {
             echo "::error::Expected exactly one Panther-compatible DTB archive, found ${#members[@]}"
             tar -tzf "$outer" | grep -E 'dtb-rockchip|dtb' || true
