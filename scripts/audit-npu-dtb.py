@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
-"""Semantic comparison for CI-only Panther X2 RK3566 NPU DTB candidates.
+"""Fail-closed semantic comparison of Panther X2 NPU DTB candidates.
 
-Uses the device-tree-compiler fdtget utility. It intentionally fails closed:
-any DTB tree/property difference outside the explicit Panther NPU board fragment
-allowlist is reported as an unexpected change.
+Device Tree Compiler may renumber phandles when a candidate begins referencing
+previously unreferenced nodes. Compare reference targets by node path rather
+than raw phandle numbers, while preserving argument cells and all other data.
 """
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
 
+REFERENCE_PROPERTIES = {
+    "clocks", "assigned-clocks", "assigned-clock-parents", "resets",
+    "power-domains", "iommus", "interrupt-parent", "interrupts-extended",
+    "operating-points-v2", "memory-region", "phys", "dmas", "dma-names",
+    "mboxes", "pwms", "io-channels", "io-channel-names", "nvmem-cells",
+    "cpu", "cpu-supply", "rockchip,grf", "rockchip,pmu",
+}
+PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
-def fdtget(dtb: Path, *args: str, required: bool = True) -> str:
+
+def run_fdtget(dtb: Path, *args: str, required: bool = True) -> str:
     proc = subprocess.run(
-        ["fdtget", str(dtb), *args],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["fdtget", str(dtb), *args], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     if proc.returncode:
         if required:
@@ -30,7 +38,7 @@ def fdtget(dtb: Path, *args: str, required: bool = True) -> str:
 
 
 def walk_nodes(dtb: Path, node: str = "/") -> list[str]:
-    children = fdtget(dtb, "-l", node, required=False).split()
+    children = run_fdtget(dtb, "-l", node, required=False).split()
     found = [node]
     for child in children:
         path = ("/" + child) if node == "/" else (node.rstrip("/") + "/" + child)
@@ -38,27 +46,72 @@ def walk_nodes(dtb: Path, node: str = "/") -> list[str]:
     return found
 
 
-def node_props(dtb: Path, node: str) -> dict[str, str]:
-    names = fdtget(dtb, "-p", node, required=False).split()
-    return {name: fdtget(dtb, node, name, required=False) for name in names}
+def property_names(dtb: Path, node: str) -> list[str]:
+    return run_fdtget(dtb, "-p", node, required=False).split()
 
 
-def prop(dtb: Path, node: str, name: str) -> str:
-    return fdtget(dtb, node, name)
+def phandle_map(dtb: Path) -> dict[int, str]:
+    result: dict[int, str] = {}
+    for node in walk_nodes(dtb):
+        raw = run_fdtget(dtb, "-t", "x", node, "phandle", required=False)
+        if not raw:
+            raw = run_fdtget(dtb, "-t", "x", node, "linux,phandle", required=False)
+        if raw:
+            value = int(raw.split()[0], 16)
+            if value in result:
+                raise RuntimeError(
+                    f"Duplicate phandle 0x{value:x}: {result[value]} and {node}"
+                )
+            result[value] = node
+    return result
 
 
-def phandle(dtb: Path, node: str) -> int:
-    raw = fdtget(dtb, "-t", "x", node, "phandle", required=False)
-    if not raw:
-        raw = fdtget(dtb, "-t", "x", node, "linux,phandle")
-    return int(raw.split()[0], 16)
+def is_reference_property(name: str) -> bool:
+    return (
+        name in REFERENCE_PROPERTIES
+        or name.endswith("-supply")
+        or name.endswith("-gpios")
+        or name.startswith("pinctrl-")
+        or name.endswith("-parent") and name != "interrupt-parent"
+    )
+
+
+def normalized_property(dtb: Path, node: str, name: str,
+                        handles: dict[int, str]) -> str | None:
+    if name in PHANDLE_PROPERTIES:
+        # The numeric handle itself is an implementation detail, not semantics.
+        return None
+    if is_reference_property(name):
+        raw = run_fdtget(dtb, "-t", "x", node, name, required=False)
+        cells = []
+        for token in raw.split():
+            value = int(token, 16)
+            target = handles.get(value)
+            cells.append(f"@{target}" if target else f"0x{value:x}")
+        return " ".join(cells)
+    return run_fdtget(dtb, node, name, required=False)
+
+
+def node_props(dtb: Path, node: str,
+               handles: dict[int, str]) -> dict[str, str]:
+    result = {}
+    for name in property_names(dtb, node):
+        value = normalized_property(dtb, node, name, handles)
+        if value is not None:
+            result[name] = value
+    return result
+
+
+def prop(dtb: Path, node: str, name: str,
+         handles: dict[int, str] | None = None) -> str:
+    return normalized_property(dtb, node, name, handles or phandle_map(dtb)) or ""
 
 
 def regulator_path(dtb: Path, regulator_name: str) -> str:
-    matches = []
-    for node in walk_nodes(dtb):
-        if fdtget(dtb, node, "regulator-name", required=False) == regulator_name:
-            matches.append(node)
+    matches = [
+        node for node in walk_nodes(dtb)
+        if run_fdtget(dtb, node, "regulator-name", required=False) == regulator_name
+    ]
     if len(matches) != 1:
         raise RuntimeError(
             f"Expected exactly one regulator-name={regulator_name}, found {matches}"
@@ -69,12 +122,15 @@ def regulator_path(dtb: Path, regulator_name: str) -> str:
 def assert_supply_target(dtb: Path, consumer: str, supply_prop: str,
                          regulator_name: str) -> None:
     target = regulator_path(dtb, regulator_name)
-    actual = int(fdtget(dtb, "-t", "x", consumer, supply_prop).split()[0], 16)
-    expected = phandle(dtb, target)
-    if actual != expected:
+    handles = phandle_map(dtb)
+    actual = run_fdtget(dtb, "-t", "x", consumer, supply_prop).split()
+    if len(actual) != 1:
+        raise RuntimeError(f"{consumer}:{supply_prop} must contain exactly one phandle")
+    resolved = handles.get(int(actual[0], 16))
+    if resolved != target:
         raise RuntimeError(
-            f"{consumer}:{supply_prop} points to phandle 0x{actual:x}, "
-            f"not {regulator_name} at {target} (0x{expected:x})"
+            f"{consumer}:{supply_prop} resolves to {resolved}, "
+            f"not {regulator_name} at {target}"
         )
 
 
@@ -83,25 +139,28 @@ def compare_trees(base: Path, candidate: Path, allowed: dict[str, set[str]],
     base_nodes = set(walk_nodes(base))
     cand_nodes = set(walk_nodes(candidate))
     if base_nodes != cand_nodes:
-        missing = sorted(base_nodes - cand_nodes)
-        added = sorted(cand_nodes - base_nodes)
         raise RuntimeError(
-            f"{label}: node tree changed; added={added}, missing={missing}"
+            f"{label}: node tree changed; added={sorted(cand_nodes-base_nodes)}, "
+            f"missing={sorted(base_nodes-cand_nodes)}"
         )
 
+    base_handles = phandle_map(base)
+    cand_handles = phandle_map(candidate)
     changes: list[str] = []
     for node in sorted(base_nodes):
-        old = node_props(base, node)
-        new = node_props(candidate, node)
+        old = node_props(base, node, base_handles)
+        new = node_props(candidate, node, cand_handles)
         for name in sorted(set(old) | set(new)):
             if old.get(name) == new.get(name):
                 continue
             if name in allowed.get(node, set()):
-                changes.append(f"{node}:{name}: {old.get(name)!r} -> {new.get(name)!r}")
+                changes.append(
+                    f"{node}:{name}: {old.get(name)!r} -> {new.get(name)!r}"
+                )
             else:
                 raise RuntimeError(
-                    f"{label}: unexpected property change at {node}:{name}: "
-                    f"{old.get(name)!r} -> {new.get(name)!r}"
+                    f"{label}: unexpected semantic property change at "
+                    f"{node}:{name}: {old.get(name)!r} -> {new.get(name)!r}"
                 )
     return changes
 
@@ -113,15 +172,12 @@ def main() -> int:
     parser.add_argument("--irqname-candidate", required=True, type=Path)
     args = parser.parse_args()
 
-    bus = "/bus-npu"
-    npu = "/npu@fde40000"
-    mmu = "/iommu@fde4b000"
+    bus, npu, mmu = "/bus-npu", "/npu@fde40000", "/iommu@fde4b000"
     allowed = {
         bus: {"bus-supply", "pvtm-supply", "status"},
         npu: {"rknpu-supply", "status"},
         mmu: {"status"},
     }
-
     vendor_changes = compare_trees(
         args.baseline, args.vendor_candidate, allowed, "vendor-equivalent candidate"
     )
@@ -130,44 +186,42 @@ def main() -> int:
         args.baseline, args.irqname_candidate, irq_allowed, "IRQ-name candidate"
     )
     extension_changes = compare_trees(
-        args.vendor_candidate,
-        args.irqname_candidate,
-        {npu: {"interrupt-names"}},
-        "IRQ-name-only delta",
+        args.vendor_candidate, args.irqname_candidate,
+        {npu: {"interrupt-names"}}, "IRQ-name-only delta",
     )
 
     for candidate, label in (
         (args.vendor_candidate, "vendor-equivalent"),
         (args.irqname_candidate, "IRQ-name"),
     ):
+        handles = phandle_map(candidate)
         for node in (bus, npu, mmu):
-            if prop(candidate, node, "status") != "okay":
+            if prop(candidate, node, "status", handles) != "okay":
                 raise RuntimeError(f"{label}: {node} is not status=okay")
-
         assert_supply_target(candidate, bus, "bus-supply", "vdd_logic")
         assert_supply_target(candidate, bus, "pvtm-supply", "vdd_cpu")
         assert_supply_target(candidate, npu, "rknpu-supply", "vdd_npu")
 
-        # Board fragments must not silently replace the SoC's resource topology.
         for name in (
             "interrupts", "clocks", "resets", "power-domains",
             "operating-points-v2", "iommus",
         ):
-            if prop(candidate, npu, name) != prop(args.baseline, npu, name):
-                raise RuntimeError(f"{label}: NPU {name} differs from SoC baseline")
+            if prop(candidate, npu, name, handles) != prop(args.baseline, npu, name):
+                raise RuntimeError(f"{label}: NPU {name} target/specifier differs from baseline")
         for name in ("clocks", "operating-points-v2"):
-            if prop(candidate, bus, name) != prop(args.baseline, bus, name):
-                raise RuntimeError(f"{label}: bus_npu {name} differs from SoC baseline")
-        if prop(candidate, mmu, "interrupts") != prop(args.baseline, mmu, "interrupts"):
-            raise RuntimeError(f"{label}: IOMMU IRQ differs from SoC baseline")
+            if prop(candidate, bus, name, handles) != prop(args.baseline, bus, name):
+                raise RuntimeError(f"{label}: bus_npu {name} differs from baseline")
+        if prop(candidate, mmu, "interrupts", handles) != prop(args.baseline, mmu, "interrupts"):
+            raise RuntimeError(f"{label}: IOMMU IRQ differs from baseline")
 
-    irq_names = fdtget(args.irqname_candidate, npu, "interrupt-names")
+    irq_names = run_fdtget(args.irqname_candidate, npu, "interrupt-names")
     if irq_names != "npu_irq":
         raise RuntimeError(f"IRQ-name candidate has unexpected interrupt-names={irq_names!r}")
-    if fdtget(args.vendor_candidate, npu, "interrupt-names", required=False):
+    if run_fdtget(args.vendor_candidate, npu, "interrupt-names", required=False):
         raise RuntimeError("Vendor-equivalent candidate unexpectedly adds interrupt-names")
 
     print("SEMANTIC_DTB_AUDIT=PASS")
+    print("Phandle references normalized to target node paths before comparison.")
     print(f"Vendor-equivalent allowed changes: {len(vendor_changes)}")
     for item in vendor_changes:
         print(f"  {item}")
@@ -178,7 +232,7 @@ def main() -> int:
     for item in extension_changes:
         print(f"  {item}")
     print("Supply phandles resolve to vdd_logic, vdd_cpu and vdd_npu.")
-    print("NPU IRQ/clocks/resets/power-domain/OPP/IOMMU and bus clocks/OPP preserved.")
+    print("NPU IRQ/clocks/resets/power-domain/OPP/IOMMU and bus clocks/OPP targets preserved.")
     return 0
 
 
