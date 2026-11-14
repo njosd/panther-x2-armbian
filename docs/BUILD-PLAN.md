@@ -663,3 +663,28 @@ Actions run `43599704496` / job `132461624075` 使用固定源码 commit `661b2d
 - 已将目标改为顶层 Kbuild 接受的 `rockchip/rk3566-panther-x2.dtb`，提交 `b369638c6f3db80c11f6dd8f59261beb5c0c7b8b`。
 
 **重要补充：** 当前 workflow 中候选板级片段尚未编译成功，因此不能声称候选 DTB 已生成。下一轮应重新运行，确认基线 DTB、发布包 DTB 提取与候选 DTB 编译结果；若出现 DTC warnings，再逐项分析是否来自原 DTS 或新增 NPU 片段。
+
+
+### 3.26 6.12.81 NPU DTB audit 第 2 次运行（2026-11-14）
+
+Actions run `43600205650` / job `132463126060`：
+
+**已成功的部分**
+- 固定 Ophub 源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，Makefile 版本核验为 6.12.81。
+- Panther X2 板级 DTS 无 NPU / bus_npu 覆盖配置。
+- `rk356x.dtsi` 确实定义 `rknpu`、`npu_opp_table`、`bus_npu`、`bus_npu_opp_table` 和 `rknpu_mmu`。SoC 节点存在，不是缺少 SoC NPU 支持。
+- Kbuild 已成功执行 `DTC arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb`，即原始 Panther X2 DTB 已经成功编译。
+
+**本轮失败原因**
+- 编译完成后，workflow 错误地从 `work/kernel-source/rockchip/rk3566-panther-x2.dtb` 复制 DTB；实际产物位于 `work/kernel-source/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb`。
+- 这是 workflow 的产物路径错误，不是内核或 DTS 编译失败。发布包提取与候选 DTS 编译步骤因此尚未执行。
+
+已修正基线和候选 DTB 两处复制路径，提交 `d9406cafe065e229030afa5daf6313a13bd0ed52`。
+
+**下一轮需要继续验证**
+1. 基线 DTB 反编译；
+2. 6.12.81 发布包 SHA256 校验、目标 DTB 提取；
+3. 候选 fragment 编译；
+4. 候选 DTB 反编译，确认 NPU/IOMMU/bus 节点属性。
+
+目前仍未将候选 DTS 写入产品文件，所有改动只在 CI 临时 checkout 中进行。
