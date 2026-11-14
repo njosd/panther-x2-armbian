@@ -37,6 +37,52 @@ SINGLE_PHANDLE_PROPERTIES = {
 PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
 
+def run_fdtget(dtb: Path, *args: str, required: bool = True) -> str:
+    proc = subprocess.run(
+        ["fdtget", str(dtb), *args], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    if proc.returncode:
+        if required:
+            raise RuntimeError(
+                f"fdtget failed ({' '.join(args)}): {proc.stderr.strip()}"
+            )
+        return ""
+    return proc.stdout.strip()
+
+
+def walk_nodes(dtb: Path, node: str = "/") -> list[str]:
+    children = run_fdtget(dtb, "-l", node, required=False).split()
+    found = [node]
+    for child in children:
+        path = ("/" + child) if node == "/" else (node.rstrip("/") + "/" + child)
+        found.extend(walk_nodes(dtb, path))
+    return found
+
+
+def property_names(dtb: Path, node: str) -> list[str]:
+    return run_fdtget(dtb, "-p", node, required=False).split()
+
+
+def phandle_map(dtb: Path) -> dict[int, str]:
+    result: dict[int, str] = {}
+    for node in walk_nodes(dtb):
+        raw = run_fdtget(dtb, "-t", "x", node, "phandle", required=False)
+        if not raw:
+            raw = run_fdtget(dtb, "-t", "x", node, "linux,phandle", required=False)
+        if raw:
+            values = raw.split()
+            if len(values) != 1:
+                raise RuntimeError(f"{dtb}:{node}: malformed phandle property")
+            value = int(values[0], 16)
+            if value in result:
+                raise RuntimeError(
+                    f"Duplicate phandle 0x{value:x}: {result[value]} and {node}"
+                )
+            result[value] = node
+    return result
+
+
 def is_reference_property(name: str) -> bool:
     return (
         name in PROVIDER_CELL_PROPERTIES
