@@ -140,3 +140,19 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 不改 Panther X2 当前系统、内核、驱动或网络服务。
 - 不执行 eMMC 安装。
 - 不因首次网络失败就反复刷写；先保留日志并定位 U-Boot、DTB、GMAC/PHY、NetworkManager 各层。
+
+
+### 3.7 RKNPU 6.18.63 纯编译验证工作流（已创建，待手动运行）
+
+新增 `.github/workflows/test-rknpu-module.yml`，仅允许 `workflow_dispatch`，不会因 push 自动运行。工作流：
+- 下载 Ophub 6.18.63 kernel package，并再次校验固定 SHA-256；
+- 从内层 `header-6.18.63-ophub.tar.gz` 提取 headers/build tree；
+- 下载固定 RKNPU module commit `a8792fe6b633f90cf2c6808267cac327537ab4cf`；
+- 使用 Ubuntu 24.04 x86_64 runner 和 AArch64 交叉编译器尝试构建 `rknpu.ko`；
+- 独立预处理并编译 RK3566 NPU DT overlay；
+- 保存编译日志、模块 vermagic/depends、DTBO 和结果摘要 artifact；
+- 不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
+
+输入版本已写入 `config/versions.env`：`RKNPU_MODULE_COMMIT=a8792fe6b633f90cf2c6808267cac327537ab4cf`。工作流创建于 commit `d743ef36a78786647db5b2e9b42a4d8189028f9d`；固定源码变量补齐于 `fe89c25054838c7b7af6953cdccb410102d75641`。
+
+**状态：工作流文件和固定输入已提交，尚未执行。** 只有手动运行并审阅 artifact 后，才能判断 6.18.63 编译兼容性。若失败，先根据首个编译错误定位 API/headers 问题，不自动切换内核版本或修改 BSP。
