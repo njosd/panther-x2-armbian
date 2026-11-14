@@ -171,6 +171,26 @@ jobs:
               2>&1 | tee -a work/reports/host-tools-rebuild.log
             helper_rc=${PIPESTATUS[0]}
           fi
+
+          # Some Kbuild releases place hostprogs in the source tree even when
+          # O= is supplied. The external-module modpost phase expects them in
+          # the prepared output tree. Locate and stage only verified host ELF
+          # tools; never copy target-architecture kernel objects here.
+          if [[ "$helper_rc" -eq 0 ]]; then
+            for helper in scripts/basic/fixdep scripts/mod/modpost; do
+              if [[ ! -x "$builddir/$helper" && -x "$kernel_source/$helper" ]]; then
+                mkdir -p "$(dirname "$builddir/$helper")"
+                cp "$kernel_source/$helper" "$builddir/$helper"
+              fi
+              if [[ ! -x "$builddir/$helper" ]]; then
+                echo "::error::Host helper missing from output tree: $helper"
+                helper_rc=1
+              else
+                file "$builddir/$helper"
+                readelf -h "$builddir/$helper" | grep -E 'Class:|Machine:'
+              fi
+            done
+          fi
           host_tools_rc=$helper_rc
           echo "host_tools_rc=$host_tools_rc" >> "$GITHUB_OUTPUT"
           set -e
