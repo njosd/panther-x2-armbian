@@ -96,8 +96,9 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 ## 6. 构建前检查清单
 
 - [x] Ophub stable kernel Release 中存在 6.18.63 资产，远端 SHA-256 已记录。
-- [ ] 手动运行 `.github/workflows/inspect-kernel-package.yml`，下载归档并核对 SHA-256。
-- [ ] 根据 inspection artifact 检查归档结构及 Panther X2 DTB/模块内容。
+- [x] 手动运行 `.github/workflows/inspect-kernel-package.yml`，下载归档并核对 SHA-256（run 43526258367）。
+- [x] 检查归档结构：6 个内部包校验值匹配；确认 ARM64 Image、Panther X2 DTB 文件名及相关驱动配置存在。
+- [ ] 提取 DTB 二进制并反编译，与固定 DTS 参考源核对启动关键节点；当前 artifact 仅含清单，不含 DTB 字节。详见 `docs/DTB-AUDIT.md`。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
 - [ ] 构建 workflow 仅手动触发，不配置 push 自动构建。
