@@ -21,6 +21,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y             bc bison build-essential device-tree-compiler dpkg-dev             flex gcc-aarch64-linux-gnu libelf-dev libssl-dev
 
+      - name: Install matching Arm GNU Toolchain 15.3.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain_archive="$RUNNER_TEMP/arm-gnu-toolchain-15.3.rel1.tar.xz"
+          toolchain_root="$RUNNER_TEMP/arm-gnu-toolchain-15.3.rel1"
+          curl --fail --location --retry 3 --retry-delay 3 \
+            "https://gitlab.arm.com/api/v4/projects/tooling%2Fgnu-toolchains-for-arm/packages/generic/gnu-toolchain/15.3.rel1/arm-gnu-toolchain-15.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz" \
+            -o "$toolchain_archive"
+          mkdir -p "$toolchain_root"
+          tar -xJf "$toolchain_archive" --strip-components=1 -C "$toolchain_root"
+          echo "$toolchain_root/bin" >> "$GITHUB_PATH"
+          {
+            echo "Arm GNU Toolchain archive SHA256: $(sha256sum "$toolchain_archive" | awk '{print $1}')"
+            "$toolchain_root/bin/aarch64-none-linux-gnu-gcc" --version | head -n1
+          } | tee "$RUNNER_TEMP/arm-toolchain-version.txt"
+
       - name: Fetch fixed kernel package and RKNPU source
         shell: bash
         run: |
@@ -83,7 +100,8 @@ jobs:
             echo "RKNPU repository: https://github.com/w568w/rknpu-module"
             echo "RKNPU commit: ${RKNPU_MODULE_COMMIT}"
             echo "RKNPU package version: 0.9.8"
-            echo "Cross compiler: $(aarch64-linux-gnu-gcc --version | head -n1)"
+            echo "Cross compiler: $(aarch64-none-linux-gnu-gcc --version | head -n1)"
+            cat "$RUNNER_TEMP/arm-toolchain-version.txt"
             echo "Kernel release: $(cat "$kdir/include/config/kernel.release" 2>/dev/null || true)"
             echo "Module.symvers: $([[ -s "$kdir/Module.symvers" ]] && echo present || echo missing)"
           } | tee work/reports/build-inputs.txt
@@ -99,7 +117,7 @@ jobs:
 
           set +e
           make -C "$kdir" M="$src" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- V=1 modules \
+            CROSS_COMPILE=aarch64-none-linux-gnu- V=1 modules \
             2>&1 | tee work/reports/module-build.log
           module_rc=${PIPESTATUS[0]}
           set -e
