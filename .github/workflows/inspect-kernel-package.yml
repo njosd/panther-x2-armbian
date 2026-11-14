@@ -85,6 +85,21 @@ jobs:
               sys.exit("Nested package checksum verification failed")
           PY
 
+          # Extract the Panther X2 DTB bytes and decompile them for source comparison.
+          dtb_pkg="inspection/inner/dtb-rockchip-${KERNEL_PACKAGE_VERSION}-ophub.tar.gz"
+          dtb_file="inspection/extracted/rk3566-panther-x2.dtb"
+          tar -xOzf "${dtb_pkg}" "rk3566-panther-x2.dtb" > "${dtb_file}"
+          [[ -s "${dtb_file}" ]] || { echo "::error::Panther X2 DTB is empty or missing"; exit 1; }
+          sha256sum "${dtb_file}" > inspection/panther-x2-dtb-sha256.txt
+          sudo apt-get update
+          sudo apt-get install -y device-tree-compiler
+          dtc -I dtb -O dts -o inspection/extracted/rk3566-panther-x2.from-dtb.dts "${dtb_file}" 2> inspection/dtc-warnings.txt
+          {
+            echo "DTB file: ${dtb_file}"
+            cat inspection/panther-x2-dtb-sha256.txt
+            echo "Decompiled DTS: inspection/extracted/rk3566-panther-x2.from-dtb.dts"
+          } > inspection/panther-x2-dtb-report.txt
+
           # Extract boot package files and inspect the exact kernel config/image.
           boot_pkg="inspection/inner/boot-${KERNEL_PACKAGE_VERSION}-ophub.tar.gz"
           tar -xzf "${boot_pkg}" -C inspection/extracted
@@ -116,6 +131,9 @@ jobs:
             echo "Kernel image:"
             cat inspection/kernel-image-file.txt
             echo
+            echo "Panther X2 DTB SHA256:"
+            cat inspection/panther-x2-dtb-sha256.txt
+            echo
             echo "Kernel config: ${config_file}"
             echo "Relevant config saved in relevant-kernel-config.txt"
             echo
@@ -138,5 +156,10 @@ jobs:
             inspection/kernel-image-file.txt
             inspection/boot-file-checksums.txt
             inspection/inspection-report.txt
+            inspection/panther-x2-dtb-sha256.txt
+            inspection/panther-x2-dtb-report.txt
+            inspection/dtc-warnings.txt
+            inspection/extracted/rk3566-panther-x2.dtb
+            inspection/extracted/rk3566-panther-x2.from-dtb.dts
           if-no-files-found: error
           retention-days: 14
