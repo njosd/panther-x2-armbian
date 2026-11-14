@@ -203,3 +203,26 @@ Linux 6.18 官方 Rocket 文档列出的硬件支持对象为 RK3588；Rocket �
 - [Linux 6.18 Rocket documentation](https://docs.kernel.org/6.18/accel/rocket/index.html)
 - [RKNN Toolkit2](https://github.com/rockchip-linux/rknn-toolkit2)
 - [Immich RKNN backend discussion](https://github.com/immich-app/immich/discussions/30970)
+
+
+### 6. 外置模块源码快照锁定（补充）
+
+为避免后续审计跟随可变 `main`，已读取 `w568w/rknpu-module` 当前 main 分支并锁定本轮审计快照：
+
+- Repository: `w568w/rknpu-module`
+- Branch: `main`
+- Commit: `a8792fe6b633f90cf2c6808267cac327537ab4cf`
+- Commit message: `ci: switch to DietPi apt repo to match device kernel (7.0.0-rc7)`
+- DKMS package version: `rknpu/0.9.8`
+- License: GPL-2.0（上游 README 声明）
+
+静态检查到的构建组成：
+- `Kbuild` 以 out-of-tree 模块方式构建 `rknpu.o`，核心对象包括 driver、GEM、fence、job、reset、IOMMU、debugger、devfreq；
+- 编译定义选择 DRM GEM、debugfs、fence 路径；没有选择 Vendor DMA Heap 路径，因此该快照不依赖 `rknpu_mem.o` / `linux/rk-dma-heap.h`；
+- `src/include/compat/rockchip/` 提供若干 Rockchip 私有头文件兼容层，至少包含 `rockchip_iommu.h`、`rockchip_ipa.h`、`rockchip_opp_select.h`、`rockchip_system_monitor.h`；
+- DKMS 配置包名/版本为 `rknpu/0.9.8`，并设置 `AUTOINSTALL=yes`；
+- overlay 是单独的 `dts/rk3566-rknpu-overlay.dts`，与模块可分开编译/审计。
+
+这说明它不是简单复制 Vendor 6.1 的整个驱动目录，而是已做过一轮 out-of-tree 拆分和兼容封装，符合“独立 BSP 功能包”的方向。仍需重点核对兼容层是否足以覆盖 Ophub 6.18.63、devfreq 相关 API、模块符号依赖、overlay 的 Panther X2 regulator/clock/power-domain 映射及实际 4GB RAM/IOMMU 风险。
+
+**本 commit 仅作为审计输入锁定，不代表推荐直接安装或自动更新。** 下一轮 CI 必须使用该固定 SHA，而不是 `main`。
