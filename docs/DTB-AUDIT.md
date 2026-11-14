@@ -77,6 +77,6 @@
 
 ## 下一步（保持最小范围）
 
-在后续构建工作流中增加一个轻量检查步骤：从固定的 `dtb-rockchip-6.18.63-ophub.tar.gz` 中实际提取 `rk3566-panther-x2.dtb`，记录文件 SHA-256，并使用 `dtc` 反编译为 DTS，保存反编译结果作为 artifact。随后只对启动关键节点（GMAC/MDIO/PHY、SDHCI/eMMC、SDMMC/TF、USB host）做差异审查。
+已更新 `.github/workflows/inspect-kernel-package.yml`：下一次手动运行时，会从固定的 `dtb-rockchip-6.18.63-ophub.tar.gz` 中提取 `rk3566-panther-x2.dtb`，记录文件 SHA-256，并使用 `dtc` 反编译为 DTS，将原始 DTB、反编译文本和警告日志一并上传为 artifact。**该新增步骤尚未运行，结果待验证。**
 
-不因这项检查重新编译内核，也不把 NPU/GPU/多媒体节点列为第一版启动阻塞项。检查通过后继续最小 BSP 补丁集和手动 TF 镜像构建。
+拿到 artifact 后，只对启动关键节点（GMAC/MDIO/PHY、SDHCI/eMMC、SDMMC/TF、USB host）做差异审查。不因这项检查重新编译内核，也不把 NPU/GPU/多媒体节点列为第一版启动阻塞项。检查通过后继续最小 BSP 补丁集和手动 TF 镜像构建。
