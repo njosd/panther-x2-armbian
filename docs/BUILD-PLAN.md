@@ -636,17 +636,16 @@ Ophub 6.12.81 Panther X2 DTS 已有 `vdd_npu`、`vdd_logic`、`vdd_cpu`；SoC DT
 下一步可在 CI 临时工作目录中应用候选板级 DTS fragment，编译 DTB 并做静态差异检查；不修改产品 DTS、不生成可部署补丁、不触碰 9.6。只有 CI 静态检查通过后，才进入明确授权的后续阶段。
 
 
-### 3.24 Panther X2 NPU DTB source-readiness CI added（2026-11-14）
+### 3.24 Panther X2 NPU DTB source-readiness CI（版本基线更正，2026-11-14）
 
-新增手动触发 workflow：`.github/workflows/audit-panther-npu-dtb.yml`，提交 `a8e460ab09cf00bfd8ae12ed46e755176a8f5e9f`。
+新增手动触发 workflow：`.github/workflows/audit-panther-npu-dtb.yml`。该工作流的唯一目标基线是 **Ophub RK35xx 6.12.81**，与当前 NPU 驱动、SoC DTSI、BSP 来源审计保持一致。
 
-本轮在编写候选 DTS 前，先发现一个必须澄清的兼容性问题：固定 Ophub 6.18.63 源码中的 Panther X2 板级 DTS 仍定义了 `vdd_npu`、`vdd_logic`、`vdd_cpu`，但该版本目录结构将 SoC DTS 拆分为 `rk3566.dtsi` / `rk3566-base.dtsi` / `rk356x-base.dtsi`；初步检查未在这套 6.18.63 RK356x DTSI 中发现 `rknpu`、`rknpu_mmu`、`bus_npu` 节点。与 6.12.81 RK35xx 源码中的 RKNPU SoC 节点不能混为一谈。
+此前首次提交误引用了 6.18.63 的普通 Ophub kernel package 变量。这是工作流编写错误，不能视为项目改选 6.18.63。用户指出后，已修正为：
+- 源码仓库/commit：`OPHUB_RK35XX_KERNEL_SOURCE_REPO` / `OPHUB_RK35XX_KERNEL_SOURCE_COMMIT`
+- 内核版本：`OPHUB_RK35XX_KERNEL_VERSION=6.12.81`
+- 发布包：`OPHUB_RK35XX_PACKAGE_URL` / `OPHUB_RK35XX_PACKAGE_SHA256`
+- 包内 DTB 归档目录匹配：`6.12.81/dtb-rockchip-*.tar.gz`
 
-因此新 workflow 先做三层独立核验：
-1. 对固定 6.18.63 源码构建未修改的 Panther X2 DTB；
-2. 从已校验 SHA256 的 6.18.63 发布包提取并反编译发布 DTB；
-3. 检查源码 DTSI、源码构建 DTB、发布 DTB 的 NPU 节点差异。
+工作流先构建未修改的 6.12.81 Panther X2 DTB，提取并反编译校验过 SHA256 的 6.12.81 RK35xx 发布包 DTB，再核对源码 DTSI、源码构建 DTB、发布 DTB。只有在 6.12.81 源码确实具备 SoC 级 NPU 节点时，才会在 CI 临时副本追加板级候选 fragment；如果节点缺失则报告 `SKIPPED`，不拼接不完整节点。
 
-只有当固定源码确实定义 SoC NPU 节点时，workflow 才在临时 checkout 中追加板级候选 fragment 并编译候选 DTB。若缺少 SoC 节点，则明确报告 `SKIPPED`，不尝试用悬空的 `&rknpu` 标签制造失败或伪造成功。
-
-该 workflow 是 source-readiness audit，不是部署补丁，不修改产品 DTS、内核包或 9.6。它也不会在缺少 SoC 节点时自动从 6.12.81 复制完整 SoC 节点；若审计确认缺失，下一步应单独研究从维护中的上游/官方 RK356x DTS 导入所需 SoC 节点的完整依赖，而非直接拷贝局部 overlay。
+本工作流只做 CI source-readiness audit，不修改产品 DTS、内核包或 9.6。6.18.63 仍仅属于此前外置 RKNPU 模块构建研究线，不参与本次 NPU DTB 适配决策。
