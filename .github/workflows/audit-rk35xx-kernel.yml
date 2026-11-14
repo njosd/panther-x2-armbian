@@ -85,7 +85,7 @@ jobs:
               {
                 echo "=== $member ==="
                 echo "entries=$(wc -l < "$listing")"
-                grep -Ei '(^|/)(Module.symvers|modules\.builtin|modules\.order|kernel\.release|\.config)$|\.dtb(\.gz)?$|(^|/)(Image|Image\.gz|vmlinuz)(-|$)' "$listing" | head -n 160 || true
+                grep -Ei '(^|/)(Module.symvers|modules\.builtin|modules\.order|kernel\.release|\.config)$|\.dtb(\.gz)?$|(^|/)(Image|Image\.gz|vmlinuz)(-|$)' "$listing" | sed -n '1,160p' || true
               } >> "$root/reports/nested-content-index.txt"
 
               local extracted="$root/nested/extract-$index"
@@ -139,7 +139,7 @@ jobs:
                     if [[ -s "$root/reports/$base.dts" ]]; then
                       {
                         echo "=== $base ==="
-                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$base.dts" | head -n 240 || true
+                        grep -n -E -B4 -A14 'rknpu|npu@fde40000|fde4b000|npu_irq|rknpu-supply|status = "okay"|status = "disabled"' "$root/reports/$base.dts" | sed -n '1,240p' || true
                       } >> "$root/reports/dtb-npu-properties.txt"
                     fi
                     ;;
@@ -185,6 +185,24 @@ jobs:
             done
           } > work/reports/combined-comparison.md
 
+      - name: Print concise audit findings
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for label in standard flippy; do
+            echo "========== $label =========="
+            for f in package-metadata.txt nested-archive-index.txt nested-content-index.txt header-audit.txt rknpu-builtin-audit.txt dtb-audit.txt dtb-npu-properties.txt; do
+              p="work/$label/reports/$f"
+              if [[ -s "$p" ]]; then
+                echo "----- $f -----"
+                cat "$p"
+              else
+                echo "----- $f: no entries -----"
+              fi
+            done
+          done
+
       - name: Verify source and config reference snapshots
         shell: bash
         run: |
@@ -214,6 +232,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ophub-rk35xx-6.12.81-standard-vs-flippy
-          path: work/
+          path: |
+            work/reports/
+            work/standard/reports/
+            work/flippy/reports/
           if-no-files-found: warn
           retention-days: 30
