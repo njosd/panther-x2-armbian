@@ -54,18 +54,21 @@
 
 下一步必须对 rebuild 逻辑做最小补丁：将 U-Boot、firmware 的下载改为固定 commit checkout，或直接从固定 commit 下载所需目录；构建日志中记录实际 HEAD。补丁应尽量小并单独保存、审查。
 
-### 3.3 Kernel package 与 DTB 状态
+### 3.3 Kernel package、DTB 与驱动状态
 
-6.18.63 发布资产已通过检查工作流下载并核验：
-- 外层归档 SHA-256 与 `config/versions.env` 记录一致；
-- 6 个内部归档校验值全部 MATCH；
-- ARM64 Image 存在；
-- Rockchip DTB 包清单包含 `rk3566-panther-x2.dtb`；
-- 内核配置包含 Rockchip GMAC、Realtek PHY、Rockchip MMC 等基础驱动选项。
+6.18.63 发布资产已通过深度检查工作流：
+- 外层归档 SHA-256 与仓库记录一致；
+- 6 个内部包 SHA-256 全部匹配发布包内的校验清单；
+- ARM64 Image 和完整配置文件存在；
+- Panther X2 DTB 已提取并反编译，SHA-256 已记录，dtc 无警告；
+- DTB 的板型标识、GMAC1/PHY、eMMC、TF/SD、USB 等关键节点已做静态抽查，与固定 Ophub DTS 高度吻合；完整结构化等价及二进制构建来源仍未证实；
+- RGA、VDEC 模块已从 modules 包及配置头确认存在；尚未实机 probe 或应用验证；
+- 未发现明确 RKNPU 模块或 NPU 设备节点。DTB 中虽有 vdd_npu、qos_npu 等资源描述，但不代表驱动可用；
+- MPP/VENC 内核支持仍待确认。
 
-DTB 仍有一项未完成：本次 artifact 只上传清单与配置摘要，没有包含 DTB 二进制，因此尚不能反编译并与 DTS 逐项比对。固定 DTS 参考源为 `Lyric-c/panther-x2` 的 `userpatches/kernel/rockchip64-6.18/dt/rk3566-panther-x2.dts`，blob SHA `52cbb88552dcae7d15a18682c7a77ec0888dbdc3`。GMAC/PHY 地址、时序、复位，eMMC/TF 与 USB host 的节点摘要见 `docs/DTB-AUDIT.md`。
+检查运行：[43543451274](https://github.com/njosd/panther-x2-armbian/actions/runs/43543451274)，Job [132289067398](https://github.com/njosd/panther-x2-armbian/actions/runs/43543451274/job/132289067398)。artifact ID：14093500129。完整记录见 `docs/DTB-AUDIT.md`。
 
-因此，当前结论是“内核包中存在目标 DTB 文件且驱动配置具备”，不是“DTB 二进制已证明与参考 DTS 一致”。后续检查只需补取 DTB 二进制并核对启动关键节点，不需要重新审计整个内核包。
+当前判断是“内核包与 DTB 静态审计已完成一轮，启动关键节点初步吻合”，不是“已证明镜像可在实机启动”。NPU/RKNN 不作为第一版 TF 启动、DHCP、SSH 验收的前置条件，但应在后续 BSP 来源审计中单独评估。
 
 ### 3.4 GitHub Actions 依赖
 
@@ -96,14 +99,16 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 执行 gzip 完整性检查，生成归档文件清单、内核配置摘要和相关模块路径清单；
 - 不运行 rebuild、不写入镜像、不操作任何设备。
 
-运行记录：`43526258367`。检查通过，artifact 已下载并审阅。注意该 artifact 不含原始 DTB 字节，DTB 二进制比对仍列为待办。
+最近运行记录：`43543451274`，检查通过，artifact 已下载并审阅；包含原始 DTB、反编译 DTS、完整模块路径清单及配置摘要。
 
 ## 6. 构建前检查清单
 
 - [x] Ophub stable kernel Release 中存在 6.18.63 资产，远端 SHA-256 已记录。
 - [x] 手动运行 `.github/workflows/inspect-kernel-package.yml`，下载归档并核对 SHA-256（run 43526258367）。
 - [x] 检查归档结构：6 个内部包校验值匹配；确认 ARM64 Image、Panther X2 DTB 文件名及相关驱动配置存在。
-- [ ] 提取 DTB 二进制并反编译，与固定 DTS 参考源核对启动关键节点；当前 artifact 仅含清单，不含 DTB 字节。详见 `docs/DTB-AUDIT.md`。
+- [x] 提取 DTB 二进制并反编译；启动关键节点已与固定 Ophub DTS 静态抽查，完整等价与 provenance 仍待验证。详见 `docs/DTB-AUDIT.md`。
+- [ ] BSP/NPU 驱动、设备树补丁及 RKNN 用户态库来源审计。
+- [ ] TF/SD 控制器与 USB host 节点按 Panther X2 实际板级映射进一步核对。
 - [ ] U-Boot 与 firmware 下载已改为固定 commit。
 - [ ] Armbian Build、Ophub Action、上传 Action 均固定 commit。
 - [ ] 构建 workflow 仅手动触发，不配置 push 自动构建。
