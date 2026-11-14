@@ -366,3 +366,22 @@ RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并�
 3. 优先追查 Panther 专用扁平 DTS 的原始 DTB/DTS（仓库 `reference/source-input.sha256` 所列的两个输入目前未随仓库保存），并与 unifreq Panther DTS、Rockchip `rk356x.dtsi` / `rk3566-box.dtsi` 对照。
 4. 对照 NPU `reg`、IRQ name/number、`rknpu-supply`、mem-supply、clocks、resets、power-domain、IOMMU、NPU OPP/bus OPP 和 regulator。
 5. 仍需证明 6.12.81 发布资产与所观察源码 commit/config 的 provenance；仍未在 9.6 实机验证 probe 或 RKNN inference。
+
+
+### 3.17 主线原则澄清：Ophub / 官方渠道优先，历史 BSP 仅作参考
+
+本项目的目标不是复刻最早的 Panther X2 专用 BSP，也不是直接采用某个第三方 RK3566 镜像、DTS 或补丁。此前审计的 Panther X2 BSP、unifreq DTS、其他 RK3566 设备案例及社区修复，全部只作为硬件线索、历史问题、代码来源和验证清单。
+
+**技术路线优先级固定如下：**
+
+1. **Ophub 优先**：优先使用 Ophub 正式维护的 RK35xx 内核发布、源码分支、配置和构建流程，先验证现有支持能否满足 Panther X2。
+2. **官方渠道其次**：需要补足时，优先查找 Armbian 官方、Rockchip 官方及相关 SoC/板级官方源码、驱动、DTS 和补丁。
+3. **最小独立补丁**：只有证明 Panther X2 存在具体且可复现的支持缺口，才考虑增加独立补丁；补丁必须有明确来源、清晰差异、可审计构建和后续 rebase 路径，尽量避免复制整份旧 BSP 或维护整套分叉内核。
+4. **第三方 BSP / 社区资料只作参考**：可以用来识别寄存器、中断、供电、时钟、IOMMU、OPP 等硬件线索，也可以帮助定位历史 bug；不得因其曾经可用就直接将其 DTS、DTB、内核配置或补丁纳入主线。
+5. **长期可维护性优先于短期点亮**：如果某项 Panther X2 支持只能依赖无人维护的个人仓库或不可追溯的二进制 DTB，则必须明确记录维护风险，不能将其视为首选方案。
+
+后续所有对照审计都应回答两个问题：
+- Ophub 当前正式 RK35xx 发布/源码是否已经包含所需支持？若没有，官方渠道是否已有可维护的修复？
+- 如果确实需要 Panther X2 专用补丁，能否把必要差异独立、最小化地维护，并持续应用到 Ophub 后续内核？
+
+**本原则覆盖此前文档中任何可能被理解为“以最早 Panther BSP 为目标基线”的表述。** 历史 BSP 只用于反向审计和交叉验证，不改变 Ophub / 官方渠道优先的主线。
