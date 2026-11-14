@@ -456,3 +456,53 @@ Ophub kernel_rk35xx release 同时发布：
 - 上传两种资产的独立报告及合并比较报告。
 
 当前 workflow 只做下载、解包和静态审计，不安装内核、不加载模块、不应用 DTB、不接触 Panther X2 实机。请手动运行 Actions：Audit Ophub RK35xx 6.12.81 kernel assets。完成后再根据 artifact 结果决定是否需要继续研究 Flippy 变体或最小板级适配。
+
+
+### 3.19 Ophub RK35xx 6.12.81 发布资产首轮检查结果（2026-11-14）
+
+CI run 43596176146 / job 132451039113 完成了两个发布资产的下载和 SHA256/大小校验：
+
+| 资产 | SHA256 校验 | 大小校验 |
+|---|---|---|
+| 标准版 6.12.81.tar.gz | 通过 | 通过，141,437,450 bytes |
+| Flippy 6.12.81-rk35xx-flippy-2611b.tar.gz | 通过 | 通过，119,018,056 bytes |
+
+#### 标准版已确认的内容
+
+- 嵌套 headers、boot、modules 三个归档均被首版脚本识别。
+- headers 归档提供 `include/config/kernel.release`，值为 `6.12.81-rk35xx-ophub`。
+- headers 归档提供 `Module.symvers`，其中包含 `pm_runtime_force_suspend` 与 `pm_runtime_force_resume` 的导出符号。
+- headers 归档没有包含 `.config`；因此不能将 Ophub config 仓库中的配置快照直接说成已从该发布包内核构建产物提取。
+- modules 归档中的 `modules.builtin` 明确列出 `kernel/drivers/rknpu/rknpu.ko`。按 Linux `modules.builtin` 语义，这表示 RKNPU 被编译进内核（built-in），不是一个可通过 `insmod rknpu.ko` 单独加载的模块文件。这是当前最重要的新证据：**标准版 6.12.81 的模块清单表明它包含内建 RKNPU 驱动**。
+- 标准版首轮脚本在 boot 内部归档中没有找到以 `.dtb` 结尾的条目，尚不能据此判断该发布包没有 Panther DTB；也可能 DTB 位于其他嵌套归档、采用不同文件命名或打包布局。必须修正审计脚本后再确认。
+
+#### Flippy 版当前状态
+
+两个 SHA256/大小校验均通过，但首版脚本只按标准版目录命名规则匹配嵌套归档，因此 Flippy 版的 headers/boot/modules 都未识别。**这是审计脚本的布局假设问题，不是 Flippy 版缺少这些内容的证据。** 暂不对 Flippy 作任何 NPU 支持结论。
+
+#### 配置参考校验
+
+CI 下载的 Ophub RK35xx config-6.12 快照长度为 258,639 bytes，其 Git blob SHA-1 为 `dee127c6c644f38426eeb28000d73536084d34a3`，与固定参考值一致。该配置明确包含：
+
+- `CONFIG_ROCKCHIP_RKNPU=y`
+- `CONFIG_ROCKCHIP_RKNPU_DRM_GEM=y`
+- `CONFIG_ROCKCHIP_RKNPU_SRAM=y`
+- `CONFIG_PM_DEVFREQ=y`
+
+注意：这是 Ophub 官方配置仓库的固定快照，和发布包 `modules.builtin` 的证据相互印证，但仍未证明该 config 文件就是该资产的精确构建输入；发布包 headers 没有 .config，source-to-binary provenance 仍未闭环。
+
+#### 首轮审计脚本问题及修正
+
+首版 workflow 的包内路径匹配写死了标准版的 `6.12.81/header-*.tar.gz` 等布局，无法识别 Flippy 变体；同时在 source/config 校验中使用相对路径调用 `git hash-object`，导致命令在子目录上下文下失败。这两个都是 workflow 缺陷，不是 Ophub 内核包错误。
+
+已将 `.github/workflows/audit-rk35xx-kernel.yml` 重写为按内容识别嵌套归档的只读审计：
+- 保存两个资产完整的外层文件清单；
+- 扫描每个嵌套 tar.gz/tgz，不依赖外层目录和文件名；
+- 按归档内部的 Module.symvers、kernel.release、modules.builtin、DTB 等内容识别 header/module/boot 证据；
+- 对每个 modules.builtin 提取 RKNPU 条目；
+- 对发现的 Panther/RK3566 DTB 反编译并提取 NPU 属性；
+- 修正 config blob 校验的绝对路径，并上传完整 work 报告。
+
+本次修正提交：`10fdd8961df8ecd21b2988501b8e18f00584de61`。尚未运行新版 workflow，所有 Flippy 和 DTB 结论待下一轮 CI。
+
+**当前判断更新：** Ophub RK35xx 标准 6.12.81 内建 RKNPU 的证据已经成立（发布包 modules.builtin + 官方 config 快照双重佐证）；但 Panther X2 实际发布 DTB 是否启用 NPU/MMU、供电绑定是否正确仍未知。因此“内核驱动存在”已从推测升级为已验证；“Panther X2 NPU 可正常 probe/运行”仍未验证。继续不安装内核、不加载模块、不修改 9.6。
