@@ -406,7 +406,7 @@ RK35xx workflow 会在编译前读取 kernel source 的 `main` 分支 SHA，并�
 
 #### B. Ophub stable 6.18.63：Panther 板型支持存在，但官方配置没有 RKNPU
 
-Ophub kernel-config/release/stable/config-6.18 当前 blob SHA 为 57d061b9c4228c438b354ba58f09013d9f52f603，其配置包含 CONFIG_PM_DEVFREQ=y，但没有 CONFIG_ROCKCHIP_RKNPU 配置项。
+Ophub kernel-config/release/stable/config-6.18 当前 blob SHA 为 57d061b9c4228c438b354ba58f09013d9f52f603，其配置包含 CONFIG_PM_DEVFREQ=y，但没有 CONFIG_ROCKCHIP_RKNPU 配置项；对应源码 commit 的 drivers/rknpu 目录也不存在。
 
 在对应 linux-6.18.y 的 Panther X2 DTS 中可以看到 vdd_npu regulator 定义，但该板级 DTS 没有显式启用 NPU 节点，也没有板级 rknpu-supply / NPU IRQ-name 绑定。该源码的 RK3566 DTS 组织结构已不同于 6.12 vendor tree；不能仅凭存在 vdd_npu regulator 就推断内核有 RKNPU 驱动或 NPU 可用。
 
