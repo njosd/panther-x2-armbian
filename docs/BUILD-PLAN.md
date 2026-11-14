@@ -143,30 +143,25 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 - 不因首次网络失败就反复刷写；先保留日志并定位 U-Boot、DTB、GMAC/PHY、NetworkManager 各层。
 
 
-### 3.7 RKNPU 6.18.63 纯编译验证工作流（第五轮首次进入驱动源码编译）
+### 3.7 RKNPU 6.18.63 纯编译验证工作流（第六轮已通过核心对象编译）
 
-首轮运行：[43561086372](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372)，Job [132344685076](https://github.com/njosd/panther-x2-armbian/actions/runs/43561086372/job/132344685076)。
-第二轮运行：[43561337246](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246)，Job [132345466091](https://github.com/njosd/panther-x2-armbian/actions/runs/43561337246/job/132345466091)。
-第三轮运行：[43561699157](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157)，Job [132346621276](https://github.com/njosd/panther-x2-armbian/actions/runs/43561699157/job/132346621276)。
-第四轮运行：[43562266807](https://github.com/njosd/panther-x2-armbian/actions/runs/43562266807)，Job [132348334717](https://github.com/njosd/panther-x2-armbian/actions/runs/43562266807/job/132348334717)，artifact ID `14100383227`。
-第五轮运行：[43563270130](https://github.com/njosd/panther-x2-armbian/actions/runs/43563270130)，Job [132351452241](https://github.com/njosd/panther-x2-armbian/actions/runs/43563270130/job/132351452241)，artifact ID `14100902884`.
+前五轮运行及结论见本节前序记录。
+第六轮运行：[43582735410](https://github.com/njosd/panther-x2-armbian/actions/runs/43582735410)，Job [132410737160](https://github.com/njosd/panther-x2-armbian/actions/runs/43582735410/job/132410737160)，artifact ID `14108958665`。
 
-第五轮已确认：
-- GCC 15.3.1、6.18.63 headers、完整源码树配合、host `fixdep/modpost` 重建均成功；
-- RKNPU 模块终于进入真实源码编译，多个前置对象（包括 `rknpu_drv.o`、`rknpu_gem.o`、`rknpu_iommu.o`、`rknpu_debugger.o`）已开始/完成编译；
-- 首个阻塞错误来自 `src/rknpu_devfreq.c:14`：找不到 `linux/devfreq-governor.h`。Ophub Linux 6.18.63 源码中对应内部头文件实际位于 `drivers/devfreq/governor.h`，不属于可供外置模块直接 include 的公共头文件；
-- 固定 RKNPU 项目自己的 `PLAN.md` 已将 devfreq/DVFS 列为初期应禁用、后期再实现的可选功能；其 `rknpu_devfreq.h` 在 `RKNPU_NO_DEVFREQ` 定义时提供 no-op 接口；
-- 因此当前编译失败尚不能说明核心 DRM GEM、IOMMU、job/fence 路径不兼容；需要先禁用可选 devfreq，再观察其余源码的编译结果；
-- DT overlay CPP/DTC 返回成功并生成 DTBO，但 `reg_format`、`avoid_default_addr_size`、`interrupts_property` 警告持续存在。不能将其视为设备树已适配 Panther X2。
+第六轮结果：
+- 主机辅助工具阶段成功重建 x86_64 `fixdep`，但通用 `scripts` 目标没有在输出树生成 `scripts/mod/modpost`；
+- 禁用可选 devfreq 后，RKNPU 核心对象已完成 ARM64 编译，包括 driver/GEM/IOMMU/reset/debugger 等，并成功链接成中间对象 `rknpu.o`；
+- 最终失败发生在外置模块 modpost 阶段，明确报错为输出树缺少 `scripts/mod/modpost`，不是 RKNPU C 源码 API 编译错误；
+- DT overlay 仍可生成 DTBO，但存在 reg_format、默认 address/size cells 及 interrupt-parent 警告，不能认定设备树适配完成；
+- 本轮没有生成最终 `rknpu.ko`，没有加载模块，也没有修改任何设备。
 
-**第六轮验证调整：** 工作流提交 `25bbc0ad662c092a8e373e7dca43706cc7732ae0`，随后修正 Kbuild 标志追加命令的换行转义，最终工作流提交为 `324045da07fb1b2debd13d5b900bef7354b337fc`。仅在 CI 解包后的临时 RKNPU 源码副本中：
-1. 从 Kbuild 对象列表移除 `src/rknpu_devfreq.o`；
-2. 添加 `-DRKNPU_NO_DEVFREQ`，启用该项目头文件已提供的 no-op 接口；
-3. 归档原始 Kbuild 与禁用 devfreq 的差异补丁；
-4. 再编译剩余 RKNPU 对象，观察核心驱动路径的真实兼容性问题。
+**第七轮针对性修正：** 工作流提交 `3158c9d0d972ecb8aca6ee1f892e4b0b3767e240`。在成功执行通用 `scripts` 后，显式调用 Kbuild 的 `scripts/mod/modpost` host-program 目标，再核验输出树中的 `modpost` 是 x86_64 ELF，才继续外置模块构建。此改动尚未运行验证。
 
-这只是“无 DVFS 基线”的编译验证，不代表最终产品可永久禁用 DVFS，也不修改固定上游源码 commit。后续若核心模块通过，再单独评估标准 devfreq/OPP 的实现，以及 Panther X2 的 NPU 时钟、电源域和 OPP 条件。
+下一轮重点：
+1. 确认 `scripts/mod/modpost` 目标在该源码树中是否有效；
+2. 确认 `fixdep` 与 `modpost` 均为 x86_64；
+3. 是否完成 `MODPOST` 并生成 `rknpu.ko`；
+4. 如成功，核对 vermagic、depends、符号版本及源码/header provenance；
+5. DT overlay 警告单独处理，不把 DTBO 生成成功等同于 Panther X2 设备树兼容。
 
-**源码来源限制仍然有效：** 当前锁定源码 commit 的版本号为 6.18.63，但尚未证明它就是发布二进制内核包的精确构建源码。即使模块编译成功，也必须核对源码与 headers 的 `UTS_RELEASE`、配置、符号版本及生成头文件；必要时追溯精确构建源码后才能讨论 ABI 匹配。
-
-全过程仅在 GitHub Actions runner 做静态/交叉编译验证，不加载模块、不安装文件、不触碰 Panther X2 或 192.168.9.6。
+仍须强调：Ophub 源码 commit 的 6.18.63 版本号并未证明它就是发布二进制内核包的精确源码。模块成功编译也不能单独证明 ABI 匹配。全部操作仍仅限 GitHub Actions 纯编译验证，不触碰 Panther X2（192.168.9.6）。
