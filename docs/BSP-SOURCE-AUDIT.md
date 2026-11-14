@@ -205,3 +205,61 @@ The unresolved high-value issue is now Panther X2 device-tree provenance and run
 6. Keep real probe, DRM render-node access, RKNN runtime version match and inference on Panther X2 marked unverified until there is a controlled hardware test.
 
 No installation, system modification, driver loading or service change was performed on 192.168.9.6.
+
+
+## 9. External community cross-checks (2026-11-14)
+
+These sources corroborate the in-tree build model and the importance of board-specific DTS. They are comparative reports, not proof that the exact Panther X2 BSP image was runtime-tested.
+
+### 9.1 Panther X2 board DTS is reused from the Ophub/unifreq lineage
+
+A 2026-07-15 RK3566 Rockchip BSP build walkthrough explicitly says it used the third-party ArmSoM kernel initially, then verified the official `rockchip-linux/kernel` `develop-6.1` source could also build. For Panther X2 it copies `rk3566-panther-x2.dts` from `unifreq/linux-6.1.y`, adds the DTB to the Rockchip DTS Makefile, enables IOMMU/MPP configuration, and enables MPP service / RKVDEC / RKVENC nodes. This independently corroborates the board-DTS reuse path recorded above. It also reports a hardware-specific warning that Panther X2 has USB 2.0 only, and removes an inherited `usb_host0_xhci` host-mode fragment; this is a useful reminder not to treat every inherited DTS property as correct for the physical board.
+
+Source: https://lxnchan.cn/rockchip-mpp-kernel.html (created 2026-07-15, updated 2026-08-17).
+
+### 9.2 Rockchip driver 0.9.8 plus a present NPU node is not enough
+
+Ophub issue #3123 reports an RK3566 OECT board where RKNPU 0.9.8 initializes a DRM device but logs include:
+- missing `mem-supply`;
+- failed resource request for `0xfde40000-0xfde4ffff`;
+- `IRQ npu_irq not found`;
+- missing NVMEM calibration data;
+- OPP not supported by regulators.
+
+The issue's reporter initially assumes `rknpu.ko` is missing, but the logs show the driver itself did initialize. Ophub maintainer comments say the 6.1.99 image/DTB had not been built/tested by them and warns that different image packagers may have different board-specific handling. This supports a careful separation between driver presence, DT binding correctness and successful inference.
+
+Source: https://github.com/ophub/amlogic-s9xxx-armbian/issues/3123
+
+### 9.3 Armbian community: RKNPU can be built-in and disabled by DTB
+
+A 2025 Armbian forum discussion for RK3566 notes that `modules.builtin` can contain `kernel/drivers/rknpu/rknpu.ko` even though the driver is built into the kernel image (the filename suffix is retained in the built-in list). The same report finds the NPU node disabled in the DTB and describes enabling it with a board-specific overlay. It also points to an Armbian RK3566 NPU-enabled DTS as a reference. This matches the conclusion that an absent loadable `rknpu.ko` in the modules archive does not prove the driver is absent.
+
+Source: https://forum.armbian.com/topic/44950-rk3566-kernel-with-npu-support/
+
+A separate H96 Max V56 community thread shows the same classes of DTB issues across RK3566 devices: absent `npu_irq`, supply lookups, IOMMU mode and regulator/OPP messages. The exact wiring differs by board; these logs are a checklist of failure modes, not a recipe to copy the H96 DTS to Panther X2.
+
+Source: https://forum.armbian.com/topic/28895-efforts-to-develop-firmware-for-h96-max-v56-rk3566-8g64g/page/11/
+
+### 9.4 Rockchip upstream issue: DRM node symptoms can mask DT resource errors
+
+Rockchip kernel issue #371 reports RKNPU 0.9.8 and a DRM initialization message while also showing a memory resource request warning and missing power-model properties. It remains an open report, so it is evidence of a real diagnostic pattern, not a confirmed fix.
+
+Source: https://github.com/rockchip-linux/kernel/issues/371
+
+### 9.5 RKNN driver source vs Toolkit2
+
+Rockchip's `rockchip-linux/rknpu` repository explains that RK3566/RK3568/RK3588 should use the `rknpu2` kernel driver line and RKNN Toolkit2 userspace stack, rather than the older rknpu repository's older-platform driver. The driver source is maintained in the Rockchip kernel tree or SDK's `external/rknpu/drivers`; Toolkit2 is the model conversion/runtime interface and does not replace the kernel driver.
+
+Source: https://github.com/rockchip-linux/rknpu
+
+### External evidence conclusion
+
+The community reports strongly support the following diagnostic order for Panther X2:
+1. confirm `CONFIG_ROCKCHIP_RKNPU=y` and built-in list, not just search for a loadable `.ko`;
+2. confirm actual boot DTB and NPU node status;
+3. validate `reg`, `interrupts` and `interrupt-names = "npu_irq"`;
+4. validate `rknpu-supply`, any `mem-supply` expected by this exact driver revision, power-domain supply, clocks/resets, IOMMU and NPU/bus OPP/regulator ranges;
+5. validate that the selected DRM GEM backend creates a DRM render node and that the driver reports v0.9.8;
+6. only then test RKNN runtime/Toolkit2 ABI and execute an inference workload.
+
+No community workaround should be copied verbatim without comparing the Panther X2 board wiring and the exact driver/DTS revision.
