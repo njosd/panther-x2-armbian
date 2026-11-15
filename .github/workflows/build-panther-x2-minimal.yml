@@ -279,7 +279,7 @@ jobs:
           sudo grep -E '^(Package|Version): (linux-image|linux-dtb|linux-u-boot)' validation/root/var/lib/dpkg/status || true
 
           check "boot Image symlink/file" test -s validation/boot/Image
-          check "versioned kernel image" test -s validation/boot/Image-6.12.81-rk35xx-ophub
+          check "versioned kernel image" test -s validation/boot/vmlinuz-6.12.81-rk35xx-ophub
           check "versioned initrd" test -s validation/boot/uInitrd-6.12.81-rk35xx-ophub
           check "Panther X2 DTB" test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
           check "armbianEnv selects Panther X2 DTB" grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
