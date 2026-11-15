@@ -566,3 +566,8 @@ Panther X2 DTS 当前显式启用：
 | 编译后最终 DTB 中的 phandle/status | 待编译核验 |
 | 6.1.116 旧 DTB 对应关系 | 待从本地备份归档提取后比较 |
 | 唯一外露 USB 口实际速率 | 未知 |
+### 15.4 合并 DTB 构建审计工作流
+
+已新增 GitHub Actions 工作流 `.github/workflows/audit-panther-usb-dtb.yml`，固定检出 Ophub 6.12.81 源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，执行内核标准 `dtbs` 构建目标，提取 `rk3566-panther-x2.dtb`，计算 SHA-256，并用 `dtc` 反编译保存合并后的 DTS 与 USB 节点摘录。
+
+工作流仅在 GitHub Actions runner 上构建和检查，不接触 Panther X2 实机，也不修改源码或设备配置。运行成功后应重点审阅 artifact 中的 `usb-topology-excerpts.txt`、`rk3566-panther-x2.merged.dts` 和 `dtc-warnings.txt`。工作流文件提交后仍需由 Actions 实际运行，当前不能将构建成功标记为已验证。
