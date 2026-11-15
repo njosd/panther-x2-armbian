@@ -101,6 +101,7 @@ def is_reference_property(name: str) -> bool:
         or name in SINGLE_PHANDLE_PROPERTIES
         or name.endswith("-supply")
         or name.endswith("-gpios")
+        or name.endswith("-gpio")
         or re.fullmatch(r"pinctrl-\d+", name) is not None
         or name.endswith("-parent")
     )
@@ -169,7 +170,7 @@ def normalized_property(dtb: Path, node: str, name: str,
             raw, handles, dtb, f"{node}:{name}", PROVIDER_CELL_PROPERTIES[name]
         )
 
-    if name.endswith("-gpios"):
+    if name.endswith("-gpios") or name.endswith("-gpio"):
         return normalize_specifier_list(
             raw, handles, dtb, f"{node}:{name}", "#gpio-cells"
         )
