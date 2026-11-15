@@ -1,0 +1,127 @@
+name: Audit Panther X2 USB device tree (Ophub 6.12.81)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout audit repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install device-tree build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev device-tree-compiler python3
+
+      - name: Fetch exact Ophub kernel source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          git clone --filter=blob:none --no-checkout "$OPHUB_RK35XX_KERNEL_SOURCE_REPO" kernel
+          git -C kernel fetch --depth=1 origin "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
+          git -C kernel checkout --detach FETCH_HEAD
+          test "$(git -C kernel rev-parse HEAD)" = "$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
+          {
+            echo "Source repository: $OPHUB_RK35XX_KERNEL_SOURCE_REPO"
+            echo "Pinned commit: $(git -C kernel rev-parse HEAD)"
+            echo "DTS source: arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
+          } | tee source-revision.txt
+
+      - name: Build the merged Panther X2 DTB
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd kernel
+          make ARCH=arm64 defconfig
+          make ARCH=arm64 -j"$(nproc)" rockchip/rk3566-panther-x2.dtb
+          test -s arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb
+          mkdir -p ../audit
+          cp arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb ../audit/
+          sha256sum ../audit/rk3566-panther-x2.dtb > ../audit/dtb-sha256.txt
+          dtc -I dtb -O dts -o ../audit/rk3566-panther-x2.merged.dts ../audit/rk3566-panther-x2.dtb 2> ../audit/dtc-warnings.txt
+
+      - name: Extract final USB topology and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, re
+          src = pathlib.Path("audit/rk3566-panther-x2.merged.dts").read_text()
+          out = pathlib.Path("audit/usb-topology-report.txt")
+          names = [
+              "usbdrd30", "usbdrd_dwc3", "usbhost30", "usbhost_dwc3",
+              "usb_host0_xhci", "usb_host0_ehci", "usb_host0_ohci",
+              "usb_host1_ehci", "usb_host1_ohci",
+              "usb2phy0", "u2phy0_host", "u2phy0_otg",
+              "usb2phy1", "u2phy1_host", "u2phy1_otg",
+          ]
+          labels = {}
+          # dtc emits label comments in many builds; also retain node path/address matches.
+          for name in names:
+              hits = []
+              for m in re.finditer(r"(?m)^\s*([^\n{]+)\s*\{", src):
+                  start = m.start()
+                  depth = 0
+                  end = None
+                  for i in range(m.end()-1, len(src)):
+                      if src[i] == "{": depth += 1
+                      elif src[i] == "}":
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              break
+                  if end is None: continue
+                  block = src[start:end]
+                  if name in block[:240] or name in block:
+                      if re.search(r"(?m)^\s*(?:label\s*=\s*\""+re.escape(name)+r"\"|"+re.escape(name)+r"\s*:)", block) or name in block[:240]:
+                          hits.append(block)
+              if hits:
+                  labels[name] = hits[:3]
+          lines = [
+              "Merged DTB USB topology audit",
+              "This report describes the built DTB, not physical PCB routing.",
+              "",
+          ]
+          for name in names:
+              lines.append(f"===== {name} =====")
+              # Match common node addresses/names when dtc has removed source labels.
+              candidates = []
+              for block in re.findall(r"(?ms)^\s*[^\n{]+\s*\{.*?^\s*\};", src):
+                  if name in block:
+                      candidates.append(block)
+              if candidates:
+                  lines.extend(candidates[:2])
+              else:
+                  lines.append("No textual label/reference found in decompiled DTB.")
+              lines.append("")
+          out.write_text("\n".join(lines))
+          print(out.read_text())
+          PY
+
+          # Keep concise, line-numbered excerpts for quick review.
+          grep -n -E -B5 -A18 'usbdrd|usbhost|usb_host0|usb_host1|usb2phy0|usb2phy1|u2phy0|u2phy1' audit/rk3566-panther-x2.merged.dts > audit/usb-topology-excerpts.txt || true
+
+      - name: Upload merged DTB and audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-6.12.81-merged-usb-dtb-audit
+          path: |
+            source-revision.txt
+            audit/rk3566-panther-x2.dtb
+            audit/dtb-sha256.txt
+            audit/rk3566-panther-x2.merged.dts
+            audit/dtc-warnings.txt
+            audit/usb-topology-report.txt
+            audit/usb-topology-excerpts.txt
+          if-no-files-found: error
+          retention-days: 30
