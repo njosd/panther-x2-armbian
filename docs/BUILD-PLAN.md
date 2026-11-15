@@ -1106,3 +1106,27 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 #### 状态
 
 本轮是测试代码 fixture 错误，不是 parser 逻辑失败，也没有执行完整 DTB 审计。修复尚待 Actions 复验。下一轮先确认 11 项测试全部通过，再继续真实 DTB 比较。
+
+
+### 3.42 Tenth-run result: stale fixture reference remained in mock assertion（2026-11-15）
+
+运行记录：GitHub Actions run `43657467999`，job `132639097623`，checkout commit `b1f977cdbb19f2115929bf8e2478447e58445836`。
+
+#### 本轮结果
+
+- 单元测试仍在新增的 `__symbols__` 回归测试失败；
+- 失败位置不是 `normalized_property` 输入，而是 mock 的 `assert_called_once_with` 仍引用 `self.dtb`；
+- 上轮修复只替换了被测函数的第一个参数，没有替换断言中的旧 fixture，因此测试继续 AttributeError；
+- workflow 正确跳过所有昂贵构建步骤。
+
+#### 修复
+
+提交 `7c95422a534fde26cb57e69e0b7c0aee10cdf098`：
+- 将 mock 调用断言中的 `self.dtb` 也改为本地 `Path("tree.dtb")`；
+- 测试不再依赖其他 TestCase 类的 fixture。
+
+#### 质量改进
+
+前两次 symbols 测试修复均遗漏了同一测试方法中的第二处 fixture 引用。下一步不应再仅凭代码替换完成就报告“测试修复”；先通过 GitHub Actions 的单元测试门禁，再进行完整构建。必要时增加一个本地/CI lint 检查，禁止测试类引用未定义的实例属性。
+
+当前状态：修复已提交，尚待 Actions 验证；完整 DTB 审计未运行；没有修改产品 DTS、内核源码或 Panther X2 实机。
