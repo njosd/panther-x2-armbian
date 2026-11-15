@@ -29,7 +29,8 @@ class ReferenceClassificationTests(unittest.TestCase):
         with patch.object(audit, "run_fdtget", return_value="/ddr3-params") as mocked:
             self.assertEqual(
                 audit.normalized_property(
-                    self.dtb, "/__symbols__", "ddr3_params", self.handles
+                    Path("tree.dtb"), "/__symbols__", "ddr3_params",
+                    {0x10: "/provider-a", 0x11: "/provider-b"}
                 ),
                 "/ddr3-params",
             )
