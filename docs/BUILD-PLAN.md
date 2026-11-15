@@ -1284,3 +1284,31 @@ Artifact：`14139197505`。语义审计仍未通过，未能证明候选 DTB 与
 本轮显示新增 NPU 引用导致全树 phandle 编号变化，会影响媒体、网络、显示等无关节点。比较器需要对引用语义做准确规范化，同时保留所有非引用数值的严格比较。不要通过忽略整个属性或整个子树来消除差异。
 
 下一轮先跑 13 项单元测试，再完整审计。若语义比较通过，审查报告中的差异必须确认只包含预期 NPU 节点及必要元数据；并检查候选 DTC warnings。未触碰 9.6。
+
+
+### 3.48 Fifteenth audit run: unit tests 12/12; MMC power-sequence phandle exposed（2026-11-15）
+
+运行记录：GitHub Actions run `43659228111`，job `132644587110`，checkout commit `64ea31a50a2be7a43025bc35d4713da01183c406`。
+
+#### 本轮通过
+
+- 语义解析器单元测试 12/12；
+- Ophub 6.12.81 固定源码及 Panther X2 DTS 审查；
+- 未修改源码基线 DTB 构建；
+- 发布包外层 SHA-256 校验、DTB 提取和反编译；
+- vendor-equivalent 与 irqname-equivalent 候选 DTB 编译。
+
+#### 本轮失败
+
+语义比较报告：`/mmc@fe2c0000:mmc-pwrseq` 原始值 `171 -> 172`。
+
+在固定源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 Panther X2 板级 DTS 中，`&sdmmc1` 使用 `mmc-pwrseq = <&sdio_pwrseq>`，目标 `sdio_pwrseq` 是 `mmc-pwrseq-simple` 节点，负责 SDIO/Wi-Fi 上电时序。因此这是单 phandle 引用，不是普通数值。该节点另含 clocks、pinctrl、reset-gpios；这些字段的参数语义不应随本次修复被放宽。
+
+#### 修复
+
+- `f00c3a0a09c19bdb3b7d65ee79e16013703bb2ef`：将 `mmc-pwrseq` 纳入单 phandle 规范化；
+- `929e47b782699cba2a5d3a0364b6b8c3d06dd89c`：扩展单 phandle 单元测试覆盖。
+
+Artifact：`14139108053`。本轮候选编译通过，但完整语义审计仍失败，不能认定候选等价。
+
+下一轮先运行 13 项单元测试，再执行语义比较。继续坚持按固定 DTS 证实属性含义，不能按名称盲目忽略；比较通过后需核对全量差异与 DTC warnings。无实机改动。
