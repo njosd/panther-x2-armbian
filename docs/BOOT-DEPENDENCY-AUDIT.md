@@ -415,3 +415,76 @@ Panther X2 DTS 当前显式启用：
 4. 审计最小 rootfs 是否具备 DHCP 客户端、SSH server、systemd/udev、网络命名与网卡初始化；此项目前未完成。
 
 本节仅为源码/config 静态审计。没有构建镜像、写卡、安装软件或修改 Panther X2 实机。
+
+## 13. 脱敏归档：用户历史 Panther X2 6.1.116 备份基线（2026-11-15）
+
+本节记录从用户保留的历史备份中读取到、可供后续内核和启动链审计复用的信息。只记录与系统/内核相关的非敏感元数据及归档校验值；不上传原始归档、应用数据、Docker 配置、数据库、账号凭据、家庭网络地址、设备序列号或个人目录信息。
+
+### 13.1 历史系统基线
+
+| 项目 | 已知记录 |
+|---|---|
+| 设备 | Panther X2 / RK3566 |
+| 发行版 | Armbian 24.8.4 |
+| 用户空间基线 | Ubuntu 22.04.5 LTS |
+| 架构 | aarch64 |
+| 实际运行内核 | 6.1.116-ophub |
+| 内核仓库 | ophub/kernel |
+| 内核源码分支记录 | 6.1.y |
+| DTB | rk3566-panther-x2.dtb |
+| U-Boot 主镜像路径 | /usr/lib/u-boot/u-boot.itb |
+| Bootloader 路径 | /usr/lib/u-boot/idbloader.img |
+| 启动环境文件 | armbianEnv.txt |
+| 旧系统记录的下载/介质元数据 | DOWNLOAD_TYPE=tar、DISK_TYPE=usb |
+
+注意：旧版 /etc/ophub-release 中的 KERNEL_TAGS 曾记录为 stable，而实际内核来源分支记录为 6.1.y；两者属于不同层级的元数据，不应混为一个字段。旧记录中的 PACKAGED_DATE=2023-12-07 也不等于本次备份文件的创建日期。
+
+该旧系统曾正常运行，是 Panther X2 + Ophub 6.1 系列的历史实机基线。它不是 6.12.81 的实机验证，也不能证明当前候选二进制与旧系统完全相同。
+
+### 13.2 备份归档清单与 SHA-256
+
+备份目录中与内核相关的归档及其随附 sha256sums 记录如下。用户在 iMac 上执行 shasum -a 256 -c sha256sums，三项均返回 OK。
+
+| 归档 | SHA-256 | 校验 |
+|---|---|---|
+| boot-6.1.116-ophub.tar.gz | 68e991e78c19ecaf96d766a058b9b1149a57efcef5a729fd971edf47808ed6d2 | OK |
+| dtb-rockchip-6.1.116-ophub.tar.gz | 2c60c79d67fee948689fa3ac17cd834e33553f1c65f03bf852529372ae37d5e5 | OK |
+| modules-6.1.116-ophub.tar.gz | d8056b6abe03cdee392e56e4d5cf20ccfd5d1f577d579fbf29923cfba6a1b529 | OK |
+
+另有 boot-before-6.1.116.tar.gz，其中目录清单搜索仅发现 armbianEnv.txt 与本次相关；该归档没有出现在上述三项 SHA256 清单中，因此本节不为它声明已校验。
+
+备份目录记录日期为 2025-06-27。此日期是备份文件记录的时间，不应与旧系统软件包元数据中的 PACKAGED_DATE 混淆。
+
+### 13.3 归档内容检查结果
+
+只读取归档目录，没有解压或修改原始备份：
+
+- boot-6.1.116-ophub.tar.gz：未发现 idbloader.img、u-boot.itb、trust.bin 或包含 U-Boot 的目录路径。
+- boot-before-6.1.116.tar.gz：未发现上述 U-Boot 文件；仅发现 armbianEnv.txt。
+- dtb-rockchip-6.1.116-ophub.tar.gz：作为 DTB 归档保留，后续可用于与 6.12.81 Panther X2 DTB 做静态差异比较。
+- modules-6.1.116-ophub.tar.gz：作为旧内核模块基线保留，可用于驱动模块清单比较。
+- 其他系统配置/应用归档中也未找到 idbloader.img、u-boot.itb 或 trust.bin。
+
+因此，本次备份可供后续使用的内容是旧内核、DTB、模块及启动环境参考；没有收录旧系统实际使用的 U-Boot 二进制。不能从上述归档 SHA256 推导 U-Boot 文件的哈希。
+
+### 13.4 对后续 6.12.81 审计的用途
+
+1. 将 rk3566-panther-x2.dtb 作为旧版成功运行系统的设备树参考，比较 6.12.81 DTS 的节点状态、GPIO、时钟、PHY、USB、存储和 regulator 差异。
+2. 从 DTB 归档提取旧版 DTB，在 CI 中用 dtc 反编译后做结构化比较；比较前记录原始归档 SHA256 和提取文件 SHA256。
+3. 从 modules 归档生成模块清单，与 6.12.81 最终内核包比较驱动覆盖范围；注意旧版模块清单不能替代新版本 .config。
+4. 从 boot 归档提取 armbianEnv.txt，作为旧版启动参数参考；任何设备节点编号仍需按新系统实际 MMC 枚举重新验证。
+5. 继续沿用 Panther X2 历史成功方案的 idbloader.img + u-boot.itb 文件布局作为 6.12.81 候选启动链；不因本次备份未收录二进制就推断旧系统使用了不同方案。
+
+### 13.5 证据边界
+
+| 结论 | 证据级别 |
+|---|---|
+| 用户历史系统实际运行 6.1.116-ophub | 用户提供的旧系统记录 |
+| 历史系统配置了 idbloader.img + u-boot.itb 路径 | 用户提供的 /etc/ophub-release |
+| 三个内核相关归档的 SHA256 校验通过 | 用户在 iMac 上执行校验并提供结果 |
+| boot 归档未包含两个 U-Boot 文件 | 对归档目录的只读列表检查 |
+| 旧系统实际使用的 U-Boot 二进制内容/哈希 | 未取得，未知 |
+| 旧版 DTB、模块与 6.12.81 的差异 | 待提取并比较 |
+| 6.12.81 能否在 Panther X2 实机启动 | 未验证 |
+
+本节只保存审计所需的非敏感索引和校验值。原始备份继续由用户本地保存，不进入 Git 仓库。
