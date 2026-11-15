@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Unit tests for DTB semantic reference normalization."""
 from pathlib import Path
-import sys
+import importlib.util
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import audit_npu_dtb as audit
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "audit-npu-dtb.py"
+SPEC = importlib.util.spec_from_file_location("audit_npu_dtb", SCRIPT)
+audit = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(audit)
 
 
 class ReferenceClassificationTests(unittest.TestCase):
@@ -14,7 +17,7 @@ class ReferenceClassificationTests(unittest.TestCase):
         for name in ("clocks", "resets", "power-domains", "iommus",
                      "interrupts-extended", "nvmem-cells", "memory-region",
                      "devfreq-events", "interrupt-parent", "rockchip,hw",
-                     "ddr3_params", "vdd-supply", "pinctrl-0", "gpios"):
+                     "ddr3_params", "vdd-supply", "pinctrl-0", "reset-gpios"):
             with self.subTest(name=name):
                 self.assertTrue(audit.is_reference_property(name))
         for name in ("pinctrl-names", "clock-frequency", "reg", "status",
