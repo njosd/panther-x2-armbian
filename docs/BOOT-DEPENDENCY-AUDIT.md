@@ -646,3 +646,76 @@ D. 实机验收（未来阶段，当前未授权执行）
 - 验收失败时保留 UART 救援路径，但修复目标是恢复网络远程管理，不把“UART 可登录”当成首版通过。
 
 当前阶段边界：本节只定义验收标准和审计工作；未安装软件、未修改 rootfs/内核配置、未构建或写入实机镜像，也未操作 Panther X2。
+
+## 17. 首版网络与 SSH 用户态构建路径：第一轮源码审计（2026-11-15）
+
+本节将网络/SSH 作为首版 P0，检查固定 Ophub Armbian 工作流与项目记录的 Armbian build 源码快照。证据分为“构建脚本明确传参”“固定源码默认行为”“最终 rootfs 尚待检查”，不可混为一谈。
+
+### 17.1 Ophub Server 构建工作流选择
+
+固定 Ophub Armbian commit `9e71b57f73683f9c4d14a30311e4c2ccbff29566` 的 `.github/workflows/build-armbian-arm64-server-image.yml` 中，Armbian 编译命令明确传入：
+
+- `BUILD_MINIMAL=no`
+- `BUILD_DESKTOP=no`
+- `RELEASE` 由构建矩阵选择，项目目标基线为 Noble。
+- Server workflow 在后续步骤再运行 Ophub 的 rootfs 整理脚本。
+
+固定 Armbian build commit `3f3849bf50bfadff94d0d488eb968bdaf970dc72` 的 `lib/functions/configuration/main-config.sh` 规定：未显式设置 `NETWORKING_STACK` 时，`BUILD_MINIMAL=yes` 选择 `systemd-networkd`；否则选择 `network-manager`。该构建命令未传入 `NETWORKING_STACK`，所以按此源码快照的默认逻辑应选择 NetworkManager。
+
+### 17.2 NetworkManager + Netplan DHCP 路径
+
+固定 Armbian build 源码中：
+
+- `extensions/network/net-network-manager.sh` 为 NetworkManager 扩展添加 `network-manager`、`network-manager-openvpn`、`netplan.io` 软件包。
+- 扩展启用 `systemd-resolved.service`，部署 Netplan 配置，并禁用 `NetworkManager-wait-online.service`。
+- `extensions/network/config-nm/netplan/00-default-use-network-manager.yaml` 设置 `renderer: NetworkManager`，其注释说明所有设备交给 NetworkManager 管理，检测到 carrier 后通过 DHCP 自动配置。
+
+这条路径不要求额外假定一个独立的 isc-dhcp-client；DHCP 由 NetworkManager 管理。Panther X2 当前 boot 环境参数包含 `net.ifnames=0`，因此传统接口名通常为 `eth0`；Netplan 配置的通配匹配为 `e*`，静态上能够覆盖该命名。最终仍需在 rootfs 和实机验证接口名及 DHCP 行为。
+
+### 17.3 Noble CLI 基础软件包证据
+
+固定 Armbian build commit 的 `config/cli/noble/main/packages` 明确列出：
+
+- `openssh-server`
+- `iproute2`
+- `iputils-ping`
+- `rsyslog`
+- `systemd-resolved`
+
+因此在该 CLI rootfs 配置路径中，SSH server 和基本网络诊断工具有软件包清单证据。NetworkManager 及 Netplan 则由前述网络扩展额外加入。
+
+**重要边界：** 软件包在配置清单中，不等于最终镜像已安装、服务已 enable、SSH 已监听或用户认证已配置。最终 rootfs 的 `ssh.service` enable 状态、host key 生成、首启用户创建、密码/公钥认证策略仍需从实际镜像检查。
+
+### 17.4 构建来源可追溯性发现
+
+虽然项目 `config/versions.env` 固定记录了 Armbian build commit `3f3849bf50bfadff94d0d488eb968bdaf970dc72`，但固定 Ophub Server workflow 的实际源码下载步骤使用 `git clone --single-branch --depth=1 --branch=main https://github.com/armbian/build.git`，没有 checkout 到上述固定 commit。
+
+因此：
+- 本节关于 NetworkManager 默认选择、Netplan DHCP 和 Noble CLI 包清单的结论，是对项目固定 Armbian 源码快照的静态审计结果。
+- Ophub workflow 在实际运行时使用的 Armbian build 源码版本可能随 main 分支变化。
+- 不能声称历史 workflow 运行时必然使用了 `3f3849bf...` 的实现。
+- 后续自建/修订的可追溯构建流程必须显式 checkout `ARMBIAN_BUILD_COMMIT`，并在构建日志记录实际 HEAD；不能只在 versions.env 记录一个未被 workflow 消费的 commit。
+
+### 17.5 当前阶段判定
+
+| 项目 | 当前结论 |
+|---|---|
+| Ophub Server workflow 的 BUILD_MINIMAL | 已从固定 workflow 源码确认：no |
+| 固定 Armbian build 源码默认网络栈 | 已确认：非 minimal 时为 NetworkManager |
+| NetworkManager + Netplan DHCP 配置 | 已确认：carrier 后 DHCP |
+| Noble CLI 软件包清单包含 openssh-server | 已确认 |
+| Noble CLI 软件包清单包含 iproute2 / iputils-ping / rsyslog | 已确认 |
+| 固定 Ophub workflow 实际使用的 Armbian build commit | 未固定，workflow clone main |
+| 6.12.81 最终内核包的 GMAC/PHY 配置与模块 | 待专用 CI 提取 |
+| 最终 rootfs 中 NetworkManager、Netplan、openssh-server 是否存在 | 待镜像构建产物核查 |
+| ssh.service 是否 enabled、host keys 和首启账户策略 | 待最终 rootfs 核查 |
+| DHCP、链路、SSH 实机验收 | 未验证 |
+
+### 17.6 下一步
+
+1. 运行 `.github/workflows/audit-panther-network-ssh.yml`，核对 Ophub 6.12.81 发布包最终内核 config 和 modules，而不是仅看 config 模板。
+2. 在构建器中固定 Armbian build commit；明确首版采用 NetworkManager + Netplan，避免构建来源变化造成网络栈漂移。
+3. 对首版候选 rootfs 做只读静态检查：NetworkManager/Netplan 配置、ssh.service enable 状态、SSH host key 生成、初始用户和认证策略。
+4. 只有静态检查通过后才进入 TF 卡实机启动；以局域网 SSH 作为主要验收通道，UART 作为辅助救援。
+
+当前没有构建或写入实机镜像，没有安装软件，也没有修改 Panther X2 实机。
