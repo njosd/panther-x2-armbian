@@ -242,9 +242,23 @@ jobs:
         working-directory: work/ophub
         run: |
           set -euo pipefail
+          check() {
+            local label="$1"; shift
+            echo "::group::CHECK $label"
+            if "$@"; then
+              echo "PASS: $label"
+            else
+              local rc=$?
+              echo "::error::FAIL: $label (exit $rc)"
+              echo "::endgroup::"
+              return "$rc"
+            fi
+            echo "::endgroup::"
+          }
+
           image=$(find build/output/images -maxdepth 1 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
-          test -n "$image"
-          gzip -t "$image"
+          check "final compressed image exists" test -n "$image"
+          check "final image gzip integrity" gzip -t "$image"
           mkdir -p validation
           gzip -dc "$image" > validation/panther-x2-minimal.img
           loop=$(sudo losetup --find --show --partscan validation/panther-x2-minimal.img)
@@ -257,50 +271,57 @@ jobs:
           sudo mount "${loop}p1" validation/boot
           sudo mount "${loop}p2" validation/root
 
-          test -s validation/boot/Image
-          test -s validation/boot/Image-6.12.81-ophub
-          test -s validation/boot/uInitrd-6.12.81-ophub
-          test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
-          grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
+          echo "========== BOOT PARTITION INVENTORY =========="
+          sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\\n' | sort
+          echo "========== ROOTFS KERNEL INVENTORY =========="
+          sudo find validation/root/boot validation/root/usr/lib/modules -maxdepth 3 -printf '%y %P -> %l (%s bytes)\\n' 2>/dev/null | sort || true
+          echo "========== KERNEL PACKAGE STATE =========="
+          sudo grep -E '^(Package|Version): (linux-image|linux-dtb|linux-u-boot)' validation/root/var/lib/dpkg/status || true
+
+          check "boot Image symlink/file" test -s validation/boot/Image
+          check "versioned kernel image" test -s validation/boot/Image-6.12.81-ophub
+          check "versioned initrd" test -s validation/boot/uInitrd-6.12.81-ophub
+          check "Panther X2 DTB" test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          check "armbianEnv selects Panther X2 DTB" grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
 
           idb_size=$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/idbloader.img)
           idb_blocks=$(((idb_size + 511) / 512))
           dd if=validation/panther-x2-minimal.img of=validation/idbloader.from-image bs=512 skip=64 count="$idb_blocks" status=none
           truncate -s "$idb_size" validation/idbloader.from-image
-          cmp validation/idbloader.from-image build-armbian/u-boot/rockchip/panther-x2/idbloader.img
+          check "embedded idbloader matches pinned source" cmp validation/idbloader.from-image build-armbian/u-boot/rockchip/panther-x2/idbloader.img
 
           itb_size=$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/u-boot.itb)
           itb_blocks=$(((itb_size + 511) / 512))
           dd if=validation/panther-x2-minimal.img of=validation/u-boot.itb.from-image bs=512 skip=16384 count="$itb_blocks" status=none
           truncate -s "$itb_size" validation/u-boot.itb.from-image
-          cmp validation/u-boot.itb.from-image build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
+          check "embedded u-boot.itb matches pinned source" cmp validation/u-boot.itb.from-image build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
 
-          test -s validation/root/etc/ssh/sshd_config
-          test -s validation/root/etc/shadow
-          test -d validation/root/usr/lib/modules/6.12.81-ophub
-          grep -q '^Port 22' validation/root/etc/ssh/sshd_config
-          grep -q '^PermitRootLogin yes' validation/root/etc/ssh/sshd_config
-          grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
-          grep -q '^root:\$6\$' validation/root/etc/shadow
-          test -e validation/root/usr/lib/systemd/system/ssh.service
-          test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
-          test -e validation/root/usr/lib/systemd/system/NetworkManager.service
-          test -e validation/root/etc/systemd/system/multi-user.target.wants/NetworkManager.service
-          test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
-          test -e validation/root/etc/systemd/system/multi-user.target.wants/armbian-firstrun.service
-          test -e validation/root/root/.not_logged_in_yet
-          test -x validation/root/usr/lib/armbian/armbian-firstlogin
-          test -s validation/root/etc/default/armbian-firstrun
-          grep -q '^OPENSSHD_REGENERATE_HOST_KEYS=true' validation/root/etc/default/armbian-firstrun
-          grep -q '^Package: openssh-server$' validation/root/var/lib/dpkg/status
-          grep -q '^Package: network-manager$' validation/root/var/lib/dpkg/status
-          grep -q '^Package: netplan.io$' validation/root/var/lib/dpkg/status
-          test -d validation/root/etc/netplan
-          find validation/root/etc/netplan -maxdepth 1 -type f -name '*.yaml' | grep -q .
-          grep -R -Eq 'renderer:[[:space:]]*NetworkManager' validation/root/etc/netplan
-          grep -R -Eq 'dhcp4:[[:space:]]*true' validation/root/etc/netplan
-          test -s validation/root/usr/lib/u-boot/idbloader.img
-          test -s validation/root/usr/lib/u-boot/u-boot.itb
+          check "SSH server config exists" test -s validation/root/etc/ssh/sshd_config
+          check "shadow database exists" test -s validation/root/etc/shadow
+          check "6.12.81 modules directory exists" test -d validation/root/usr/lib/modules/6.12.81-ophub
+          check "SSH listens on port 22" grep -q '^Port 22' validation/root/etc/ssh/sshd_config
+          check "root SSH login enabled" grep -q '^PermitRootLogin yes' validation/root/etc/ssh/sshd_config
+          check "password SSH authentication enabled" grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
+          check "root password hash exists" grep -q '^root:\\$6\\$' validation/root/etc/shadow
+          check "SSH service unit exists" test -e validation/root/usr/lib/systemd/system/ssh.service
+          check "SSH service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
+          check "NetworkManager service unit exists" test -e validation/root/usr/lib/systemd/system/NetworkManager.service
+          check "NetworkManager service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/NetworkManager.service
+          check "Armbian first-run service exists" test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
+          check "Armbian first-run service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/armbian-firstrun.service
+          check "first-login marker exists" test -e validation/root/root/.not_logged_in_yet
+          check "Armbian first-login program executable" test -x validation/root/usr/lib/armbian/armbian-firstlogin
+          check "first-run defaults exist" test -s validation/root/etc/default/armbian-firstrun
+          check "first-run regenerates SSH host keys" grep -q '^OPENSSHD_REGENERATE_HOST_KEYS=true' validation/root/etc/default/armbian-firstrun
+          check "openssh-server package installed" grep -q '^Package: openssh-server$' validation/root/var/lib/dpkg/status
+          check "network-manager package installed" grep -q '^Package: network-manager$' validation/root/var/lib/dpkg/status
+          check "netplan package installed" grep -q '^Package: netplan.io$' validation/root/var/lib/dpkg/status
+          check "Netplan directory exists" test -d validation/root/etc/netplan
+          check "Netplan YAML exists" bash -c 'find validation/root/etc/netplan -maxdepth 1 -type f -name "*.yaml" | grep -q .'
+          check "Netplan uses NetworkManager renderer" grep -R -Eq 'renderer:[[:space:]]*NetworkManager' validation/root/etc/netplan
+          check "Netplan enables DHCPv4" grep -R -Eq 'dhcp4:[[:space:]]*true' validation/root/etc/netplan
+          check "rootfs U-Boot idbloader copy exists" test -s validation/root/usr/lib/u-boot/idbloader.img
+          check "rootfs U-Boot FIT copy exists" test -s validation/root/usr/lib/u-boot/u-boot.itb
 
           {
             echo "Image: $image"
