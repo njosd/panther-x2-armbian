@@ -1,0 +1,133 @@
+name: Audit Panther X2 Ethernet and SSH prerequisites
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout audit repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install read-only audit tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl git gzip tar
+
+      - name: Download and inspect exact Ophub RK35xx 6.12.81 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p audit/package audit/nested audit/extracted audit/reports
+
+          archive="audit/package/$OPHUB_RK35XX_PACKAGE_ASSET"
+          curl --fail --location --retry 3 --retry-delay 3 "$OPHUB_RK35XX_PACKAGE_URL" -o "$archive"
+          actual_size="$(stat -c '%s' "$archive")"
+          actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          {
+            echo "Asset: $OPHUB_RK35XX_PACKAGE_ASSET"
+            echo "Expected size: $OPHUB_RK35XX_PACKAGE_SIZE_BYTES"
+            echo "Actual size: $actual_size"
+            echo "Expected SHA256: $OPHUB_RK35XX_PACKAGE_SHA256"
+            echo "Actual SHA256: $actual_sha"
+          } | tee audit/reports/package-check.txt
+          test "$actual_size" = "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES"
+          test "$actual_sha" = "$OPHUB_RK35XX_PACKAGE_SHA256"
+          gzip -t "$archive"
+          tar -tzf "$archive" > audit/reports/outer-members.txt
+
+          : > audit/reports/nested-index.txt
+          while IFS= read -r member; do
+            [[ "$member" =~ \.(tar\.gz|tgz)$ ]] || continue
+            name="$(basename "$member")"
+            nested="audit/nested/$name"
+            tar -xOzf "$archive" "$member" > "$nested"
+            gzip -t "$nested"
+            tar -tzf "$nested" > "audit/nested/$name.members.txt"
+            echo "===== $name =====" >> audit/reports/nested-index.txt
+            cat "audit/nested/$name.members.txt" >> audit/reports/nested-index.txt
+            echo >> audit/reports/nested-index.txt
+          done < audit/reports/outer-members.txt
+
+          boot="audit/nested/boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+          modules="audit/nested/modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+          test -s "$boot"
+          test -s "$modules"
+
+          config_member="$(tar -tzf "$boot" | grep -E '(^|/)config-[^/]*-ophub$' | head -n 1)"
+          test -n "$config_member"
+          tar -xOzf "$boot" "$config_member" > audit/extracted/kernel.config
+          grep -E '^(CONFIG_(NET|INET|IPV6|PACKET|UNIX|NETDEVICES|ETHERNET|STMMAC_ETH|STMMAC_PLATFORM|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK|MODULES)=|# CONFIG_(STMMAC_ETH|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK) is not set)' audit/extracted/kernel.config > audit/reports/network-kernel-config.txt || true
+
+          tar -tzf "$modules" > audit/reports/modules-members.txt
+          grep -Ei '(stmmac|dwmac|realtek|libphy|phylink|mdio|ethernet)' audit/reports/modules-members.txt > audit/reports/network-module-paths.txt || true
+          {
+            echo "Boot archive: $boot"
+            echo "Kernel config member: $config_member"
+            echo "Modules archive: $modules"
+            echo "Relevant module paths:"
+            cat audit/reports/network-module-paths.txt
+          } > audit/reports/kernel-network-summary.txt
+
+      - name: Audit pinned Armbian rootfs networking and SSH build logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          git clone --filter=blob:none --no-checkout "$ARMBIAN_BUILD_REPO" audit/armbian-build
+          git -C audit/armbian-build fetch --depth=1 origin "$ARMBIAN_BUILD_COMMIT"
+          git -C audit/armbian-build checkout --detach FETCH_HEAD
+          test "$(git -C audit/armbian-build rev-parse HEAD)" = "$ARMBIAN_BUILD_COMMIT"
+
+          root="audit/armbian-build"
+          {
+            echo "Armbian build commit: $(git -C "$root" rev-parse HEAD)"
+            echo
+            echo "=== Noble CLI base packages ==="
+            grep -n -E '^(openssh-server|iproute2|iputils-ping|rsyslog|systemd-resolved)$' "$root/config/cli/noble/main/packages" || true
+            echo
+            echo "=== Network stack selection logic ==="
+            sed -n '70,95p' "$root/lib/functions/configuration/main-config.sh"
+            sed -n '365,390p' "$root/lib/functions/configuration/main-config.sh"
+            echo
+            echo "=== NetworkManager extension ==="
+            sed -n '1,100p' "$root/extensions/network/net-network-manager.sh"
+            echo
+            echo "=== Netplan DHCP policy ==="
+            cat "$root/extensions/network/config-nm/netplan/00-default-use-network-manager.yaml"
+          } > audit/reports/rootfs-network-ssh-source.txt
+
+      - name: Record Ophub build workflow provenance caveat
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/ophub/amlogic-s9xxx-armbian/$OPHUB_ARMBIAN_COMMIT/.github/workflows/build-armbian-arm64-server-image.yml" \
+            -o audit/reports/ophub-server-build-workflow.yml
+          {
+            echo "The pinned Ophub workflow source is recorded above."
+            echo "The workflow's Armbian checkout command is:"
+            grep -n -E 'git clone.*armbian/build|BUILD_MINIMAL=|BUILD_DESKTOP=' audit/reports/ophub-server-build-workflow.yml || true
+            echo
+            echo "Compare the workflow's actual Armbian checkout ref with ARMBIAN_BUILD_COMMIT in config/versions.env."
+            echo "A workflow that clones main does not consume the pinned ARMBIAN_BUILD_COMMIT unless an additional checkout override exists."
+          } > audit/reports/build-provenance-note.txt
+
+      - name: Upload Ethernet and SSH audit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-6.12.81-ethernet-ssh-prerequisite-audit
+          path: |
+            audit/reports/
+            audit/extracted/kernel.config
+          if-no-files-found: warn
+          retention-days: 30
