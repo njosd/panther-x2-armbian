@@ -87,8 +87,9 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
           rebuild = Path("work/ophub/rebuild")
-          s = rebuild.read_text()
+          source = rebuild.read_text()
           replacements = {
               'if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then':
                   'if false; then # CI pre-seeds U-Boot from the pinned commit',
@@ -96,33 +97,41 @@ jobs:
                   'if false; then # CI pre-seeds firmware from the pinned commit',
           }
           for old, new in replacements.items():
-              if s.count(old) != 1:
+              if source.count(old) != 1:
                   raise SystemExit(f"Expected one occurrence of {old!r}")
-              s = s.replace(old, new)
-          marker = '''    # Enable ssh service
-    ssh_config="etc/ssh/sshd_config"'''
-          injected = '''    # Enable required first-boot network and remote-management services in the target rootfs.
-    systemctl --root="${tag_rootfs}" enable ssh.service
-    systemctl --root="${tag_rootfs}" enable NetworkManager.service
-    systemctl --root="${tag_rootfs}" enable armbian-firstrun.service
+              source = source.replace(old, new)
 
-    # Enable ssh service
-    ssh_config="etc/ssh/sshd_config"'''
-          if s.count(marker) != 1:
+          marker = "\\n".join([
+              "    # Enable ssh service",
+              '    ssh_config="etc/ssh/sshd_config"',
+          ])
+          injected = "\\n".join([
+              "    # Enable required first-boot network and remote-management services.",
+              '    systemctl --root="${tag_rootfs}" enable ssh.service',
+              '    systemctl --root="${tag_rootfs}" enable NetworkManager.service',
+              '    systemctl --root="${tag_rootfs}" enable armbian-firstrun.service',
+              "",
+              "    # Enable ssh service",
+              '    ssh_config="etc/ssh/sshd_config"',
+          ])
+          if source.count(marker) != 1:
               raise SystemExit("Expected SSH rootfs configuration marker exactly once")
-          s = s.replace(marker, injected)
-          rebuild.write_text(s)
+          rebuild.write_text(source.replace(marker, injected))
 
           helper = Path("work/ophub/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh")
-          s = helper.read_text()
-          old = '''        git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ophub/firmware "${edid_tmp}/fw" 2>/dev/null
-        git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1'''
-          new = '''        mkdir -p "${edid_tmp}/fw/firmware/edid"
-        cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"'''
-          if s.count(old) != 1:
+          source = helper.read_text()
+          old = "\\n".join([
+              '        git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ophub/firmware "${edid_tmp}/fw" 2>/dev/null',
+              '        git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1',
+          ])
+          new = "\\n".join([
+              '        mkdir -p "${edid_tmp}/fw/firmware/edid"',
+              '        cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"',
+          ])
+          if source.count(old) != 1:
               raise SystemExit("Expected EDID moving-branch download block exactly once")
-          helper.write_text(s.replace(old, new))
-          print("Patched local build scripts to consume only pinned U-Boot/firmware sources")
+          helper.write_text(source.replace(old, new))
+          print("Patched local build scripts to consume pinned U-Boot/firmware sources")
           PY
 
       - name: Pin Panther X2 model database to RK35xx 6.12.y
@@ -234,7 +243,6 @@ jobs:
           test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
           grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
 
-          # Confirm the raw Rockchip loader bytes are embedded at the expected sectors.
           idb_size=$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/idbloader.img)
           idb_blocks=$(((idb_size + 511) / 512))
           dd if=validation/panther-x2-minimal.img of=validation/idbloader.from-image bs=512 skip=64 count="$idb_blocks" status=none
@@ -246,6 +254,7 @@ jobs:
           dd if=validation/panther-x2-minimal.img of=validation/u-boot.itb.from-image bs=512 skip=16384 count="$itb_blocks" status=none
           truncate -s "$itb_size" validation/u-boot.itb.from-image
           cmp validation/u-boot.itb.from-image build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
+
           test -s validation/root/etc/ssh/sshd_config
           test -s validation/root/etc/shadow
           test -d validation/root/usr/lib/modules/6.12.81-ophub
@@ -263,8 +272,16 @@ jobs:
           test -x validation/root/usr/lib/armbian/armbian-firstlogin
           test -s validation/root/etc/default/armbian-firstrun
           grep -q '^OPENSSHD_REGENERATE_HOST_KEYS=true' validation/root/etc/default/armbian-firstrun
-          grep -q '^Package: openssh-server          test -s validation/root/usr/lib/u-boot/idbloader.img
+          grep -q '^Package: openssh-server$' validation/root/var/lib/dpkg/status
+          grep -q '^Package: network-manager$' validation/root/var/lib/dpkg/status
+          grep -q '^Package: netplan.io$' validation/root/var/lib/dpkg/status
+          test -d validation/root/etc/netplan
+          find validation/root/etc/netplan -maxdepth 1 -type f -name '*.yaml' | grep -q .
+          grep -R -Eq 'renderer:[[:space:]]*NetworkManager' validation/root/etc/netplan
+          grep -R -Eq 'dhcp4:[[:space:]]*true' validation/root/etc/netplan
+          test -s validation/root/usr/lib/u-boot/idbloader.img
           test -s validation/root/usr/lib/u-boot/u-boot.itb
+
           {
             echo "Image: $image"
             sha256sum "$image"
