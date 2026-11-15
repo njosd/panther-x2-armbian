@@ -104,3 +104,24 @@ This establishes that relevant driver code is built into the audited 6.12.81 ker
 - **Verified from extracted files:** FNNAS boot environment and script contents; FNNAS DTB properties; Ophub 6.12.81 DTB properties; 6.12.81 kernel config symbols; standard/Flippy decompiled DTS equality.
 - **Known project baseline:** FNNAS v389 TF card has previously booted successfully on Panther X2.
 - **Not verified:** Exact FNNAS bootloader's power-rail actions; physical RK809 SW2 state; successful NPU/MPP driver probe; successful NPU inference or video acceleration; normal multi-user boot from the FNNAS root filesystem.
+
+
+## 6. Exact 6.12.81 RKNPU driver / supply cross-check
+
+The recorded source commit is resolvable in `ophub/linux-6.12.y-rockchip`:
+- Commit: `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- Board DTS: `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`
+- SoC DTSI: `arch/arm64/boot/dts/rockchip/rk356x.dtsi`
+- Vendor RKNPU driver: `drivers/rknpu/rknpu_drv.c`
+- Devfreq implementation: `drivers/rknpu/rknpu_devfreq.c`
+
+The exact source confirms:
+- The NPU node's compatible `rockchip,rk3568-rknpu` is explicitly matched by the vendor `drivers/rknpu/rknpu_drv.c` driver.
+- The driver obtains an optional regulator using `devm_regulator_get_optional(dev, "rknpu")`. This regulator name corresponds to a DT property `rknpu-supply`.
+- The shipped Panther X2 DTB contains a regulator named `vdd_npu` (RK809 DCDC_REG4), but the NPU node has no `rknpu-supply` reference to it.
+- The NPU node itself and its IOMMU remain disabled in the shipped DTB, so this supply mismatch is a static enablement gap, not an observed failure on the running system.
+- In this driver revision, the optional supply can leave `rknpu_dev->vdd` null. The driver's `RKNPU_GET_VOLT` action calls `regulator_get_voltage(rknpu_dev->vdd)` without a local null check. The devfreq initialization path also reads the regulator voltage if its OPP/devfreq setup succeeds. Therefore, simply changing the NPU node to `okay` without auditing the supply path and ioctl/devfreq behavior is not an acceptable enablement plan.
+
+The RK3568 mainline/Rocket enablement RFCs found during external research use a different binding/interface, including `rockchip,rk3568-rknn-core`, `npu-supply` and a PM-domain `domain-supply`. That is not the same compatible or driver interface as this 6.12.81 vendor RKNPU driver. Do not transplant those property names or patches into this vendor DTB without a deliberate driver/binding reconciliation.
+
+**Result:** 6.12.81 contains the vendor RKNPU driver and a disabled RK3568 NPU hardware description, but the board DTB does not currently connect the NPU driver to the board's `vdd_npu` regulator. This is a concrete item for a separate NPU enablement patch study; it is not a reason to delay the minimal non-accelerated system.
