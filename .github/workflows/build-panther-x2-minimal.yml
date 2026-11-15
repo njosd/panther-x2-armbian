@@ -170,7 +170,7 @@ jobs:
         working-directory: work/ophub
         run: |
           set -euo pipefail
-          image=$(find build/output/images -maxdepth 1 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz' -print -quit)
+          image=$(find build/output/images -maxdepth 1 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
           test -n "$image"
           gzip -t "$image"
           mkdir -p validation
@@ -186,8 +186,18 @@ jobs:
           sudo mount "${loop}p2" validation/root
 
           test -s validation/boot/Image
+          test -s validation/boot/Image-6.12.81-ophub
           test -s validation/boot/uInitrd-6.12.81-ophub
           test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
+
+          # Confirm the raw Rockchip loader bytes are embedded at the expected sectors.
+          dd if=validation/panther-x2-minimal.img bs=512 skip=64 status=none | \
+            cmp -n "$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/idbloader.img)" - \
+              build-armbian/u-boot/rockchip/panther-x2/idbloader.img
+          dd if=validation/panther-x2-minimal.img bs=512 skip=16384 status=none | \
+            cmp -n "$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/u-boot.itb)" - \
+              build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
           test -s validation/root/etc/ssh/sshd_config
           test -s validation/root/etc/shadow
           test -d validation/root/usr/lib/modules/6.12.81-ophub
@@ -196,6 +206,7 @@ jobs:
           grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
           grep -q '^root:\$6\$' validation/root/etc/shadow
           test -e validation/root/usr/lib/systemd/system/ssh.service
+          test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
           test -e validation/root/usr/lib/systemd/system/NetworkManager.service
           test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
           test -e validation/root/root/.not_logged_in_yet
