@@ -989,3 +989,35 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 
 成功分支仍引用过时的单一候选反编译文件名；实际已拆分为 vendor/irqname 两份，应在后续工作流整理中分别报告。
 本轮最终语义审计仍未通过；两份候选编译通过。下一轮继续验证完整差异。
+
+
+### 3.37 Eighth semantic audit run: Rockchip DMC FSP parameter phandles（2026-11-15）
+
+运行记录：GitHub Actions run `43656313247`，job `132635483215`，执行提交 `d108feea19d7e56f22d531c344f2711965cd0e53`。
+
+#### 已通过阶段
+
+- Ophub 固定源码获取、DTS 审查；
+- source baseline DTB 编译；
+- 发布包外层 SHA-256 校验及发布 DTB 提取；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 编译；
+- 之前修复的 NVMEM、pinctrl、Rockchip hw、memory-region、devfreq-events 属性误判已消除。
+
+#### 本轮失败
+
+`/dmc-fsp:ddr3_params` 的值从 `156` 变为 `157`。固定源码 `rk356x.dtsi` 中 `dmc_fsp` 节点的 `ddr3_params`、`ddr4_params`、`lpddr3_params`、`lpddr4_params`、`lpddr4x_params` 均为单 phandle 参数表引用。DTC 新增引用后 phandle 编号重排，旧比较器直接比较数值导致误报。
+
+#### 修复
+
+提交 `24ae91695d5caed230f952cb8b2ce9a1043fc3a0`：
+- 将五个 DMC FSP 参数引用属性纳入单 phandle 语义解析；
+- 比较引用目标节点路径，不比较 phandle 整数；
+- 保持 fail-closed，未扩大 DTS 差异白名单。
+
+#### 重要说明
+
+本次 workflow 的 step 7 标记 failure，但其失败点已明确发生在语义比较阶段。baseline/published DTB 与两个候选 DTB 均已成功构建。Artifact：`14138231604`，包含本轮报告和反编译文件。
+
+此外，成功分支仍有旧的单候选 DTS 文件名引用，需修复为 vendor/irqname 两份文件。
+
+下一步不应只继续追加属性名单。需在审计器中维护显式的属性类型表与未知 phandle-like 属性检测，随后增加小型合成 DTB 测试，覆盖单 phandle、phandle list、带参数 specifier、普通字符串和整数数组。通过单元测试后再跑完整 DTB workflow。
