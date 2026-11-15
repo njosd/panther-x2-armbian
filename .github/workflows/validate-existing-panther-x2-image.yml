@@ -1,0 +1,104 @@
+name: Validate Existing Panther X2 Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build workflow run ID containing panther-x2-minimal-6.12.81-noble artifact"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download existing image artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          path: artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Inspect existing image without rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p validation
+          image=$(find artifact -maxdepth 2 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
+          test -n "$image"
+          sha256file="$image.sha256"
+          test -s "$sha256file"
+          (cd "$(dirname "$image")" && sha256sum --check "$(basename "$sha256file")")
+          gzip -t "$image"
+          gzip -dc "$image" > validation/panther-x2-minimal.img
+
+          loop=$(sudo losetup --find --show --partscan validation/panther-x2-minimal.img)
+          cleanup() {
+            sudo umount validation/boot validation/root 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          mkdir -p validation/boot validation/root
+          sudo mount -o ro "${loop}p1" validation/boot
+          sudo mount -o ro "${loop}p2" validation/root
+
+          {
+            echo "Image: $image"
+            echo "SHA256:"
+            cat "$sha256file"
+            echo
+            echo "========== BOOT PARTITION =========="
+            sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\\n' | sort
+            echo
+            echo "========== NETWORKMANAGER ENABLEMENT =========="
+            sudo find validation/root/etc/systemd/system -maxdepth 5 \\( -iname '*networkmanager*' -o -iname '*NetworkManager*' \\) -printf '%y %p -> %l\\n' 2>/dev/null | sort || true
+            sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager.service 2>&1 || true
+            sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager 2>&1 || true
+            echo
+            echo "========== NETWORKMANAGER UNIT =========="
+            sudo sed -n '1,220p' validation/root/usr/lib/systemd/system/NetworkManager.service 2>/dev/null || true
+            echo
+            echo "========== NETPLAN =========="
+            sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \\; 2>/dev/null || true
+            echo
+            echo "========== NETWORKMANAGER CONFIG =========="
+            sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+            echo
+            echo "========== NETWORKD / IFUPDOWN CONFIG =========="
+            sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+            echo
+            echo "========== NETWORK PACKAGES =========="
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' network-manager netplan.io openssh-server 2>&1 || true
+            echo
+            echo "========== KERNEL / LEGACY PACKAGE STATUS =========="
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
+            for package in linux-image-current-meson64 linux-dtb-current-meson64 linux-u-boot-odroidn2-current; do
+              echo "--- $package file list ---"
+              sudo dpkg-query --admindir=validation/root/var/lib/dpkg -L "$package" 2>&1 | sed -n '1,100p' || true
+            done
+            echo
+            echo "========== SSH / FIRST LOGIN =========="
+            sudo systemctl --root="$PWD/validation/root" is-enabled ssh.service 2>&1 || true
+            sudo systemctl --root="$PWD/validation/root" is-enabled armbian-firstrun.service 2>&1 || true
+            sudo grep -E '^(Port|PermitRootLogin|PasswordAuthentication)' validation/root/etc/ssh/sshd_config 2>/dev/null || true
+          } | tee validation/existing-image-diagnostics.txt
+
+          sudo umount validation/boot validation/root
+          sudo losetup -d "$loop"
+          trap - EXIT
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-image-validation-${{ inputs.run_id }}
+          path: validation/existing-image-diagnostics.txt
+          if-no-files-found: warn
+          retention-days: 14
