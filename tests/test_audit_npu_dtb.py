@@ -25,6 +25,18 @@ class ReferenceClassificationTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertFalse(audit.is_reference_property(name))
 
+    def test_symbols_node_values_are_strings_even_for_phandle_named_symbols(self):
+        with patch.object(audit, "run_fdtget", return_value="/ddr3-params") as mocked:
+            self.assertEqual(
+                audit.normalized_property(
+                    self.dtb, "/__symbols__", "ddr3_params", self.handles
+                ),
+                "/ddr3-params",
+            )
+            mocked.assert_called_once_with(
+                self.dtb, "/__symbols__", "ddr3_params", required=False
+            )
+
     def test_phandle_metadata_is_omitted(self):
         self.assertIsNone(
             audit.normalized_property(Path("tree.dtb"), "/node", "phandle", {})
