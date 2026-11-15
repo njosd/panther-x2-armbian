@@ -47,7 +47,7 @@ jobs:
           trap cleanup EXIT
           mkdir -p validation/boot validation/root
           sudo mount -o ro "${loop}p1" validation/boot
-          sudo mount -o ro "${loop}p2" validation/root
+          sudo mount -o ro,noload "${loop}p2" validation/root
 
           {
             echo "Image: $image"
