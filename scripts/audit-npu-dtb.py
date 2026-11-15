@@ -138,6 +138,10 @@ def normalized_property(dtb: Path, node: str, name: str,
                         handles: dict[int, str]) -> str | None:
     if name in PHANDLE_PROPERTIES:
         return None
+    # /__symbols__ stores label-to-node-path strings; symbol names may
+    # collide with real phandle property names elsewhere in the tree.
+    if node == "/__symbols__":
+        return run_fdtget(dtb, node, name, required=False)
     if not is_reference_property(name):
         return run_fdtget(dtb, node, name, required=False)
 
