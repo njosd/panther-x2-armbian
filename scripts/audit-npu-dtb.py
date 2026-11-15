@@ -105,6 +105,7 @@ def is_reference_property(name: str) -> bool:
         or name.endswith("-gpio")
         or re.fullmatch(r"pinctrl-\d+", name) is not None
         or name.endswith("-parent")
+        or name == "interrupt-map"
     )
 
 
@@ -137,6 +138,49 @@ def normalize_specifier_list(
     return " ".join(out)
 
 
+def normalize_interrupt_map(
+    raw: list[int], dtb: Path, node: str, handles: dict[int, str],
+) -> str:
+    def cell_count(path: str, prop: str) -> int:
+        value = run_fdtget(dtb, "-t", "x", path, prop, required=False)
+        if not value:
+            raise RuntimeError(
+                f"{dtb}:{node}: interrupt-map requires {prop} on {path}"
+            )
+        return int(value.split()[0], 16)
+
+    child_addr_cells = cell_count(node, "#address-cells")
+    child_irq_cells = cell_count(node, "#interrupt-cells")
+    pos = 0
+    entries: list[str] = []
+    while pos < len(raw):
+        child_end = pos + child_addr_cells + child_irq_cells
+        if child_end >= len(raw):
+            raise RuntimeError(f"{dtb}:{node}: truncated interrupt-map child specifier")
+        child = raw[pos:child_end]
+        parent_handle = raw[child_end]
+        parent = handles.get(parent_handle)
+        if parent is None:
+            raise RuntimeError(
+                f"{dtb}:{node}: interrupt-map has unknown parent phandle "
+                f"0x{parent_handle:x}"
+            )
+        parent_addr_cells = cell_count(parent, "#address-cells")
+        parent_irq_cells = cell_count(parent, "#interrupt-cells")
+        end = child_end + 1 + parent_addr_cells + parent_irq_cells
+        if end > len(raw):
+            raise RuntimeError(
+                f"{dtb}:{node}: truncated interrupt-map parent specifier for {parent}"
+            )
+        parent_spec = raw[child_end + 1:end]
+        entries.append(
+            "child(" + ",".join(f"0x{x:x}" for x in child) + ")"
+            f"@{parent}(" + ",".join(f"0x{x:x}" for x in parent_spec) + ")"
+        )
+        pos = end
+    return " ".join(entries)
+
+
 def normalized_property(dtb: Path, node: str, name: str,
                         handles: dict[int, str]) -> str | None:
     if name in PHANDLE_PROPERTIES:
@@ -152,6 +196,9 @@ def normalized_property(dtb: Path, node: str, name: str,
     raw = [int(token, 16) for token in raw_text.split()]
     if not raw:
         return ""
+
+    if name == "interrupt-map":
+        return normalize_interrupt_map(raw, dtb, node, handles)
 
     if name in SINGLE_PHANDLE_ARRAY_PROPERTIES:
         targets = []
