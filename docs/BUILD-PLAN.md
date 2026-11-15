@@ -1186,3 +1186,35 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 Artifact：`14139106413`。语义审计仍未通过；本轮失败属于比较器属性分类缺口，不表示 PHY 接线发生变化。候选 DTB 编译成功不等于设备运行验证。
 
 下一轮先跑单元测试，再继续完整审计。若继续遇到 phandle-only property，不应盲目扩大名单：先确认属性在绑定/源码中的真实语义，再归类为单引用、列表或带参数 specifier。对比通过后仍需人工审查差异报告。
+
+
+### 3.45 Twelfth audit run: DWMAC configuration phandles exposed（2026-11-15）
+
+运行记录：GitHub Actions run `43658286480`，job `132641665380`，checkout commit `74ddeae197fee8930f965c8825496666e55cac8a`。
+
+#### 本轮结果
+
+- 语义解析器单元测试 11/11 通过；
+- 固定 Ophub 6.12.81 源码、基线 DTB、发布 DTB 外层 SHA-256/提取反编译全部通过；
+- Vendor-equivalent 与 IRQ-name 候选 DTB 均编译成功；
+- 语义比较失败：`/ethernet@fe010000:snps,axi-config` 原始值 `119 -> 120`。
+
+#### 原因核对
+
+在固定 Ophub commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `arch/arm64/boot/dts/rockchip/rk356x.dtsi` 中，GMAC1 使用：
+- `snps,axi-config = <&gmac1_stmmac_axi_setup>`
+- `snps,mtl-rx-config = <&gmac1_mtl_rx_setup>`
+- `snps,mtl-tx-config = <&gmac1_mtl_tx_setup>`
+
+三个属性均是指向配置子节点的单 phandle，不是整数配置值。新增候选 phandle 引起编号重排。
+
+#### 修复
+
+- `9592d6a60e509493fc8d7c989a44fab1a316494e`：将三个 Synopsys DWMAC 配置引用属性加入单 phandle 语义解析；
+- `04cdaa3ff062ae3cddc1c0960f7ce8c086584722`：单 phandle 测试覆盖三个属性。
+
+#### 判定
+
+本轮不表示 Ethernet 配置发生变化；是审计器对真实配置节点引用的类型覆盖缺失。当前完整语义审计仍未通过，不能认定 NPU candidate 与 baseline 等价。Artifact：`14139191560`。
+
+下一轮先跑单元测试，再运行完整审计。若继续发现引用属性，按固定源码/绑定确认真实语义后再归类，不对未知属性做宽松猜测。待完整语义比较通过，仍须检查候选 DTB 的具体差异与 DTC warnings，并审查 NPU 电源/时钟/IRQ/IOMMU/OPP 闭环。无实机操作。
