@@ -219,12 +219,17 @@ jobs:
           grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
 
           # Confirm the raw Rockchip loader bytes are embedded at the expected sectors.
-          dd if=validation/panther-x2-minimal.img bs=512 skip=64 status=none | \
-            cmp -n "$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/idbloader.img)" - \
-              build-armbian/u-boot/rockchip/panther-x2/idbloader.img
-          dd if=validation/panther-x2-minimal.img bs=512 skip=16384 status=none | \
-            cmp -n "$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/u-boot.itb)" - \
-              build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
+          idb_size=$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/idbloader.img)
+          idb_blocks=$(((idb_size + 511) / 512))
+          dd if=validation/panther-x2-minimal.img of=validation/idbloader.from-image bs=512 skip=64 count="$idb_blocks" status=none
+          truncate -s "$idb_size" validation/idbloader.from-image
+          cmp validation/idbloader.from-image build-armbian/u-boot/rockchip/panther-x2/idbloader.img
+
+          itb_size=$(stat -c '%s' build-armbian/u-boot/rockchip/panther-x2/u-boot.itb)
+          itb_blocks=$(((itb_size + 511) / 512))
+          dd if=validation/panther-x2-minimal.img of=validation/u-boot.itb.from-image bs=512 skip=16384 count="$itb_blocks" status=none
+          truncate -s "$itb_size" validation/u-boot.itb.from-image
+          cmp validation/u-boot.itb.from-image build-armbian/u-boot/rockchip/panther-x2/u-boot.itb
           test -s validation/root/etc/ssh/sshd_config
           test -s validation/root/etc/shadow
           test -d validation/root/usr/lib/modules/6.12.81-ophub
