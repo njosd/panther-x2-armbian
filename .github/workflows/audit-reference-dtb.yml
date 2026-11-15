@@ -1,0 +1,103 @@
+name: Audit Panther X2 6.1.116 reference DTB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout reference branch
+        uses: actions/checkout@v4
+        with:
+          ref: audit/6.1.116-reference-dtb
+
+      - name: Verify archive and inspect DTB
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, pathlib, struct, zipfile
+
+          archive = pathlib.Path("audit/reference-dtb/6.1.116/rk3566-panther-x2-6.1.116.dtb.zip")
+          expected = "5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82"
+          with zipfile.ZipFile(archive) as z:
+              entries = [n for n in z.namelist() if n.endswith(".dtb")]
+              if len(entries) != 1:
+                  raise SystemExit(f"Expected exactly one DTB, found: {entries}")
+              data = z.read(entries[0])
+
+          digest = hashlib.sha256(data).hexdigest()
+          print(f"Archive: {archive}")
+          print(f"Entry: {entries[0]}")
+          print(f"DTB bytes: {len(data)}")
+          print(f"DTB SHA256: {digest}")
+          print(f"Expected SHA256: {expected}")
+          if digest != expected:
+              raise SystemExit("SHA256 mismatch")
+
+          if data[:4] != bytes.fromhex("d00dfeed"):
+              raise SystemExit("Invalid FDT magic")
+          total, off_struct, off_strings, off_reserve, version, last_comp, boot_cpu, size_strings, size_struct = struct.unpack(">9I", data[4:40])
+          if total > len(data) or off_struct + size_struct > len(data) or off_strings + size_strings > len(data):
+              raise SystemExit("FDT header bounds invalid")
+
+          strings = data[off_strings:off_strings + size_strings]
+          def cstring(buf, offset):
+              end = buf.find(b"\0", offset)
+              if end < 0:
+                  raise ValueError("Unterminated string")
+              return buf[offset:end].decode("utf-8", "replace")
+
+          pos = off_struct
+          stack = []
+          nodes = {}
+          while pos < off_struct + size_struct:
+              token = struct.unpack_from(">I", data, pos)[0]
+              pos += 4
+              if token == 1:  # FDT_BEGIN_NODE
+                  end = data.index(0, pos)
+                  name = data[pos:end].decode("utf-8", "replace")
+                  pos = (end + 4) & ~3
+                  stack.append(name)
+                  nodes.setdefault("/" + "/".join(x for x in stack if x), {})
+              elif token == 2:  # FDT_END_NODE
+                  if not stack:
+                      raise SystemExit("Unbalanced FDT_END_NODE")
+                  stack.pop()
+              elif token == 3:  # FDT_PROP
+                  length, nameoff = struct.unpack_from(">II", data, pos)
+                  pos += 8
+                  value = data[pos:pos + length]
+                  pos = (pos + length + 3) & ~3
+                  prop = cstring(strings, nameoff)
+                  path = "/" + "/".join(x for x in stack if x)
+                  nodes.setdefault(path, {})[prop] = value
+              elif token == 4:  # FDT_NOP
+                  continue
+              elif token == 9:  # FDT_END
+                  break
+              else:
+                  raise SystemExit(f"Unknown FDT token {token}")
+
+          def render(prop, value):
+              if prop in {"compatible", "model", "status", "regulator-name", "label", "name"}:
+                  return value.rstrip(b"\0").replace(b"\0", b",").decode("utf-8", "replace")
+              if prop in {"phandle", "linux,phandle", "regulator-min-microvolt", "regulator-max-microvolt"} and len(value) % 4 == 0:
+                  return ",".join(str(x) for x in struct.unpack(">" + "I" * (len(value)//4), value))
+              if len(value) == 0:
+                  return "<boolean>"
+              return value.hex()
+
+          needles = ("rk809", "SWITCH_REG2", "vcc3v3_sd", "vccio_sd", "sdmmc0", "mmc@fe2b0000")
+          print("\nRelevant DTB nodes and properties:")
+          for path, props in nodes.items():
+              blob = path + " " + " ".join(k + "=" + render(k,v) for k,v in props.items())
+              if any(n.lower() in blob.lower() for n in needles) or any(n.lower() in path.lower() for n in needles):
+                  print(f"[{path}]")
+                  for key in sorted(props):
+                      print(f"  {key} = {render(key, props[key])}")
+          print("\nDTB archive verification and structural parse: PASS")
+          PY
