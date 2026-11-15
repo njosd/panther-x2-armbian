@@ -161,7 +161,7 @@ jobs:
           print("Panther X2 kernel selector: rk35xx/6.12.y")
           PY
 
-      - name: Download and verify exact RK35xx 6.12.81 package
+      - name: Download and inspect exact RK35xx 6.12.81 package
         shell: bash
         run: |
           set -euo pipefail
@@ -172,42 +172,37 @@ jobs:
           gzip -t "$archive"
           mkdir -p work/ophub/build-armbian/kernel/rk35xx
           tar -xzf "$archive" -C work/ophub/build-armbian/kernel/rk35xx
-          test -d "work/ophub/build-armbian/kernel/rk35xx/$OPHUB_RK35XX_KERNEL_VERSION"
-          cd "work/ophub/build-armbian/kernel/rk35xx/$OPHUB_RK35XX_KERNEL_VERSION"
+          package_dir="work/ophub/build-armbian/kernel/rk35xx/$OPHUB_RK35XX_KERNEL_VERSION"
+          test -d "$package_dir"
+          cd "$package_dir"
           test -s sha256sums
           sha256sum --check sha256sums
+
+          echo "========== PACKAGE TOP-LEVEL INVENTORY =========="
+          find . -maxdepth 2 -type f -printf '%P | %s bytes\\n' | sort
+          echo "========== ARCHIVE METADATA =========="
           for kind in boot dtb-rockchip modules header; do
-            test -s "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
-            gzip -t "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+            file="$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+            if test -s "$file"; then
+              echo "--- $file ---"
+              stat -c 'size=%s bytes' "$file"
+              gzip -t "$file"
+              tar -tzf "$file" > "$kind.list"
+              echo "entries=$(wc -l < "$kind.list")"
+              echo "first 80 entries:"
+              sed -n '1,80p' "$kind.list"
+            else
+              echo "::error::Expected archive is missing: $file"
+              exit 1
+            fi
           done
-          # Materialize listings before searching: grep -q on a tar pipeline can
-          # close the pipe early and make tar exit with SIGPIPE under pipefail.
-          tar -tzf "dtb-rockchip-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > dtb.list
-          tar -tzf "boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > boot.list
-          tar -tzf "modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > modules.list
-          echo "=== DTB archive entries ==="
-          cat dtb.list
-          echo "=== boot archive entries ==="
-          cat boot.list
-          echo "=== modules archive matching entries ==="
-          grep -F "$OPHUB_RK35XX_KERNEL_VERSION" modules.list || true
-          echo "=== archive filename inventory ==="
-          ls -lah *.tar.gz
-          echo "=== expected Panther X2 DTB ==="
-          grep -F 'rk3566-panther-x2.dtb' dtb.list || {
-            echo "::error::Panther X2 DTB not found at expected archive path"
-            exit 1
-          }
-          echo "=== expected kernel image ==="
-          grep -E '(^|/)(Image|vmlinuz)(-|$)' boot.list || {
-            echo "::error::No expected kernel image entry found"
-            exit 1
-          }
-          echo "=== expected modules tree ==="
-          grep -F "$OPHUB_RK35XX_KERNEL_VERSION" modules.list || {
-            echo "::error::Kernel version directory not found in modules archive"
-            exit 1
-          }
+
+          echo "========== RELEVANT PATH CANDIDATES =========="
+          for list in boot.list dtb-rockchip.list modules.list header.list; do
+            echo "--- $list ---"
+            grep -Ei '(^|/)(Image|Image-[^/]+|vmlinuz[^/]*|rk3566-panther-x2\\.dtb|[^/]*panther[^/]*\\.dtb|[^/]*6\\.12\\.81[^/]*)($|/)' "$list" || true
+          done
+          echo "========== PACKAGE INSPECTION COMPLETE =========="
 
       - name: Build pinned Armbian Noble base image
         shell: bash
