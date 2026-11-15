@@ -279,8 +279,8 @@ jobs:
           sudo grep -E '^(Package|Version): (linux-image|linux-dtb|linux-u-boot)' validation/root/var/lib/dpkg/status || true
 
           check "boot Image symlink/file" test -s validation/boot/Image
-          check "versioned kernel image" test -s validation/boot/Image-6.12.81-ophub
-          check "versioned initrd" test -s validation/boot/uInitrd-6.12.81-ophub
+          check "versioned kernel image" test -s validation/boot/Image-6.12.81-rk35xx-ophub
+          check "versioned initrd" test -s validation/boot/uInitrd-6.12.81-rk35xx-ophub
           check "Panther X2 DTB" test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
           check "armbianEnv selects Panther X2 DTB" grep -q 'rk3566-panther-x2.dtb' validation/boot/armbianEnv.txt
 
@@ -298,7 +298,7 @@ jobs:
 
           check "SSH server config exists" test -s validation/root/etc/ssh/sshd_config
           check "shadow database exists" test -s validation/root/etc/shadow
-          check "6.12.81 modules directory exists" test -d validation/root/usr/lib/modules/6.12.81-ophub
+          check "6.12.81 modules directory exists" test -d validation/root/usr/lib/modules/6.12.81-rk35xx-ophub
           check "SSH listens on port 22" grep -q '^Port 22' validation/root/etc/ssh/sshd_config
           check "root SSH login enabled" grep -q '^PermitRootLogin yes' validation/root/etc/ssh/sshd_config
           check "password SSH authentication enabled" grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
@@ -326,7 +326,7 @@ jobs:
           {
             echo "Image: $image"
             sha256sum "$image"
-            echo "Kernel: 6.12.81-ophub"
+            echo "Kernel: 6.12.81-rk35xx-ophub"
             echo "DTB: rk3566-panther-x2.dtb"
             echo "Bootloader: idbloader.img + u-boot.itb"
             echo "SSH: root/password configured; TCP/22"
