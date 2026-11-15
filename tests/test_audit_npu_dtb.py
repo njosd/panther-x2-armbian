@@ -63,7 +63,7 @@ class NormalizationTests(unittest.TestCase):
                 )
 
     def test_single_phandle(self):
-        for name in ("rockchip,hw", "remote-endpoint"):
+        for name in ("rockchip,hw", "remote-endpoint", "phy-handle"):
             with self.subTest(name=name), patch.object(
                 audit, "run_fdtget", return_value="10"
             ):
