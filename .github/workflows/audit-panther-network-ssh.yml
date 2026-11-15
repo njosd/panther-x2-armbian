@@ -62,7 +62,8 @@ jobs:
           test -s "$boot"
           test -s "$modules"
 
-          config_member="$(tar -tzf "$boot" | awk '/(^|\/)config-[^/]*-rk35xx-ophub$/ { print; exit }')"
+          tar -tzf "$boot" > audit/reports/boot-members.txt
+          config_member="$(awk '/(^|\/)config-[^/]*-rk35xx-ophub$/ && found == 0 { value=$0; found=1 } END { if (found) print value }' audit/reports/boot-members.txt)"
           test -n "$config_member"
           tar -xOzf "$boot" "$config_member" > audit/extracted/kernel.config
           grep -E '^(CONFIG_(NET|INET|IPV6|PACKET|UNIX|NETDEVICES|ETHERNET|STMMAC_ETH|STMMAC_PLATFORM|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK|MODULES)=|# CONFIG_(STMMAC_ETH|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK) is not set)' audit/extracted/kernel.config > audit/reports/network-kernel-config.txt || true
