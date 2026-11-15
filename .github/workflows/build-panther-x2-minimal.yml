@@ -228,6 +228,7 @@ jobs:
           test -n "$image"
           gzip -dk "$image"
           test -s "${image%.gz}"
+          sha256sum "$image" > "$image.sha256"
 
       - name: Rebuild Panther X2 image with pinned RK35xx kernel and loader
         shell: bash
@@ -355,11 +356,11 @@ jobs:
           sudo losetup -d "$loop"
           trap - EXIT
 
-          sha256sum "$image" > "$image.sha256"
           cp validation/validation-report.txt build/output/images/
 
       - name: Upload bootable image and validation report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
           name: panther-x2-minimal-6.12.81-noble
           path: |
