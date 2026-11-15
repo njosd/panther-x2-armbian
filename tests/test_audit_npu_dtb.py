@@ -35,7 +35,7 @@ class ReferenceClassificationTests(unittest.TestCase):
                 "/ddr3-params",
             )
             mocked.assert_called_once_with(
-                self.dtb, "/__symbols__", "ddr3_params", required=False
+                Path("tree.dtb"), "/__symbols__", "ddr3_params", required=False
             )
 
     def test_phandle_metadata_is_omitted(self):
