@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo ./rebuild -b panther-x2 -r ophub/kernel -u rk35xx \
-            -k 6.12.y -a false -t ext4 -s 6144 -n Panther-X2-Minimal
+            -k 6.12.81 -a false -t ext4 -s 6144 -n Panther-X2-Minimal
 
       - name: Validate final image contents
         shell: bash
