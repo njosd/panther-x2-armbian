@@ -958,3 +958,34 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 当前 workflow 的成功分支报告仍引用旧文件名 `rk3566-panther-x2.candidate.decompiled.dts`，而实际产物已拆分为 `vendor-candidate` 与 `irqname-candidate`。该 grep 只影响附加报告内容，不影响 DTB 构建或比较器本身；应在下一次 workflow 清理中改为分别检查两份 decompiled DTS。
 
 当前判定：两份候选编译通过；语义审计尚未完成。下一步继续用真实 DTB 暴露属性 schema 覆盖缺口，但每次修正均需以 DTS 实际结构为依据。
+
+
+### 3.36 Seventh semantic audit run: devfreq-events is a phandle list（2026-11-15）
+
+运行记录：GitHub Actions run `43655926329`，job `132634305592`，执行提交 `df718d9efebc935cd9f2edcab0b0d0a731d2fd27`。
+
+#### 本轮已通过
+
+- 6.12.81 固定源码获取及 DTS 审查；
+- 未修改 source baseline DTB 构建；
+- 发布内核包 SHA-256 校验、发布 DTB 提取及反编译；
+- Vendor-equivalent 与 IRQ-name 两份候选 DTB 编译；
+- 之前修复的 NVMEM、pinctrl-names、Rockchip `rockchip,hw`、`memory-region` 误判未再出现。
+
+#### 本轮失败
+
+`/dmc:devfreq-events` 的语义值由 `153 154` 变成 `154 155`。固定 Ophub commit 的 `rk356x.dtsi` 显示：
+`devfreq-events = <&dfi>, <&nocp_cpu>;`
+这是两个直接 provider phandle 的列表；此属性格式没有在每个 phandle 后附加参数 cells。新增引用引起 phandle 号重排，旧比较器直接比较整数造成误报。
+
+#### 修复
+
+提交 `7e6737101bc1d398d51d8dc5ae3dd891be0a65e7`：
+- 将 `devfreq-events` 纳入直接 phandle 列表；
+- 每项解析为 provider 节点路径后比较；
+- 不忽略引用，不扩大差异白名单。
+
+#### 工作流待清理项
+
+成功分支仍引用过时的单一候选反编译文件名；实际已拆分为 vendor/irqname 两份，应在后续工作流整理中分别报告。
+本轮最终语义审计仍未通过；两份候选编译通过。下一轮继续验证完整差异。
