@@ -75,6 +75,34 @@ class NormalizationTests(unittest.TestCase):
                     "@/provider-a",
                 )
 
+    def test_interrupt_map_normalizes_parent_phandle_and_keeps_cells(self):
+        def fake_fdtget(_dtb, *args, required=True):
+            prop = args[-1]
+            if prop == "interrupt-map":
+                return "0 0 0 1 10 0 0 0 0 2 10 1"
+            if prop == "#address-cells":
+                return "3" if args[-2] == "/pcie" else "0"
+            if prop == "#interrupt-cells":
+                return "1"
+            return ""
+
+        with patch.object(audit, "run_fdtget", side_effect=fake_fdtget):
+            self.assertEqual(
+                audit.normalized_property(
+                    self.dtb, "/pcie", "interrupt-map", self.handles
+                ),
+                "child(0x0,0x0,0x0,0x1)@/provider-a(0x0) "
+                "child(0x0,0x0,0x0,0x2)@/provider-a(0x1)",
+            )
+
+    def test_interrupt_map_rejects_unknown_parent(self):
+        with patch.object(audit, "run_fdtget", side_effect=lambda _dtb, *args, required=True:
+                          {"interrupt-map": "0 0 0 1 99 0"}.get(args[-1], "3" if args[-1] == "#address-cells" else "1")):
+            with self.assertRaisesRegex(RuntimeError, "unknown parent phandle"):
+                audit.normalized_property(
+                    self.dtb, "/pcie", "interrupt-map", self.handles
+                )
+
     def test_provider_specifier_preserves_argument_cells(self):
         def fake_fdtget(_dtb, *args, required=True):
             if args[-1] == "clocks":
