@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           cd kernel
           make ARCH=arm64 defconfig
-          make ARCH=arm64 -j"$(nproc)" rockchip/rk3566-panther-x2.dtb
+          make ARCH=arm64 -j"$(nproc)" dtbs
           test -s arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb
           mkdir -p ../audit
           cp arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb ../audit/
