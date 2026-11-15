@@ -1,0 +1,174 @@
+name: Panther X2 Image Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Existing Build workflow run ID (no rebuild)"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download existing image artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          path: artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Install read-only inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y device-tree-compiler fdisk parted kmod
+
+      - name: Inspect existing image without rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preflight
+          image=$(find artifact -maxdepth 2 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
+          test -n "$image"
+          sha_file="$image.sha256"
+          test -s "$sha_file"
+          expected=$(awk 'NR==1 {print $1}' "$sha_file")
+          actual=$(sha256sum "$image" | awk '{print $1}')
+          test "$expected" = "$actual"
+          gzip -t "$image"
+          gzip -dc "$image" > preflight/panther-x2.img
+
+          loop=$(sudo losetup --find --show --partscan preflight/panther-x2.img)
+          cleanup() {
+            sudo umount preflight/boot preflight/root 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          mkdir -p preflight/boot preflight/root
+          sudo mount -o ro "${loop}p1" preflight/boot
+          sudo mount -o ro,noload "${loop}p2" preflight/root
+          BOOT="$PWD/preflight/boot"
+          ROOT="$PWD/preflight/root"
+          REPORT="$PWD/preflight/preflight-report.txt"
+
+          {
+            echo "Panther X2 6.12.81 image preflight"
+            echo "Build run ID: ${{ inputs.run_id }}"
+            echo "Image: $image"
+            echo "SHA256: $actual"
+            echo
+            echo "========== DISK / PARTITION LAYOUT =========="
+            sudo fdisk -l preflight/panther-x2.img
+            sudo sfdisk --dump preflight/panther-x2.img
+            sudo parted -s preflight/panther-x2.img unit MiB print
+            echo
+            echo "========== BOOT PARTITION INVENTORY =========="
+            sudo find "$BOOT" -maxdepth 4 -printf '%y %P -> %l (%s bytes)\n' | sort
+            echo
+            echo "========== BOOT ENVIRONMENT =========="
+            sudo sed -n '1,240p' "$BOOT/armbianEnv.txt"
+            echo
+            echo "========== KERNEL IMAGE =========="
+            sudo file "$BOOT/Image" "$BOOT/vmlinuz-6.12.81-rk35xx-ophub"
+            echo
+            echo "========== INITRAMFS =========="
+            sudo file "$BOOT/uInitrd-6.12.81-rk35xx-ophub"
+            echo
+            echo "========== PANTHER X2 DTB =========="
+            dtb="$BOOT/dtb/rockchip/rk3566-panther-x2.dtb"
+            test -s "$dtb"
+            dtc -I dtb -O dts "$dtb" -o preflight/panther-x2.dts
+            echo "DTB decompilation: PASS"
+            grep -nE 'model =|compatible =|gmac1|mmc@|usb|rk809|fan53555|stdout-path' preflight/panther-x2.dts | head -160 || true
+            echo
+            echo "========== DTB NODE / STATUS SUMMARY =========="
+            grep -nE 'gmac1|mmc@|usb|rk809|fan53555|status = ' preflight/panther-x2.dts | head -240 || true
+            echo
+            echo "========== KERNEL MODULE TREE =========="
+            sudo find "$ROOT/usr/lib/modules" -maxdepth 2 -type f \( -name 'modules.builtin' -o -name 'modules.dep' -o -name 'modules.alias' -o -name 'modules.order' \) -printf '%P (%s bytes)\n' | sort
+            echo
+            echo "========== BUILT-IN DRIVER CANDIDATES =========="
+            for f in "$ROOT"/usr/lib/modules/*/modules.builtin; do
+              if test -f "$f"; then
+                echo "--- $f ---"
+                grep -Ei 'stmmac|dwmac|realtek|phy|mmc|sdhci|rockchip.*(usb|dwc)|ehci|ohci|xhci|rk808|fan53555' "$f" | head -160 || true
+              fi
+            done
+            echo
+            echo "========== MODULE DEPENDENCY / FIRMWARE INVENTORY =========="
+            sudo find "$ROOT/usr/lib/modules" -type f -name '*.ko*' | wc -l | xargs echo "Kernel module files:"
+            sudo find "$ROOT/usr/lib/firmware" -maxdepth 4 -type f 2>/dev/null | wc -l | xargs echo "Firmware files:"
+            sudo find "$ROOT/usr/lib/firmware" -maxdepth 4 -type f 2>/dev/null | grep -Ei 'rockchip|rtl|realtek|wifi|bluetooth' | head -100 || true
+            echo
+            echo "========== ROOTFS BOOTLOADER COPIES =========="
+            for f in idbloader.img u-boot.itb; do
+              if test -s "$ROOT/usr/lib/u-boot/$f"; then
+                sha256sum "$ROOT/usr/lib/u-boot/$f"
+              else
+                echo "NOT FOUND: /usr/lib/u-boot/$f"
+              fi
+            done
+            echo
+            echo "========== EMBEDDED BOOTLOADER CONSISTENCY =========="
+            idb="$ROOT/usr/lib/u-boot/idbloader.img"
+            itb="$ROOT/usr/lib/u-boot/u-boot.itb"
+            if test -s "$idb"; then
+              n=$(stat -c '%s' "$idb")
+              blocks=$(((n + 511) / 512))
+              dd if=preflight/panther-x2.img of=preflight/idbloader.embedded bs=512 skip=64 count="$blocks" status=none
+              truncate -s "$n" preflight/idbloader.embedded
+              cmp "$idb" preflight/idbloader.embedded
+              echo "idbloader embedded copy matches rootfs copy: PASS"
+            else
+              echo "idbloader comparison: SKIPPED (rootfs copy absent)"
+            fi
+            if test -s "$itb"; then
+              n=$(stat -c '%s' "$itb")
+              blocks=$(((n + 511) / 512))
+              dd if=preflight/panther-x2.img of=preflight/u-boot.itb.embedded bs=512 skip=16384 count="$blocks" status=none
+              truncate -s "$n" preflight/u-boot.itb.embedded
+              cmp "$itb" preflight/u-boot.itb.embedded
+              echo "u-boot.itb embedded copy matches rootfs copy: PASS"
+            else
+              echo "u-boot.itb comparison: SKIPPED (rootfs copy absent)"
+            fi
+            echo
+            echo "========== NETWORK / FIRST-BOOT STATIC CONFIG =========="
+            sudo systemctl --root="$ROOT" is-enabled NetworkManager.service 2>&1 || true
+            sudo systemctl --root="$ROOT" is-enabled ssh.service 2>&1 || true
+            sudo systemctl --root="$ROOT" is-enabled armbian-firstrun.service 2>&1 || true
+            sudo find "$ROOT/etc/netplan" -maxdepth 2 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
+            echo
+            echo "========== AUTOMATIC UPDATE POLICY =========="
+            for f in "$ROOT/etc/apt/apt.conf.d/20auto-upgrades" "$ROOT/etc/apt/apt.conf.d/50unattended-upgrades"; do
+              if test -f "$f"; then
+                echo "--- $f ---"
+                sudo sed -n '1,220p' "$f"
+              fi
+            done
+            sudo systemctl --root="$ROOT" is-enabled apt-daily.timer 2>&1 || true
+            sudo systemctl --root="$ROOT" is-enabled apt-daily-upgrade.timer 2>&1 || true
+          } 2>&1 | tee "$REPORT"
+
+          sudo umount preflight/boot preflight/root
+          sudo losetup -d "$loop"
+          trap - EXIT
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-preflight-${{ inputs.run_id }}
+          path: preflight/preflight-report.txt
+          if-no-files-found: warn
+          retention-days: 14
