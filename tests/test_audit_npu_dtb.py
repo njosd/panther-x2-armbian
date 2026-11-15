@@ -105,6 +105,22 @@ class NormalizationTests(unittest.TestCase):
                 "@/provider-a(0x7,0x1)",
             )
 
+    def test_singular_gpio_property_uses_gpio_cells(self):
+        def fake_fdtget(_dtb, *args, required=True):
+            if args[-1] == "snps,reset-gpio":
+                return "10 1 1"
+            if args[-1] == "#gpio-cells":
+                return "2"
+            return ""
+
+        with patch.object(audit, "run_fdtget", side_effect=fake_fdtget):
+            self.assertEqual(
+                audit.normalized_property(
+                    self.dtb, "/ethernet", "snps,reset-gpio", self.handles
+                ),
+                "@/provider-a(0x1,0x1)",
+            )
+
     def test_strings_and_integer_arrays_are_not_rewritten(self):
         with patch.object(audit, "run_fdtget", return_value="default") as mocked:
             self.assertEqual(
