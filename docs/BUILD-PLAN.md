@@ -1159,3 +1159,30 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 这是语义比较器对 OF graph 引用类型覆盖不完整导致的误报，不表示显示链路本身发生变化。候选构建通过，但完整语义审计仍失败，不能据此认定候选 DTS 等价。
 
 下一轮先运行单元测试，再检查是否还有其他标准 graph/reference 属性被误当作普通数值。若比较器通过，必须人工审查完整 diff，特别是 NPU 节点、IOMMU、regulator、OPP、电源域、时钟/复位、IRQ 与保留内存的目标路径和参数。Artifact：`14138712028`。
+
+
+### 3.44 Eleventh audit run: unit gate passes; Ethernet phy-handle is another graph reference（2026-11-15）
+
+运行记录：GitHub Actions run `43658010209`，job `132640800355`，checkout commit `740ff88d5998f8f2d775b97a76c75585ede6a628`。
+
+#### 已通过
+
+- parser unit tests 11/11；
+- Ophub 6.12.81 source fetch and DTS audit；
+- unmodified source baseline DTB build；
+- published kernel package outer SHA-256 verification；
+- published Panther X2 DTB extraction and decompilation；
+- vendor-candidate and irqname-candidate DTB builds。
+
+#### 本轮失败
+
+`/ethernet@fe010000:phy-handle` 的 raw phandle 从 `130` 变为 `131`。这是 Ethernet MAC 到 PHY 节点的标准单 phandle 引用；DTC 因新增引用重排编号，比较器未分类它。
+
+#### 修复
+
+- `e3c29f04d28c346ef6e87dd9840cd2d9170fb00c`：将 `phy-handle` 加入单 phandle 属性集合；
+- `c6b379523758c4c0590f4af26d79548feb0db20e`：单 phandle 测试覆盖 `phy-handle`。
+
+Artifact：`14139106413`。语义审计仍未通过；本轮失败属于比较器属性分类缺口，不表示 PHY 接线发生变化。候选 DTB 编译成功不等于设备运行验证。
+
+下一轮先跑单元测试，再继续完整审计。若继续遇到 phandle-only property，不应盲目扩大名单：先确认属性在绑定/源码中的真实语义，再归类为单引用、列表或带参数 specifier。对比通过后仍需人工审查差异报告。
