@@ -1084,3 +1084,25 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - Artifact：`14138961409`。
 
 下一轮先确认新增 symbols 测试通过，再运行完整语义比较。不能因修复 metadata 误判而移除真正 DMC FSP 节点上的 `ddr3_params` phandle 检查。当前仍不修改产品 DTS/内核源码，不触碰 9.6。
+
+
+### 3.41 Ninth-run result: test gate correctly stopped the expensive build（2026-11-15）
+
+运行记录：GitHub Actions run `43657351487`，job `132638729304`，checkout commit `10a428793489a0e9a6c213657186a438bdf28d03`。
+
+#### 本轮结果
+
+- 新增的 symbols namespace 测试被执行；
+- 该测试失败，错误为 `AttributeError: 'ReferenceClassificationTests' object has no attribute 'dtb'`；
+- 原因是测试方法放在 `ReferenceClassificationTests` 类中，却引用了定义在 `NormalizationTests` 类中的 `self.dtb/self.handles` fixture；
+- workflow 按预期在单元测试 gate 失败后跳过完整源码获取、DTB 构建和语义比较，避免了无效构建消耗。
+
+#### 修复
+
+提交 `7cd6ccfd4d1176dc76f4c7efc02ae86305e2a8d1`：
+- symbols 测试改用本地 `Path("tree.dtb")` 和本地 phandle 映射，不再跨测试类引用 fixture；
+- parser 对 `/__symbols__` 按字符串处理的修复仍保留在前序提交 `6049b21`。
+
+#### 状态
+
+本轮是测试代码 fixture 错误，不是 parser 逻辑失败，也没有执行完整 DTB 审计。修复尚待 Actions 复验。下一轮先确认 11 项测试全部通过，再继续真实 DTB 比较。
