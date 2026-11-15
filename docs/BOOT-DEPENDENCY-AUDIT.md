@@ -842,3 +842,75 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 | LAN IPv4 DHCP、TCP/22 SSH 登录 | 未验证，需未来实机验收 |
 
 下一步不应重复内核 config 检查，而应审计 Ophub rootfs 生成流程：实际 Armbian checkout 版本、CLI 包安装、首启用户创建、SSH enable/host key 和防火墙配置。只有拿到最终 rootfs 后，才能做文件级静态检查。未经授权，不在 Panther X2 实机安装或修改任何内容。
+
+
+## 17.10 SSH 首次登录与 Host Key 生命周期审计（run 43670178481，2026-11-15）
+
+第四次网络/SSH 专项审计成功完成。Run：`43670178481`；Job：`132678274475`；审计代码 commit：`67da4fb164f335275c421c3052f61bc77b6dd5d1`。Artifact ID：`14143727667`；ZIP SHA-256：`248b493f0446ed8e987e23188ec6e179a1d8e1c84e1da28266d2d6f9a24880df`。
+
+本次下载并逐项检查了 artifact 中的固定源码文件，不只依赖 Actions 日志。
+
+### 17.10.1 Ophub SSH 配置
+
+固定 Ophub commit `9e71b57f73683f9c4d14a30311e4c2ccbff29566` 的 Server workflow：
+- Armbian 编译参数为 `BUILD_MINIMAL=no`、`BUILD_DESKTOP=no`。
+- 清理/打包阶段调用 `build_armbian_rootfs_file.sh -v <release> -s true -c true -k true -p arm64`。
+- 固定脚本 `compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh` 在 `-s true` 时，将 sshd 配置设为 Port 22、`PermitRootLogin yes`、`PasswordAuthentication yes`。
+- 同一脚本将 root 密码写为 `1234`（SHA-512 crypt）。
+
+这确认 Ophub 构建意图允许首次 root 密码 SSH 登录。它不等于已验证最终镜像的 sshd 服务启用状态或实机可连接性。
+
+### 17.10.2 Armbian 首次登录可通过交互式 SSH 承载
+
+固定 Armbian commit `3f3849bf50bfadff94d0d488eb968bdaf970dc72`：
+- rootfs 构建逻辑创建 `/root/.not_logged_in_yet` 标记。
+- `/etc/profile.d/armbian-check-first-login.sh` 在 root 登录 shell 检测该标记并调用 `/usr/lib/armbian/armbian-firstlogin`。
+- 首次登录脚本入口要求 `tty -s`，因此必须是分配 PTY 的交互式 SSH；无 PTY 的 `ssh host command` 不会运行该交互流程。
+- 脚本明确把非空 `SSH_CONNECTION` 视为已经有用户接入，不会等待本地控制台按 Enter。
+- Ophub 的 rootfs 修改没有设置 Armbian 的 `PRESET_ROOT_PASSWORD` 或 `PRESET_USER_NAME` 标记。因此首次交互式 SSH 登录会要求重新设置 root 密码（输入两次），随后创建普通用户，并继续 shell、时区和 locale 等首次初始化。
+- 首次初始化成功后才删除 `.not_logged_in_yet` 标记；中途失败会保留标记，以便下次登录重试。
+
+**结论（源码级）：** 首次登录流程具备通过 iMac 交互式 SSH + PTY 完成的代码路径，不要求 UART/显示器。Ophub 的 `1234` 是初始登录凭据，初始化流程仍会要求设置 root 最终密码。用户创建是首次初始化流程的一部分。
+
+### 17.10.3 Host Key 首启流程与时序
+
+固定 Armbian rootfs 构建逻辑会在 `armbian-firstrun.service` 存在时 enable 该服务。该 unit：
+- `After=ssh.service`
+- `Before=getty.target`
+- `WantedBy=multi-user.target`
+- `Type=simple`、`RemainAfterExit=yes`
+- 执行 `/usr/lib/armbian/armbian-firstrun start`
+
+默认配置 `OPENSSHD_REGENERATE_HOST_KEYS=true`。firstrun 脚本会删除旧的 `/etc/ssh/ssh_host_*`，调用 `dpkg-reconfigure openssh-server` 生成新 Host Keys，再执行 `service ssh restart`。
+
+**时序注意：** 该服务明确排在 `ssh.service` 之后，且会重新启动 SSH。故不能假定第一次开机时 SSH daemon 从启动到完成 Host Key 重建期间完全没有变化。未来实机验收需观察首次连接是否遇到服务重启，以及 Host Key 稳定后第二次连接是否正常。当前未证明该时序必然导致连接失败。
+
+### 17.10.4 网络与 SSH 的剩余验证边界
+
+本次源码审计支持以下结论：
+- 固定 Armbian Noble CLI 软件包列表包含 `openssh-server`、`iproute2`、`iputils-ping`。
+- 固定源码默认 NetworkManager + Netplan 路径适用于 `BUILD_MINIMAL=no`，Netplan 配置声明检测到 carrier 后由 NetworkManager 使用 DHCP。
+- Ophub `-s true` 配置 SSH root/password 登录。
+- Armbian 首次初始化能通过交互式 SSH PTY 运行。
+
+仍未验证：
+- Ophub 那次实际构建使用的 Armbian commit；workflow clone `main`，并未固定到本项目审计的 `3f3849b...`。
+- 最终 rootfs 是否实际安装 `openssh-server`、`network-manager`、`netplan.io`。
+- 最终 rootfs 中 `ssh.service` 是否 enabled、sshd_config 最终生效内容、Host Keys 的实际生成状态。
+- 最终镜像是否存在影响 TCP/22 的防火墙规则。
+- 实机 DHCP 地址获取、SSH 首次登录、初始化完整完成、SSH 重连和重启后持久性。
+
+| 检查项 | 当前判定 |
+|---|---|
+| Ophub SSH 配置意图及初始 root 密码 | 已确认（固定脚本源码） |
+| Armbian first-login 交互式 SSH/PTY 路径 | 已确认（固定源码） |
+| 首次初始化包含 root 密码重设和普通用户创建 | 已确认（固定源码） |
+| Host Key 首启生成及 SSH restart 逻辑 | 已确认（固定源码） |
+| 最终 rootfs 中 sshd/networking 包与服务状态 | 未验证 |
+| DHCP + TCP/22 实机可达及完整首次初始化 | 未验证 |
+
+### 17.10.5 审计脚本的小问题
+
+本次 run 的首次登录报告生成步骤早于下载 Ophub Server workflow，因此报告中的 workflow grep 当时没有输入文件；命令使用 `|| true`，没有使工作流失败。后续 provenance 步骤成功下载了 workflow，且从该文件确认了 `-s true` 调用。结论已由 artifact 内的实际 workflow 文件复核，但报告编排应修正：先下载 Ophub workflow，再生成 first-login lifecycle 报告，避免报告缺少调用上下文。
+
+下一步应继续审计最终 rootfs 构建/打包流程，特别是 Armbian checkout 固定、包实际安装、`ssh.service` enable、Host Key 与防火墙文件状态；不重复本次已完成的源码检查，不操作 192.168.9.6 实机。
