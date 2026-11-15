@@ -29,7 +29,7 @@ PROVIDER_CELL_PROPERTIES = {
     "pwms": "#pwm-cells",
     "io-channels": "#io-channel-cells",
 }
-SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells", "memory-region"}
+SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells", "memory-region", "devfreq-events"}
 SINGLE_PHANDLE_PROPERTIES = {
     "interrupt-parent", "operating-points-v2",
     "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
