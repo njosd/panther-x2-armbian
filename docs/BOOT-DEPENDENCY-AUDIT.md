@@ -747,3 +747,18 @@ D. 实机验收（未来阶段，当前未授权执行）
 - **下一步：** 先追踪 Panther X2 原始板级 DTS 的 USB 节点变更历史，核实 PHY0/PHY1、EHCI/OHCI 与 DWC3 的设计意图；随后对照本地 6.1.116 旧系统 DTB。确定板级拓扑后再提出最小 DTS 修补候选，并通过 CI 重新编译和静态审查。实机 USB 测试留到网络/SSH P0 首版通过之后。
 
 本次 dtc 反编译还报告若干既有结构类 warning（例如 duplicate unit-address、unnecessary address/size cells、graph child address）；这些 warning 不影响本次 DTB 编译成功，但应保留完整 warning 清单，后续按涉及节点逐项判断，不应一概视为 USB 故障。
+
+### 16.5 合并 DTB 对 GMAC1 的补充核验（run 43668003702）
+
+同一份成功编译的最终合并 DTB 也可用于核对 GMAC1 节点，得到以下构建产物证据：
+
+- `/ethernet@fe010000` compatible 为 `rockchip,rk3568-gmac` / `snps,dwmac-4.20a`，`status = "okay"`。
+- `phy-mode = "rgmii"`，`clock_in_out = "input"`，PHY 电源引用有效的 regulator phandle。
+- reset GPIO 为 GPIO3 PA1，低有效，延时数组为 0 / 20,000 / 100,000 微秒。
+- TX/RX delay 属性分别为 `0x30` / `0x10`。
+- `phy-handle` 指向本节点 MDIO 子节点 `ethernet-phy@0`，地址为 0，状态为 okay。
+- 外部固定时钟节点 `gmac1_clkin` 为 125 MHz，assigned-clock-parents 中可见该时钟引用。
+
+这确认了最终 DTB 中 GMAC1 及其 MDIO PHY 节点均处于启用状态，DTS 的关键时钟、供电、reset、RGMII 和 PHY handle 引用已进入编译产物。它仍不证明 PHY 实际型号、PHY ID 驱动匹配、reset 电气波形、RGMII 时序裕量、网线 carrier、千兆协商或数据传输成功；这些必须继续通过最终内核配置/驱动包审计及未来实机测试验证。
+
+特别注意：PHY 节点只声明通用 Clause 22 compatible，最终 DTB 没有硬编码 RTL8211F 等具体型号。后续不能在未读取 PHY ID 或板级 BOM 前把具体 Realtek 型号当成已确认事实。
