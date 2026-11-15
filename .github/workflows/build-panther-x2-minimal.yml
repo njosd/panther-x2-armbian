@@ -1,0 +1,230 @@
+name: Build Panther X2 minimal bootable image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout project build manifest
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Load pinned inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          {
+            echo "OPHUB_ARMBIAN_REPO=$OPHUB_ARMBIAN_REPO"
+            echo "OPHUB_ARMBIAN_COMMIT=$OPHUB_ARMBIAN_COMMIT"
+            echo "ARMBIAN_BUILD_REPO=$ARMBIAN_BUILD_REPO"
+            echo "ARMBIAN_BUILD_COMMIT=$ARMBIAN_BUILD_COMMIT"
+            echo "OPHUB_RK35XX_KERNEL_SOURCE_COMMIT=$OPHUB_RK35XX_KERNEL_SOURCE_COMMIT"
+            echo "OPHUB_UBOOT_REPO=$OPHUB_UBOOT_REPO"
+            echo "OPHUB_UBOOT_COMMIT=$OPHUB_UBOOT_COMMIT"
+            echo "OPHUB_FIRMWARE_REPO=$OPHUB_FIRMWARE_REPO"
+            echo "OPHUB_FIRMWARE_COMMIT=$OPHUB_FIRMWARE_COMMIT"
+            echo "OPHUB_RK35XX_PACKAGE_URL=$OPHUB_RK35XX_PACKAGE_URL"
+            echo "OPHUB_RK35XX_PACKAGE_SHA256=$OPHUB_RK35XX_PACKAGE_SHA256"
+            echo "OPHUB_RK35XX_KERNEL_VERSION=$OPHUB_RK35XX_KERNEL_VERSION"
+          } >> "$GITHUB_ENV"
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            acl aria2 bc binfmt-support bison build-essential ca-certificates \
+            ccache cpio curl device-tree-compiler dosfstools dwarves e2fsprogs \
+            fdisk flex gawk gcc-aarch64-linux-gnu gdisk git gnupg gpg-agent \
+            kmod libelf-dev libncurses-dev libssl-dev lz4 lzop make \
+            parted pigz python3 python3-dev python3-pip qemu-user-static \
+            rsync systemd-container tar u-boot-tools unzip uuid-dev wget xfsprogs \
+            zstd
+
+      - name: Fetch fixed Ophub, Armbian, U-Boot and firmware sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none "$OPHUB_ARMBIAN_REPO" work/ophub
+          git -C work/ophub checkout --detach "$OPHUB_ARMBIAN_COMMIT"
+          git clone --filter=blob:none "$ARMBIAN_BUILD_REPO" work/ophub/build
+          git -C work/ophub/build checkout --detach "$ARMBIAN_BUILD_COMMIT"
+
+          git clone --filter=blob:none "$OPHUB_UBOOT_REPO" work/uboot
+          git -C work/uboot checkout --detach "$OPHUB_UBOOT_COMMIT"
+          test -s work/uboot/u-boot/rockchip/panther-x2/idbloader.img
+          test -s work/uboot/u-boot/rockchip/panther-x2/u-boot.itb
+          mkdir -p work/ophub/build-armbian/u-boot
+          cp -a work/uboot/u-boot/. work/ophub/build-armbian/u-boot/
+
+          git clone --filter=blob:none "$OPHUB_FIRMWARE_REPO" work/firmware
+          git -C work/firmware checkout --detach "$OPHUB_FIRMWARE_COMMIT"
+          test -d work/firmware/firmware
+          mkdir -p work/ophub/build-armbian/armbian-files/common-files/usr/lib
+          cp -a work/firmware/firmware work/ophub/build-armbian/armbian-files/common-files/usr/lib/
+
+          echo "Pinned Ophub: $(git -C work/ophub rev-parse HEAD)"
+          echo "Pinned Armbian: $(git -C work/ophub/build rev-parse HEAD)"
+          echo "Pinned U-Boot: $(git -C work/uboot rev-parse HEAD)"
+          echo "Pinned firmware: $(git -C work/firmware rev-parse HEAD)"
+
+      - name: Pin Panther X2 model database to RK35xx 6.12.y
+        shell: bash
+        run: |
+          set -euo pipefail
+          db=work/ophub/build-armbian/armbian-files/common-files/etc/model_database.conf
+          test -s "$db"
+          python3 - "$db" <<'PY'
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          lines = p.read_text().splitlines()
+          found = 0
+          out = []
+          for line in lines:
+              if line.startswith("r301") and ":panther-x2" in line:
+                  fields = line.split(":")
+                  if len(fields) < 15:
+                      raise SystemExit("Panther X2 model database row has unexpected format")
+                  fields[8] = "rk35xx/6.12.y"
+                  line = ":".join(fields)
+                  found += 1
+              out.append(line)
+          if found != 1:
+              raise SystemExit(f"Expected exactly one Panther X2 row, found {found}")
+          p.write_text("\n".join(out) + "\n")
+          print("Panther X2 kernel selector: rk35xx/6.12.y")
+          PY
+
+      - name: Download and verify exact RK35xx 6.12.81 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/kernel/rk35xx
+          archive=work/kernel/6.12.81.tar.gz
+          curl --fail --location --retry 4 --retry-delay 3 "$OPHUB_RK35XX_PACKAGE_URL" -o "$archive"
+          echo "$OPHUB_RK35XX_PACKAGE_SHA256  $archive" | sha256sum --check
+          gzip -t "$archive"
+          mkdir -p work/ophub/build-armbian/kernel/rk35xx
+          tar -xzf "$archive" -C work/ophub/build-armbian/kernel/rk35xx
+          test -d "work/ophub/build-armbian/kernel/rk35xx/$OPHUB_RK35XX_KERNEL_VERSION"
+          cd "work/ophub/build-armbian/kernel/rk35xx/$OPHUB_RK35XX_KERNEL_VERSION"
+          test -s sha256sums
+          sha256sum --check sha256sums
+          for kind in boot dtb-rockchip modules header; do
+            test -s "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+            gzip -t "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+          done
+          tar -tzf "dtb-rockchip-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q 'rk3566-panther-x2.dtb'
+          tar -tzf "boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q "vmlinuz-$OPHUB_RK35XX_KERNEL_VERSION-ophub"
+          tar -tzf "modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q "$OPHUB_RK35XX_KERNEL_VERSION-ophub/kernel"
+
+      - name: Build pinned Armbian Noble base image
+        shell: bash
+        working-directory: work/ophub/build
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          ./compile.sh RELEASE=noble BOARD=odroidn2 BRANCH=current \
+            BUILD_MINIMAL=no BUILD_ONLY=default HOST=armbian \
+            BUILD_DESKTOP=no EXPERT=yes KERNEL_CONFIGURE=no \
+            COMPRESS_OUTPUTIMAGE=sha SHARE_LOG=yes
+
+      - name: Prepare base rootfs and enable initial SSH access
+        shell: bash
+        working-directory: work/ophub
+        run: |
+          set -euo pipefail
+          chmod +x compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh
+          compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh \
+            -v noble -s true -c true -k false -p arm64
+          image=$(find build/output/images -maxdepth 1 -type f -name '*-trunk_*.img.gz' -print -quit)
+          test -n "$image"
+          gzip -dk "$image"
+          test -s "${image%.gz}"
+
+      - name: Rebuild Panther X2 image with pinned RK35xx kernel and loader
+        shell: bash
+        working-directory: work/ophub
+        run: |
+          set -euo pipefail
+          # The rebuild helper only downloads U-Boot/firmware when their directories
+          # are nearly empty. Verify the pinned trees are fully populated before use.
+          uboot_dirs=$(find build-armbian/u-boot/rockchip -mindepth 1 -maxdepth 1 -type d | wc -l)
+          firmware_dirs=$(find build-armbian/armbian-files/common-files/usr/lib/firmware -mindepth 1 -maxdepth 1 -type d | wc -l)
+          test "$uboot_dirs" -gt 5
+          test "$firmware_dirs" -gt 5
+          sudo ./rebuild -b panther-x2 -r ophub/kernel -u rk35xx \
+            -k 6.12.y -a false -t ext4 -s 6144 -n Panther-X2-Minimal
+
+      - name: Validate final image contents
+        shell: bash
+        working-directory: work/ophub
+        run: |
+          set -euo pipefail
+          image=$(find build/output/images -maxdepth 1 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz' -print -quit)
+          test -n "$image"
+          gzip -t "$image"
+          mkdir -p validation
+          gzip -dc "$image" > validation/panther-x2-minimal.img
+          loop=$(sudo losetup --find --show --partscan validation/panther-x2-minimal.img)
+          cleanup() {
+            sudo umount validation/boot validation/root 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          mkdir -p validation/boot validation/root
+          sudo mount "${loop}p1" validation/boot
+          sudo mount "${loop}p2" validation/root
+
+          test -s validation/boot/Image
+          test -s validation/boot/uInitrd-6.12.81-ophub
+          test -s validation/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s validation/root/etc/ssh/sshd_config
+          test -s validation/root/etc/shadow
+          test -d validation/root/usr/lib/modules/6.12.81-ophub
+          grep -q '^Port 22' validation/root/etc/ssh/sshd_config
+          grep -q '^PermitRootLogin yes' validation/root/etc/ssh/sshd_config
+          grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
+          grep -q '^root:\$6\$' validation/root/etc/shadow
+          test -e validation/root/usr/lib/systemd/system/ssh.service
+          test -e validation/root/usr/lib/systemd/system/NetworkManager.service
+          test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
+          test -e validation/root/root/.not_logged_in_yet
+          test -s validation/root/usr/lib/u-boot/idbloader.img
+          test -s validation/root/usr/lib/u-boot/u-boot.itb
+          {
+            echo "Image: $image"
+            sha256sum "$image"
+            echo "Kernel: 6.12.81-ophub"
+            echo "DTB: rk3566-panther-x2.dtb"
+            echo "Bootloader: idbloader.img + u-boot.itb"
+            echo "SSH: root/password configured; TCP/22"
+            echo "First login marker: present"
+            echo "NetworkManager service unit: present"
+          } | tee validation/validation-report.txt
+          sudo umount validation/boot validation/root
+          sudo losetup -d "$loop"
+          trap - EXIT
+
+          sha256sum "$image" > "$image.sha256"
+          cp validation/validation-report.txt build/output/images/
+
+      - name: Upload bootable image and validation report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          path: |
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz.sha256
+            work/ophub/build/output/images/validation-report.txt
+          if-no-files-found: error
+          retention-days: 14
