@@ -101,11 +101,11 @@ jobs:
                   raise SystemExit(f"Expected one occurrence of {old!r}")
               source = source.replace(old, new)
 
-          marker = "\\n".join([
+          marker = "\n".join([
               "    # Enable ssh service",
               '    ssh_config="etc/ssh/sshd_config"',
           ])
-          injected = "\\n".join([
+          injected = "\n".join([
               "    # Enable required first-boot network and remote-management services.",
               '    systemctl --root="${tag_rootfs}" enable ssh.service',
               '    systemctl --root="${tag_rootfs}" enable NetworkManager.service',
@@ -120,11 +120,11 @@ jobs:
 
           helper = Path("work/ophub/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh")
           source = helper.read_text()
-          old = "\\n".join([
+          old = "\n".join([
               '        git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ophub/firmware "${edid_tmp}/fw" 2>/dev/null',
               '        git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1',
           ])
-          new = "\\n".join([
+          new = "\n".join([
               '        mkdir -p "${edid_tmp}/fw/firmware/edid"',
               '        cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"',
           ])
