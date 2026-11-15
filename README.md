@@ -4,7 +4,7 @@
 
 ## 目标
 
-先得到一个从独立 TF 卡启动的最小 Armbian Server 系统，并通过以下验收：
+第一阶段先让不包含 Immich 的最小 Armbian Server 系统在 Panther X2 上稳定运行，并通过以下验收：
 
 - Panther X2 专用 DTB 与启动固件正确；
 - RTL8211F/GMAC 建立稳定链路；
@@ -19,7 +19,7 @@
 
 - SoC：RK3566；实机内存 4GB；单有线网口。
 - OS：Ubuntu 24.04 LTS（Noble）。
-- 内核系列：Ophub stable 6.18.y；候选二进制内核包固定为 6.18.63（SHA-256 已核验）。
+- 内核系列：Ophub RK35xx 6.12.y；首选固定版本为 6.12.81。6.18.63 审计成果保留为备用参考，不作为第一版主线。
 - 文件系统：EXT4。
 - 镜像类型：Server。
 - 设备 DTB：`rk3566-panther-x2.dtb`。
@@ -30,11 +30,11 @@
 
 - `config/versions.env`：已知源码快照和待锁定项目。
 - `docs/BUILD-PLAN.md`：构建链风险与后续步骤。
-- `docs/DTB-AUDIT.md`：6.18.63 Panther X2 DTB 与驱动配置审计记录。\n- `docs/RKNPU-BSP-AUDIT.md`：RK3566 RKNPU 独立驱动来源、6.18.63 兼容性和 Panther X2 overlay 风险审计。
+- `docs/DTB-AUDIT.md`：内核版本与 Panther X2 DTB/驱动配置的历史审计记录（6.18.63 结论保留作参考）。\n- `docs/RKNPU-BSP-AUDIT.md`：RK3566 RKNPU 独立驱动来源、6.18.63 兼容性和 Panther X2 overlay 风险审计。
 - `docs/NETWORK-ACCEPTANCE.md`：首启网络与 SSH 验收标准。
 - `manifests/build-manifest.template`：每次构建的记录模板。
 
-当前**没有可直接运行的镜像构建工作流**。内核包 6.18.63 已完成归档校验和内容清单检查；DTB 二进制已提取并反编译，关键节点与固定 Ophub DTS 快照高度吻合，但全量差异及精确构建来源仍未证明。RGA/VDEC 模块已确认存在；RKNPU 驱动和 NPU 设备节点尚未发现，已找到独立 RK3566 驱动候选，需先做离线兼容性验证。U-Boot/firmware 固定下载、Actions 依赖锁定及首启配置审查仍是构建前工作。后续构建只允许手动触发。
+当前**没有可直接运行的镜像构建工作流**。当前首选基线为 Ophub 6.12.81；其 Panther X2 原始 DTB 已与固定源码构建结果完成 SHA-256 一致性核验。DTB 二进制已提取并反编译，关键节点与固定 Ophub DTS 快照高度吻合，但全量差异及精确构建来源仍未证明。RGA/VDEC 模块已确认存在；RKNPU 驱动和 NPU 设备节点尚未发现，已找到独立 RK3566 驱动候选，需先做离线兼容性验证。U-Boot/firmware 固定下载、Actions 依赖锁定及首启配置审查仍是构建前工作。后续构建只允许手动触发。
 
 ## 安全边界
 
