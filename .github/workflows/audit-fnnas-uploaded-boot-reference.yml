@@ -55,7 +55,10 @@ jobs:
 
           manifest=$(find work/extracted -type f \( -name SHA256SUMS -o -name SHA256SUMS.txt \) -print -quit)
           if [ -n "$manifest" ]; then
-            (cd "$(dirname "$manifest")" && sha256sum -c "$(basename "$manifest")") | tee output/CHECKSUM-VERIFICATION.txt
+            manifest_dir=$(dirname "$manifest")
+            manifest_name=$(basename "$manifest")
+            awk -v self="$manifest_name" '$2 != self && $2 != "./" self {print}' "$manifest" \
+              | (cd "$manifest_dir" && sha256sum -c -) | tee output/CHECKSUM-VERIFICATION.txt
           else
             echo "No SHA256SUMS manifest found; generated hashes are informational." | tee output/CHECKSUM-VERIFICATION.txt
           fi
