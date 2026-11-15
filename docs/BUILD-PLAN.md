@@ -1218,3 +1218,37 @@ Artifact：`14139106413`。语义审计仍未通过；本轮失败属于比较�
 本轮不表示 Ethernet 配置发生变化；是审计器对真实配置节点引用的类型覆盖缺失。当前完整语义审计仍未通过，不能认定 NPU candidate 与 baseline 等价。Artifact：`14139191560`。
 
 下一轮先跑单元测试，再运行完整审计。若继续发现引用属性，按固定源码/绑定确认真实语义后再归类，不对未知属性做宽松猜测。待完整语义比较通过，仍须检查候选 DTB 的具体差异与 DTC warnings，并审查 NPU 电源/时钟/IRQ/IOMMU/OPP 闭环。无实机操作。
+
+
+### 3.46 Thirteenth audit run: singular GPIO property classification（2026-11-15）
+
+运行记录：GitHub Actions run `43658639530`，job `132642752349`，checkout commit `53e84e618f728f1ec31031f7e309f08a1393d63a`。
+
+#### 本轮通过项
+
+- DTB semantic parser unit tests 11/11；
+- Ophub 6.12.81 fixed source fetch and DTS audit；
+- source baseline DTB build；
+- published kernel package outer SHA-256 verification and Panther X2 DTB extraction/decompilation；
+- 两份 NPU 候选 DTB 均成功编译。
+
+#### 本轮失败
+
+`/ethernet@fe010000:snps,reset-gpio` 原始值从 `129 1 1` 变为 `130 1 1`。该属性位于 Panther X2 板级 GMAC 节点，源码为：
+
+```dts
+snps,reset-gpio = <&gpio3 RK_PA1 GPIO_ACTIVE_LOW>;
+```
+
+虽然名称是单数 `-gpio`，其内容仍是 GPIO provider phandle + `#gpio-cells` 参数，不是普通整数。此前解析器只匹配 `-gpios` 后缀，遗漏该 Synopsys 属性命名形式。
+
+#### 修复
+
+- `1e6962ab84a81ca14d6821b92397a2122368623e`：将单数 `-gpio` 也按 `#gpio-cells` specifier 规范化；
+- `ff564ecd7e88333d2cb0afc30212c068e9d96396`：增加 `snps,reset-gpio` 专项单元测试。
+
+Artifact：`14138984216`。完整语义比较仍未通过；候选编译通过不代表 NPU 可运行。
+
+#### 方法上的下一步调整
+
+这一轮说明不应把所有 `-gpio` 属性都无条件认定为相同格式。后续应根据 GPIO binding/实际 provider 的 `#gpio-cells` 解析，验证参数长度，并保留 active-low 等 flags；对非标准命名属性也要确认其绑定语义。新增测试后再运行 CI。暂不触碰 9.6。
