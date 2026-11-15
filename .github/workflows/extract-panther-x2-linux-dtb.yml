@@ -1,0 +1,67 @@
+name: Extract Panther X2 6.12.81 Linux DTB
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Existing 6.12.81 build workflow run ID (no rebuild)"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download existing image artifact
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          path: artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.run_id }}
+
+      - name: Extract Linux DTB read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y device-tree-compiler fdisk
+          image=$(find artifact -maxdepth 2 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
+          test -n "$image"
+          expected=$(awk 'NR==1 {print $1}' "$image.sha256")
+          actual=$(sha256sum "$image" | awk '{print $1}')
+          test "$expected" = "$actual"
+          gzip -t "$image"
+          mkdir -p work output
+          gzip -dc "$image" > work/panther-x2.img
+          loop=$(sudo losetup --find --show --partscan work/panther-x2.img)
+          cleanup() {
+            sudo umount work/boot 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          mkdir -p work/boot
+          sudo mount -o ro "${loop}p1" work/boot
+          dtb=work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s "$dtb"
+          sudo cp "$dtb" output/rk3566-panther-x2-6.12.81-image.dtb
+          sudo chown "$(id -u):$(id -g)" output/rk3566-panther-x2-6.12.81-image.dtb
+          dtc -I dtb -O dts output/rk3566-panther-x2-6.12.81-image.dtb -o output/rk3566-panther-x2-6.12.81-image.dts
+          sha256sum output/*
+          file output/*
+          echo "Extracted from build run: ${{ inputs.run_id }}"
+          echo "Image SHA256: $actual"
+
+      - name: Upload extracted DTB and source DTS
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-linux-dtb-6.12.81
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
