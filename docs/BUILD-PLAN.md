@@ -1049,3 +1049,38 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 当前状态：测试及 workflow gate 已提交，尚未由 Actions 执行验证；DMC FSP 分类修复也尚未经过下一轮真实 DTB workflow。两份候选 DTB此前多轮编译成功，但完整语义审计仍未通过。未修改产品 DTS、内核源码或 9.6。
 
 下一步先运行 workflow，确认 unit-test step 通过，再继续完整 DTB 构建与语义审计。若单元测试失败，先修测试或 parser，不重复耗时构建。
+
+
+### 3.40 Eighth-run result: unit tests pass; DTB metadata namespace collision fixed（2026-11-15）
+
+运行记录：GitHub Actions run `43657074177`，job `132637859017`，执行提交 `67496f068a65f3f29771f93e53e315ea5d758ae2`。
+
+#### 本轮结果
+
+- 新增的 10 项语义解析器单元测试全部通过；
+- Ophub 6.12.81 固定源码获取、SoC/板级 DTS 检查通过；
+- source baseline DTB 构建通过；
+- 发布内核包外层 SHA-256 校验通过，发布 Panther X2 DTB 成功提取并反编译；
+- 两份候选 DTB 均成功编译；
+- 完整语义比较失败，尚未生成 PASS。
+
+#### 失败原因
+
+错误：
+`/__symbols__:ddr3_params: expected a single phandle, got 2f 64 64 72 33 2d 70 61 72 61 6d 73 00`
+
+这些字节是字符串 `/ddr3-params\0`。DTC 的 `/__symbols__` 节点保存 label 到节点路径的字符串映射；属性名可能与普通树中的真实 phandle 属性同名。旧比较器仅按属性名分类，没有结合节点上下文，因此误将 symbol 字符串当作 phandle。
+
+#### 修复
+
+- `6049b21c1001eaee3d7d0b945e6fed8906dfa8fa`：对 `/__symbols__` 节点始终按普通字符串读取，不应用 phandle 属性分类。
+- `765fb2a608bbb3effe307970ef936f8fbd665ae5`：新增回归单元测试，覆盖名为 `ddr3_params` 的 symbol 字符串。
+
+#### 状态与下一步
+
+- 单元测试：本轮 10/10 通过；新增 symbols 回归测试尚待下一轮执行。
+- 候选 DTB 构建：通过。
+- 完整语义审计：未通过，仍待验证。
+- Artifact：`14138961409`。
+
+下一轮先确认新增 symbols 测试通过，再运行完整语义比较。不能因修复 metadata 误判而移除真正 DMC FSP 节点上的 `ddr3_params` phandle 检查。当前仍不修改产品 DTS/内核源码，不触碰 9.6。
