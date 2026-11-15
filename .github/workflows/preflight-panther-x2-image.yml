@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y device-tree-compiler fdisk parted kmod
+          sudo apt-get install -y device-tree-compiler fdisk parted kmod gdisk e2fsprogs
 
       - name: Inspect existing image without rebuilding
         shell: bash
@@ -55,17 +55,42 @@ jobs:
           }
           trap cleanup EXIT
           mkdir -p preflight/boot preflight/root
-          sudo mount -o ro "${loop}p1" preflight/boot
-          sudo mount -o ro,noload "${loop}p2" preflight/root
           BOOT="$PWD/preflight/boot"
           ROOT="$PWD/preflight/root"
           REPORT="$PWD/preflight/preflight-report.txt"
 
+          # Run filesystem and GPT checks before mounting either partition.
+          # e2fsck -n opens the filesystem read-only and never repairs it.
           {
             echo "Panther X2 6.12.81 image preflight"
             echo "Build run ID: ${{ inputs.run_id }}"
             echo "Image: $image"
             echo "SHA256: $actual"
+            echo
+            echo "========== READ-ONLY GPT VALIDATION =========="
+            set +e
+            sudo sgdisk -v preflight/panther-x2.img
+            gpt_status=$?
+            set -e
+            echo "sgdisk -v exit status: $gpt_status"
+            echo
+            echo "========== READ-ONLY ROOT EXT4 VALIDATION =========="
+            echo "Target: ${loop}p2 (must remain unmounted during this check)"
+            set +e
+            sudo e2fsck -fn "${loop}p2"
+            fsck_status=$?
+            set -e
+            echo "e2fsck -fn exit status: $fsck_status"
+            echo
+            echo "========== END OF READ-ONLY VALIDATION =========="
+          } 2>&1 | tee "$REPORT"
+
+          # Only after e2fsck has finished do we mount partitions read-only
+          # for static inventory. No repair or partition-table writes occur.
+          sudo mount -o ro "${loop}p1" preflight/boot
+          sudo mount -o ro,noload "${loop}p2" preflight/root
+
+          {
             echo
             echo "========== DISK / PARTITION LAYOUT =========="
             sudo fdisk -l preflight/panther-x2.img
@@ -158,7 +183,7 @@ jobs:
             done
             sudo systemctl --root="$ROOT" is-enabled apt-daily.timer 2>&1 || true
             sudo systemctl --root="$ROOT" is-enabled apt-daily-upgrade.timer 2>&1 || true
-          } 2>&1 | tee "$REPORT"
+          } 2>&1 | tee -a "$REPORT"
 
           sudo umount preflight/boot preflight/root
           sudo losetup -d "$loop"
