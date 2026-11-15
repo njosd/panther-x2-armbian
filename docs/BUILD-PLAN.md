@@ -1130,3 +1130,32 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 前两次 symbols 测试修复均遗漏了同一测试方法中的第二处 fixture 引用。下一步不应再仅凭代码替换完成就报告“测试修复”；先通过 GitHub Actions 的单元测试门禁，再进行完整构建。必要时增加一个本地/CI lint 检查，禁止测试类引用未定义的实例属性。
 
 当前状态：修复已提交，尚待 Actions 验证；完整 DTB 审计未运行；没有修改产品 DTS、内核源码或 Panther X2 实机。
+
+
+### 3.43 Tenth audit run: unit gate passed; graph endpoint phandle normalization needed（2026-11-15）
+
+运行记录：GitHub Actions run `43657750978`，job `132639978756`，checkout commit `b150ea0ddccbc3daa37e73d3eec2c990073c7cea`。
+
+#### 本轮通过项
+
+- DTB 语义解析器单元测试 11/11 全部通过；
+- Ophub 6.12.81 固定源码获取及 SoC/板级 DTS 审查通过；
+- 未修改 source baseline DTB 构建通过；
+- 发布内核包外层 SHA-256 校验通过，发布 DTB 提取、反编译成功；
+- vendor-candidate 与 irqname-candidate 两份 DTB 均编译成功；
+- 完整语义比较已启动。
+
+#### 本轮失败
+
+`/dsi@fe060000/ports/port@0/endpoint@1:remote-endpoint` 原始值 `144 -> 145`。这是 OF graph 的 endpoint 反向连接 phandle，不是普通整数属性。候选引入 NPU 引用导致 phandle 重排，旧解析器未把 `remote-endpoint` 归入单 phandle 属性。
+
+#### 修复
+
+- `eebb2a0efd38d043b10c6c7619690c9ad72f0cd8`：将 `remote-endpoint` 加入单 phandle 属性集合，按目标 endpoint 节点路径比较。
+- `29ff263e590aeeeae8bf5efcd0e6bc1ac71e0027`：单 phandle 单元测试同时覆盖 `rockchip,hw` 和 `remote-endpoint`。
+
+#### 判定与下一步
+
+这是语义比较器对 OF graph 引用类型覆盖不完整导致的误报，不表示显示链路本身发生变化。候选构建通过，但完整语义审计仍失败，不能据此认定候选 DTS 等价。
+
+下一轮先运行单元测试，再检查是否还有其他标准 graph/reference 属性被误当作普通数值。若比较器通过，必须人工审查完整 diff，特别是 NPU 节点、IOMMU、regulator、OPP、电源域、时钟/复位、IRQ 与保留内存的目标路径和参数。Artifact：`14138712028`。
