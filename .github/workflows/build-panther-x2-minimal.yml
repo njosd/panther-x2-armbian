@@ -76,6 +76,38 @@ jobs:
           echo "Pinned U-Boot: $(git -C work/uboot rev-parse HEAD)"
           echo "Pinned firmware: $(git -C work/firmware rev-parse HEAD)"
 
+      - name: Disable upstream moving-branch dependency downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          rebuild = Path("work/ophub/rebuild")
+          s = rebuild.read_text()
+          replacements = {
+              'if [[ -n "${uboot_num}" && "${uboot_num}" -le "5" ]]; then':
+                  'if false; then # CI pre-seeds U-Boot from the pinned commit',
+              'if [[ -n "${firmware_num}" && "${firmware_num}" -le "5" ]]; then':
+                  'if false; then # CI pre-seeds firmware from the pinned commit',
+          }
+          for old, new in replacements.items():
+              if s.count(old) != 1:
+                  raise SystemExit(f"Expected one occurrence of {old!r}")
+              s = s.replace(old, new)
+          rebuild.write_text(s)
+
+          helper = Path("work/ophub/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh")
+          s = helper.read_text()
+          old = '''        git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ophub/firmware "${edid_tmp}/fw" 2>/dev/null
+                git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1'''
+          new = '''        mkdir -p "${edid_tmp}/fw/firmware/edid"
+                cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"'''
+          if s.count(old) != 1:
+              raise SystemExit("Expected EDID moving-branch download block exactly once")
+          helper.write_text(s.replace(old, new))
+          print("Patched local build scripts to consume only pinned U-Boot/firmware sources")
+          PY
+
       - name: Pin Panther X2 model database to RK35xx 6.12.y
         shell: bash
         run: |
@@ -156,12 +188,6 @@ jobs:
         working-directory: work/ophub
         run: |
           set -euo pipefail
-          # The rebuild helper only downloads U-Boot/firmware when their directories
-          # are nearly empty. Verify the pinned trees are fully populated before use.
-          uboot_dirs=$(find build-armbian/u-boot/rockchip -mindepth 1 -maxdepth 1 -type d | wc -l)
-          firmware_dirs=$(find build-armbian/armbian-files/common-files/usr/lib/firmware -mindepth 1 -maxdepth 1 -type d | wc -l)
-          test "$uboot_dirs" -gt 5
-          test "$firmware_dirs" -gt 5
           sudo ./rebuild -b panther-x2 -r ophub/kernel -u rk35xx \
             -k 6.12.y -a false -t ext4 -s 6144 -n Panther-X2-Minimal
 
