@@ -1,0 +1,102 @@
+name: Audit Panther X2 U-Boot FIT
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-uboot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install static inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y u-boot-tools device-tree-compiler
+
+      - name: Fetch and verify the pinned Panther X2 U-Boot binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit/input audit/extracted audit/report
+          base="https://raw.githubusercontent.com/ophub/u-boot/6e70f41585f15c43f45fcae609adec1865e83eb5/u-boot/rockchip/panther-x2"
+          curl --fail --location --retry 3 "$base/u-boot.itb" -o audit/input/u-boot.itb
+          curl --fail --location --retry 3 "$base/idbloader.img" -o audit/input/idbloader.img
+
+          check_blob() {
+            local file="$1" expected="$2" actual
+            actual=$(git hash-object "$file")
+            printf '%s  expected=%s  actual=%s\n' "$file" "$expected" "$actual"
+            test "$actual" = "$expected"
+          }
+          check_blob audit/input/u-boot.itb 04cd10bddd4e823d2ea495ee95b264cb2bce1f4c
+          check_blob audit/input/idbloader.img d22b624fc90c46e656baf98894bee182316e692e
+          sha256sum audit/input/* | tee audit/report/sha256.txt
+          stat -c '%n %s bytes' audit/input/* | tee audit/report/sizes.txt
+
+      - name: Inspect FIT structure and extract embedded FDT images
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "Panther X2 U-Boot FIT static audit"
+            echo "Source repository: ophub/u-boot"
+            echo "Source commit: 6e70f41585f15c43f45fcae609adec1865e83eb5"
+            echo "Board directory: u-boot/rockchip/panther-x2"
+            echo
+            echo "===== FIT listing ====="
+            dumpimage -l audit/input/u-boot.itb
+            echo
+            echo "===== IDBLoader strings (selected) ====="
+            strings -a audit/input/idbloader.img | grep -Ei 'rk809|rk817|regulator|pmic|sdmmc|vcc3v3|sw2|panther|rockchip' | head -n 250 || true
+            echo
+            echo "===== U-Boot ITB strings (selected) ====="
+            strings -a audit/input/u-boot.itb | grep -Ei 'rk809|rk817|regulator|pmic|sdmmc|vcc3v3|sw2|panther|rockchip|fdt|fit' | head -n 400 || true
+          } 2>&1 | tee audit/report/fit-inspection.txt
+
+          found=0
+          for index in $(seq 0 31); do
+            candidate="audit/extracted/image-${index}.bin"
+            if dumpimage -T flat_dt -p "$index" -o "$candidate" audit/input/u-boot.itb >/dev/null 2>&1; then
+              magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
+              if [ "$magic" = "d00dfeed" ]; then
+                found=$((found + 1))
+                dtb="audit/extracted/fdt-${index}.dtb"
+                dts="audit/extracted/fdt-${index}.dts"
+                mv "$candidate" "$dtb"
+                dtc -I dtb -O dts -o "$dts" "$dtb" 2>"audit/extracted/fdt-${index}-dtc-warnings.txt"
+                {
+                  echo "===== Extracted FDT image index $index ====="
+                  echo "DTB: $dtb"
+                  echo "DTS: $dts"
+                  echo "--- Relevant DTS nodes/properties ---"
+                  grep -Ein -C 3 'rk809|rk817|SWITCH_REG2|SW2_EN|sdmmc0|vmmc-supply|vqmmc-supply|vcc3v3_sd|regulator-(always-on|boot-on)|regulator-name|rockchip,.*(mmc|sd)' "$dts" || true
+                  echo "--- Relevant strings ---"
+                  strings -a "$dtb" | grep -Ei 'rk809|rk817|SWITCH_REG2|SW2_EN|sdmmc0|vmmc|vqmmc|vcc3v3_sd|panther' || true
+                  echo
+                } >> audit/report/fdt-details.txt
+              else
+                rm -f "$candidate"
+              fi
+            fi
+          done
+          {
+            echo "Extracted FDT count: $found"
+            if [ "$found" -eq 0 ]; then
+              echo "No FDT image was extracted by dumpimage -T flat_dt across indices 0..31."
+              echo "Review FIT listing and extraction tool output; this is not proof that the FIT contains no FDT."
+            fi
+          } | tee audit/report/extraction-summary.txt
+
+      - name: Publish static audit report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-uboot-fit-audit
+          path: audit/
+          if-no-files-found: warn
+          retention-days: 30
