@@ -1031,3 +1031,21 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 - `a9168533141fc17146c33438a4ec19824a64c515`：修复 workflow 成功报告仍引用已废弃的 `rk3566-panther-x2.candidate.decompiled.dts` 文件名，改为分别读取 vendor-candidate 与 irqname-candidate 的反编译 DTS。
 
 两项修改均未改变产品 DTS、内核源码或 9.6 设备。下一次运行应使用这两个提交之后的 main HEAD。仍需强调：DMC FSP 修复尚未经过下一轮实际 workflow 验证，语义审计目前未通过。
+
+
+### 3.39 DTB semantic parser unit-test gate added（2026-11-15）
+
+针对 3.30–3.38 连续出现的 phandle 属性类型误判，先暂停继续追加真实 DTB 特例，增加独立测试门槛。
+
+新增 `tests/test_audit_npu_dtb.py`，覆盖属性分类、直接 phandle 列表、单 phandle、clock/GPIO provider specifier 参数保留、普通字符串与整数数组、未知引用及截断引用 fail-closed，以及 `fdtget` 参数顺序。
+
+修订提交：
+- `2e7959a1537b2fa9888c034b362db074188b0a20`：新增测试集；
+- `21b50987cc02a07fbe442c2e5cb78477e796b00a`：修正测试加载带连字符脚本文件的方式及 GPIO 测试属性名；
+- `f1b72e8269edeaad9639b9818f209e44e5f7e26f`：在完整 kernel/DTB 工作流前增加单元测试步骤，测试失败则不启动耗时构建。
+
+测试通过 mock 验证属性分类、规范化逻辑和 `fdtget` 参数组装，**不是合成 DTB 文件的端到端测试**；它用于拦截已发现的 parser 回归，不能代替真实 DTB 审计。
+
+当前状态：测试及 workflow gate 已提交，尚未由 Actions 执行验证；DMC FSP 分类修复也尚未经过下一轮真实 DTB workflow。两份候选 DTB此前多轮编译成功，但完整语义审计仍未通过。未修改产品 DTS、内核源码或 9.6。
+
+下一步先运行 workflow，确认 unit-test step 通过，再继续完整 DTB 构建与语义审计。若单元测试失败，先修测试或 parser，不重复耗时构建。
