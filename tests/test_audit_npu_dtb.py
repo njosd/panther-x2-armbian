@@ -64,7 +64,7 @@ class NormalizationTests(unittest.TestCase):
 
     def test_single_phandle(self):
         for name in ("rockchip,hw", "remote-endpoint", "phy-handle",
-                     "snps,axi-config", "snps,mtl-rx-config", "snps,mtl-tx-config"):
+                     "snps,axi-config", "snps,mtl-rx-config", "snps,mtl-tx-config", "rockchip,srv"):
             with self.subTest(name=name), patch.object(
                 audit, "run_fdtget", return_value="10"
             ):
