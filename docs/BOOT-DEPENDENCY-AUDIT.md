@@ -960,3 +960,17 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 - 基础 rootfs 使用 Armbian Odroid N2 构建目标，是沿用 Ophub 官方 Server workflow 的构建模式；最终镜像由 Ophub rebuild 脚本替换成 Panther X2 DTB、6.12.81 内核和 Rockchip loader。仍需在实机确认没有残留板型特定服务影响启动。
 - Ophub 原始重建脚本有少量 CI 临时补丁，目的是阻止 U-Boot/firmware 从 moving branch 下载；不改动用户设备，也不修改仓库中的上游源码。
 - 没有构建或写入 eMMC；没有操作 192.168.9.6 实机。
+
+
+### 17.11.1 构建工作流收敛补充
+
+后续对构建工作流增加了以下保护：
+- 通过 `systemctl --root=<target-rootfs> enable` 显式启用 `ssh.service`、`NetworkManager.service` 和 `armbian-firstrun.service`，不只依赖基础镜像包的默认 enable 状态。
+- 最终镜像检查要求 openssh-server、network-manager、netplan.io 均为 dpkg 已安装状态。
+- 最终镜像检查要求 Netplan 配置明确使用 NetworkManager renderer，并包含 `dhcp4: true`。
+- U-Boot 镜像写入后，从最终镜像 sector 64 / 16384 读取 loader 字节并与固定 U-Boot 源文件逐字节比较。
+- 内核选择使用具体版本参数 `6.12.81`，而非系列字符串 `6.12.y`；设备数据库 selector 仍是 `rk35xx/6.12.y`。
+- Ophub rebuild 和 rootfs helper 中会访问 moving branch 的 U-Boot/firmware 下载被本地 CI 补丁关闭，改用预置的固定 U-Boot/firmware commit；EDID 文件也从固定 firmware checkout 复制。
+- 构建参数集中记录在 `config/versions.env`：基础板型 odroidn2、内核标签 rk35xx、root 分区 6144 MiB。
+
+工作流当前仍未运行；Artifact 和实机状态均未产生新的验证结论。
