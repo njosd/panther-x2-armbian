@@ -180,9 +180,14 @@ jobs:
             test -s "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
             gzip -t "$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
           done
-          tar -tzf "dtb-rockchip-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q 'rk3566-panther-x2.dtb'
-          tar -tzf "boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q "vmlinuz-$OPHUB_RK35XX_KERNEL_VERSION-ophub"
-          tar -tzf "modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" | grep -q "$OPHUB_RK35XX_KERNEL_VERSION-ophub/kernel"
+          # Materialize listings before searching: grep -q on a tar pipeline can
+          # close the pipe early and make tar exit with SIGPIPE under pipefail.
+          tar -tzf "dtb-rockchip-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > dtb.list
+          tar -tzf "boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > boot.list
+          tar -tzf "modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > modules.list
+          grep -F 'rk3566-panther-x2.dtb' dtb.list
+          grep -F "vmlinuz-$OPHUB_RK35XX_KERNEL_VERSION-ophub" boot.list
+          grep -F "$OPHUB_RK35XX_KERNEL_VERSION-ophub/kernel" modules.list
 
       - name: Build pinned Armbian Noble base image
         shell: bash
