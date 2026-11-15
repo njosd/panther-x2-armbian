@@ -532,3 +532,37 @@ Panther X2 DTS 当前显式启用：
 | 其他 USB 控制器是否承担内部设备通信 | 待查板级资料/设备树消费者关系 |
 
 当前不修改 DTS，不操作实机。USB 仍是最小系统构建前必须完成的静态依赖核查项，但审计目标限定为确认唯一外露接口所需的最小路径，并避免误关内部设备依赖。
+## 15. 6.12.81 USB host0 PHY 引用复核（2026-11-15）
+
+固定源码 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的板级 DTS 与 SoC 基础 DTSI 交叉检查，发现一项明确的静态引用不一致：
+
+- `arch/arm64/boot/dts/rockchip/rk356x.dtsi` 中 `usb_host0_ehci`（`fd800000`）引用 clock `<&usb2phy1>`，PHY `<&u2phy1_otg>`。
+- 同一文件中 `usb_host0_ohci`（`fd840000`）也引用 clock `<&usb2phy1>`，PHY `<&u2phy1_otg>`。
+- Panther X2 板级 DTS 将 `usb_host0_ehci`、`usb_host0_ohci` 设为 `status = "okay"`。
+- Panther X2 板级 DTS 启用的是 `usb2phy0` 和 `u2phy0_host`，未见启用 `usb2phy1` / `u2phy1_otg`。
+
+这不是仅凭节点命名作出的推断，而是当前固定源码中控制器节点的 phandle 引用与板级启用节点直接对照所得。它构成潜在的 probe/PHY 依赖风险；尚不能仅据此断言实际启动一定失败，因为最终结果还取决于合并 DTB、PHY provider 节点状态、驱动对缺失/未启用 provider 的处理，以及板级 DTS 其他覆盖。
+
+### 15.1 对照原始适配历史
+
+原始 Panther X2 适配提交 `tdleiyao/armbian@99e8ca02b3472dcc5ad9daa7e7a87cdc22ce9a02` 曾启用 `usb_host0_xhci`、`usb_host0_ohci`、`usb_host1_ehci`，并启用 `usb2phy0`、`usb2phy0_host`、`usb2phy0_otg`。这说明早期板级适配有针对 USB PHY/host 拓扑作过调整；但不能证明该历史配置与当前 Ophub 6.12.81 的基础 DTSI 节点组合天然兼容。
+
+### 15.2 当前风险判断与处理原则
+
+- `usb_host0_ehci` / `usb_host0_ohci` 的 inherited PHY reference 与板级启用的 PHY0 host port 不一致：**静态证据已确认，实际影响待验证**。
+- 不应因为外露 USB 只有一个，就把 EHCI、OHCI、XHCI 简单视为三个独立外部接口；EHCI/OHCI 通常是同一 USB2 host 控制器的高速/全速低速 companion 控制器，可能共同服务一个物理 root hub/端口拓扑。
+- 不应在没有合并 DTB 证据前修改板级 DTS，也不应直接禁用 EHCI/OHCI 中任一个。
+- 下一步必须编译固定 commit 的 `rk3566-panther-x2.dtb`，反编译并核对最终节点状态与 phandle；同时查看 `usb2phy0/1` provider 及其 host/otg 子节点状态。
+- 随后将 6.1.116 备份中的旧 DTB 与新 DTB 作结构化比较。旧 DTB 当前仅保存在用户本地备份中，尚未进入仓库或 CI 工作区；旧 DTB 的内容比较不能用旧系统元数据代替。
+- 最终确认外露接口速率仍需板级原理图/PCB 信息或实机 USB 设备协商结果。DTS 中 USB3 节点未启用只能说明当前设备树没有明确启用对应 USB3 host/OTG 控制器，不能单独证明 PCB 没有 USB3 走线。
+
+### 15.3 证据状态
+
+| 项目 | 状态 |
+|---|---|
+| 当前 6.12.81 host0 EHCI/OHCI PHY phandle | 源码已确认：usb2phy1 / u2phy1_otg |
+| 当前 Panther X2 板级启用的 USB2 PHY host 端 | 源码已确认：usb2phy0 / u2phy0_host |
+| 两组引用是否导致 probe 失败 | 未验证 |
+| 编译后最终 DTB 中的 phandle/status | 待编译核验 |
+| 6.1.116 旧 DTB 对应关系 | 待从本地备份归档提取后比较 |
+| 唯一外露 USB 口实际速率 | 未知 |
