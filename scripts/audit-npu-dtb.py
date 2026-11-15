@@ -31,7 +31,7 @@ PROVIDER_CELL_PROPERTIES = {
 }
 SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells", "memory-region", "devfreq-events"}
 SINGLE_PHANDLE_PROPERTIES = {
-    "interrupt-parent", "operating-points-v2", "remote-endpoint",
+    "interrupt-parent", "operating-points-v2", "remote-endpoint", "phy-handle",
     "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
     "ddr3_params", "ddr4_params", "lpddr3_params",
     "lpddr4_params", "lpddr4x_params",
