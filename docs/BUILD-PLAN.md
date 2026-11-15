@@ -1252,3 +1252,35 @@ Artifact：`14138984216`。完整语义比较仍未通过；候选编译通过�
 #### 方法上的下一步调整
 
 这一轮说明不应把所有 `-gpio` 属性都无条件认定为相同格式。后续应根据 GPIO binding/实际 provider 的 `#gpio-cells` 解析，验证参数长度，并保留 active-low 等 flags；对非标准命名属性也要确认其绑定语义。新增测试后再运行 CI。暂不触碰 9.6。
+
+
+### 3.47 Fourteenth audit run: unit tests 12/12; Rockchip MPP service phandle uncovered（2026-11-15）
+
+运行记录：GitHub Actions run `43658909464`，job `132643592021`，checkout commit `3202d0cac2346f5e08ab2042b485545ab84b6f47`。
+
+#### 本轮通过
+
+- 单元测试 12/12；
+- 固定 Ophub 6.12.81 源码审查；
+- source baseline DTB 构建；
+- 发布包外层 SHA-256 校验、目标 DTB 提取及反编译；
+- vendor-equivalent 和 irqname-equivalent 两份候选 DTB 均编译成功。
+
+#### 本轮失败
+
+完整语义比较在 `/iep@fdef0000:rockchip,srv` 失败：原始 phandle `100 -> 102`。
+
+固定源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `arch/arm64/boot/dts/rockchip/rk356x.dtsi` 显示，`rockchip,srv` 用于 VPU/JPEG/IEP/RKVENC/RKVDEC 等媒体节点，指向共享的 `&mpp_srv` 服务节点，是单 phandle 引用，而不是数值配置。该属性也不局限于 IEP。
+
+#### 修复
+
+- `458c15c2c9c3b422a85f5df8b1e74438ec9c92df`：将 `rockchip,srv` 纳入单 phandle 语义规范化；
+- `402669a8df03b17a00ea5cd8ed0b6d93edf907b2`：扩展单 phandle 测试覆盖该属性。
+
+Artifact：`14139197505`。语义审计仍未通过，未能证明候选 DTB 与 baseline 等价。
+
+#### 方法说明
+
+本轮显示新增 NPU 引用导致全树 phandle 编号变化，会影响媒体、网络、显示等无关节点。比较器需要对引用语义做准确规范化，同时保留所有非引用数值的严格比较。不要通过忽略整个属性或整个子树来消除差异。
+
+下一轮先跑 13 项单元测试，再完整审计。若语义比较通过，审查报告中的差异必须确认只包含预期 NPU 节点及必要元数据；并检查候选 DTC warnings。未触碰 9.6。
