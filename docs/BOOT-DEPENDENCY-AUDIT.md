@@ -914,3 +914,49 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 本次 run 的首次登录报告生成步骤早于下载 Ophub Server workflow，因此报告中的 workflow grep 当时没有输入文件；命令使用 `|| true`，没有使工作流失败。后续 provenance 步骤成功下载了 workflow，且从该文件确认了 `-s true` 调用。结论已由 artifact 内的实际 workflow 文件复核，但报告编排应修正：先下载 Ophub workflow，再生成 first-login lifecycle 报告，避免报告缺少调用上下文。
 
 下一步应继续审计最终 rootfs 构建/打包流程，特别是 Armbian checkout 固定、包实际安装、`ssh.service` enable、Host Key 与防火墙文件状态；不重复本次已完成的源码检查，不操作 192.168.9.6 实机。
+
+
+## 17.11 第一版最小启动镜像构建工作流（2026-11-15）
+
+已新增专用 GitHub Actions 工作流：
+
+- 文件：`.github/workflows/build-panther-x2-minimal.yml`
+- 工作流名称：Build Panther X2 minimal bootable image
+- 当前构建目标：Armbian Noble CLI + Ophub RK35xx 6.12.81 + Panther X2 原始 DTS + 历史 Rockchip loader 组合。
+- 运行方式：GitHub Actions → Build Panther X2 minimal bootable image → Run workflow。
+- 输出 Artifact：`panther-x2-minimal-6.12.81-noble`（成功完成后才会生成）。
+
+### 固定输入
+
+| 组件 | 固定选择 |
+|---|---|
+| Ophub rebuild 脚本 | `9e71b57f73683f9c4d14a30311e4c2ccbff29566` |
+| Armbian build 源码 | `3f3849bf50bfadff94d0d488eb968bdaf970dc72` |
+| 基础板型 | Odroid N2（仅借用 Armbian 通用 ARM64 rootfs/构建路径，最终重建为 Panther X2） |
+| 发行版 | Ubuntu Noble |
+| Panther X2 内核标签 | `rk35xx/6.12.y`（在 CI 临时修改该设备数据库行，不改上游仓库文件） |
+| 内核包 | Ophub RK35xx 6.12.81，外层 SHA-256 使用 config/versions.env 固定值 |
+| U-Boot | Ophub/u-boot commit `6e70f41585f15c43f45fcae609adec1865e83eb5` |
+| Firmware | Ophub/firmware commit `a9d0e8337cc8aa2ca4b482acd7b19c74ce05860f` |
+| 根文件系统 | ext4，目标 root 分区 6144 MiB |
+| 初始 SSH | TCP/22、root/password，Ophub 脚本初始密码 `1234` |
+| 安装目标 | 独立 TF 卡；不安装到 eMMC |
+
+### 构建方法
+
+1. 固定 commit 下载 Ophub rebuild 工具、Armbian build 源码、U-Boot 和 firmware。
+2. 从固定 Ophub RK35xx 6.12.81 release 下载内核包，核对外层 SHA-256、内部 `sha256sums`，并确认 boot、dtb-rockchip、modules、header 四类归档存在。
+3. 将 Panther X2 设备数据库的 kernel selector 从默认 `stable/6.18.y` 临时切换到 `rk35xx/6.12.y`。
+4. 使用 Armbian Noble + Odroid N2 构建通用基础 rootfs，再由固定 Ophub 工具重建为 Panther X2 镜像。
+5. 关闭 Ophub rebuild 对 U-Boot/firmware moving branch 的自动下载，改用已预置的固定 commit；rootfs EDID 文件也从同一固定 firmware checkout 复制。
+6. 禁用自动查询最新内核，强制选择 6.12.y 并使用已预置的 6.12.81 包。
+7. 最终镜像挂载检查：内核、initrd、Panther X2 DTB、rootfs modules、SSH 配置、NetworkManager、Netplan、first-login、firstrun、U-Boot 文件和分区内容。
+8. 额外从镜像原始扇区读取数据，与固定 U-Boot checkout 的 `idbloader.img`（sector 64）和 `u-boot.itb`（sector 16384）逐字节比较，避免只验证文件名而未验证镜像实际写入内容。
+
+### 重要边界
+
+- 这是首版构建工作流，尚未运行成功；只有 Actions 成功、Artifact 生成并通过镜像内容检查后，才能称为“已生成可用镜像”。
+- 最终静态镜像检查不能替代 Panther X2 实机启动、DHCP、SSH 首次登录和重启恢复验证。
+- 基础 rootfs 使用 Armbian Odroid N2 构建目标，是沿用 Ophub 官方 Server workflow 的构建模式；最终镜像由 Ophub rebuild 脚本替换成 Panther X2 DTB、6.12.81 内核和 Rockchip loader。仍需在实机确认没有残留板型特定服务影响启动。
+- Ophub 原始重建脚本有少量 CI 临时补丁，目的是阻止 U-Boot/firmware 从 moving branch 下载；不改动用户设备，也不修改仓库中的上游源码。
+- 没有构建或写入 eMMC；没有操作 192.168.9.6 实机。
