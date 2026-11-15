@@ -106,6 +106,57 @@ jobs:
             cat "$root/extensions/network/config-nm/netplan/00-default-use-network-manager.yaml"
           } > audit/reports/rootfs-network-ssh-source.txt
 
+      - name: Audit first-login and SSH startup lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          mkdir -p audit/source-files/armbian audit/source-files/ophub
+
+          root="audit/armbian-build"
+          files=(
+            "packages/bsp/common/usr/lib/armbian/armbian-firstlogin"
+            "packages/bsp/common/usr/lib/armbian/armbian-firstrun"
+            "packages/bsp/common/etc/profile.d/armbian-check-first-login.sh"
+            "packages/bsp/common/etc/default/armbian-firstrun.dpkg-dist"
+            "packages/bsp/common/lib/systemd/system/armbian-firstrun.service"
+            "lib/functions/rootfs/distro-agnostic.sh"
+          )
+          for path in "${files[@]}"; do
+            git -C "$root" show "$ARMBIAN_BUILD_COMMIT:$path" > "audit/source-files/armbian/$(basename "$path")"
+          done
+
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/ophub/amlogic-s9xxx-armbian/$OPHUB_ARMBIAN_COMMIT/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh" \
+            -o audit/source-files/ophub/build_armbian_rootfs_file.sh
+
+          {
+            echo "=== Ophub workflow invokes rootfs rewrite with SSH enabled ==="
+            grep -n -A2 -B2 -E 'ROOTFS_SCRIPT|\-s true' audit/reports/ophub-server-build-workflow.yml || true
+            echo
+            echo "=== Ophub rootfs SSH configuration and initial root password ==="
+            grep -n -A12 -B4 -E 'Set sshd_config|PermitRootLogin yes|PasswordAuthentication yes|rootnewpasswd|Set root password' audit/source-files/ophub/build_armbian_rootfs_file.sh || true
+            echo
+            echo "=== Armbian creates first-login marker ==="
+            grep -n -A7 -B5 -E 'not_logged_in_yet|armbian-firstrun.service|OPENSSHD_REGENERATE_HOST_KEYS' audit/source-files/armbian/distro-agnostic.sh || true
+            echo
+            echo "=== SSH login first-login trigger ==="
+            cat audit/source-files/armbian/armbian-check-first-login.sh
+            echo
+            echo "=== First-login PTY and SSH behavior ==="
+            grep -n -A12 -B5 -E 'if \[\[ -f /root/\.not_logged_in_yet|SSH_CONNECTION|Press Enter|PRESET_ROOT_PASSWORD|read_password "Create root"|add_user$|ssh-keygen -A|systemctl restart ssh.service|FIRSTLOGIN_SUCCESS=1' audit/source-files/armbian/armbian-firstlogin || true
+            echo
+            echo "=== Firstrun service ordering and enablement ==="
+            cat audit/source-files/armbian/armbian-firstrun.service
+            grep -n -A8 -B4 -E 'systemctl --no-reload enable armbian-firstrun.service|OPENSSHD_REGENERATE_HOST_KEYS' audit/source-files/armbian/distro-agnostic.sh || true
+            echo
+            echo "=== Default SSH host key regeneration setting ==="
+            cat audit/source-files/armbian/armbian-firstrun.dpkg-dist
+            echo
+            echo "=== First-run host key regeneration implementation ==="
+            grep -n -A12 -B5 -E 'SSH Keys creation|OPENSSHD_REGENERATE_HOST_KEYS|ssh-keygen|service ssh restart' audit/source-files/armbian/armbian-firstrun || true
+          } > audit/reports/ssh-firstlogin-lifecycle.txt
+
       - name: Record Ophub build workflow provenance caveat
         shell: bash
         run: |
@@ -130,6 +181,7 @@ jobs:
           name: panther-x2-6.12.81-ethernet-ssh-prerequisite-audit
           path: |
             audit/reports/
+            audit/source-files/
             audit/extracted/kernel.config
           if-no-files-found: warn
           retention-days: 30
