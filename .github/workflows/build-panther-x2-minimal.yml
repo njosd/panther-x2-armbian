@@ -182,7 +182,7 @@ jobs:
           find . -maxdepth 2 -type f -printf '%P | %s bytes\\n' | sort
           echo "========== ARCHIVE METADATA =========="
           for kind in boot dtb-rockchip modules header; do
-            file="$kind-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+            file="$kind-$OPHUB_RK35XX_KERNEL_VERSION-rk35xx-ophub.tar.gz"
             if test -s "$file"; then
               echo "--- $file ---"
               stat -c 'size=%s bytes' "$file"
