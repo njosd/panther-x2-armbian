@@ -789,3 +789,56 @@ D. 实机验收（未来阶段，当前未授权执行）
 失败发生在 boot 归档配置文件定位命令：`tar -tzf "$boot" | awk '... { print; exit }'`。由于工作流启用 `pipefail`，awk 找到目标后提前退出，tar 写入已关闭管道触发 SIGPIPE，导致步骤退出码 2。artifact 中的 boot 归档目录索引已证明配置文件确实存在：`config-6.12.81-rk35xx-ophub`。因此这仍是审计脚本管道处理错误，不是发布包或内核配置错误。
 
 已在 commit `80522f8296e243fb3b77107127a3ac79664182da` 修正：先把完整 tar 成员清单写入文件，再从文件中筛选 config 路径，避免提前关闭 tar 输出管道。该提交尚未运行验证，下一步需重新触发工作流。
+
+### 17.9 网络/SSH 专项审计成功结果（run 43669171821，2026-11-15）
+
+第三次运行（workflow run #3）所有步骤成功，成功下载并校验固定 Ophub 6.12.81 RK35xx 内核包、提取最终 config、索引 modules 包，并审计固定 Armbian build 源码快照及固定 Ophub Server workflow。Artifact ID：`14143082992`，artifact ZIP SHA-256：`b2fc272881bef576b0e6961bfb2cea5a0cbb13f9c4eb9e614cb41a4c1f0ba3d0`。
+
+#### 17.9.1 最终内核包网络配置
+
+最终 `config-6.12.81-rk35xx-ophub` 确认：
+- `CONFIG_NET=y`、`CONFIG_PACKET=y`、`CONFIG_UNIX=y`、`CONFIG_INET=y`
+- `CONFIG_NETDEVICES=y`、`CONFIG_ETHERNET=y`
+- `CONFIG_STMMAC_ETH=y`、`CONFIG_STMMAC_PLATFORM=y`、`CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_PHYLINK=y`、`CONFIG_PHYLIB=y`、`CONFIG_REALTEK_PHY=y`
+- `CONFIG_MDIO_BUS=y`、`CONFIG_OF_MDIO=y`
+- `CONFIG_MODULES=y`、`CONFIG_IPV6=m`
+
+结论：GMAC1 依赖的 STMMAC、Rockchip DWMAC、PHYLIB、Realtek PHY、MDIO 和 PHYLINK 主链均为内建（`=y`），不依赖启动后加载对应 .ko。最终 modules 包中未发现 stmmac/dwmac/Realtek PHY 主链模块，与内建配置吻合。modules 包中的其他平台网卡和无线模块不应误认为 Panther X2 GMAC1 的依赖。
+
+IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验收目标，IPv6 不是此目标的前置依赖。
+
+#### 17.9.2 Armbian rootfs 网络与 SSH 软件包路径
+
+固定 Armbian build commit `3f3849bf50bfadff94d0d488eb968bdaf970dc72` 的源码核查确认：
+- Noble CLI 基础软件包清单列出 `openssh-server`、`iproute2`、`iputils-ping`、`rsyslog`、`systemd-resolved`。
+- Ophub Server workflow 传入 `BUILD_MINIMAL=no`、`BUILD_DESKTOP=no`。
+- 该 Armbian commit 在未设置 `NETWORKING_STACK` 时，非 minimal 默认选择 `network-manager`。
+- NetworkManager 扩展加入 `network-manager`、`network-manager-openvpn`、`netplan.io`，启用 `systemd-resolved.service`，部署 Netplan 和 NetworkManager 配置。
+- Netplan 默认 renderer 为 NetworkManager，配置注释说明所有设备由 NetworkManager 管理，检测到 carrier 后通过 DHCP 自动配置。
+
+这证明固定 Armbian 源码快照具备合理的有线 DHCP 和 SSH 软件包构建路径，但不证明实际 rootfs 已包含并启用这些组件。
+
+#### 17.9.3 构建来源偏差
+
+固定 Ophub workflow 实际执行 `git clone -q --single-branch --depth=1 --branch=main https://github.com/armbian/build.git build`，没有 checkout 项目 `config/versions.env` 中记录的 `ARMBIAN_BUILD_COMMIT=3f3849bf50bfadff94d0d488eb968bdaf970dc72`。因此本次 Armbian 源码审计是固定 commit 的可重复静态分析，但不能证明 Ophub workflow 当时实际构建 rootfs 使用了该 commit。后续构建流程必须消除此偏差。
+
+#### 17.9.4 SSH 尚未完成静态验收
+
+本次只证明 Noble CLI 软件包清单包含 `openssh-server`，尚未检查最终 rootfs 是否实际安装该包、`ssh.service/sshd.service` 是否 enabled、host keys 是否生成、首启用户是否创建及其密码/公钥策略、PermitRootLogin/PasswordAuthentication、防火墙 TCP/22 规则，以及首启流程是否会阻塞网络管理。不能把软件包清单当作“SSH 已可登录”。
+
+#### 17.9.5 当前阶段结论
+
+| 检查项 | 状态 |
+|---|---|
+| Ophub 6.12.81 最终内核包完整性 | 已验证（大小、SHA-256、gzip/tar） |
+| 最终内核 GMAC / DWMAC / PHY / MDIO 配置 | 已验证，关键项均为内建 |
+| 最终 modules 包 | 已索引；未见 GMAC 主链模块，与内建配置吻合 |
+| 固定 Armbian 源码的 NetworkManager + Netplan DHCP 路径 | 已验证（源码级） |
+| 固定 Armbian Noble CLI SSH 软件包清单 | 已验证（源码级） |
+| Ophub workflow 实际 Armbian build commit | 未固定 main 分支，存在来源偏差 |
+| 最终 rootfs 中网络包和配置 | 未验证 |
+| SSH enable、host key、初始用户与认证 | 未验证 |
+| LAN IPv4 DHCP、TCP/22 SSH 登录 | 未验证，需未来实机验收 |
+
+下一步不应重复内核 config 检查，而应审计 Ophub rootfs 生成流程：实际 Armbian checkout 版本、CLI 包安装、首启用户创建、SSH enable/host key 和防火墙配置。只有拿到最终 rootfs 后，才能做文件级静态检查。未经授权，不在 Panther X2 实机安装或修改任何内容。
