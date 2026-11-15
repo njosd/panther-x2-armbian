@@ -33,6 +33,8 @@ SINGLE_PHANDLE_ARRAY_PROPERTIES = {"nvmem-cells", "memory-region", "devfreq-even
 SINGLE_PHANDLE_PROPERTIES = {
     "interrupt-parent", "operating-points-v2",
     "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
+    "ddr3_params", "ddr4_params", "lpddr3_params",
+    "lpddr4_params", "lpddr4x_params",
 }
 PHANDLE_PROPERTIES = {"phandle", "linux,phandle"}
 
