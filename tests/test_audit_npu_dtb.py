@@ -63,13 +63,16 @@ class NormalizationTests(unittest.TestCase):
                 )
 
     def test_single_phandle(self):
-        with patch.object(audit, "run_fdtget", return_value="10"):
-            self.assertEqual(
-                audit.normalized_property(
-                    self.dtb, "/consumer", "rockchip,hw", self.handles
-                ),
-                "@/provider-a",
-            )
+        for name in ("rockchip,hw", "remote-endpoint"):
+            with self.subTest(name=name), patch.object(
+                audit, "run_fdtget", return_value="10"
+            ):
+                self.assertEqual(
+                    audit.normalized_property(
+                        self.dtb, "/consumer", name, self.handles
+                    ),
+                    "@/provider-a",
+                )
 
     def test_provider_specifier_preserves_argument_cells(self):
         def fake_fdtget(_dtb, *args, required=True):
