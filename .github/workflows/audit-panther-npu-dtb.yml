@@ -206,7 +206,10 @@ jobs:
               echo "CANDIDATE_STATUS=BUILT_AND_SEMANTICALLY_AUDITED"
               echo "Both DTB variants were built and passed the semantic audit."
               echo "=== Candidate NPU nodes ==="
-              grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' work/reports/rk3566-panther-x2.candidate.decompiled.dts || true
+              for candidate in vendor-candidate irqname-candidate; do
+            echo "--- ${candidate} ---"
+            grep -nE 'npu@fde40000|iommu@fde4b000|bus-npu|rknpu-supply|interrupt-names = "npu_irq"' "work/reports/rk3566-panther-x2.${candidate}.decompiled.dts" || true
+          done
             } >> "$report"
             echo "candidate_status=built" >> "$GITHUB_OUTPUT"
           fi
