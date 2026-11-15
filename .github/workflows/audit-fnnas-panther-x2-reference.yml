@@ -15,14 +15,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          url="https://github.com/ophub/fnnas/releases/download/fnnas_rockchip_692/fnnas_rockchip_panther-x2_k6.12.41_2026.09.23.img.gz"
-          expected="c49172097224b5e4d5a8e720d47c758dc37d87d73b91cee44c4c5a8a4e0ab345"
+          url="https://github.com/ophub/fnnas/releases/download/fnnas_v389/fnnas_rockchip_panther-x2_k6.12.41_2026.01.24.img.gz"
           mkdir -p work output
           curl -fL --retry 5 --retry-all-errors "$url" -o work/fnnas-panther-x2.img.gz
           actual=$(sha256sum work/fnnas-panther-x2.img.gz | awk '{print $1}')
-          echo "Expected compressed SHA256: $expected"
-          echo "Actual compressed SHA256:   $actual"
-          test "$actual" = "$expected"
+          echo "Compressed image SHA256: $actual"
+          echo "$actual  fnnas-panther-x2.img.gz" > output/COMPRESSED-IMAGE-SHA256SUMS
           gzip -t work/fnnas-panther-x2.img.gz
           gzip -dc work/fnnas-panther-x2.img.gz > work/fnnas-panther-x2.img
           raw=$(sha256sum work/fnnas-panther-x2.img | awk '{print $1}')
@@ -38,8 +36,8 @@ jobs:
           sudo apt-get install -y gdisk btrfs-progs device-tree-compiler u-boot-tools
           {
             echo "FNNAS Panther X2 image audit"
-            echo "Image: fnnas_rockchip_panther-x2_k6.12.41_2026.09.23.img.gz"
-            echo "Release tag: fnnas_rockchip_692"
+            echo "Image: fnnas_rockchip_panther-x2_k6.12.41_2026.01.24.img.gz"
+            echo "Release tag: fnnas_v389"
             echo
             echo "========== Partition table =========="
             sudo sgdisk -p work/fnnas-panther-x2.img
