@@ -251,3 +251,86 @@ rebuild 脚本的 `-u` 参数可以把默认 tag 从 stable 改为 rk35xx，但 
 4. 追踪 Ophub U-Boot 仓库 Panther X2 文件的首次加入来源和变更历史。GitHub commit 搜索未返回 Panther/E23 关键词匹配，因此该历史仍需通过仓库 Git 路径历史或 clone 后 `git log --follow` 补齐。
 
 所有这些工作仍属于只读源码与构建产物审计，不涉及写卡或实机修改。
+
+## 11. 以公开实机启动记录和用户旧 6.1.116 系统反向核对（2026-11-15）
+
+本节优先使用实际成功运行记录，不再只从文件名推断 U-Boot。
+
+### 11.1 公开的 Panther X2 实机启动记录
+
+Ophub Issue #1319 的早期适配过程给出了以下直接证据：
+
+- 2023-04-24，适配者 tdleiyao 表示 Panther X2 Armbian 已适配完成，并提供镜像。
+- 2023-04-25，适配者明确说明：U-Boot 暂时借用 Radxa E23；其 Linux DTS 是基于 Armbian 主线并参照 Radxa E25 修改，适配者当时主要完成设备树适配，U-Boot 源码未公开。
+- Ophub 在同一讨论中说明其按 Panther X2 使用的串口参数配置启动脚本。
+- Ophub Contributors #90 记录：2023-04-25 经测试反馈，Panther-X2（RK3566）可安装到 eMMC，使用 rk3566-panther-x2.dtb，千兆有线网络正常。
+
+来源：
+- https://github.com/ophub/amlogic-s9xxx-armbian/issues/1319#issuecomment-1521843631 （U-Boot 借用 Radxa E23）
+- https://github.com/ophub/amlogic-s9xxx-armbian/issues/1319#issuecomment-1521443259 （Armbian 主线、参考 Radxa E25 的 DTS 说明）
+- https://github.com/ophub/amlogic-s9xxx-armbian/commit/d6a1a360b66925cf4b73e8727952f7f287144c92 （Panther X2 初始支持）
+- https://github.com/ophub/amlogic-s9xxx-armbian/commit/e70c212d62d863f358160a218deee6d0b1ee4ab7 （Panther X2 启动配置文件）
+- https://github.com/ophub/amlogic-s9xxx-armbian/blob/main/CONTRIBUTORS.md （第 90 条实机测试记录）
+
+这条证据链将两块板级参考明确区分：
+- U-Boot：借用 Radxa E23。
+- Panther X2 Linux DTS：参照 Radxa E25 修改。
+不能把 E25 DTS 参考误写成 E25 U-Boot 已被实际采用。
+
+### 11.2 当时 Panther X2 的 U-Boot 文件布局
+
+初始支持提交 d6a1a360... 的设备数据库新增 Panther X2 条目，明确配置：
+
+- TRUST_IMG=NA
+- MAINLINE_UBOOT=u-boot.itb
+- BOOTLOADER_IMG=idbloader.img
+- KERNEL_TAGS=6.1.y
+- PLATFORM=rockchip
+- FAMILY=rk3566
+- BOOT_CONF=armbianEnv.txt
+
+因此，2023 年公开成功启动的 Panther X2 路线不是 u-boot.img + trust.bin + idbloader.bin 组合，而是 idbloader.img + u-boot.itb，且设备数据库不要求单独 TRUST_IMG。
+
+这与当前用户旧系统 /etc/ophub-release 中的路径字段完全吻合：
+
+- MAINLINE_UBOOT=/usr/lib/u-boot/u-boot.itb
+- BOOTLOADER_IMG=/usr/lib/u-boot/idbloader.img
+- BOOT_CONF=armbianEnv.txt
+- FDTFILE=rk3566-panther-x2.dtb
+- KERNEL_REPO=ophub/kernel
+- KERNEL_TAGS=6.1.y
+- KERNEL_VERSION=6.1.116
+
+### 11.3 用户旧 6.1.116 系统的交叉核对
+
+用户此前提供的旧系统信息显示：
+
+- 实际运行内核：6.1.116-ophub
+- 内核来源：ophub/kernel
+- 内核分支：6.1.y
+- Panther X2 DTB：rk3566-panther-x2.dtb
+- U-Boot 文件路径：/usr/lib/u-boot/u-boot.itb 与 /usr/lib/u-boot/idbloader.img
+- /boot 与根文件系统实际位于 eMMC：/dev/mmcblk1p1、/dev/mmcblk1p2
+- /etc/ophub-release 同时记录 DISK_TYPE=usb；该字段与实际根/boot 挂载设备不是同一层面的证据，不能据此推断实际启动介质。
+
+另有一份备份系统记录为 KERNEL_VERSION=6.1.192，并有相同的 U-Boot 文件路径及 PACKAGED_DATE=2023-12-07。这份记录应与当前运行的 6.1.116 分开看待，不能把备份版本号混写为 6.1.116。
+
+**当前最强结论：** 用户曾正常运行的 6.1.116 系统采用的 U-Boot 文件布局，与 2023 年公开实机启动成功的 Panther X2 适配方案完全一致；而公开适配者明确说该方案的 U-Boot 借用 Radxa E23。故旧 6.1.116 系统极有可能沿用了这条 E23-derived idbloader.img + u-boot.itb 启动链。
+
+**尚不能声称已证明的部分：**
+- 旧系统 /usr/lib/u-boot/ 两个文件的实际 SHA-256、文件大小和内部版本字符串尚未取得。
+- 尚未证明旧系统文件与当前 Ophub U-Boot 仓库 Panther X2 blob 是逐字节相同。
+- /usr/lib/u-boot/ 中的文件路径是软件包/安装器元数据；仅凭路径不能证明 eMMC raw sectors 中实际写入的 loader 字节与文件完全一致。
+- 旧系统根/boot 在 eMMC 是 Linux 运行态证据，不单独证明 BootROM 最初从 eMMC 还是 TF 卡/SPI 读取 ID Block。
+
+### 11.4 对 6.12.81 最小系统的决策建议
+
+目前没有理由先换掉这条经过 Panther X2 实机成功记录的启动方案。优先路线应为：
+
+1. 以旧 6.1.116 环境和 2023 成功适配为参考基线，继续采用 idbloader.img + u-boot.itb 文件组合。
+2. 暂时保留当前 Ophub Panther X2 启动文件作为候选，不主动重编 U-Boot。
+3. 通过旧系统备份或只读读取旧系统文件，取得两个 U-Boot 文件的 SHA-256、大小和版本字符串。
+4. 对比当前 Ophub Panther X2 文件的 SHA-256；相同则建立强关联，不同则继续追踪替换提交和来源。
+5. 只有发现旧系统实际文件与当前候选不一致，或有明确硬件/启动问题证据，才评估重建 U-Boot。
+
+以上仍不授权写 TF 卡、eMMC 或修改 192.168.9.6。
