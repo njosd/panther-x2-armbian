@@ -32,6 +32,10 @@ jobs:
             echo "OPHUB_RK35XX_PACKAGE_URL=$OPHUB_RK35XX_PACKAGE_URL"
             echo "OPHUB_RK35XX_PACKAGE_SHA256=$OPHUB_RK35XX_PACKAGE_SHA256"
             echo "OPHUB_RK35XX_KERNEL_VERSION=$OPHUB_RK35XX_KERNEL_VERSION"
+            echo "TARGET_BUILD_BASE_BOARD=$TARGET_BUILD_BASE_BOARD"
+            echo "TARGET_KERNEL_TAG=$TARGET_KERNEL_TAG"
+            echo "TARGET_ROOTFS_SIZE_MIB=$TARGET_ROOTFS_SIZE_MIB"
+            echo "TARGET_ROOTFS=$TARGET_ROOTFS"
           } >> "$GITHUB_ENV"
 
       - name: Install build dependencies
@@ -166,7 +170,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          ./compile.sh RELEASE=noble BOARD=odroidn2 BRANCH=current \
+          ./compile.sh RELEASE=noble BOARD=$TARGET_BUILD_BASE_BOARD BRANCH=current \
             BUILD_MINIMAL=no BUILD_ONLY=default HOST=armbian \
             BUILD_DESKTOP=no EXPERT=yes KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha SHARE_LOG=yes
@@ -178,7 +182,7 @@ jobs:
           set -euo pipefail
           chmod +x compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh
           compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh \
-            -v noble -s true -c true -k false -p arm64
+            -v "$TARGET_ROOTFS" -s true -c true -k false -p arm64
           image=$(find build/output/images -maxdepth 1 -type f -name '*-trunk_*.img.gz' -print -quit)
           test -n "$image"
           gzip -dk "$image"
