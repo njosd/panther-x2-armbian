@@ -719,3 +719,31 @@ D. 实机验收（未来阶段，当前未授权执行）
 4. 只有静态检查通过后才进入 TF 卡实机启动；以局域网 SSH 作为主要验收通道，UART 作为辅助救援。
 
 当前没有构建或写入实机镜像，没有安装软件，也没有修改 Panther X2 实机。
+
+### 15.5 合并 DTB 实际结果（GitHub Actions run 43668003702，2026-11-15）
+
+本次工作流已在固定 Ophub commit 上成功编译 `rk3566-panther-x2.dtb`，并成功上传 artifact。构建成功只证明 DTB 编译通过，不代表 USB 控制器在实机可用。
+
+- DTB SHA-256：`00220c6cabc02573099e74dec912787dcb629ff5904f280f25bc782e92332185`
+- Artifact：`panther-x2-6.12.81-merged-usb-dtb-audit`
+- Artifact SHA-256：`e4e0b42d90ae99f5f4be197f9b7cedc099d0b3c84a12db11be8ac5636c6d2921`
+
+对反编译后的最终合并 DTS 进行 phandle 反查，确认：
+
+1. `/usb@fd800000`（EHCI）与 `/usb@fd840000`（OHCI）均为 `status = "okay"`。
+2. 两个控制器的 `phys = <0x2d>`，反查为 `/usb2-phy@fe8b0000/otg-port`（即 PHY1 OTG 子节点）。
+3. 对应 PHY1 provider `/usb2-phy@fe8b0000` 为 `status = "disabled"`，其 `otg-port` 也为 `status = "disabled"`。
+4. 板级启用的 `/usb2-phy@fe8a0000`（PHY0）及其 `host-port` 均为 `status = "okay"`，但当前已启用的 EHCI/OHCI 并未引用这个 PHY0 host 子节点。
+5. `/usbdrd`（USB DRD/DWC3）父节点为 disabled；`/usbhost`（USB3 host/DWC3）父节点也为 disabled。不能据此声称当前 DTS 已启用 USB3 host/OTG。
+
+因此，先前提出的“host0 EHCI/OHCI 引用了未启用 PHY1 OTG，而板级启用 PHY0 host”的风险，已由最终合并 DTB **确认存在**，不再只是源码片段推测。该关系可能导致 PHY 获取失败、控制器 probe 失败或 USB host 无法正常工作；具体内核驱动行为和实机影响仍未验证。
+
+### 15.6 USB 结论与后续动作
+
+- **已验证（构建产物）：** 固定 commit 的 Panther X2 DTB 可编译；最终 phandle 关系如上。
+- **已确认（静态配置问题）：** 已启用的 EHCI/OHCI 引用 disabled 的 PHY1 OTG；enabled 的 PHY0 host 没有被这两个 enabled 控制器引用。
+- **未验证：** EHCI/OHCI 在该状态下实际 probe 结果；唯一外露 USB 插口的实际 PHY/控制器走线及 USB2/USB3 速率。
+- **不做的事：** 不因外露接口只有一个就直接改写 phandle；不猜测应把控制器改指向 PHY0 host；不禁用 EHCI/OHCI 中任意一个；不在此阶段改 DTS 或刷机。
+- **下一步：** 先追踪 Panther X2 原始板级 DTS 的 USB 节点变更历史，核实 PHY0/PHY1、EHCI/OHCI 与 DWC3 的设计意图；随后对照本地 6.1.116 旧系统 DTB。确定板级拓扑后再提出最小 DTS 修补候选，并通过 CI 重新编译和静态审查。实机 USB 测试留到网络/SSH P0 首版通过之后。
+
+本次 dtc 反编译还报告若干既有结构类 warning（例如 duplicate unit-address、unnecessary address/size cells、graph child address）；这些 warning 不影响本次 DTB 编译成功，但应保留完整 warning 清单，后续按涉及节点逐项判断，不应一概视为 USB 故障。
