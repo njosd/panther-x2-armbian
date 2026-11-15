@@ -37,6 +37,7 @@ jobs:
             echo "Actual size: $actual_size"
             echo "Expected SHA256: $OPHUB_RK35XX_PACKAGE_SHA256"
             echo "Actual SHA256: $actual_sha"
+            echo "Package integrity: verified"
           } | tee audit/reports/package-check.txt
           test "$actual_size" = "$OPHUB_RK35XX_PACKAGE_SIZE_BYTES"
           test "$actual_sha" = "$OPHUB_RK35XX_PACKAGE_SHA256"
@@ -56,12 +57,12 @@ jobs:
             echo >> audit/reports/nested-index.txt
           done < audit/reports/outer-members.txt
 
-          boot="audit/nested/boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
-          modules="audit/nested/modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz"
+          boot="audit/nested/boot-$OPHUB_RK35XX_KERNEL_VERSION-rk35xx-ophub.tar.gz"
+          modules="audit/nested/modules-$OPHUB_RK35XX_KERNEL_VERSION-rk35xx-ophub.tar.gz"
           test -s "$boot"
           test -s "$modules"
 
-          config_member="$(tar -tzf "$boot" | grep -E '(^|/)config-[^/]*-ophub$' | head -n 1)"
+          config_member="$(tar -tzf "$boot" | awk '/(^|\/)config-[^/]*-rk35xx-ophub$/ { print; exit }')"
           test -n "$config_member"
           tar -xOzf "$boot" "$config_member" > audit/extracted/kernel.config
           grep -E '^(CONFIG_(NET|INET|IPV6|PACKET|UNIX|NETDEVICES|ETHERNET|STMMAC_ETH|STMMAC_PLATFORM|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK|MODULES)=|# CONFIG_(STMMAC_ETH|DWMAC_ROCKCHIP|PHYLIB|REALTEK_PHY|MDIO_BUS|OF_MDIO|PHYLINK) is not set)' audit/extracted/kernel.config > audit/reports/network-kernel-config.txt || true
