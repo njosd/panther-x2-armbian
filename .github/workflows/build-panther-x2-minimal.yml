@@ -185,9 +185,29 @@ jobs:
           tar -tzf "dtb-rockchip-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > dtb.list
           tar -tzf "boot-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > boot.list
           tar -tzf "modules-$OPHUB_RK35XX_KERNEL_VERSION-ophub.tar.gz" > modules.list
-          grep -F 'rk3566-panther-x2.dtb' dtb.list
-          grep -F "vmlinuz-$OPHUB_RK35XX_KERNEL_VERSION-ophub" boot.list
-          grep -F "$OPHUB_RK35XX_KERNEL_VERSION-ophub/kernel" modules.list
+          echo "=== DTB archive entries ==="
+          cat dtb.list
+          echo "=== boot archive entries ==="
+          cat boot.list
+          echo "=== modules archive matching entries ==="
+          grep -F "$OPHUB_RK35XX_KERNEL_VERSION" modules.list || true
+          echo "=== archive filename inventory ==="
+          ls -lah *.tar.gz
+          echo "=== expected Panther X2 DTB ==="
+          grep -F 'rk3566-panther-x2.dtb' dtb.list || {
+            echo "::error::Panther X2 DTB not found at expected archive path"
+            exit 1
+          }
+          echo "=== expected kernel image ==="
+          grep -E '(^|/)(Image|vmlinuz)(-|$)' boot.list || {
+            echo "::error::No expected kernel image entry found"
+            exit 1
+          }
+          echo "=== expected modules tree ==="
+          grep -F "$OPHUB_RK35XX_KERNEL_VERSION" modules.list || {
+            echo "::error::Kernel version directory not found in modules archive"
+            exit 1
+          }
 
       - name: Build pinned Armbian Noble base image
         shell: bash
