@@ -234,8 +234,8 @@ jobs:
         with:
           name: panther-x2-minimal-6.12.81-noble
           path: |
-            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz
-            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81-ophub_server_*.img.gz.sha256
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz.sha256
             work/ophub/build/output/images/validation-report.txt
           if-no-files-found: error
           retention-days: 14
