@@ -1021,3 +1021,13 @@ Artifact: [run 43600749020](https://github.com/njosd/panther-x2-armbian/actions/
 此外，成功分支仍有旧的单候选 DTS 文件名引用，需修复为 vendor/irqname 两份文件。
 
 下一步不应只继续追加属性名单。需在审计器中维护显式的属性类型表与未知 phandle-like 属性检测，随后增加小型合成 DTB 测试，覆盖单 phandle、phandle list、带参数 specifier、普通字符串和整数数组。通过单元测试后再跑完整 DTB workflow。
+
+
+### 3.38 Eighth-run follow-up: DMC FSP parser fix and workflow report cleanup（2026-11-15）
+
+本轮审计记录已见 3.37。随后完成两项仓库修订：
+
+- `24ae91695d5caed230f952cb8b2ce9a1043fc3a0`：将 `ddr3_params`、`ddr4_params`、`lpddr3_params`、`lpddr4_params`、`lpddr4x_params` 按单 phandle 引用解析，比较目标节点路径。
+- `a9168533141fc17146c33438a4ec19824a64c515`：修复 workflow 成功报告仍引用已废弃的 `rk3566-panther-x2.candidate.decompiled.dts` 文件名，改为分别读取 vendor-candidate 与 irqname-candidate 的反编译 DTS。
+
+两项修改均未改变产品 DTS、内核源码或 9.6 设备。下一次运行应使用这两个提交之后的 main HEAD。仍需强调：DMC FSP 修复尚未经过下一轮实际 workflow 验证，语义审计目前未通过。
