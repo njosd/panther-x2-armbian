@@ -162,3 +162,44 @@ rebuild 脚本的 `-u` 参数可以把默认 tag 从 stable 改为 rk35xx，但 
 4. 完成上述静态闭包审计后，再进入镜像构建前检查；仍不刷机、不写卡、不修改 192.168.9.6。
 
 本报告只记录静态证据和构建阻塞，不代表完整系统已在 Panther X2 实机运行。
+
+
+## 9. U-Boot 历史来源追查补充（2026-11-15）
+
+继续追查 Panther X2 最初适配记录后，发现比“二进制文件在仓库中存在”更关键的历史证据：
+
+- Ophub 原始适配 Issue #1319 的讨论中，适配者明确说明：Panther X2 的 U-Boot 当时“暂时还是借用的 Radxa E23 的”。
+- 同一讨论中，适配者表示 Panther X2 的 DTS 是参照 Armbian 主线、参考 Radxa E25 修改，U-Boot 源码当时未公开。
+- 这说明当前 Ophub U-Boot 仓库中的 Panther X2 命名文件，不能仅凭路径认定为 Panther X2 专门构建的完整板级固件。至少其早期来源与 Radxa E23 存在继承关系。
+
+来源：
+- https://github.com/ophub/amlogic-s9xxx-armbian/issues/1319#issuecomment-1521843631
+- https://github.com/ophub/amlogic-s9xxx-armbian/issues/1319#issuecomment-1521443259
+- https://github.com/ophub/amlogic-s9xxx-armbian/issues/1319#issuecomment-1521446968
+
+### 风险解释
+
+这不是“必然不能启动”的结论。RK3566/RK3568 同属 Rockchip RK35xx 家族，部分 SPL/U-Boot 代码可能复用；但 IDB/SPL 阶段涉及 DDR 初始化和板级电源/时钟配置，不能仅凭 SoC 家族相同推断适配正确。
+
+因此更新状态：
+
+| 项目 | 新判定 |
+|---|---|
+| Panther X2 命名的 U-Boot 文件存在 | 已确认 |
+| 早期 U-Boot 继承/借用 Radxa E23 | 已确认（历史讨论证据） |
+| 当前二进制是否仍为 E23 原始文件或后续修改版本 | 待验证 |
+| DDR 初始化参数是否匹配 Panther X2 实际内存 | 待验证，重要风险 |
+| U-Boot 是否能从 TF 卡稳定启动并正确加载 Panther X2 DTB | 未实机验证 |
+
+### 必须补齐的证据
+
+1. 找出 Ophub U-Boot 仓库中 Panther X2 两个二进制的首次加入记录、后续替换记录及其对应来源。
+2. 找到可公开取得的 Radxa E23 U-Boot 文件/构建配置，比较其二进制哈希和可识别结构；如果没有原始文件，明确标记无法直接比较。
+3. 从可识别的 SPL/U-Boot 镜像中提取版本字符串、FIT 配置、设备树、DDR 初始化相关信息；必要时使用专门的 Rockchip 镜像分析工具，在 CI 中只读分析，不对设备执行写入。
+4. 确认 Panther X2 的内存颗粒/容量/总线配置与启动固件 DDR 初始化参数相容。
+
+在这些证据补齐前，不把当前 U-Boot 文件标记为“已验证适配 Panther X2”，也不进入实机刷写阶段。
+
+### 历史 USB 风险提示
+
+同一 Issue #1319 还记录了早期 Panther X2 Armbian 镜像 USB 无法工作的报告，后续维护者表示会修复。该历史报告不能直接推断当前 6.12.81 USB 也有故障，但说明 USB 必须作为 A2 的独立验收项目，不能只因 DTS 中 USB2 host 节点为 okay 就判定可用。
