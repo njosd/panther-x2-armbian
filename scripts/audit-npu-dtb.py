@@ -34,6 +34,7 @@ SINGLE_PHANDLE_PROPERTIES = {
     "interrupt-parent", "operating-points-v2", "remote-endpoint", "phy-handle",
     "cpu", "rockchip,grf", "rockchip,pmu", "rockchip,hw",
     "snps,axi-config", "snps,mtl-rx-config", "snps,mtl-tx-config",
+    "rockchip,srv",
     "ddr3_params", "ddr4_params", "lpddr3_params",
     "lpddr4_params", "lpddr4x_params",
 }
