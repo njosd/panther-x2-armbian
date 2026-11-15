@@ -193,8 +193,8 @@ jobs:
         working-directory: work/ophub
         run: |
           set -euo pipefail
-          sudo ./rebuild -b panther-x2 -r ophub/kernel -u rk35xx \
-            -k 6.12.81 -a false -t ext4 -s 6144 -n Panther-X2-Minimal
+          sudo ./rebuild -b panther-x2 -r ophub/kernel -u "$TARGET_KERNEL_TAG" \
+            -k "$OPHUB_RK35XX_KERNEL_VERSION" -a false -t ext4 -s "$TARGET_ROOTFS_SIZE_MIB" -n Panther-X2-Minimal
 
       - name: Validate final image contents
         shell: bash
