@@ -86,6 +86,29 @@ jobs:
               sudo dpkg-query --admindir=validation/root/var/lib/dpkg -L "$package" 2>&1 | sed -n '1,100p' || true
             done
             echo
+            echo "========== ALL INSTALLED PACKAGES =========="
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\t${Status}\n' 2>&1 | sort || true
+            echo
+            echo "========== ENABLED SYSTEMD UNITS / TIMERS =========="
+            sudo find validation/root/etc/systemd/system -type l -printf '%P -> %l\n' 2>/dev/null | sort || true
+            sudo find validation/root/etc/systemd/system validation/root/usr/lib/systemd/system -type f \( -name '*.service' -o -name '*.timer' -o -name '*.socket' \) -printf '%p\n' 2>/dev/null | sort || true
+            echo
+            echo "========== CRON / PERIODIC TASKS =========="
+            for path in validation/root/etc/crontab validation/root/etc/cron.d validation/root/etc/cron.hourly validation/root/etc/cron.daily validation/root/etc/cron.weekly validation/root/etc/cron.monthly validation/root/var/spool/cron/crontabs; do
+              if test -e "$path"; then
+                sudo find "$path" -maxdepth 3 -type f -print -exec sed -n '1,180p' {} \; 2>/dev/null || true
+              fi
+            done
+            echo
+            echo "========== APT SOURCES / THIRD-PARTY REPOSITORIES =========="
+            sudo find validation/root/etc/apt -maxdepth 4 -type f \( -name '*.list' -o -name '*.sources' -o -name '*.pref' \) -print -exec sed -n '1,180p' {} \; 2>/dev/null || true
+            echo
+            echo "========== VENDOR / REMOTE MANAGEMENT / TELEMETRY CANDIDATES =========="
+            sudo find validation/root/usr/bin validation/root/usr/sbin validation/root/usr/lib validation/root/opt validation/root/etc -maxdepth 4 \( -iname '*ad*' -o -iname '*promo*' -o -iname '*telemetry*' -o -iname '*analytics*' -o -iname '*tracker*' -o -iname '*vendor*' -o -iname '*remote*' -o -iname '*agent*' -o -iname '*update*' \) -printf '%y %p -> %l\n' 2>/dev/null | head -1000 || true
+            echo
+            echo "========== PACKAGE / SERVICE AUTOSTART REFERENCES =========="
+            sudo grep -RniE 'adware|advertis|sponsor|promo|telemetry|analytics|tracking|tracker|teamviewer|anydesk|rustdesk|tailscale|zerotier|cockpit|webmin|vendor-agent|remote.?management' validation/root/etc/systemd validation/root/etc/cron* validation/root/etc/init.d validation/root/etc/rc.local validation/root/etc/profile.d 2>/dev/null | head -1000 || true
+            echo
             echo "========== SSH / FIRST LOGIN =========="
             sudo systemctl --root="$PWD/validation/root" is-enabled ssh.service 2>&1 || true
             sudo systemctl --root="$PWD/validation/root" is-enabled armbian-firstrun.service 2>&1 || true
