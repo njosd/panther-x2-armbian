@@ -334,3 +334,84 @@ Ophub Issue #1319 的早期适配过程给出了以下直接证据：
 5. 只有发现旧系统实际文件与当前候选不一致，或有明确硬件/启动问题证据，才评估重建 U-Boot。
 
 以上仍不授权写 TF 卡、eMMC 或修改 192.168.9.6。
+
+## 12. A2 第一轮：GMAC1 网络与 USB 主机依赖（2026-11-15）
+
+本节依据固定 Linux 源码 commit `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`、Panther X2 DTS、其 include 的 `rk3566.dtsi` / `rk356x.dtsi`，以及 Ophub RK35xx `config-6.12` 静态核对。尚未编译合并后的 DTB，也未实机验证。
+
+### 12.1 GMAC1 / RGMII / RTL8211F
+
+Panther X2 DTS 对 `&gmac1` 的显式配置：
+
+- `status = "okay"`，使用 RK3566 的 GMAC1。
+- `phy-mode = "rgmii"`。
+- 外部固定时钟 `gmac1_clkin` 为 125 MHz，并指定为 GMAC1 时钟父项。
+- PHY 供电引用 `vcc_3v3`。
+- PHY reset 使用 GPIO3 PA1，低有效，延时参数为 0 / 20,000 / 100,000 微秒。
+- RGMII 延时参数：TX `0x30`、RX `0x10`。
+- PHY 通过 `phy-handle = <&rgmii_phy1>` 连接 MDIO1，PHY 地址为 0。
+- PHY 节点使用通用 Clause 22 compatible：`ethernet-phy-ieee802.3-c22`，而不是在 DTS 中硬编码 RTL8211F 名称；实际芯片型号由 PHY ID 匹配。
+
+固定 Ophub RK35xx `config-6.12` 中相关选项：
+
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_STMMAC_PLATFORM=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_PHYLIB=y`
+- `CONFIG_REALTEK_PHY=y`
+- `CONFIG_MDIO_BUS=y`
+- `CONFIG_OF_MDIO=y`
+
+**静态判定：** GMAC1、Rockchip DWMAC、MDIO/PHYLIB 和 Realtek PHY 驱动均有内建配置；DTS 的 RGMII、时钟、供电、reset、MDIO/PHY 连接关系已能对应到源码节点。
+
+**待验证：** 实际 RTL8211F PHY ID 与驱动匹配、PHY reset 波形和时序、RGMII 时序裕量、链路协商、DHCP、持续传输及重启恢复。配置为 `=y` 不等于网口已在 Panther X2 实机工作。
+
+### 12.2 USB 主机路径：发现设备树引用不一致风险
+
+Panther X2 DTS 当前显式启用：
+
+- `&usb_host0_ehci`
+- `&usb_host0_ohci`
+- `&usb2phy0`
+- `&u2phy0_host`
+
+但固定源码的基础 `rk356x.dtsi` 中：
+
+- `usb_host0_ehci` 和 `usb_host0_ohci` 的 `phys` 引用为 `<&u2phy1_otg>`，其 clocks 也引用 `&usb2phy1`。
+- `usb2phy1` 与其 `u2phy1_otg` 子节点在基础 DTSI 中默认 disabled。
+- Panther X2 DTS 启用的是 `usb2phy0` / `u2phy0_host`，并没有显式启用 `usb2phy1` / `u2phy1_otg`。
+- 因此当前板级 DTS 对 EHCI/OHCI host0 的启用，与基础 DTSI 中这两个控制器的 PHY 引用看起来不匹配，可能导致控制器 probe 时无法取得 PHY。
+
+另外两条 DWC3 路径：
+
+- `usbdrd30`（USB3 OTG/DRD）基础节点默认 disabled。Panther X2 / RK3566 DTSI 虽然给内部 `usbdrd_dwc3` 设置了 `u2phy0_otg`、`maximum-speed = "high-speed"`，但没有将 `usbdrd30` 父节点置为 okay；板级 DTS 也没有启用该父节点。
+- `usbhost30`（USB3 Host）基础节点默认 disabled，板级 DTS 没有启用它。
+- 所以不能把 RK3566 芯片具有 USB3 能力，或 config 中存在 DWC3 驱动，等同于当前 Panther X2 DTB 已启用 USB3 主机。
+
+固定 `config-6.12` 中 EHCI/OHCI platform、DWC3、Rockchip USB2/USB3 PHY 驱动均有内建配置，例如：
+
+- `CONFIG_USB_EHCI_HCD=y`
+- `CONFIG_USB_EHCI_HCD_PLATFORM=y`
+- `CONFIG_USB_OHCI_HCD=y`
+- `CONFIG_USB_OHCI_HCD_PLATFORM=y`
+- `CONFIG_USB_DWC3=y`
+- `CONFIG_USB_PHY=y`
+- `CONFIG_PHY_ROCKCHIP_INNO_USB2=y`
+- `CONFIG_PHY_ROCKCHIP_INNO_USB3=y`
+
+**当前判定：存在风险，需在构建前解决或明确解释。** 这不是单纯缺少内核驱动的问题，而是 DTS 节点状态与 PHY phandle 引用之间的潜在不一致。下一步必须对固定源码实际编译合并 DTB，并用 `dtc` / `fdtdump` 检查最终的 `status`、`phys`、`clocks` 和 PHY provider；同时对照 Panther X2 原始适配历史和实际板上 USB 端口布线。未经该步骤，不把 USB2 host 标记为已确认可用，也不把 USB3 标记为已启用。
+
+### 12.3 串口与基础网络启动线索
+
+- Panther X2 DTS 的 `chosen.stdout-path` 指向 `serial2:1500000n8`。
+- 固定 config 中 `CONFIG_SERIAL_8250=y`、`CONFIG_SERIAL_8250_CONSOLE=y`、`CONFIG_SERIAL_OF_PLATFORM=y`、`CONFIG_SERIAL_8250_DW=y`，有串口控制台内建配置证据。
+- `CONFIG_IP_PNP=y` 与 `CONFIG_IP_PNP_DHCP=y` 已启用，但这只表示内核 IP autoconfiguration 能力；不等于用户态 DHCP 客户端或 SSH 服务已安装、启用。
+
+### 12.4 A2 下一步
+
+1. 在 CI 对固定 6.12.81 源码实际编译 `rk3566-panther-x2.dtb`，保存 DTB 并审查合并后的 USB 控制器/PHY 关系。
+2. 对照原始 Panther X2 USB 修复历史，追踪 `usb_host0`、`usb2phy0/1` 的节点选择是否有后续修订；不要凭 SoC 芯片框图猜端口映射。
+3. 检查 6.12.81 发布包中的最终 `.config`、模块清单和 firmware 依赖，而不是只依赖配置仓库模板。
+4. 审计最小 rootfs 是否具备 DHCP 客户端、SSH server、systemd/udev、网络命名与网卡初始化；此项目前未完成。
+
+本节仅为源码/config 静态审计。没有构建镜像、写卡、安装软件或修改 Panther X2 实机。
