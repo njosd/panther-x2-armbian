@@ -228,7 +228,6 @@ jobs:
           test -n "$image"
           gzip -dk "$image"
           test -s "${image%.gz}"
-          sha256sum "$image" > "$image.sha256"
 
       - name: Rebuild Panther X2 image with pinned RK35xx kernel and loader
         shell: bash
@@ -259,6 +258,7 @@ jobs:
 
           image=$(find build/output/images -maxdepth 1 -type f -name 'Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz' -print -quit)
           check "final compressed image exists" test -n "$image"
+          sha256sum "$image" > "$image.sha256"
           check "final image gzip integrity" gzip -t "$image"
           mkdir -p validation
           gzip -dc "$image" > validation/panther-x2-minimal.img
