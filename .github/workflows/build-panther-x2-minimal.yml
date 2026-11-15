@@ -302,7 +302,55 @@ jobs:
           check "SSH listens on port 22" grep -q '^Port 22' validation/root/etc/ssh/sshd_config
           check "root SSH login enabled" grep -q '^PermitRootLogin yes' validation/root/etc/ssh/sshd_config
           check "password SSH authentication enabled" grep -q '^PasswordAuthentication yes' validation/root/etc/ssh/sshd_config
-          check "root password hash exists" grep -q '^root:\\$6\\$' validation/root/etc/shadow
+          check "root password hash exists" sudo grep -Eq '^root:\\$[0-9]+\\
+          check "SSH service unit exists" test -e validation/root/usr/lib/systemd/system/ssh.service
+          check "SSH service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
+          check "NetworkManager service unit exists" test -e validation/root/usr/lib/systemd/system/NetworkManager.service
+          check "NetworkManager service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/NetworkManager.service
+          check "Armbian first-run service exists" test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
+          check "Armbian first-run service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/armbian-firstrun.service
+          check "first-login marker exists" test -e validation/root/root/.not_logged_in_yet
+          check "Armbian first-login program executable" test -x validation/root/usr/lib/armbian/armbian-firstlogin
+          check "first-run defaults exist" test -s validation/root/etc/default/armbian-firstrun
+          check "first-run regenerates SSH host keys" grep -q '^OPENSSHD_REGENERATE_HOST_KEYS=true' validation/root/etc/default/armbian-firstrun
+          check "openssh-server package installed" grep -q '^Package: openssh-server$' validation/root/var/lib/dpkg/status
+          check "network-manager package installed" grep -q '^Package: network-manager$' validation/root/var/lib/dpkg/status
+          check "netplan package installed" grep -q '^Package: netplan.io$' validation/root/var/lib/dpkg/status
+          check "Netplan directory exists" test -d validation/root/etc/netplan
+          check "Netplan YAML exists" bash -c 'find validation/root/etc/netplan -maxdepth 1 -type f -name "*.yaml" | grep -q .'
+          check "Netplan uses NetworkManager renderer" grep -R -Eq 'renderer:[[:space:]]*NetworkManager' validation/root/etc/netplan
+          check "Netplan enables DHCPv4" grep -R -Eq 'dhcp4:[[:space:]]*true' validation/root/etc/netplan
+          check "rootfs U-Boot idbloader copy exists" test -s validation/root/usr/lib/u-boot/idbloader.img
+          check "rootfs U-Boot FIT copy exists" test -s validation/root/usr/lib/u-boot/u-boot.itb
+
+          {
+            echo "Image: $image"
+            sha256sum "$image"
+            echo "Kernel: 6.12.81-rk35xx-ophub"
+            echo "DTB: rk3566-panther-x2.dtb"
+            echo "Bootloader: idbloader.img + u-boot.itb"
+            echo "SSH: root/password configured; TCP/22"
+            echo "First login marker: present"
+            echo "NetworkManager service unit: present"
+          } | tee validation/validation-report.txt
+          sudo umount validation/boot validation/root
+          sudo losetup -d "$loop"
+          trap - EXIT
+
+          sha256sum "$image" > "$image.sha256"
+          cp validation/validation-report.txt build/output/images/
+
+      - name: Upload bootable image and validation report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          path: |
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz
+            work/ophub/build/output/images/Armbian_*_rockchip_panther-x2_noble_6.12.81_server_*.img.gz.sha256
+            work/ophub/build/output/images/validation-report.txt
+          if-no-files-found: error
+          retention-days: 14
+ validation/root/etc/shadow
           check "SSH service unit exists" test -e validation/root/usr/lib/systemd/system/ssh.service
           check "SSH service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
           check "NetworkManager service unit exists" test -e validation/root/usr/lib/systemd/system/NetworkManager.service
