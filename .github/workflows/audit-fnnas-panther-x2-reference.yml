@@ -1,0 +1,112 @@
+name: Audit FNNAS Panther X2 TF boot reference
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Download exact FNNAS release image
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/ophub/fnnas/releases/download/fnnas_rockchip_692/fnnas_rockchip_panther-x2_k6.12.41_2026.09.23.img.gz"
+          expected="c49172097224b5e4d5a8e720d47c758dc37d87d73b91cee44c4c5a8a4e0ab345"
+          mkdir -p work output
+          curl -fL --retry 5 --retry-all-errors "$url" -o work/fnnas-panther-x2.img.gz
+          actual=$(sha256sum work/fnnas-panther-x2.img.gz | awk '{print $1}')
+          echo "Expected compressed SHA256: $expected"
+          echo "Actual compressed SHA256:   $actual"
+          test "$actual" = "$expected"
+          gzip -t work/fnnas-panther-x2.img.gz
+          gzip -dc work/fnnas-panther-x2.img.gz > work/fnnas-panther-x2.img
+          raw=$(sha256sum work/fnnas-panther-x2.img | awk '{print $1}')
+          echo "Decompressed image SHA256: $raw"
+          echo "$raw  fnnas-panther-x2.img" > output/IMAGE-SHA256SUMS
+          stat -c 'Decompressed image bytes: %s' work/fnnas-panther-x2.img
+
+      - name: Inspect image layout and extract boot files read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gdisk btrfs-progs device-tree-compiler u-boot-tools
+          {
+            echo "FNNAS Panther X2 image audit"
+            echo "Image: fnnas_rockchip_panther-x2_k6.12.41_2026.09.23.img.gz"
+            echo "Release tag: fnnas_rockchip_692"
+            echo
+            echo "========== Partition table =========="
+            sudo sgdisk -p work/fnnas-panther-x2.img
+            sudo sgdisk -v work/fnnas-panther-x2.img
+            echo
+            echo "========== Filesystem signatures =========="
+            sudo blkid -p work/fnnas-panther-x2.img || true
+          } | tee output/IMAGE-LAYOUT.txt
+
+          loop=$(sudo losetup --find --show --partscan work/fnnas-panther-x2.img)
+          cleanup() {
+            sudo umount work/boot 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$loop" || true
+          lsblk -o NAME,START,SIZE,FSTYPE,UUID,PARTUUID "$loop" | tee output/LOOP-PARTITIONS.txt
+
+          bootpart="${loop}p1"
+          test -b "$bootpart"
+          mkdir -p work/boot
+          sudo mount -o ro "$bootpart" work/boot
+          sudo find work/boot -maxdepth 5 -type f -printf '%P\t%s bytes\n' | sort | tee output/BOOT-FILE-LIST.txt
+
+          for f in armbianEnv.txt boot.cmd extlinux/extlinux.conf; do
+            if [ -f "work/boot/$f" ]; then
+              mkdir -p "output/boot/$(dirname "$f")"
+              cp "work/boot/$f" "output/boot/$f"
+            fi
+          done
+
+          find work/boot -type f \( -name 'boot.scr' -o -name 'uInitrd*' -o -name 'initrd.img*' -o -name 'Image' -o -name 'vmlinuz*' -o -name 'idbloader.img' -o -name 'u-boot.itb' -o -name 'rk3566-panther-x2.dtb' \) -print0 | while IFS= read -r -d '' f; do
+            rel="${f#work/boot/}"
+            mkdir -p "output/boot/$(dirname "$rel")"
+            cp "$f" "output/boot/$rel"
+          done
+
+          dtb=$(find work/boot -type f -name 'rk3566-panther-x2.dtb' -print -quit)
+          test -n "$dtb"
+          dtc -I dtb -O dts "$dtb" -o output/rk3566-panther-x2-fnnas.dts
+          sha256sum "$dtb" | tee output/DTB-SHA256SUMS
+          if [ -f work/boot/boot.scr ]; then
+            strings work/boot/boot.scr > output/BOOT-SCRIPT-STRINGS.txt
+            dumpimage -l work/boot/boot.scr > output/BOOT-SCRIPT-IMAGE-INFO.txt 2>&1 || true
+          fi
+          {
+            echo "========== Key DTB properties =========="
+            grep -nE 'model =|compatible =|SWITCH_REG2|vcc3v3_sd|vccio_sd|mmc@fe2b0000|vmmc-supply|vqmmc-supply|regulator-(always-on|boot-on|on-in-suspend|off-in-suspend)|status = ' output/rk3566-panther-x2-fnnas.dts | head -260
+            echo
+            echo "========== Boot environment =========="
+            for f in output/boot/armbianEnv.txt output/boot/boot.cmd output/boot/extlinux/extlinux.conf; do
+              if [ -f "$f" ]; then echo "--- $f"; cat "$f"; fi
+            done
+            echo
+            echo "========== Kernel / initrd metadata =========="
+            find output/boot -type f \( -name 'Image' -o -name 'vmlinuz*' -o -name 'uInitrd*' -o -name 'initrd.img*' -o -name 'idbloader.img' -o -name 'u-boot.itb' \) -exec file {} \;
+            echo
+            echo "========== Extracted file hashes =========="
+            find output/boot -type f -print0 | sort -z | xargs -0 sha256sum
+          } | tee output/FNNAS-BOOT-REPORT.txt
+          cleanup
+          trap - EXIT
+
+      - name: Upload read-only audit results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fnnas-panther-x2-tf-reference-audit
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
