@@ -179,7 +179,7 @@ jobs:
           sha256sum --check sha256sums
 
           echo "========== PACKAGE TOP-LEVEL INVENTORY =========="
-          find . -maxdepth 2 -type f -printf '%P | %s bytes\\n' | sort
+          find . -maxdepth 2 -type f -printf '%P | %s bytes\n' | sort
           echo "========== ARCHIVE METADATA =========="
           for kind in boot dtb-rockchip modules header; do
             file="$kind-$OPHUB_RK35XX_KERNEL_VERSION-rk35xx-ophub.tar.gz"
@@ -273,25 +273,25 @@ jobs:
           sudo mount "${loop}p2" validation/root
 
           echo "========== BOOT PARTITION INVENTORY =========="
-          sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\\n' | sort
+          sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\n' | sort
           echo "========== ROOTFS KERNEL INVENTORY =========="
-          sudo find validation/root/boot validation/root/usr/lib/modules -maxdepth 3 -printf '%y %P -> %l (%s bytes)\\n' 2>/dev/null | sort || true
+          sudo find validation/root/boot validation/root/usr/lib/modules -maxdepth 3 -printf '%y %P -> %l (%s bytes)\n' 2>/dev/null | sort || true
           echo "========== KERNEL PACKAGE STATE =========="
           sudo grep -E '^(Package|Version): (linux-image|linux-dtb|linux-u-boot)' validation/root/var/lib/dpkg/status || true
           echo "========== NETWORK SERVICE STATE =========="
-          sudo find validation/root/etc/systemd/system -maxdepth 4 \\( -iname '*network*manager*' -o -iname '*NetworkManager*' \\) -printf '%y %p -> %l\\n' 2>/dev/null | sort || true
+          sudo find validation/root/etc/systemd/system -maxdepth 4 \( -iname '*network*manager*' -o -iname '*NetworkManager*' \) -printf '%y %p -> %l\n' 2>/dev/null | sort || true
           sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager.service 2>&1 || true
           sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager 2>&1 || true
           echo "========== NETWORK UNIT CONTENT =========="
           sudo sed -n '1,220p' validation/root/usr/lib/systemd/system/NetworkManager.service 2>/dev/null || true
           echo "========== NETPLAN CONTENT =========="
-          sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \\; 2>/dev/null || true
+          sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \; 2>/dev/null || true
           echo "========== NETWORKMANAGER CONFIG =========="
-          sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+          sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
           echo "========== OTHER NETWORK CONFIG =========="
-          sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+          sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
           echo "========== KERNEL PACKAGE STATUS DETAILS =========="
-          sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
+          sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
           for package in linux-image-current-meson64 linux-dtb-current-meson64 linux-u-boot-odroidn2-current; do
             echo "--- $package ---"
             sudo dpkg-query --admindir=validation/root/var/lib/dpkg -L "$package" 2>&1 | sed -n '1,100p' || true
