@@ -203,3 +203,51 @@ rebuild 脚本的 `-u` 参数可以把默认 tag 从 stable 改为 rk35xx，但 
 ### 历史 USB 风险提示
 
 同一 Issue #1319 还记录了早期 Panther X2 Armbian 镜像 USB 无法工作的报告，后续维护者表示会修复。该历史报告不能直接推断当前 6.12.81 USB 也有故障，但说明 USB 必须作为 A2 的独立验收项目，不能只因 DTS 中 USB2 host 节点为 okay 就判定可用。
+
+
+## 10. 原始适配分支与 E23 启动链证据补充（2026-11-15）
+
+### 10.1 原始适配分支
+
+通过原始适配者公开的 `tdleiyao/armbian` `panther-x2` 分支读取到分支头提交：
+
+- Commit：`99e8ca02b3472dcc5ad9daa7e7a87cdc22ce9a02`
+- 标题：`Panther X2: Modify usb mode and enable GPU`
+
+该提交的可见改动集中于 Panther X2 Linux DTS（包括 USB host 模式、USB2 PHY host 节点、GPU 和 SARADC 状态等），未看到 U-Boot 源码、defconfig 或 U-Boot 构建补丁。该事实与 Issue #1319 中“U-Boot 暂时借用 Radxa E23”的说明相互吻合。
+
+分支文件 `config/sources/families/rockchip.conf` 显示该 Armbian 分支的 Rockchip 家族默认 U-Boot 分支为 `tag:v2022.04`（miqi 除外）。但由于当前可见 Panther X2 分支没有可读取的专用 board config / U-Boot 补丁，尚不能从该文件单独证明 Panther X2 的实际 U-Boot defconfig、编译命令和产物来源。
+
+### 10.2 当前 Ophub U-Boot 仓库的比较限制
+
+在固定 Ophub U-Boot commit `6e70f41585f15c43f45fcae609adec1865e83eb5` 中：
+
+- Panther X2 目录存在 `idbloader.img` 与 `u-boot.itb`。
+- 没有找到 `u-boot/rockchip/radxa-e23/` 或 `u-boot/rockchip/e23/` 对应的同名二进制文件。
+- Rock 3A 文件存在，但它不是 Radxa E23 文件，不能拿它作为 E23 的二进制对照样本。
+- GitHub 二进制 blob 读取接口无法以 UTF-8 返回这些二进制内容；当前 connector 只能确认 blob SHA，不能据此计算文件 SHA-256 或解析 FIT/SPL。
+
+因此，当前没有可直接进行 SHA-256 比较的 E23 原始二进制样本。之前报告中“后续与 E23 原始文件做哈希比较”的工作项需要依赖取得 E23 官方 loader 或构建产物后才能执行，不能用 Rock 3A 文件替代。
+
+### 10.3 当前证据链判定
+
+| 证据项 | 判定 |
+|---|---|
+| 原始适配者明确说明借用 Radxa E23 U-Boot | 已确认（Issue 评论） |
+| 原始 Panther X2 分支头提交主要修改 Linux DTS，未见 U-Boot 补丁 | 已确认（该提交 diff） |
+| Armbian Rockchip 家族默认 U-Boot 分支为 v2022.04 | 已确认（家族配置）；非 Panther 专用构建证明 |
+| 当前 Ophub U-Boot 仓库包含 Panther X2 命名的启动文件 | 已确认 |
+| 当前 Panther X2 二进制是否与 E23 原版完全相同 | 未知 |
+| 当前 Panther X2 二进制的实际编译配置、源码 commit、DDR 参数 | 未知 |
+| E23 原版 loader 的哈希和可解析内容 | 缺少原始样本，待取得 |
+
+**结论：** “历史上借用 E23”是可靠历史证据，但不能据此断言当前 Ophub Panther X2 二进制仍与 E23 二进制逐字节相同。当前启动固件来源链仍未闭合。
+
+### 10.4 下一步的最短路径
+
+1. 取得 Radxa E23 官方 BSP 对应 U-Boot 源码版本、defconfig、板级 DTS 和 Rockchip DDR loader 文件；重点确认 RK3566 与 E23 板级参数。
+2. 取得官方 E23 可下载镜像或 loader 文件，在 CI 中只读提取并记录 SHA-256、大小和版本信息。
+3. 对当前 Panther X2 两个 blob 做可复现下载，计算 SHA-256，并使用 `dumpimage` / `mkimage` / Rockchip 专用工具分析容器结构；如果 connector 无法提供二进制下载，则由项目 CI 从公开仓库下载，不触碰实机。
+4. 追踪 Ophub U-Boot 仓库 Panther X2 文件的首次加入来源和变更历史。GitHub commit 搜索未返回 Panther/E23 关键词匹配，因此该历史仍需通过仓库 Git 路径历史或 clone 后 `git log --follow` 补齐。
+
+所有这些工作仍属于只读源码与构建产物审计，不涉及写卡或实机修改。
