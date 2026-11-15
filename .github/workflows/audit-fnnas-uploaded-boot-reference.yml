@@ -66,6 +66,12 @@ jobs:
           readme=$(find work/extracted -type f \( -iname README -o -iname README.txt -o -iname README.md \) -print -quit)
           if [ -n "$readme" ]; then cp "$readme" output/SOURCE-README.txt; fi
 
+          # Export source configuration verbatim for review; never execute it.
+          bootcmd=$(find work/extracted -type f -name boot.cmd -print -quit)
+          armbianenv=$(find work/extracted -type f -name armbianEnv.txt -print -quit)
+          [ -z "$bootcmd" ] || cp "$bootcmd" output/SOURCE-BOOT-CMD.txt
+          [ -z "$armbianenv" ] || cp "$armbianenv" output/SOURCE-ARMBIAN-ENV.txt
+
           find work/extracted -type f \( -name armbianEnv.txt -o -name boot.cmd -o -path '*/extlinux/extlinux.conf' \) -print | sort | tee output/BOOT-CONFIG-FILES.txt
           dtb=$(find work/extracted -type f -name 'rk3566-panther-x2.dtb' -print -quit)
           if [ -n "$dtb" ]; then
