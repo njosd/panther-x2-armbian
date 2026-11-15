@@ -35,7 +35,9 @@ jobs:
           test -n "$image"
           sha256file="$image.sha256"
           test -s "$sha256file"
-          (cd "$(dirname "$image")" && sha256sum --check "$(basename "$sha256file")")
+          expected_sha=$(awk 'NR==1 {print $1}' "$sha256file")
+          actual_sha=$(sha256sum "$image" | awk '{print $1}')
+          test "$expected_sha" = "$actual_sha"
           gzip -t "$image"
           gzip -dc "$image" > validation/panther-x2-minimal.img
 
@@ -55,10 +57,10 @@ jobs:
             cat "$sha256file"
             echo
             echo "========== BOOT PARTITION =========="
-            sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\\n' | sort
+            sudo find validation/boot -maxdepth 4 -printf '%y %P -> %l (%s bytes)\n' | sort
             echo
             echo "========== NETWORKMANAGER ENABLEMENT =========="
-            sudo find validation/root/etc/systemd/system -maxdepth 5 \\( -iname '*networkmanager*' -o -iname '*NetworkManager*' \\) -printf '%y %p -> %l\\n' 2>/dev/null | sort || true
+            sudo find validation/root/etc/systemd/system -maxdepth 5 \( -iname '*networkmanager*' -o -iname '*NetworkManager*' \) -printf '%y %p -> %l\n' 2>/dev/null | sort || true
             sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager.service 2>&1 || true
             sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager 2>&1 || true
             echo
@@ -66,19 +68,19 @@ jobs:
             sudo sed -n '1,220p' validation/root/usr/lib/systemd/system/NetworkManager.service 2>/dev/null || true
             echo
             echo "========== NETPLAN =========="
-            sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \\; 2>/dev/null || true
+            sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \; 2>/dev/null || true
             echo
             echo "========== NETWORKMANAGER CONFIG =========="
-            sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+            sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
             echo
             echo "========== NETWORKD / IFUPDOWN CONFIG =========="
-            sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+            sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
             echo
             echo "========== NETWORK PACKAGES =========="
-            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' network-manager netplan.io openssh-server 2>&1 || true
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\n' network-manager netplan.io openssh-server 2>&1 || true
             echo
             echo "========== KERNEL / LEGACY PACKAGE STATUS =========="
-            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
             for package in linux-image-current-meson64 linux-dtb-current-meson64 linux-u-boot-odroidn2-current; do
               echo "--- $package file list ---"
               sudo dpkg-query --admindir=validation/root/var/lib/dpkg -L "$package" 2>&1 | sed -n '1,100p' || true
