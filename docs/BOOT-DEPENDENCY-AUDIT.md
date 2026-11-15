@@ -571,3 +571,78 @@ Panther X2 DTS 当前显式启用：
 已新增 GitHub Actions 工作流 `.github/workflows/audit-panther-usb-dtb.yml`，固定检出 Ophub 6.12.81 源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，执行内核标准 `dtbs` 构建目标，提取 `rk3566-panther-x2.dtb`，计算 SHA-256，并用 `dtc` 反编译保存合并后的 DTS 与 USB 节点摘录。
 
 工作流仅在 GitHub Actions runner 上构建和检查，不接触 Panther X2 实机，也不修改源码或设备配置。运行成功后应重点审阅 artifact 中的 `usb-topology-excerpts.txt`、`rk3566-panther-x2.merged.dts` 和 `dtc-warnings.txt`。工作流文件提交后仍需由 Actions 实际运行，当前不能将构建成功标记为已验证。
+## 16. 首版最小系统网络与 SSH 远程维护验收门槛（2026-11-15）
+
+用户明确要求：初始版本必须先保证 Panther X2 有线网口正常工作、DHCP 可获得地址、SSH 可从局域网连接；不能完全依赖 UART 进行后续故障排查和修补。该要求成为首版系统的 P0 验收门槛，优先级高于 USB、NPU、Immich 和其他外设功能。
+
+### 16.1 P0 启动与远程维护链
+
+首版必须具备完整链路：
+
+1. U-Boot 正确加载 Panther X2 DTB 和 Linux 内核。
+2. GMAC1 驱动成功 probe。
+3. MDIO 总线发现外部 PHY，PHY reset/时钟/RGMII 时序正常。
+4. 网线连接后建立 Ethernet carrier，至少支持 1000BASE-T 全双工协商（若实物 PHY/磁性器件/网口规格确认支持千兆）。
+5. 用户态网络管理组件启动，DHCP 客户端获取 IPv4 地址、默认路由和 DNS（具体网络管理方案以 rootfs 实际构建配置确定，不预先假定 NetworkManager 或 systemd-networkd）。
+6. SSH server 随系统启动并监听 LAN 接口。
+7. 从同一局域网另一台设备建立 SSH 会话，能够执行基础诊断命令。
+8. 冷启动、软重启和网线断开/重接后，网络与 SSH 自动恢复。
+
+UART 仍需保留为启动早期日志和救援接口，但不能作为唯一管理通道。
+
+### 16.2 首版最低诊断能力
+
+SSH 登录后至少应具备以下诊断工具/接口：
+
+- ip：检查接口、carrier、地址、路由和邻居表。
+- ethtool：检查 PHY 协商速率、双工和链路状态（若工具未安装，需明确替代方案）。
+- dmesg / journalctl：检查内核驱动 probe、PHY、DHCP 和 SSH 启动日志。
+- systemctl：检查网络管理器和 SSH 服务状态（前提是最终 rootfs 使用 systemd）。
+- ping / getent 或等效工具：验证局域网网关、DNS 和基础连通性。
+- lspci 不属于 RK3566 网络排查必需项；不为此额外引入依赖。
+
+SSH 认证方式、初始用户创建、密钥注入和密码策略必须在镜像构建方案中明确；禁止使用无密码 root SSH 或默认公开凭据。
+
+### 16.3 当前证据与待核查项
+
+| 层级 | 当前证据 | 状态 |
+|---|---|---|
+| 板级 GMAC1 DTS | RGMII、125 MHz 外部时钟、reset GPIO、PHY handle、供电引用 | 源码已核查 |
+| 内核 GMAC 驱动 | STMMAC、Rockchip DWMAC 配置模板为内建 | config 模板已核查；最终包待核 |
+| PHY 驱动 | PHYLIB、Realtek PHY 配置模板为内建 | config 模板已核查；实际 PHY ID/最终包待核 |
+| 最终内核配置 | 尚未从固定 6.12.81 发布包完整提取并核对 | 待核 |
+| 内核模块/firmware | 尚未确认最终包中驱动是否内建或作为模块提供、firmware 是否缺失 | 待核 |
+| rootfs 网络管理组件 | 尚未从实际 rootfs 构建定义确认 | 待核 |
+| DHCP 客户端 | 用户态 DHCP 能力尚未确认 | 待核 |
+| SSH server | 安装、启用、启动顺序和认证配置尚未确认 | 待核 |
+| 实机链路/DHCP/SSH | 未执行 | 未验证 |
+
+### 16.4 后续工作顺序（P0）
+
+A. 固定 6.12.81 发布包核验
+- 下载并校验 config/versions.env 固定的 Ophub RK35xx 6.12.81 发布包。
+- 提取最终 boot/config、modules、firmware 归档清单。
+- 核实 CONFIG_STMMAC_ETH、CONFIG_DWMAC_ROCKCHIP、CONFIG_PHYLIB、CONFIG_REALTEK_PHY、MDIO、网络核心、PHY 相关配置的最终值。
+- 对驱动为模块的情况，确认对应 .ko 存在、依赖可解析、模块随 rootfs 安装；对内建驱动则记录 =y。
+- 核实 Panther X2 实际 PHY ID 能否由最终 Realtek PHY 驱动匹配；当前 DTS 是通用 Clause 22 compatible，不能仅凭“可能是 RTL8211F”提前下结论。
+- 检查所需 firmware 是否存在；没有 firmware 依赖时也明确记录。
+
+B. rootfs 用户态网络与 SSH 核验
+- 从固定 Armbian build commit 和 Panther X2 board config 追踪 rootfs 包选择、网络管理方案、DHCP 客户端、SSH server、默认服务启用方式。
+- 明确实际使用 NetworkManager、systemd-networkd、ifupdown 或其他方案，不能同时假定多个组件负责同一接口。
+- 核实服务 enable/start 顺序、DHCP 超时行为、网卡命名规则（当前历史配置包含 net.ifnames=0，需确认实际效果）、SSH host key 生成和用户认证策略。
+- 检查最小系统是否包含 iproute2、日志工具及必要诊断命令。
+
+C. 构建产物静态验收
+- 形成一份明确的最小网络/SSH 软件包清单与配置，不把完整桌面/容器/Immich 带入首版。
+- 构建首版 TF 测试镜像前，静态检查镜像内 rootfs 的网络配置、SSH 服务 enable 状态、用户和 host key 生成机制。
+- 仅在 A/B 静态审计通过后，才计划 TF 卡实机测试。
+
+D. 实机验收（未来阶段，当前未授权执行）
+- 串口只用于记录 boot log；主要验收通过 LAN SSH 完成。
+- 冷启动后 DHCP 获取地址并从另一台 LAN 主机 SSH 登录。
+- 多次重启、链路重协商、拔插网线后重复验证。
+- 从 SSH 检查 dmesg、ethtool、ip addr/route、网络服务日志。
+- 验收失败时保留 UART 救援路径，但修复目标是恢复网络远程管理，不把“UART 可登录”当成首版通过。
+
+当前阶段边界：本节只定义验收标准和审计工作；未安装软件、未修改 rootfs/内核配置、未构建或写入实机镜像，也未操作 Panther X2。
