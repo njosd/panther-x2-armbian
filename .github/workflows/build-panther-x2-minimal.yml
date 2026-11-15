@@ -277,6 +277,24 @@ jobs:
           sudo find validation/root/boot validation/root/usr/lib/modules -maxdepth 3 -printf '%y %P -> %l (%s bytes)\\n' 2>/dev/null | sort || true
           echo "========== KERNEL PACKAGE STATE =========="
           sudo grep -E '^(Package|Version): (linux-image|linux-dtb|linux-u-boot)' validation/root/var/lib/dpkg/status || true
+          echo "========== NETWORK SERVICE STATE =========="
+          sudo find validation/root/etc/systemd/system -maxdepth 4 \\( -iname '*network*manager*' -o -iname '*NetworkManager*' \\) -printf '%y %p -> %l\\n' 2>/dev/null | sort || true
+          sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager.service 2>&1 || true
+          sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager 2>&1 || true
+          echo "========== NETWORK UNIT CONTENT =========="
+          sudo sed -n '1,220p' validation/root/usr/lib/systemd/system/NetworkManager.service 2>/dev/null || true
+          echo "========== NETPLAN CONTENT =========="
+          sudo find validation/root/etc/netplan -maxdepth 2 -type f -print -exec sed -n '1,220p' {} \\; 2>/dev/null || true
+          echo "========== NETWORKMANAGER CONFIG =========="
+          sudo find validation/root/etc/NetworkManager -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+          echo "========== OTHER NETWORK CONFIG =========="
+          sudo find validation/root/etc/systemd/network validation/root/etc/network -maxdepth 3 -type f -print -exec sed -n '1,160p' {} \\; 2>/dev/null || true
+          echo "========== KERNEL PACKAGE STATUS DETAILS =========="
+          sudo dpkg-query --admindir=validation/root/var/lib/dpkg -W -f='${binary:Package} ${Version} ${db:Status-Abbrev} ${Status}\\n' 'linux-image*' 'linux-dtb*' 'linux-u-boot*' 2>&1 || true
+          for package in linux-image-current-meson64 linux-dtb-current-meson64 linux-u-boot-odroidn2-current; do
+            echo "--- $package ---"
+            sudo dpkg-query --admindir=validation/root/var/lib/dpkg -L "$package" 2>&1 | sed -n '1,100p' || true
+          done
 
           check "boot Image symlink/file" test -s validation/boot/Image
           check "versioned kernel image" test -s validation/boot/vmlinuz-6.12.81-rk35xx-ophub
@@ -306,7 +324,7 @@ jobs:
           check "SSH service unit exists" test -e validation/root/usr/lib/systemd/system/ssh.service
           check "SSH service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/ssh.service
           check "NetworkManager service unit exists" test -e validation/root/usr/lib/systemd/system/NetworkManager.service
-          check "NetworkManager service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/NetworkManager.service
+          check "NetworkManager service enabled" sudo systemctl --root="$PWD/validation/root" is-enabled NetworkManager.service
           check "Armbian first-run service exists" test -e validation/root/usr/lib/systemd/system/armbian-firstrun.service
           check "Armbian first-run service enabled" test -e validation/root/etc/systemd/system/multi-user.target.wants/armbian-firstrun.service
           check "first-login marker exists" test -e validation/root/root/.not_logged_in_yet
