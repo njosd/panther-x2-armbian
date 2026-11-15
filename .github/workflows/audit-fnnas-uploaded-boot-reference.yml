@@ -1,0 +1,84 @@
+name: Audit uploaded FNNAS Panther X2 boot reference
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - audit/fnnas-boot-reference
+    paths:
+      - 'audit/reference-boot/fnnas/**'
+      - '.github/workflows/audit-fnnas-uploaded-boot-reference.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reference branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Validate archive and inspect contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="audit/reference-boot/fnnas/fnnas-boot-reference-20261115-200307.tar.gz"
+          test -s "$archive"
+          mkdir -p work/extracted output
+          gzip -t "$archive"
+          tar -tzf "$archive" | tee output/ARCHIVE-FILE-LIST.txt
+          if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+            echo "Unsafe archive path detected" >&2
+            exit 1
+          fi
+          tar -xzf "$archive" -C work/extracted
+
+          {
+            echo "# FNNAS Panther X2 boot reference audit"
+            echo
+            echo "- Source archive: $archive"
+            echo "- Git ref: ${GITHUB_REF_NAME}"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Archive SHA256:"
+            sha256sum "$archive"
+            echo
+            echo "## Extracted files"
+            find work/extracted -type f -printf '%P\t%s bytes\n' | sort
+            echo
+            echo "## SHA256"
+            find work/extracted -type f -print0 | sort -z | xargs -0 -r sha256sum
+          } | tee output/AUDIT-REPORT.md
+
+          manifest=$(find work/extracted -type f \( -name SHA256SUMS -o -name SHA256SUMS.txt \) -print -quit)
+          if [ -n "$manifest" ]; then
+            (cd "$(dirname "$manifest")" && sha256sum -c "$(basename "$manifest")") | tee output/CHECKSUM-VERIFICATION.txt
+          else
+            echo "No SHA256SUMS manifest found; generated hashes are informational." | tee output/CHECKSUM-VERIFICATION.txt
+          fi
+
+          readme=$(find work/extracted -type f \( -iname README -o -iname README.txt -o -iname README.md \) -print -quit)
+          if [ -n "$readme" ]; then cp "$readme" output/SOURCE-README.txt; fi
+
+          find work/extracted -type f \( -name armbianEnv.txt -o -name boot.cmd -o -path '*/extlinux/extlinux.conf' \) -print | sort | tee output/BOOT-CONFIG-FILES.txt
+          dtb=$(find work/extracted -type f -name 'rk3566-panther-x2.dtb' -print -quit)
+          if [ -n "$dtb" ]; then
+            sudo apt-get update
+            sudo apt-get install -y device-tree-compiler
+            dtc -I dtb -O dts "$dtb" -o output/rk3566-panther-x2-fnnas.dts
+            grep -nE 'model =|compatible =|vcc3v3_sd|vccio_sd|mmc@fe2b0000|vmmc-supply|vqmmc-supply|regulator-(always-on|boot-on)|status = ' output/rk3566-panther-x2-fnnas.dts > output/DTB-KEY-PROPERTIES.txt || true
+            sha256sum "$dtb" > output/DTB-SHA256SUMS
+          else
+            echo "Panther X2 DTB not present under expected filename." > output/DTB-NOT-FOUND.txt
+          fi
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fnnas-panther-x2-uploaded-boot-reference-audit
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
