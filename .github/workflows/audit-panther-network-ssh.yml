@@ -106,6 +106,23 @@ jobs:
             cat "$root/extensions/network/config-nm/netplan/00-default-use-network-manager.yaml"
           } > audit/reports/rootfs-network-ssh-source.txt
 
+      - name: Record Ophub build workflow provenance caveat
+        shell: bash
+        run: |
+          set -euo pipefail
+          source config/versions.env
+          curl --fail --location --retry 3 \
+            "https://raw.githubusercontent.com/ophub/amlogic-s9xxx-armbian/$OPHUB_ARMBIAN_COMMIT/.github/workflows/build-armbian-arm64-server-image.yml" \
+            -o audit/reports/ophub-server-build-workflow.yml
+          {
+            echo "The pinned Ophub workflow source is recorded above."
+            echo "The workflow's Armbian checkout command is:"
+            grep -n -E 'git clone.*armbian/build|BUILD_MINIMAL=|BUILD_DESKTOP=' audit/reports/ophub-server-build-workflow.yml || true
+            echo
+            echo "Compare the workflow's actual Armbian checkout ref with ARMBIAN_BUILD_COMMIT in config/versions.env."
+            echo "A workflow that clones main does not consume the pinned ARMBIAN_BUILD_COMMIT unless an additional checkout override exists."
+          } > audit/reports/build-provenance-note.txt
+
       - name: Audit first-login and SSH startup lifecycle
         shell: bash
         run: |
@@ -156,23 +173,6 @@ jobs:
             echo "=== First-run host key regeneration implementation ==="
             grep -n -A12 -B5 -E 'SSH Keys creation|OPENSSHD_REGENERATE_HOST_KEYS|ssh-keygen|service ssh restart' audit/source-files/armbian/armbian-firstrun || true
           } > audit/reports/ssh-firstlogin-lifecycle.txt
-
-      - name: Record Ophub build workflow provenance caveat
-        shell: bash
-        run: |
-          set -euo pipefail
-          source config/versions.env
-          curl --fail --location --retry 3 \
-            "https://raw.githubusercontent.com/ophub/amlogic-s9xxx-armbian/$OPHUB_ARMBIAN_COMMIT/.github/workflows/build-armbian-arm64-server-image.yml" \
-            -o audit/reports/ophub-server-build-workflow.yml
-          {
-            echo "The pinned Ophub workflow source is recorded above."
-            echo "The workflow's Armbian checkout command is:"
-            grep -n -E 'git clone.*armbian/build|BUILD_MINIMAL=|BUILD_DESKTOP=' audit/reports/ophub-server-build-workflow.yml || true
-            echo
-            echo "Compare the workflow's actual Armbian checkout ref with ARMBIAN_BUILD_COMMIT in config/versions.env."
-            echo "A workflow that clones main does not consume the pinned ARMBIAN_BUILD_COMMIT unless an additional checkout override exists."
-          } > audit/reports/build-provenance-note.txt
 
       - name: Upload Ethernet and SSH audit
         if: always()
