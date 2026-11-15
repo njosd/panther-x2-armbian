@@ -1312,3 +1312,39 @@ Artifact：`14139197505`。语义审计仍未通过，未能证明候选 DTB 与
 Artifact：`14139108053`。本轮候选编译通过，但完整语义审计仍失败，不能认定候选等价。
 
 下一轮先运行 13 项单元测试，再执行语义比较。继续坚持按固定 DTS 证实属性含义，不能按名称盲目忽略；比较通过后需核对全量差异与 DTC warnings。无实机改动。
+
+
+### 3.49 Sixteenth audit run: PCI interrupt-map is a structured nexus mapping（2026-11-15）
+
+运行记录：GitHub Actions run `43659541724`，job `132645538735`，checkout commit `4a0b9791965c9e82ba172a203f89f73ce548f98a`。
+
+#### 本轮结果
+
+- 语义解析器单元测试 12/12；
+- 固定 Ophub 6.12.81 源码及板级 DTS 审查；
+- source baseline DTB 构建；
+- 发布 kernel package 外层 SHA-256、目标 DTB 提取和反编译；
+- 候选 DTB 构建成功；
+- 语义比较失败于 `/pcie@fe260000:interrupt-map`：parent phandle `162 -> 163`。
+
+#### 根因
+
+固定源码 `arch/arm64/boot/dts/rockchip/rk356x.dtsi` 的 PCIe nexus 映射为四组记录：
+```dts
+interrupt-map = <0 0 0 1 &pcie2x1_intc 0>,
+                <0 0 0 2 &pcie2x1_intc 1>,
+                <0 0 0 3 &pcie2x1_intc 2>,
+                <0 0 0 4 &pcie2x1_intc 3>;
+```
+每条记录由 child unit-address（由 nexus 的 `#address-cells` 决定）、child interrupt specifier（`#interrupt-cells`）、parent phandle、parent unit-address 和 parent interrupt specifier（由 parent 节点 cell-count 决定）组成。不能把该属性当作单 phandle，也不能忽略整条属性或盲目替换数字。
+
+#### 修复
+
+- `034fc819462e6fbef7c3c2a9a3d8350575fd8024`：增加结构化 `interrupt-map` 解析；按 nexus/parent 的 cell-count 逐条解析，phandle 规范化为目标节点路径，保留 child/parent 所有参数 cell；遇到未知 parent、缺少 cell-count 或截断数据时 fail-closed。
+- `7fc8d3768f1524d0a1736c1959400e7fa6387589`：新增 PCI interrupt-map 正常映射及未知 parent 拒绝测试。
+
+Artifact：`14139496861`。本轮完整语义比较失败，不能认定候选 DTB 等价。
+
+#### 下一步
+
+先跑 14 项单元测试。通过后再运行完整审计。即使通过，也要人工确认 PCIe 映射每条 child/parent 参数未变化，并检查候选 DTC warnings。该修复只处理 `interrupt-map`；其他 nexus 属性（例如 `msi-map`）不能自动套用同一格式，必须按各自 binding 处理。无实机改动。
