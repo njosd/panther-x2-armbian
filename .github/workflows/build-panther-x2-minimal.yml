@@ -99,6 +99,18 @@ jobs:
               if s.count(old) != 1:
                   raise SystemExit(f"Expected one occurrence of {old!r}")
               s = s.replace(old, new)
+          marker = '''    # Enable ssh service
+    ssh_config="etc/ssh/sshd_config"'''
+          injected = '''    # Enable required first-boot network and remote-management services in the target rootfs.
+    systemctl --root="${tag_rootfs}" enable ssh.service
+    systemctl --root="${tag_rootfs}" enable NetworkManager.service
+    systemctl --root="${tag_rootfs}" enable armbian-firstrun.service
+
+    # Enable ssh service
+    ssh_config="etc/ssh/sshd_config"'''
+          if s.count(marker) != 1:
+              raise SystemExit("Expected SSH rootfs configuration marker exactly once")
+          s = s.replace(marker, injected)
           rebuild.write_text(s)
 
           helper = Path("work/ophub/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh")
