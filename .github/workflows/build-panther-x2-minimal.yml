@@ -99,9 +99,9 @@ jobs:
           helper = Path("work/ophub/compile-kernel/tools/script/docker/build_armbian_rootfs_file.sh")
           s = helper.read_text()
           old = '''        git clone -q --depth 1 --filter=blob:none --sparse https://github.com/ophub/firmware "${edid_tmp}/fw" 2>/dev/null
-                git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1'''
+        git -C "${edid_tmp}/fw" sparse-checkout set firmware/edid >/dev/null 2>&1'''
           new = '''        mkdir -p "${edid_tmp}/fw/firmware/edid"
-                cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"'''
+        cp -af "${current_path}/../firmware/firmware/edid/." "${edid_tmp}/fw/firmware/edid/"'''
           if s.count(old) != 1:
               raise SystemExit("Expected EDID moving-branch download block exactly once")
           helper.write_text(s.replace(old, new))
