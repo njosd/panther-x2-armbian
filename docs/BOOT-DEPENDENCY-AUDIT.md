@@ -949,7 +949,7 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 3. 将 Panther X2 设备数据库的 kernel selector 从默认 `stable/6.18.y` 临时切换到 `rk35xx/6.12.y`。
 4. 使用 Armbian Noble + Odroid N2 构建通用基础 rootfs，再由固定 Ophub 工具重建为 Panther X2 镜像。
 5. 关闭 Ophub rebuild 对 U-Boot/firmware moving branch 的自动下载，改用已预置的固定 commit；rootfs EDID 文件也从同一固定 firmware checkout 复制。
-6. 禁用自动查询最新内核，强制选择 6.12.y 并使用已预置的 6.12.81 包。
+6. 禁用自动查询最新内核，指定具体版本 `6.12.81`，并使用已预置的该版本包（设备数据库仍以 `rk35xx/6.12.y` 表示系列）。
 7. 最终镜像挂载检查：内核、initrd、Panther X2 DTB、rootfs modules、SSH 配置、NetworkManager、Netplan、first-login、firstrun、U-Boot 文件和分区内容。
 8. 额外从镜像原始扇区读取数据，与固定 U-Boot checkout 的 `idbloader.img`（sector 64）和 `u-boot.itb`（sector 16384）逐字节比较，避免只验证文件名而未验证镜像实际写入内容。
 
