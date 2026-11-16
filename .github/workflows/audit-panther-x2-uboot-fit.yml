@@ -67,29 +67,37 @@ jobs:
           fdt_count=0
           for index in $(seq 0 31); do
             candidate="audit/extracted/image-${index}.bin"
-            if dumpimage -T flat_dt -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
-              magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
-              bytes=$(stat -c '%s' "$candidate")
-              if [ "$magic" = "d00dfeed" ]; then
-                fdt_count=$((fdt_count + 1))
-                dtb="audit/extracted/fdt-${index}.dtb"
-                dts="audit/extracted/fdt-${index}.dts"
-                mv "$candidate" "$dtb"
-                dtc -I dtb -O dts -o "$dts" "$dtb" 2>"audit/extracted/fdt-${index}-dtc-warnings.txt"
-                {
-                  echo "===== FIT FDT index $index ($bytes bytes) ====="
-                  echo "DTB: $dtb"
-                  echo "DTS: $dts"
-                  grep -Ein -C 3 'model|compatible|ethernet|gmac|mac-address|local-mac-address|aliases' "$dts" || true
-                } >> audit/report/fdt-details.txt
-              elif [ "$bytes" = "1208600" ]; then
-                proper_count=$((proper_count + 1))
-                mv "$candidate" audit/extracted/u-boot-proper.bin
-                echo "U-Boot proper payload index=$index size=$bytes" | tee audit/report/proper-extraction.txt
-              else
-                echo "FIT payload index=$index size=$bytes magic=$magic" >> audit/report/other-payloads.txt
-                mv "$candidate" "audit/extracted/payload-${index}.bin"
-              fi
+            extracted_type=""
+            if dumpimage -T standalone -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
+              extracted_type="standalone"
+            elif dumpimage -T flat_dt -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
+              extracted_type="flat_dt"
+            else
+              rm -f "$candidate"
+              continue
+            fi
+
+            magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
+            bytes=$(stat -c '%s' "$candidate")
+            if [ "$extracted_type" = "flat_dt" ] && [ "$magic" = "d00dfeed" ]; then
+              fdt_count=$((fdt_count + 1))
+              dtb="audit/extracted/fdt-${index}.dtb"
+              dts="audit/extracted/fdt-${index}.dts"
+              mv "$candidate" "$dtb"
+              dtc -I dtb -O dts -o "$dts" "$dtb" 2>"audit/extracted/fdt-${index}-dtc-warnings.txt"
+              {
+                echo "===== FIT FDT index $index ($bytes bytes) ====="
+                echo "DTB: $dtb"
+                echo "DTS: $dts"
+                grep -Ein -C 3 'model|compatible|ethernet|gmac|mac-address|local-mac-address|aliases' "$dts" || true
+              } >> audit/report/fdt-details.txt
+            elif [ "$extracted_type" = "standalone" ] && [ "$bytes" = "1208600" ]; then
+              proper_count=$((proper_count + 1))
+              mv "$candidate" audit/extracted/u-boot-proper.bin
+              echo "U-Boot proper payload index=$index size=$bytes" | tee audit/report/proper-extraction.txt
+            else
+              echo "FIT payload index=$index type=$extracted_type size=$bytes magic=$magic" >> audit/report/other-payloads.txt
+              mv "$candidate" "audit/extracted/payload-${index}.bin"
             fi
           done
 
