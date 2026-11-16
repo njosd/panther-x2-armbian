@@ -439,3 +439,35 @@ DWMAC4 可选 `dwmac4_addrs` 结构为空时，寄存器基址回退仍为 DMA c
 本报告第 11.1 节已根据历史对话记录校正 6.1.174 证据边界。旧稿误把未检索到来源的 NetworkManager DHCP 日志、hEX 抓包、TX 统计和 ethtool 计数写成已验证事实，现全部撤回。后续分析不得再引用这些旧断言。
 
 唯一明确的已知正常内核基线是原 eMMC 上的 `6.1.116-ophub`；备份目录为用户 iMac 的 `~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/`，其中已存在 `boot-6.1.116-ophub.tar.gz`、`modules-6.1.116-ophub.tar.gz`、`dtb-rockchip-6.1.116-ophub.tar.gz`，且归档完整性此前已验证。当前仓库仅有 6.1.116 DTB，没有内核 config 文件。
+
+
+## 14. 6.12.81 实际 RK35xx 内核配置基线已提取
+
+已从 Ophub kernel config 的固定 Git ref 读取：
+- Repository: `ophub/kernel`
+- Ref: `c23196e10d7702ee2906de4a05421d8971fb2717`
+- Path: `kernel-config/release/rk35xx/config-6.12`
+- Blob SHA: `dee127c6c644f38426eeb28000d73536084d34a3`
+
+关键网络/ DMA 选项：
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_STMMAC_PLATFORM=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_PHYLINK=y`
+- `CONFIG_PHYLIB=y`
+- `CONFIG_REALTEK_PHY=y`
+- `CONFIG_OF_MDIO=y`
+- `CONFIG_IOMMU_SUPPORT=y`
+- `CONFIG_IOMMU_DMA=y`
+- `CONFIG_IOMMU_DEFAULT_DMA_STRICT=y`
+- `CONFIG_SWIOTLB=y`
+- `CONFIG_DMA_API_DEBUG` 未启用
+
+这些选项证明 6.12.81 目标配置包含 Panther GMAC/RTL8211F 所需驱动，并使用 IOMMU DMA 与 SWIOTLB 支持；但它们本身不能证明当前硬件运行时 DMA 映射正确，也不能与 6.1.116 作结论性比较，因为 6.1.116 实际 config 尚未进入仓库。
+
+### 下一项唯一需要的静态输入
+
+原 eMMC 已知正常的 6.1.116 备份归档位于 iMac：
+`~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/boot-6.1.116-ophub.tar.gz`
+
+归档已知包含 `config-6.1.116-ophub`。只需将这个 config 文件上传到本仓库的诊断分支（建议 `evidence/kernel-config/config-6.1.116-ophub`），即可进行实际配置差异比较；不需要重启 Panther、不需要重跑 DHCP 测试，也不需要上传整个 modules 归档。
