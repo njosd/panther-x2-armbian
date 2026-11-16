@@ -41,6 +41,8 @@
 
 - 首版镜像构建及静态验收：见 [首启与路线基线](FIRST-BOOT-AND-ROADMAP-2026-11-15.md)。
 - 新增 TF 启动故障调查：见 [2026-11-15 TF 启动故障调查](reports/2026-11/TF-BOOT-FAILURE-INVESTIGATION.md)。
+- 新增 eMMC 启动链与 Vendor Storage 调查：见 [2026-11-16 eMMC U-Boot 与 Vendor Storage 审计](reports/2026-11/EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md)。
+- 对应脱敏证据摘录：见 [eMMC BOOT 文件审计证据](../evidence/boot/2026-11-16-panther-x2-emmc-boot-files-audit.txt)。
 - 新上传的 UART 原始日志放入 evidence/uart/，保持原样并附校验值。
 - 先补齐索引和目录规范，再渐进迁移旧文档；不重跑已完成的测试。
 
