@@ -1,0 +1,98 @@
+Panther X2 eMMC BOOT / ROOTFS read-only audit
+Date: 2026-11-16
+Status: sanitized evidence excerpt; not a byte-for-byte original terminal transcript.
+Privacy: real MAC addresses, partition UUIDs, and other device-identifying values are intentionally omitted.
+
+Collection context
+------------------
+- Running system root: TF card /dev/mmcblk0p2
+- Running /boot: TF card /dev/mmcblk0p1
+- Internal eMMC: /dev/mmcblk1
+- eMMC BOOT: /dev/mmcblk1p1 (not mounted)
+- eMMC ROOTFS: /dev/mmcblk1p2 (not mounted)
+- Access method: e2fsprogs debugfs 1.47.0, read-only inspection
+- Extracted files were written to /tmp on the running TF system, not to eMMC.
+
+eMMC BOOT file inventory (selected)
+-----------------------------------
+armbianEnv.txt                         408 bytes
+boot.cmd                              3310 bytes
+boot.scr                              3382 bytes
+dtb/rockchip/rk3566-panther-x2.dtb   117859 bytes
+Image -> vmlinuz-6.1.116-ophub
+uInitrd -> uInitrd-6.1.116-ophub
+dtb-6.1.192-ophub -> dtb
+
+Both 6.1.116 and 6.1.192 kernel/initrd/config/System.map file sets were present.
+The generic Image and uInitrd symlinks target the 6.1.116 files.
+
+Selected armbianEnv.txt values
+-------------------------------
+verbosity=7
+bootlogo=true
+fdtfile=rockchip/rk3566-panther-x2.dtb
+rootdev=UUID=<redacted; UUID resolves to eMMC ROOTFS>
+rootfstype=ext4
+rootflags=rw,errors=remount-ro
+earlycon=on
+console=both
+consoleargs=console=ttyS02,1500000 console=tty0
+docker_optimizations=on
+extraboardargs=net.ifnames=0 max_loop=128
+overlay_prefix=rk3566
+overlays=
+user_overlays=
+
+boot.cmd load sequence
+----------------------
+1. Read and import armbianEnv.txt from the boot device.
+2. Build kernel bootargs.
+3. Load uInitrd.
+4. Load Image.
+5. Load dtb/<fdtfile>.
+6. Run booti.
+
+eMMC ROOTFS U-Boot files
+------------------------
+/usr/lib/u-boot/idbloader.img  305152 bytes
+/usr/lib/u-boot/u-boot.itb    1431552 bytes
+
+Extracted-file SHA-256
+----------------------
+idbloader.img:
+990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e
+
+u-boot.itb:
+3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af
+
+Git Blob SHA-1 (git hash-object)
+--------------------------------
+idbloader.img:
+d22b624fc90c46e656baf98894bee182316e692e
+
+u-boot.itb:
+04cd10bddd4e823d2ea495ee95b264cb2bce1f4c
+
+Both Git Blob SHA-1 values exactly match the corresponding files in:
+https://github.com/ophub/u-boot/tree/6e70f41585f15c43f45fcae609adec1865e83eb5/u-boot/rockchip/panther-x2
+
+Vendor Storage observation
+--------------------------
+- Rockchip Vendor Storage magic: DVKR
+- Version: 2
+- item_num: 1
+- item ID: 3
+- item size: 12 bytes
+- ID 3 is LAN_MAC
+- The data contains two GMAC addresses.
+- Address bytes and actual addresses are intentionally redacted.
+
+Interpretation boundary
+-----------------------
+This proves the U-Boot files stored in eMMC ROOTFS are byte-identical to the
+Ophub Panther X2 repository files. It does not prove those files are present
+in the eMMC raw boot area or were executed during the device's actual boot.
+Successful Vendor Storage read by the running U-Boot is also not yet proven.
+
+No eMMC writes, mounts, formatting, flashing, or configuration changes were
+performed as part of this audit.
