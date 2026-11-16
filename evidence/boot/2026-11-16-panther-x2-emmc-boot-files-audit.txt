@@ -135,3 +135,31 @@ raw user-area offsets, but does not alone prove which boot source/offset the
 hardware actually executes on power-up.
 
 No eMMC writes or mounts were performed.
+
+
+idbloader internal SPL/FDT inspection (2026-11-16)
+---------------------------------------------------
+The idbloader binary inspected here is the same file whose Git Blob SHA-1
+matches the eMMC raw user-area data at LBA 64.
+
+Printable SPL build string:
+U-Boot SPL 2017.09-armbian (Apr 23 2023 - 13:08:07)
+
+Parsed embedded FDT:
+- Offset within idbloader file: 283840 bytes
+- FDT total size: 20421 bytes
+- Root model: Radxa E25
+- Root compatible: radxa,e25, rockchip,rk3568
+
+The old UART log summary contains the same SPL version/build timestamp and
+Model: Radxa E25. This is a strong three-part binary fingerprint correlation,
+but static contents do not prove that a particular power-on actually executed
+this file or selected this embedded FDT.
+
+Privacy: no MAC address bytes or partition UUIDs are included.
+
+Reference source-code lead (not proof of this binary's build configuration):
+https://github.com/radxa/u-boot/blob/next-dev-v2026.01/arch/arm/mach-rockchip/board.c
+The reference implementation gates LAN_MAC vendor-storage reads on
+CONFIG_ROCKCHIP_SET_ETHADDR and CONFIG_ROCKCHIP_VENDOR_PARTITION, and may
+fall back to random MAC generation if the read fails or data is invalid.
