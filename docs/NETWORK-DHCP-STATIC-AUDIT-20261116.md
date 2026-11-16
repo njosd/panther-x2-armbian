@@ -284,3 +284,53 @@ NetworkManager 服务也已启用。
 本节依据的上游说明：
 - Netplan Noble manpage：early boot renderer 读取 YAML 并写入 `/run` 后端配置。
 - Netplan 上游 `src/configure.c`：全局使用 NetworkManager renderer 时写入空的 `/run/NetworkManager/conf.d/10-globally-managed-devices.conf`，以禁用 Ubuntu 限制 Ethernet 的默认规则。
+
+
+## 9. Netplan generator 与 6.1.116/6.12.81 GMAC 代码对照补充
+
+### 9.1 Netplan generator 安装完整性已确认
+
+最新只读审计 workflow run `43787930302` 进一步确认：
+- `netplan-generator:arm64 1.1.2-8ubuntu1~24.04.3` 已安装。
+- `/usr/lib/systemd/system-generators/netplan` 指向 `../../../libexec/netplan/generate`。
+- `/usr/libexec/netplan/generate` 存在，权限为 `-rwxr-xr-xr-x`。
+- `/etc/systemd/system-generators` 只发现发行版对 `systemd-gpt-auto-generator` 的屏蔽，没有屏蔽 Netplan generator。
+- `NetworkManager.service` enabled；`systemd-networkd.service` disabled。
+
+结合 Netplan 1.1.2 的 early-boot generator 设计，系统启动时应执行 Netplan generator 并生成空的 `/run/NetworkManager/conf.d/10-globally-managed-devices.conf`，从而解除 Ubuntu 的 Ethernet unmanaged 默认限制。
+
+**边界：** 仍未直接观察当前那次实机启动时的 `/run` 输出或 generator journal，因此“generator 已安装且无 mask”是已验证，“该次启动 generator 成功生成 override”是强预期但尚非实机直接证据。静态 rootfs 没有发现明显 NetworkManager/Netplan 冲突。
+
+### 9.2 Panther X2 设备树的 6.1/6.12 源码文件相同
+
+对照：
+- Ophub `linux-6.1.y-rockchip/main`
+- Ophub `linux-6.12.y-rockchip` commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c)
+
+`arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts` 的 Git blob SHA 在两者中完全相同：
+`d517c99841cf9d724a61cd31acf9437acbb131e6`
+
+其中 GMAC1 的 RGMII、clock input、3.3V PHY supply、reset GPIO/延时、TX/RX delay 均一致。6.12.81 UART 实际报告的 PHY 模式、delay 和 link-up 与这份 DTS 一致。
+
+### 9.3 上游稳定版 stmmac/PHY 驱动差异（精确版本对照）
+
+对照 Linux stable：
+- `gregkh/linux v6.1.116`
+- `gregkh/linux v6.12.81`
+
+观察结果：
+- `dwmac-rk.c` 的 `rk_gmac_powerup()` 保持一致；`rk_fix_speed()` 只增加 mode 参数，RGMII/RMII speed programming 逻辑不变。
+- `realtek.c` 的 `rtl8211f_config_init()` 保持一致；`rtl821x_probe()/resume()` 有可选 PHY clock/PM 相关变化，但当前实机已经完成 RTL8211F link negotiation。
+- DWMAC4 DMA channel init 和 tail pointer API 改为可传入平台自定义地址结构 `dwmac4_addrs`。RK3566 的 Rockchip glue 没有设置该结构，平台数据由零初始化，因此使用默认 DMA channel base `0x1100` 和 stride `0x80`；与 6.1.116 原有固定宏计算相同。暂未发现 TX tail pointer 地址变化。
+- `stmmac_xmit()` 增加 EST max-SDU drop 判断，以及当 TX queue 不支持 COE 或帧 EtherType 非 IP 时的 `skb_checksum_help()` 软件校验和回退。普通 DHCPv4 是 IPv4 EtherType；Panther DTS 没有发现 EST 配置，也没有 `snps,coe-unsupported` queue 属性，因此当前没有证据表明这两条新增路径会丢弃 DHCP Discover。
+- `stmmac_tx_clean()`、TX NAPI cleanup/timer 逻辑变化主要涉及发送完成回收，不是首个 DHCP 报文发出的前置步骤。
+- `stmmac_enable_dma_transmission()` API 增加 channel 参数；DWMAC4 ops 表并未使用这个 legacy poll-demand callback，DWMAC4 正常依赖 TX tail pointer，因此该签名变化本身不构成 Panther 的直接嫌疑。
+
+**限制：** 这是上游 stable v6.1.116 对 v6.12.81 的精确版本比较，不等于 Ophub RK BSP 两个实际打包内核的完整源码比较。Ophub 6.1 `main` 与 6.12 commit 的 DTS blob 一致，但 6.1 源码分支仍需精确定位到已知工作的 6.1.116 构建提交。
+
+### 9.4 当前判断更新
+
+- 原始 6.12.81 rootfs 的 NetworkManager/Netplan 配置、服务启用和 Netplan generator 安装均符合预期；**userspace 配置不是当前最强嫌疑**。
+- GMAC/PHY 的设备树配置一致，PHY 初始化/链路协商成功。
+- 上游 stmmac 的主要新增发送逻辑已检查，尚未找到一个可直接解释 DHCP Discover 完全未到达 hEX 的确定性代码错误。
+- 下一轮继续追踪 Ophub RK BSP 中 6.1.116 实际构建提交与 6.12.81 commit 的差异，重点放在 stmmac/DWMAC4 DMA descriptor、TX queue、DMA mapping 和时钟/复位路径；不重复 DHCP server、线缆、IPv6 或用户侧抓包测试。
