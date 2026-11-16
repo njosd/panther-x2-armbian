@@ -136,6 +136,71 @@ jobs:
             wc -l audit/report/u-boot-proper.disasm.txt
           } | tee audit/report/disassembly-notes.txt
 
+      - name: Resolve direct AArch64 references to MAC and Vendor Storage strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          load = 0x00a00000
+          strings_path = Path("audit/report/u-boot-proper-strings.txt")
+          disasm_path = Path("audit/report/u-boot-proper.disasm.txt")
+          terms = re.compile(
+              r"vendor_storage|LAN_MAC|ethaddr|eth1addr|rockchip_set_ethaddr|"
+              r"MAC addresses|using MAC address from ROM|local-mac-address|"
+              r"gmac|ethernet", re.I
+          )
+          targets = []
+          for line in strings_path.read_text(errors="replace").splitlines():
+              m = re.match(r"\s*([0-9a-fA-F]+)\s+(.*)", line)
+              if m and terms.search(m.group(2)):
+                  off = int(m.group(1), 16)
+                  targets.append((load + off, m.group(2)))
+
+          lines = disasm_path.read_text(errors="replace").splitlines()
+          hits = []
+          adrp_re = re.compile(r"^\s*([0-9a-f]+):.*?\badrp\s+(x\d+),\s*#?(0x[0-9a-f]+)", re.I)
+          add_re = re.compile(r"^\s*([0-9a-f]+):.*?\badd\s+(x\d+),\s*(x\d+),\s*#(0x[0-9a-f]+|[0-9]+)", re.I)
+          adr_re = re.compile(r"^\s*([0-9a-f]+):.*?\badr\s+(x\d+),\s*#?(0x[0-9a-f]+)", re.I)
+
+          for i, line in enumerate(lines):
+              m = adr_re.search(line)
+              if m:
+                  pc, reg, dest = int(m.group(1),16), m.group(2), int(m.group(3),16)
+                  for target, value in targets:
+                      if dest == target:
+                          hits.append((i, pc, target, value, "ADR"))
+              m = adrp_re.search(line)
+              if not m:
+                  continue
+              pc, reg, page = int(m.group(1),16), m.group(2), int(m.group(3),16)
+              for j in range(i + 1, min(i + 8, len(lines))):
+                  a = add_re.search(lines[j])
+                  if a and a.group(2) == reg and a.group(3) == reg:
+                      dest = page + int(a.group(4), 0)
+                      for target, value in targets:
+                          if dest == target:
+                              hits.append((i, pc, target, value, "ADRP+ADD"))
+                      break
+                  if re.search(rf"\b{reg}\b", lines[j]) and not re.search(r"\b(?:add|nop)\b", lines[j]):
+                      break
+
+          out = Path("audit/report/string-cross-references.txt")
+          with out.open("w") as f:
+              f.write("Static direct-reference scan; not a complete data-flow or decompiler analysis.\n")
+              f.write("A zero-hit result does not prove strings are unused.\n")
+              f.write(f"Relevant strings indexed: {len(targets)}\n")
+              f.write(f"Direct ADR / ADRP+ADD matches: {len(hits)}\n\n")
+              for idx, pc, target, value, kind in hits:
+                  f.write(f"{kind}: code=0x{pc:x} string=0x{target:x} text={value}\n")
+                  for k in range(max(0, idx-12), min(len(lines), idx+18)):
+                      f.write(lines[k] + "\n")
+                  f.write("\n")
+          print(out.read_text())
+          PY
+
       - name: Publish static audit report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
