@@ -108,6 +108,36 @@ Git Blob SHA-1 由 `git hash-object` 计算。两个结果均与 Ophub 仓库 Pa
 
 **重要边界：** 以上只证明 eMMC ROOTFS 中保存的文件与 Ophub 仓库文件完全一致，不证明 eMMC 原始启动区域已经烧录相同内容，也不证明本机启动时实际执行了这两个文件。
 
+
+## 4.2 eMMC 原始用户区启动位置比对（2026-11-16，新增）
+
+根据 Ophub `amlogic-s9xxx-armbian` 仓库 rebuild 脚本（commit `277a2f610d70d45d4662daeadb2688226c5a3d61`）中的 Rockchip 镜像布局，`idbloader.img` 从 LBA 64 写入，`u-boot.itb` 从 LBA 16384 写入。按 512-byte sector 计算，分别读取 596 sectors 和 2796 sectors。
+
+本次在 Panther X2 当前 TF 启动系统上执行只读读取：
+
+- 源设备：`/dev/mmcblk1`（eMMC 用户区）
+- 输出文件：`/tmp/raw-emmc-idbloader.img`、`/tmp/raw-emmc-u-boot.itb`（当前 TF 系统的临时目录）
+- 没有访问 eMMC boot0/boot1，也没有向 eMMC 写入数据。
+
+| 原始用户区位置 | 读取长度 | SHA-256 | Git Blob SHA-1 |
+|---|---:|---|---|
+| LBA 64 | 596 sectors / 305,152 bytes | `990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e` | `d22b624fc90c46e656baf98894bee182316e692e` |
+| LBA 16384 | 2796 sectors / 1,431,552 bytes | `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af` | `04cd10bddd4e823d2ea495ee95b264cb2bce1f4c` |
+
+**新增已验证结论：** 两段 eMMC 原始用户区数据的 SHA-256 与此前从 eMMC ROOTFS 提取的对应文件一致；Git Blob SHA-1 也与 Ophub Panther X2 仓库目标文件一致。因此，eMMC 用户区 LBA 64 和 LBA 16384 处分别存在与 Ophub 对应版本逐字节一致的 `idbloader.img` 和 `u-boot.itb`。
+
+**边界：** 该结果确认了这两个标准偏移处的数据身份，但仍不能单独证明设备上电时实际从哪个介质/偏移启动，或实际执行的 U-Boot 就是该文件。需要继续结合旧 UART 日志、U-Boot 设备枚举和 Vendor Storage 读取行为验证。
+
+本次读取命令：
+
+```bash
+sudo dd if=/dev/mmcblk1 of=/tmp/raw-emmc-idbloader.img bs=512 skip=64 count=596 status=progress
+sudo dd if=/dev/mmcblk1 of=/tmp/raw-emmc-u-boot.itb bs=512 skip=16384 count=2796 status=progress
+sha256sum /tmp/raw-emmc-idbloader.img /tmp/raw-emmc-u-boot.itb
+git hash-object /tmp/raw-emmc-idbloader.img
+git hash-object /tmp/raw-emmc-u-boot.itb
+```
+
 ## 5. U-Boot FIT 元数据线索
 
 此前对该 Ophub Panther X2 `u-boot.itb` 的 FIT 元数据检查记录：
@@ -141,7 +171,7 @@ Git Blob SHA-1 由 `git hash-object` 计算。两个结果均与 Ophub 仓库 Pa
 - eMMC BOOT/ROOTFS 未挂载，使用 `debugfs` 只读访问。
 - eMMC BOOT 的文件清单、符号链接目标、启动配置和脚本加载顺序。
 - eMMC ROOTFS U-Boot 文件大小及哈希。
-- 两个 Git Blob SHA-1 与 Ophub Panther X2 仓库目标文件完全匹配。
+- 两个 Git Blob SHA-1 与 Ophub Panther X2 仓库目标文件完全匹配；原始用户区 LBA 64 和 LBA 16384 的数据也已通过 SHA-256 及 Git Blob SHA-1 交叉匹配。
 - eMMC Vendor Storage 存在 LAN_MAC ID 3 条目，具体地址已脱敏。
 
 ### 静态审计确认 / 尚不能推出
@@ -152,7 +182,7 @@ Git Blob SHA-1 由 `git hash-object` 计算。两个结果均与 Ophub 仓库 Pa
 
 ### 待验证
 
-1. eMMC 原始启动区域中的 loader/U-Boot 内容及其与 ROOTFS 文件的关系。
+1. 设备实际上电时是否确实从 eMMC 用户区 LBA 64 / LBA 16384 读取这些镜像，以及启动介质选择的证据。
 2. 设备实际上电时使用的启动介质、加载路径与运行中的 U-Boot 身份。
 3. 实际运行的 U-Boot 是否启用并成功执行 Vendor Storage LAN_MAC 读取流程。
 4. MAC 从 Vendor Storage 到运行时 FDT/网卡接口的传递链，以及当前地址变化发生在哪个阶段。
