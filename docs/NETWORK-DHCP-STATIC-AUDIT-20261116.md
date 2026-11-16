@@ -334,3 +334,17 @@ NetworkManager 服务也已启用。
 - GMAC/PHY 的设备树配置一致，PHY 初始化/链路协商成功。
 - 上游 stmmac 的主要新增发送逻辑已检查，尚未找到一个可直接解释 DHCP Discover 完全未到达 hEX 的确定性代码错误。
 - 下一轮继续追踪 Ophub RK BSP 中 6.1.116 实际构建提交与 6.12.81 commit 的差异，重点放在 stmmac/DWMAC4 DMA descriptor、TX queue、DMA mapping 和时钟/复位路径；不重复 DHCP server、线缆、IPv6 或用户侧抓包测试。
+
+
+## 10. 6.12.81 后续 stable stmmac TX 修复核对
+
+继续将 Linux stable `v6.12.81` 与 `v6.12.117` 对照：
+- `dwmac-rk.c` 的 Panther 相关 `rk_gmac_powerup()`、`rk_fix_speed()`、`rk_gmac_setup()`、`rk_gmac_probe()` 保持一致。
+- `dwmac4_dma.c` 的 `dwmac4_dma_init_tx_chan()`、`dwmac4_dma_tx_chan_op_mode()` 保持一致。
+- `realtek.c` 的 `rtl8211f_config_init()`、`rtl821x_probe()`、`rtl821x_resume()` 保持一致。
+- `stmmac_main.c` 的 `stmmac_flush_tx_descriptors()`、`stmmac_tx_timer_arm()`、`stmmac_napi_poll_tx()` 保持一致。
+- `stmmac_xmit()` 的主要新增差异是 v6.12.117 增加 `!netdev_xmit_more()` 时设置最后一个描述符的 IC（interrupt-on-completion）位；对应上游提交 `d21a374995df9d7cfd193427748a19dcc87956a9`，标题为 `net: stmmac: raise TX completion interrupt at the end of an xmit burst`。
+
+该提交解释的是低流量/小批次发送时 TX completion interrupt 延迟、skb 回收和吞吐下降；它不是 DHCP Discover 未发出的直接证据。DMA 在发送前已获得 descriptor/tail pointer，completion interrupt 主要负责完成回收。因而该补丁可列为后续 6.12.81 TX completion 行为的候选改进，但**不能据此认定它能修复当前 DHCP 故障**，也不建议现在盲目 cherry-pick。
+
+v6.12.81 到 v6.12.117 的上述对照没有发现 Rockchip GMAC power-up、RTL8211F 初始化或 DWMAC4 TX tail-pointer 路径的后续修复。
