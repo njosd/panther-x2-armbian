@@ -67,7 +67,7 @@ jobs:
           fdt_count=0
           for index in $(seq 0 31); do
             candidate="audit/extracted/image-${index}.bin"
-            if dumpimage -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
+            if dumpimage -T flat_dt -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
               magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
               bytes=$(stat -c '%s' "$candidate")
               if [ "$magic" = "d00dfeed" ]; then
