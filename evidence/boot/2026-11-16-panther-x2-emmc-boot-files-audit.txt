@@ -96,3 +96,42 @@ Successful Vendor Storage read by the running U-Boot is also not yet proven.
 
 No eMMC writes, mounts, formatting, flashing, or configuration changes were
 performed as part of this audit.
+
+
+Raw eMMC user-area boot-region read (2026-11-16)
+------------------------------------------------
+Read source: /dev/mmcblk1 (eMMC user area)
+Output destination: /tmp on the running TF system
+Read-only; eMMC boot0/boot1 were not accessed.
+
+Ophub Rockchip image layout used for this comparison:
+- idbloader.img: LBA 64, 596 sectors, 305152 bytes
+- u-boot.itb: LBA 16384, 2796 sectors, 1431552 bytes
+
+Commands:
+sudo dd if=/dev/mmcblk1 of=/tmp/raw-emmc-idbloader.img bs=512 skip=64 count=596 status=progress
+sudo dd if=/dev/mmcblk1 of=/tmp/raw-emmc-u-boot.itb bs=512 skip=16384 count=2796 status=progress
+
+Observed sizes:
+/tmp/raw-emmc-idbloader.img 305152 bytes
+/tmp/raw-emmc-u-boot.itb 1431552 bytes
+
+Observed SHA-256:
+idbloader raw LBA 64:
+990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e
+u-boot raw LBA 16384:
+3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af
+
+Observed Git Blob SHA-1:
+idbloader raw LBA 64:
+d22b624fc90c46e656baf98894bee182316e692e
+u-boot raw LBA 16384:
+04cd10bddd4e823d2ea495ee95b264cb2bce1f4c
+
+Both raw-region SHA-256 values match the corresponding files previously extracted
+from the eMMC ROOTFS. Both Git Blob SHA-1 values also match the corresponding
+Ophub Panther X2 repository files. This establishes byte identity at these two
+raw user-area offsets, but does not alone prove which boot source/offset the
+hardware actually executes on power-up.
+
+No eMMC writes or mounts were performed.
