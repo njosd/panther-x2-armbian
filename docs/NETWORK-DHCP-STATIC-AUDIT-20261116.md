@@ -140,7 +140,7 @@ syntax error near unexpected token '('
 
 脚本在打印 `KERNEL PACKAGE STATE` 后终止，**尚未执行后续的 NetworkManager service、Netplan、NetworkManager 配置文件、DHCPv4 profile 检查**。artifact 上传步骤仍执行，所以“artifact 已上传”不代表网络配置验证通过。
 
-这是当前构建流水线中明确存在的验证缺口。后续必须先修复验证脚本，再以离线方式检查最终 rootfs；不能把之前的构建成功或 artifact 上传误认为 DHCP 配置已经审查通过。
+这是当前构建流水线中明确存在的验证缺口。已在诊断分支修正这段 find 检查，避免 shell 分组转义问题；同时移除了不符合 Armbian 默认策略的 dhcp4: true grep，改为检查 NetworkManager 配置目录是否存在。此修正只调整 CI 静态检查，不改变镜像内网络行为。不能把之前的构建成功或 artifact 上传误认为 DHCP 配置已经审查通过。
 
 ## 5. 当前故障判断（按证据强弱）
 
@@ -162,7 +162,7 @@ syntax error near unexpected token '('
 不要求用户重复抓包、ping、nmcli 或 hEX DHCP 检查。已新增独立的只读 GitHub Actions 工作流：
 `.github/workflows/audit-existing-6.12.81-network-rootfs.yml`
 
-它按既有构建 run ID 下载已生成的镜像 artifact，在 runner 上只读挂载 rootfs，采集 Netplan、NetworkManager、udev、cloud-init、ifupdown、networkd 和 systemd enablement 信息，输出小型文本报告；不重建镜像、不写设备。当前连接器没有 workflow-dispatch 写入能力，因此该工作流尚未运行。
+它按既有构建 run ID 下载已生成的镜像 artifact，在 runner 上只读挂载 rootfs，采集 Netplan、NetworkManager、udev、cloud-init、ifupdown、networkd 和 systemd enablement 信息，输出小型文本报告；不重建镜像、不写设备。工作流已提交但尚未运行；可在 GitHub Actions 中手动运行该 workflow，输入现有构建 run ID 43682186779。
 
 下一步静态审计重点：
 1. 从现有 6.12.81 镜像 rootfs 报告确认 NetworkManager 是否被启用、eth0 是否可能被标记 unmanaged、是否有 `no-auto-default` 或冲突配置。
@@ -171,3 +171,42 @@ syntax error near unexpected token '('
 4. 若 rootfs 网络管理配置正常，再继续深挖 stmmac 的 TX checksum/descriptor 路径；目前不建议直接改 PHY delay 或重写 Netplan。
 
 所有后续结论仍分为“已验证 / 未验证 / 推测”。不修改 hEX、不改 Panther X2 当前系统、不重刷 TF/eMMC。
+
+
+## 7. 本轮进一步静态核对记录
+
+### 7.1 修正 Armbian 网络策略判断
+
+此前“没有显式 eth0 DHCP stanza”被列为疑点，这个表述需要收窄。固定 Armbian 源码的注释明确规定所有设备交由 NetworkManager 管理，并在 carrier 出现时自动 DHCP。因此缺少显式 Netplan eth0 stanza 本身不是故障证据。
+
+已修正诊断分支中的构建验证：
+- 删除可能触发 Bash 解析问题的括号式 find 表达式，拆成两个独立 find。
+- 删除错误地强制要求 dhcp4: true 的检查（与 Armbian 全设备 NM renderer 策略不符）。
+- 保留 NetworkManager 配置目录和 renderer 的基本检查。
+- 这些只是 CI 验证脚本修订，不改变镜像或设备网络配置。
+
+### 7.2 stmmac 发送路径源码对照（探索性）
+
+比较对象：
+- ophub/linux-6.1.y-rockchip 的 main 分支；
+- ophub/linux-6.12.y-rockchip commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c。
+
+发现：
+- Rockchip dwmac-rk.c 的 rk_gmac_powerup()（包括 RGMII interface switch 和 delay 调用）函数文本一致。
+- 通用 stmmac_main.c 的 stmmac_xmit() 有变化。6.12 增加 EST max-SDU drop 检查，以及针对不支持 checksum offload 的 TX queue/非 IP EtherType 的软件 checksum fallback。
+- stmmac_tx_map()、stmmac_tx_err()、stmmac_dma_interrupt()、stmmac_xmit_frags() 在抽取函数对照中一致；stmmac_tx_clean() 有 XSK metadata completion 等变化。
+- DHCP Discover 是普通 IPv4/UDP 报文；新加的非 IP EtherType checksum fallback 不应针对它触发。EST max-SDU 是否会生效取决于设备是否启用了 EST/max_sdu，当前没有此项实机证据。
+- 所以目前没有发现一个可以直接解释 DHCP Discover 完全未到 hEX 的明确 stmmac 改动。
+
+**重要限制：** 6.1 main 并不等同于已知工作的精确 6.1.116 构建源码快照；这个对照只用于缩小方向，不是严格 release-to-release bisect。不能用它证明 6.12 驱动完全无回归。
+
+### 7.3 当前最可能的待确认点
+
+优先等待最终 rootfs 的离线报告，特别关注：
+- /usr/lib/NetworkManager/conf.d/、/etc/NetworkManager/conf.d/ 是否有 unmanaged 规则；
+- 是否存在 no-auto-default 或针对 eth0/MAC 的限制；
+- NetworkManager 服务是否启用且实际读取 Netplan；
+- 是否有 cloud-init、ifupdown、networkd 或 udev 规则冲突；
+- NetworkManager DHCP backend 的默认选择。
+
+在取得这些信息前，不应擅自给 Panther X2 加静态地址、重写 Netplan、改 PHY delay 或重编译 GMAC。
