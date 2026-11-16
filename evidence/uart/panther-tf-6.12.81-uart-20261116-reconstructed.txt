@@ -1,0 +1,191 @@
+# Panther X2 / Armbian 6.12.81 TF 启动 UART 日志（对话重建版）
+
+- 日期：2026-11-16
+- 设备：Panther X2（RK3566，4 GiB RAM）
+- 启动介质：原先已成功启动 FNNAS v389 的同一张 64 GB TF 卡；本次由用户自行写入 Armbian 6.12.81
+- UART：CH340G，1500000 baud，8N1；用户说明连接线不可靠，存在乱码
+- 来源：用户在 ChatGPT 对话中分段发送的 UART 日志及其上下文
+- 状态：**重建摘录，非原始完整 UART 捕获文件**
+- 原始捕获文件（保存在用户 iMac）：`~/panther-tf-6.12.81-uart-20261116.bin`
+- 采集脚本：`~/panther-uart-tf-6.12.81.py`
+
+> 重要：当前可访问的对话上下文保留了分段日志的关键行、错误和阶段性摘要，但不包含每一段的完整逐字原文。因此本文件只记录能确认的内容；未保留的行不作猜测，也不以本文件替代 iMac 上的原始 .bin。后续如需逐字完整归档，应从原始 .bin 转存/解码后另存，不覆盖本文件。
+
+## 1. U-Boot / SPL
+
+已辨认日志：
+
+```text
+DDR Version V1.13 20220218
+LPDDR4, 324MHz
+BW=32 Col=10 Bk=8 CS0 Row=16 CS1 Row=16 CS=2 Die BW=16 Size=4096MB
+change to: 1560MHz(final freq)
+
+U-Boot SPL 2017.09-armbian
+Trying to boot from MMC2
+Model: Radxa E25
+dwmmc@fe2b0000: 1 (SD), dwmmc@fe2c0000: 2, sdhci@fe310000: 0
+Bootdev(atags): mmc 1
+mmc1 is current device
+```
+
+启动脚本从当前 TF 启动设备读取 `/boot.scr`，随后加载 initrd、Image 和 DTB。可选 overlay fixup 脚本缺失，但启动继续。U-Boot 早期资源扫描出现过一次 `Failed to load DTB, ret=-19`，随后 boot script 成功加载 DTB（167306 bytes）并继续启动。
+
+其他可辨认信息：
+- `Net: No ethernet found`：发生在 U-Boot 阶段，不能据此判断 Linux 阶段没有网卡。
+- `unknown raw ID phN`、JEDEC ID 00,00,00、`WARNING: No OPTEE`、`opteed_fast` runtime service 报错：本次仍进入 Linux，暂未证明这些信息阻止启动。
+- DDR 两通道训练输出可见，未见明确训练失败。
+
+## 2. Linux 内核启动
+
+```text
+Linux version 6.12.81-rk35xx-ophub
+Machine model: Panther X2
+```
+
+已确认：
+- 4 GiB 内存识别；4 个 CPU 核心上线。
+- 内核命令行包含：
+  ```text
+  root=UUID=9c7ff1a4-9beb-4346-b396-cdd1d4d1feea
+  rootfstype=ext4
+  rootflags=rw,errors=remount-ro
+  console=ttyS02,1500000
+  net.ifnames=0
+  ```
+- CPU/GIC/GPIO/pinctrl 基础初始化继续进行。
+- `No available vop found`：显示子系统未找到可用 VOP；对无头服务器是否有实际影响尚未验证。
+- `cpu cpu0: failed to get cpu0 clk` / cpufreq 初始化失败：频率管理未完整初始化，未阻止本次启动。
+- `rga iommu bind failed`：RGA 加速初始化失败；不是当前网络排障主线。
+- Wi-Fi rfkill/GPIO/时钟有警告，但后续 Broadcom Wi-Fi 固件有加载记录；当前目标是有线网络。
+- DW-MMC 控制器出现 `No normal pinctrl state` / `No idle pinctrl state`，需与已审计的 FNNAS DTB 对照；本次 TF 仍成功识别并挂载。
+
+## 3. MMC 设备映射与文件系统
+
+本次启动会话的日志明确给出以下映射（**只适用于本次会话**）：
+
+```text
+mmc1: SDHCI controller on fe310000.mmc using ADMA
+sdhci-dwcmshc fe310000.mmc: failed to set PD rpm always on, SoC may hang later: -ENODEV
+Can't reduce the clock below 52MHz in HS200/HS400 mode
+mmc1: new HS200 MMC card at address 0001
+mmcblk1: mmc1:0001 DF4032 29.1 GiB
+mmcblk1: p1 p2
+
+mmc0: new high speed SDXC card at address aaaa
+mmcblk0: mmc0:aaaa SN64G 59.5 GiB
+mmcblk0: p1 p2
+
+EXT4-fs (mmcblk0p2): recovery complete
+EXT4-fs (mmcblk0p2): mounted filesystem 9c7ff1a4-9beb-4346-b396-cdd1d4d1feea r/w
+EXT4-fs (mmcblk0p1): mounted filesystem ... r/w
+```
+
+据此：
+- `mmcblk0` = 本次使用的 64 GB TF 卡。
+- `mmcblk1` = Panther X2 内置 Samsung eMMC（本次识别容量约 29.1 GiB）。
+- `mmc2` = SDIO，无线设备。
+- 根文件系统由 TF 卡 `mmcblk0p2` 挂载为读写；boot 分区也已挂载。
+- 本次片段未见此前另一轮 6.12.81 测试出现的 GPT sector mismatch 或 EXT4/JBD2 I/O write errors。不能把不同启动会话的错误混在一起。
+- eMMC 的 runtime-PM 警告及 HS200 时钟提示需要保留跟踪，但当前没有本次 eMMC 读写失败证据。
+
+## 4. Ethernet / PHY（本次网络排障重点）
+
+已辨认的 GMAC 初始化信息：
+
+```text
+rk_gmac-dwmac fe010000.ethernet:
+  clock input or output? (input)
+  TX delay(0x30)
+  RX delay(0x10)
+  integrated PHY? (no)
+  clock input from PHY
+  init for RGMII
+  User ID 0x30 Synopsys ID 0x51 DWMAC4/5
+```
+
+随后有线 PHY 成功绑定并建立物理链路：
+
+```text
+rk_gmac-dwmac fe010000.ethernet eth0:
+  PHY [stmmac-1:00] driver [RTL8211F Gigabit Ethernet]
+  configuring for phy/rgmii link mode
+...
+Link is Up - 1Gbps/Full - flow control rx/tx
+```
+
+结论：
+- Linux 已探测 GMAC `fe010000.ethernet`。
+- PHY 驱动识别为 RTL8211F。
+- PHY/GMAC 已协商到 1Gbps 全双工。
+- 因此“网卡驱动完全不存在”或“物理链路没有建立”都不符合本次已见日志。
+- 物理链路建立不等于 IP 网络正常；当前尚未看到 DHCP 成功、IPv4 地址或默认路由。
+
+## 5. 用户界面与首启流程
+
+已辨认：
+```text
+armbian login: root (automatic login)
+IP address: Waiting for local connection! Retrying...
+...
+Network connection timeout!
+```
+
+之后用户完成了首次登录初始化：
+- 设置 root 密码。
+- 默认 shell 选择 2（zsh），系统显示 `Shell: zsh`。
+- 当前 UART 记录在 shell 选择之后结束；是否还有后续输出需以原始 .bin 为准。
+
+注意：启动横幅没有显示 IP，只能说明启动脚本等待网络超时；不能单凭横幅断言 DHCP 客户端、NetworkManager 或 systemd-networkd 中哪一层失败。
+
+## 6. 本次启动阶段性判定
+
+| 子系统 | 本次证据 | 判定 |
+|---|---|---|
+| DDR / CPU / RAM | 4 GiB，4 核上线，启动继续 | 基本启动已验证 |
+| TF 启动链 | 从 TF 读取 boot.scr、Image、initrd、DTB | 已验证 |
+| TF 块设备 | 识别为 mmcblk0，59.5 GiB | 已验证 |
+| TF 根分区 | EXT4 recovery complete，读写挂载 | 已验证 |
+| eMMC | mmcblk1，29.1 GiB，HS200 | 已识别；PM/时钟警告待评估 |
+| GMAC | fe010000 probe | 已验证 |
+| RTL8211F PHY | 驱动绑定 | 已验证 |
+| 物理链路 | 1Gbps / Full | 已验证 |
+| DHCP / IPv4 | 启动横幅等待 IP 后超时 | 未验证成功，需查 |
+| 默认路由 / LAN 通信 | 当前片段无证据 | 未验证 |
+| SSH | 当前片段无证据 | 未验证 |
+| RGA / NPU / Immich | 非本阶段网络排障目标 | 暂不处理 |
+
+## 7. 下一步：只读网络诊断
+
+在设备当前本地 shell 执行以下命令并完整回传输出。它们只读取状态，不修改网络配置、不重启服务、不安装软件：
+
+```sh
+echo '===== LINK / ADDRESS ====='
+ip -details -br link
+ip -br addr
+echo '===== ROUTES ====='
+ip route
+ip -6 route
+echo '===== NETWORK MANAGERS ====='
+systemctl is-active NetworkManager
+systemctl is-active systemd-networkd
+systemctl is-active networking
+echo '===== NETWORKMANAGER DEVICE ====='
+nmcli device status 2>&1
+echo '===== NETWORKMANAGER CONNECTIONS ====='
+nmcli connection show 2>&1
+echo '===== DHCP / NETWORK LOG ====='
+journalctl -b --no-pager | grep -Ei 'NetworkManager|systemd-networkd|dhcp|eth0|stmmac|rtl8211|link is|carrier|no lease|timeout' | tail -n 250
+echo '===== INTERFACE COUNTERS ====='
+ip -s link show eth0
+```
+
+如果 `nmcli` 不存在，保留其错误输出即可，不要安装。拿到结果后按层定位：
+1. 接口是否存在、是否 UP、carrier 是否为 1；
+2. RX/TX packets 是否增长，有无 RX error/drop；
+3. 当前实际启用哪个网络管理器；
+4. 是否有 DHCP Discover/Request、Offer/Ack 或明确超时；
+5. 是否已有地址但启动横幅未读到；
+6. 若接口有 carrier 但 RX 计数为 0，再结合 hEX DHCP/ARP 侧记录判断二层链路与 VLAN/端口问题。
+
+未经用户明确授权，不修改 Panther X2、hEX 或任何网络配置。
