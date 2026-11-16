@@ -9,88 +9,132 @@ permissions:
 jobs:
   inspect-uboot:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
+      - name: Check out the repository evidence
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Install static inspection tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y u-boot-tools device-tree-compiler
+          sudo apt-get install -y u-boot-tools device-tree-compiler binutils-aarch64-linux-gnu file
 
-      - name: Fetch and verify the pinned Panther X2 U-Boot binaries
+      - name: Verify the exact uploaded eMMC FIT evidence
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit/input audit/extracted audit/report
-          base="https://raw.githubusercontent.com/ophub/u-boot/6e70f41585f15c43f45fcae609adec1865e83eb5/u-boot/rockchip/panther-x2"
-          curl --fail --location --retry 3 "$base/u-boot.itb" -o audit/input/u-boot.itb
-          curl --fail --location --retry 3 "$base/idbloader.img" -o audit/input/idbloader.img
+          source_file="evidence/boot/panther-x2-u-boot.itb"
+          test -f "$source_file"
+          cp "$source_file" audit/input/panther-x2-u-boot.itb
 
-          check_blob() {
-            local file="$1" expected="$2" actual
-            actual=$(git hash-object "$file")
-            printf '%s  expected=%s  actual=%s\n' "$file" "$expected" "$actual"
-            test "$actual" = "$expected"
-          }
-          check_blob audit/input/u-boot.itb 04cd10bddd4e823d2ea495ee95b264cb2bce1f4c
-          check_blob audit/input/idbloader.img d22b624fc90c46e656baf98894bee182316e692e
-          sha256sum audit/input/* | tee audit/report/sha256.txt
-          stat -c '%n %s bytes' audit/input/* | tee audit/report/sizes.txt
+          blob_sha=$(git hash-object "$source_file")
+          sha256=$(sha256sum "$source_file" | awk '{print $1}')
+          size=$(stat -c '%s' "$source_file")
+          {
+            echo "Evidence source: $source_file"
+            echo "Git blob SHA-1: $blob_sha"
+            echo "SHA-256: $sha256"
+            echo "Size: $size bytes"
+            echo
+            echo "Expected Git blob SHA-1: 04cd10bddd4e823d2ea495ee95b264cb2bce1f4c"
+            echo "Expected SHA-256: 3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af"
+            echo "Expected size: 1431552 bytes"
+          } | tee audit/report/input-identity.txt
 
-      - name: Inspect FIT structure and extract embedded FDT images
+          test "$blob_sha" = "04cd10bddd4e823d2ea495ee95b264cb2bce1f4c"
+          test "$sha256" = "3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af"
+          test "$size" = "1431552"
+
+      - name: Inspect FIT and extract payloads
         shell: bash
         run: |
           set -euo pipefail
+          fit="audit/input/panther-x2-u-boot.itb"
           {
-            echo "Panther X2 U-Boot FIT static audit"
-            echo "Source repository: ophub/u-boot"
-            echo "Source commit: 6e70f41585f15c43f45fcae609adec1865e83eb5"
-            echo "Board directory: u-boot/rockchip/panther-x2"
-            echo
             echo "===== FIT listing ====="
-            dumpimage -l audit/input/u-boot.itb
+            dumpimage -l "$fit"
             echo
-            echo "===== IDBLoader strings (selected) ====="
-            strings -a audit/input/idbloader.img | grep -Ei 'rk809|rk817|regulator|pmic|sdmmc|vcc3v3|sw2|panther|rockchip' | head -n 250 || true
-            echo
-            echo "===== U-Boot ITB strings (selected) ====="
-            strings -a audit/input/u-boot.itb | grep -Ei 'rk809|rk817|regulator|pmic|sdmmc|vcc3v3|sw2|panther|rockchip|fdt|fit' | head -n 400 || true
+            echo "===== FIT strings ====="
+            strings -a -t x "$fit" | grep -Ei 'vendor_storage|LAN_MAC|ethaddr|eth1addr|rockchip_set_ethaddr|MAC addresses|local-mac-address|gmac|ethernet|fdt' || true
           } 2>&1 | tee audit/report/fit-inspection.txt
 
-          found=0
+          proper_count=0
+          fdt_count=0
           for index in $(seq 0 31); do
             candidate="audit/extracted/image-${index}.bin"
-            if dumpimage -T flat_dt -p "$index" -o "$candidate" audit/input/u-boot.itb >/dev/null 2>&1; then
+            if dumpimage -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
               magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
+              bytes=$(stat -c '%s' "$candidate")
               if [ "$magic" = "d00dfeed" ]; then
-                found=$((found + 1))
+                fdt_count=$((fdt_count + 1))
                 dtb="audit/extracted/fdt-${index}.dtb"
                 dts="audit/extracted/fdt-${index}.dts"
                 mv "$candidate" "$dtb"
                 dtc -I dtb -O dts -o "$dts" "$dtb" 2>"audit/extracted/fdt-${index}-dtc-warnings.txt"
                 {
-                  echo "===== Extracted FDT image index $index ====="
+                  echo "===== FIT FDT index $index ($bytes bytes) ====="
                   echo "DTB: $dtb"
                   echo "DTS: $dts"
-                  echo "--- Relevant DTS nodes/properties ---"
-                  grep -Ein -C 3 'rk809|rk817|SWITCH_REG2|SW2_EN|sdmmc0|vmmc-supply|vqmmc-supply|vcc3v3_sd|regulator-(always-on|boot-on)|regulator-name|rockchip,.*(mmc|sd)' "$dts" || true
-                  echo "--- Relevant strings ---"
-                  strings -a "$dtb" | grep -Ei 'rk809|rk817|SWITCH_REG2|SW2_EN|sdmmc0|vmmc|vqmmc|vcc3v3_sd|panther' || true
-                  echo
+                  grep -Ein -C 3 'model|compatible|ethernet|gmac|mac-address|local-mac-address|aliases' "$dts" || true
                 } >> audit/report/fdt-details.txt
+              elif [ "$bytes" = "1208600" ]; then
+                proper_count=$((proper_count + 1))
+                mv "$candidate" audit/extracted/u-boot-proper.bin
+                echo "U-Boot proper payload index=$index size=$bytes" | tee audit/report/proper-extraction.txt
               else
-                rm -f "$candidate"
+                echo "FIT payload index=$index size=$bytes magic=$magic" >> audit/report/other-payloads.txt
+                mv "$candidate" "audit/extracted/payload-${index}.bin"
               fi
             fi
           done
+
           {
-            echo "Extracted FDT count: $found"
-            if [ "$found" -eq 0 ]; then
-              echo "No FDT image was extracted by dumpimage -T flat_dt across indices 0..31."
-              echo "Review FIT listing and extraction tool output; this is not proof that the FIT contains no FDT."
-            fi
+            echo "U-Boot proper payload count: $proper_count"
+            echo "FDT payload count: $fdt_count"
           } | tee audit/report/extraction-summary.txt
+
+          test "$proper_count" -eq 1
+          test -s audit/extracted/u-boot-proper.bin
+
+      - name: Disassemble U-Boot proper and index relevant strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="audit/extracted/u-boot-proper.bin"
+          {
+            echo "===== Extracted U-Boot proper identity ====="
+            file "$binary"
+            stat -c '%n %s bytes' "$binary"
+            sha256sum "$binary"
+            echo
+            echo "===== Relevant strings with file offsets ====="
+            strings -a -t x "$binary" | tee audit/report/u-boot-proper-strings.txt
+            echo
+            echo "===== Vendor Storage / MAC / Ethernet string index ====="
+            grep -Ein -C 2 'vendor_storage|LAN_MAC|ethaddr|eth1addr|rockchip_set_ethaddr|MAC addresses|using MAC address from ROM|local-mac-address|gmac|ethernet|not set|failed' audit/report/u-boot-proper-strings.txt || true
+          } 2>&1 | tee audit/report/proper-strings-analysis.txt
+
+          aarch64-linux-gnu-objdump \
+            -D -b binary -m aarch64 --adjust-vma=0x00a00000 \
+            --show-raw-insn "$binary" \
+            > audit/report/u-boot-proper.disasm.txt
+
+          {
+            echo "Disassembly generated from the extracted raw AArch64 payload."
+            echo "Virtual address base used: 0x00a00000 (FIT load address)."
+            echo "The payload is a raw binary, not an ELF with symbols; function names and boundaries are not automatically available."
+            echo "String presence does not prove a function was called or that Vendor Storage was read at boot."
+            echo "Use string file offsets together with instruction-level references and call flow; account for literal pools and relocation-free raw-image layout."
+            echo "No target device, bootloader, flash, Vendor Storage, or runtime configuration was accessed or modified."
+            echo
+            echo "Disassembly line count:"
+            wc -l audit/report/u-boot-proper.disasm.txt
+          } | tee audit/report/disassembly-notes.txt
 
       - name: Publish static audit report
         if: always()
