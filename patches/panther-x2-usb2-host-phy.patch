@@ -1,14 +1,14 @@
 diff --git a/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts b/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
 --- a/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
 +++ b/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
-@@ -556,7 +556,15 @@
+@@ -556,7 +556,13 @@
  &usb_host0_ohci {
 +    clocks = <&cru HCLK_USB2HOST0>, <&cru HCLK_USB2HOST0_ARB>,
 +             <&cru PCLK_USB>, <&usb2phy0>;
 +    phys = <&u2phy0_host>;
      status = "okay";
  };
- 
+
  &usb_host0_ehci {
 +    clocks = <&cru HCLK_USB2HOST0>, <&cru HCLK_USB2HOST0_ARB>,
 +             <&cru PCLK_USB>, <&usb2phy0>;
