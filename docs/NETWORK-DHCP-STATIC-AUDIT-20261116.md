@@ -348,3 +348,85 @@ NetworkManager 服务也已启用。
 该提交解释的是低流量/小批次发送时 TX completion interrupt 延迟、skb 回收和吞吐下降；它不是 DHCP Discover 未发出的直接证据。DMA 在发送前已获得 descriptor/tail pointer，completion interrupt 主要负责完成回收。因而该补丁可列为后续 6.12.81 TX completion 行为的候选改进，但**不能据此认定它能修复当前 DHCP 故障**，也不建议现在盲目 cherry-pick。
 
 v6.12.81 到 v6.12.117 的上述对照没有发现 Rockchip GMAC power-up、RTL8211F 初始化或 DWMAC4 TX tail-pointer 路径的后续修复。
+
+
+## 11. 完整 UART 启动日志复核（2026-11-16 上传）
+
+日志文件：`evidence/uart/panther-tf-6.12.81-uart-20261116.bin`
+- Git blob：`d3b636e500f09a8ea368a4ac907f6a646708f0b7`
+- 解码字节数：166,394
+- 文件包含两段 U-Boot/Linux 启动记录；第一段进入 Armbian 首次登录流程，第二段进入普通 root 登录。均为 `6.12.81-rk35xx-ophub`，不能把它们误当作两个不同内核版本。
+- 两段均识别 Panther X2、TF/eMMC、RTL8211F；`eth0` 成功协商 1Gbps/Full。
+- 首次登录输出明确为 `Network connection timeout!`、`Internet connection was not detected.`
+- UART 文件没有 NetworkManager journal，也没有可直接确认的 DHCP OFFER/ACK 或内核 TX DMA 错误。由于 UART 丢字，不能把某一条未出现的日志视为绝对未执行。
+
+### 11.1 已知 6.1.174 实机网络证据（复用既有测试，不要求重测）
+
+2026-11-12 的既有测试结果：
+- NetworkManager 1.36.6，`eth0` 为 `ipv4.method=auto`，NM 日志进入 DHCPv4 transaction，并记录向 `255.255.255.255` 发送 REQUEST/DISCOVER；没有收到 OFFER/ACK。
+- hEX bridge/全接口抓包多次看见其他客户端 Discover/Offer，但没有看到 Panther MAC `86:9E:3B:3E:72:44` 的报文。
+- `eth0` 为 UP/LOWER_UP，1Gbps/Full；TX 267 packets / 48,560 bytes，TX/RX errors、dropped、carrier 均为 0。
+- ethtool GMAC TX frames=267，broadcast=0；underflow、carrier、flush、fatal DMA、payload error 均为 0。
+
+**含义：** 至少在 6.1.174 上，NetworkManager 已启动 DHCPv4 状态机并尝试发包；故障不能简单归结为“NM 没有启动 DHCP”。但 NM 日志中的 send 记录只证明软件层尝试，hEX 未捕获到报文，且 GMAC broadcast 计数为 0，说明报文是否真正从 MAC/PHY 发出仍是核心疑点。其他客户端 DHCP 正常，既有测试已排除 hEX DHCP 服务整体故障，不应重复。
+
+## 12. 已知正常 6.1.116 基线与精确 TX 路径对照
+
+### 12.1 6.1.116 基线文件现状
+
+已知正常备份来自 Panther X2 原先正常启动的 eMMC Armbian 系统。用户本地备份包含：
+- `vmlinuz-6.1.116-ophub`、`initrd.img`、`uInitrd`
+- `config-6.1.116-ophub`、`System.map`
+- `/lib/modules/6.1.116-ophub`
+- `rk3566-panther-x2.dtb`
+
+6.1.116 DTB SHA256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。当前仓库保存了该 DTB，但尚未保存其 `.config`、System.map 或模块归档。因此目前可以做源代码与 DTB 比对，不能声称已完成 6.1.116 实际内核配置比对。
+
+### 12.2 DWMAC4 普通 TX 描述符格式对照
+
+对照 Linux stable `v6.1.116`、`v6.1.174`、`v6.12.81`：
+- `dwmac4_rd_prepare_tx_desc()`
+- `dwmac4_rd_prepare_tso_tx_desc()`
+- `dwmac4_rd_set_tx_ic()`
+- `dwmac4_set_tx_owner()`
+- `dwmac4_set_addr()`
+- `dwmac4_rd_init_tx_desc()`
+- `dwmac4_release_tx_desc()`
+
+以上函数三版本内容完全一致。普通 DHCPv4 使用的非 TSO 描述符路径没有发现格式变化。
+
+### 12.3 失败版本间的实际发送 doorbell 路径
+
+对照 Ophub RK BSP：
+- 6.1 分支 commit `c2f148dece4b67ebd30aefad1bdd1990f41e5633`
+- 6.12 分支 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+
+以下关键函数内容一致：
+- `stmmac_flush_tx_descriptors()`：先 `wmb()`，再按 `dma_tx_phy + cur_tx * desc_size` 计算 tail pointer。
+- `dwmac4_set_tx_tail_ptr()`：写入 `DMA_CHAN_TX_END_ADDR`。
+- `dwmac4_dma_start_tx()`：设置 DMA channel `ST` 和 MAC `TE`。
+- `dwmac4_dma_init_tx_chan()`、`dwmac4_dma_tx_chan_op_mode()`。
+- `stmmac_xmit()` 与各自上游 stable 版本一致。
+
+DWMAC4 可选 `dwmac4_addrs` 结构为空时，寄存器基址回退仍为 DMA channel base `0x1100`、stride `0x80`，MTL channel base `0x0d00`、stride `0x40`；与 6.1 旧固定宏一致。未发现 Panther 默认寄存器偏移改变。
+
+### 12.4 Rockchip GMAC / RTL8211F 差异边界
+
+- Ophub 6.1 与 6.12 RK BSP 的 `rk_gmac_powerup()` 相同；当前 DTB 的 `phy-mode=rgmii`，TX/RX delay 为 `0x30/0x10`，与 UART 实际日志一致。
+- `rk_fix_speed()` 在 6.12 增加 phylink mode 参数，RGMII speed programming 逻辑未变。
+- `rk_get_eth_addr()` 在两个 Ophub 分支相同；仅在 stmmac 没有有效 MAC 地址时才会回调。6.1.174 既有 MAC `86:9E:3B:3E:72:44` 是合法本地管理单播地址；不能仅凭它是随机地址认定 DHCP 故障原因。
+- Ophub 对 RTL8211F 的差异是额外 LED 配置；当前 UART 已确认 PHY 完成 link negotiation。
+- 6.12.81 UART 没有足够信息判断实际 MAC 来源；缺少该行不作为故障证据。
+
+### 12.5 当前定位
+
+到目前为止，已静态排除或大幅降低以下嫌疑：
+1. NetworkManager/Netplan 未安装、服务未启用、networkd 与 NM 双重管理。
+2. Panther DTS 的 GMAC RGMII / PHY delay 配置与已知正常 6.1.116 DTB 不一致。
+3. DWMAC4 普通 TX 描述符格式发生变化。
+4. DWMAC4 TX tail-pointer 寄存器基址、doorbell 写入函数发生变化。
+5. RTL8211F 未完成链路协商。
+
+仍未解释的核心矛盾是：6.1.174 上 NM 已记录发送 DHCP Discover，但 hEX 没有捕获到 Panther 报文；硬件 TX broadcast 计数为 0，且没有 DMA 错误计数。接下来需要把注意力集中在**实际内核配置、DMA mapping/地址宽度、TX DMA ring 初始化参数及系统启动后的接口运行状态**，而不是重复检查 DHCP server 或物理链路。
+
+**下一项静态比对输入：** 6.1.116 备份中已有的 `config-6.1.116-ophub`。该文件尚未上传到本仓库；拿到它后可与 6.12.81 包内的 config 逐项比较 DMA/IOMMU、STMMAC、PHY、网络栈配置，无需用户重新启动设备或执行测试。
