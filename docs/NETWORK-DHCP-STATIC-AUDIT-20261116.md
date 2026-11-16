@@ -210,3 +210,77 @@ syntax error near unexpected token '('
 - NetworkManager DHCP backend 的默认选择。
 
 在取得这些信息前，不应擅自给 Panther X2 加静态地址、重写 Netplan、改 PHY delay 或重编译 GMAC。
+
+
+## 8. 原始 6.12.81 镜像 rootfs 离线审计（Actions run 43787544512）
+
+已成功下载并只读挂载原始构建 run 43682186779 的 artifact；没有重建镜像或接触设备。审计报告 artifact：`14190734155`（`panther-x2-6.12.81-network-rootfs-audit`）。
+
+### 8.1 实际镜像配置
+
+包版本（从原始 rootfs dpkg 数据库读取）：
+- `netplan-generator`：`1.1.2-8ubuntu1~24.04.3`
+- `netplan.io`：`1.1.2-8ubuntu1~24.04.3`
+- `network-manager`：`1.46.0-1ubuntu2.8`
+- `systemd`：`255.4-1ubuntu8.18`
+
+Netplan 文件只有：
+```yaml
+network:
+  version: 2
+  renderer: NetworkManager
+```
+这符合 Armbian 的全设备 NetworkManager 自动 DHCP 设计，并非缺少 DHCP 配置的证据。
+
+NetworkManager 主配置：
+```ini
+[main]
+plugins=ifupdown,keyfile
+
+[ifupdown]
+managed=false
+
+[device]
+wifi.scan-rand-mac-address=no
+```
+镜像中没有发现 `/etc/network/interfaces` 静态接口配置；`managed=false` 因而没有已知的 eth0 stanza 可排除。没有发现 `/etc/systemd/network` 中的 networkd 配置文件；`systemd-networkd.service` 为 disabled，传统 `networking.service` 不存在。NetworkManager.service 为 enabled。
+
+udev 的 `85-nm-unmanaged.rules` 是发行版默认规则，仅排除 VirtualBox/VMware、非 eth 名称的 veth、USB gadget 等特殊设备；没有匹配 Panther X2 的普通 `eth0`。
+
+### 8.2 发现的全局 unmanaged 规则及其 Netplan 机制
+
+镜像包含 Ubuntu 的：
+`/usr/lib/NetworkManager/conf.d/10-globally-managed-devices.conf`
+内容：
+```ini
+[keyfile]
+unmanaged-devices=*,except:type:wifi,except:type:gsm,except:type:cdma
+```
+
+单独看这条规则确实会把普通 Ethernet 排除在 NetworkManager 管理之外。但**不能据此判定它是故障根因**：Netplan 在使用全局 `renderer: NetworkManager` 时，会于早期启动生成一个空的：
+`/run/NetworkManager/conf.d/10-globally-managed-devices.conf`
+用来禁用上述 Ubuntu 默认限制。Netplan 的上游源码注释明确说明此目的。Ubuntu Noble manpage 也确认 Netplan renderer 在 early boot 读取 YAML 并向 `/run` 写入后端配置。
+
+原始 rootfs 已确认安装 `netplan-generator`，且存在 systemd generator 入口：
+`/usr/lib/systemd/system-generators/netplan -> ../../../libexec/netplan/generate`
+NetworkManager 服务也已启用。
+
+**尚未从离线 rootfs 直接证明**该 symlink 的目标文件存在且可执行、systemd 启动时确实执行了 generator，以及运行时空 override 成功生成。因此目前将此处标记为“有条件正常、待验证”，不是直接定罪。最新审计工作流进一步检查 generator 目标文件和 `/etc`/`/run` 的 mask override。
+
+### 8.3 本轮排除项与剩余重点
+
+目前静态审计没有发现：
+- NetworkManager 服务未启用；
+- systemd-networkd 与 NetworkManager 同时管理 eth0；
+- ifupdown 的 eth0 配置与 NM 冲突；
+- udev 规则明确把 Panther 的 eth0 标记 unmanaged；
+- Netplan YAML renderer 指向错误后端。
+
+剩余首要问题变为：
+1. Netplan systemd generator 目标文件是否存在/可执行、启动时是否成功执行，是否生成 `/run/NetworkManager/conf.d/10-globally-managed-devices.conf` 空 override。
+2. 若 Netplan/NM 运行时管理状态正常，则从 DHCPv4 客户端状态机与 stmmac TX 统计/描述符发送路径继续静态比对。历史 hEX 抓包未见 Panther DHCP 报文，优先定位 DHCP Discover 是否产生以及是否进入 GMAC TX，而不是再重复检查 DHCP server。
+3. 继续精确寻找已知工作的 6.1.116 对应源码/配置快照；目前 6.1 `main` 对照不能替代精确版本比对。
+
+本节依据的上游说明：
+- Netplan Noble manpage：early boot renderer 读取 YAML 并写入 `/run` 后端配置。
+- Netplan 上游 `src/configure.c`：全局使用 NetworkManager renderer 时写入空的 `/run/NetworkManager/conf.d/10-globally-managed-devices.conf`，以禁用 Ubuntu 限制 Ethernet 的默认规则。
