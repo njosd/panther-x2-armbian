@@ -108,12 +108,12 @@ jobs:
 
             echo "===== NETPLAN EARLY-BOOT GENERATOR ====="
             sudo dpkg-query --admindir="$root/var/lib/dpkg" -W -f='${binary:Package} ${Version} ${db:Status-Abbrev}\n' netplan.io netplan-generator network-manager systemd 2>&1 || true
-            for d in "$root/usr/lib/systemd/system-generators" "$root/lib/systemd/system-generators" "$root/usr/lib/netplan" "$root/usr/share/netplan"; do
+            for d in "$root/etc/systemd/system-generators" "$root/run/systemd/system-generators" "$root/usr/lib/systemd/system-generators" "$root/lib/systemd/system-generators" "$root/usr/libexec/netplan" "$root/usr/lib/netplan" "$root/usr/share/netplan"; do
               [ -d "$d" ] || continue
               echo "--- ${d#$root} ---"
               find "$d" -maxdepth 2 \( -type f -o -type l \) -printf '%y %p -> %l\n' 2>/dev/null | sort
             done
-            for f in "$root/usr/lib/systemd/system-generators/"*netplan* "$root/lib/systemd/system-generators/"*netplan* "$root/usr/lib/systemd/system/"*netplan* "$root/lib/systemd/system/"*netplan*; do
+            for f in "$root/etc/systemd/system-generators/"*netplan* "$root/run/systemd/system-generators/"*netplan* "$root/usr/lib/systemd/system-generators/"*netplan* "$root/lib/systemd/system-generators/"*netplan* "$root/usr/lib/systemd/system/"*netplan* "$root/lib/systemd/system/"*netplan* "$root/usr/libexec/netplan/generate"; do
               [ -e "$f" ] || [ -L "$f" ] || continue
               echo "--- ${f#$root} ---"
               ls -l "$f"
