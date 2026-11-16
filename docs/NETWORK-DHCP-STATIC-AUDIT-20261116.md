@@ -382,7 +382,7 @@ v6.12.81 到 v6.12.117 的上述对照没有发现 Rockchip GMAC power-up、RTL8
 - `/lib/modules/6.1.116-ophub`
 - `rk3566-panther-x2.dtb`
 
-6.1.116 DTB SHA256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。当前仓库保存了该 DTB，但尚未保存其 `.config`、System.map 或模块归档。因此目前可以做源代码与 DTB 比对，不能声称已完成 6.1.116 实际内核配置比对。
+6.1.116 DTB SHA256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。当前仓库保存了该 DTB，但尚未保存其 `.config`、System.map 或模块归档。因此现在已补齐 6.1.116 实际内核配置，可与 6.12.81 的 config-6.12 进行逐项对照。
 
 ### 12.2 DWMAC4 普通 TX 描述符格式对照
 
@@ -431,14 +431,14 @@ DWMAC4 可选 `dwmac4_addrs` 结构为空时，寄存器基址回退仍为 DMA c
 
 仍未解释的核心矛盾是：6.1.174 上 NM 已记录发送 DHCP Discover，但 hEX 没有捕获到 Panther 报文；硬件 TX broadcast 计数为 0，且没有 DMA 错误计数。接下来需要把注意力集中在**实际内核配置、DMA mapping/地址宽度、TX DMA ring 初始化参数及系统启动后的接口运行状态**，而不是重复检查 DHCP server 或物理链路。
 
-**下一项静态比对输入：** 6.1.116 备份中已有的 `config-6.1.116-ophub`。该文件尚未上传到本仓库；拿到它后可与 6.12.81 包内的 config 逐项比较 DMA/IOMMU、STMMAC、PHY、网络栈配置，无需用户重新启动设备或执行测试。
+**本项已完成：** 6.1.116 实际 config 已上传并完成与 6.12.81 config-6.12 的 DMA/IOMMU、STMMAC、DWMAC、PHY 关键选项比较。文件规范位置为 `evidence/kernel-config/config-6.1.116-ophub`。
 
 
 ## 13. 证据质量更正
 
 本报告第 11.1 节已根据历史对话记录校正 6.1.174 证据边界。旧稿误把未检索到来源的 NetworkManager DHCP 日志、hEX 抓包、TX 统计和 ethtool 计数写成已验证事实，现全部撤回。后续分析不得再引用这些旧断言。
 
-唯一明确的已知正常内核基线是原 eMMC 上的 `6.1.116-ophub`；备份目录为用户 iMac 的 `~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/`，其中已存在 `boot-6.1.116-ophub.tar.gz`、`modules-6.1.116-ophub.tar.gz`、`dtb-rockchip-6.1.116-ophub.tar.gz`，且归档完整性此前已验证。当前仓库仅有 6.1.116 DTB，没有内核 config 文件。
+唯一明确的已知正常内核基线是原 eMMC 上的 `6.1.116-ophub`；备份目录为用户 iMac 的 `~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/`，其中已存在 `boot-6.1.116-ophub.tar.gz`、`modules-6.1.116-ophub.tar.gz`、`dtb-rockchip-6.1.116-ophub.tar.gz`，且归档完整性此前已验证。当前仓库已保存 6.1.116 DTB 与实际内核 config 文件。
 
 
 ## 14. 6.12.81 实际 RK35xx 内核配置基线已提取
@@ -463,11 +463,82 @@ DWMAC4 可选 `dwmac4_addrs` 结构为空时，寄存器基址回退仍为 DMA c
 - `CONFIG_SWIOTLB=y`
 - `CONFIG_DMA_API_DEBUG` 未启用
 
-这些选项证明 6.12.81 目标配置包含 Panther GMAC/RTL8211F 所需驱动，并使用 IOMMU DMA 与 SWIOTLB 支持；但它们本身不能证明当前硬件运行时 DMA 映射正确，也不能与 6.1.116 作结论性比较，因为 6.1.116 实际 config 尚未进入仓库。
+这些选项证明 6.12.81 目标配置包含 Panther GMAC/RTL8211F 所需驱动，并使用 IOMMU DMA 与 SWIOTLB 支持。现已取得 6.1.116 的实际 config，完成直接对照；比较结果见第 15 节。
 
-### 下一项唯一需要的静态输入
 
-原 eMMC 已知正常的 6.1.116 备份归档位于 iMac：
-`~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/boot-6.1.116-ophub.tar.gz`
+## 15. 已知正常 6.1.116 与 6.12.81 实际内核配置对照（2026-11-16）
 
-归档已知包含 `config-6.1.116-ophub`。只需将这个 config 文件上传到本仓库的诊断分支（建议 `evidence/kernel-config/config-6.1.116-ophub`），即可进行实际配置差异比较；不需要重启 Panther、不需要重跑 DHCP 测试，也不需要上传整个 modules 归档。
+### 15.1 文件来源与校验
+
+6.1.116 配置文件来自用户原 eMMC 已知正常系统的备份归档，文件头标识：
+`Linux/arm64 6.1.116 Kernel Configuration`。
+
+原始上传误创建了一个同名分支 `evidence/kernel-config/config-6.1.116-ophub`，并将文件放在该分支的 `evidence/config-6.1.116-ophub`。现已将文件归位到本诊断分支：
+`evidence/kernel-config/config-6.1.116-ophub`。
+
+文件大小 238,975 字节，Git blob SHA：
+`c5e4598301c3ef3675be0058b99b9b6044a14bbf`。
+
+6.12 对照文件仍为 Ophub kernel 固定 ref `c23196e10d7702ee2906de4a05421d8971fb2717` 下的 `kernel-config/release/rk35xx/config-6.12`，blob SHA `dee127c6c644f38426eeb28000d73536084d34a3`。
+
+### 15.2 网卡驱动与 PHY 配置
+
+以下关键选项两版本均启用（`=y`）：
+- `CONFIG_STMMAC_ETH`
+- `CONFIG_STMMAC_PLATFORM`
+- `CONFIG_DWMAC_ROCKCHIP`
+- `CONFIG_PHYLINK`
+- `CONFIG_PHYLIB`
+- `CONFIG_REALTEK_PHY`
+- `CONFIG_OF_MDIO`
+- `CONFIG_MDIO_BUS`
+- `CONFIG_NETDEVICES`
+- `CONFIG_NET_CORE`
+- `CONFIG_NET_VENDOR_STMICRO`
+
+这进一步排除了 6.12.81 因核心 STMMAC、Rockchip GMAC、PHYLINK 或 RTL8211F PHY 支持未编入内核而无法工作的解释。
+
+### 15.3 DMA 地址宽度、IOMMU 与 SWIOTLB
+
+两版本一致：
+- `CONFIG_ARCH_DMA_ADDR_T_64BIT=y`
+- `CONFIG_ARM64_PA_BITS=48`、`CONFIG_ARM64_PA_BITS_48=y`
+- `CONFIG_PHYS_ADDR_T_64BIT=y`
+- `CONFIG_IOMMU_SUPPORT=y`
+- `CONFIG_IOMMU_API=y`
+- `CONFIG_IOMMU_DMA=y`
+- `CONFIG_IOMMU_DEFAULT_DMA_STRICT=y`
+- `CONFIG_OF_IOMMU=y`
+- `CONFIG_ROCKCHIP_IOMMU=y`
+- `CONFIG_SWIOTLB=y`
+- `CONFIG_DMA_CMA=y`
+- `CONFIG_DMA_COHERENT_POOL=y`
+- `CONFIG_DMA_DIRECT_REMAP=y`
+- `CONFIG_DMA_API_DEBUG` 均未启用。
+
+**关键修正：** 之前只看到 6.1.116 的 `CONFIG_ARM64_VA_BITS=39` 与 6.12 的 48 位不同，容易把它误读成 DMA 地址宽度差异。实际配置显示两版本物理地址宽度均为 48 位，DMA 地址类型均为 64 位；VA 39/48 是虚拟地址空间差异，不能直接推导出 GMAC DMA 地址截断。
+
+### 15.4 真实差异及其解释边界
+
+- `CONFIG_ARM64_VA_BITS`：6.1.116 为 39，6.12 为 48。这是最明确的架构配置差异，但不等同于 DMA 地址宽度变化。
+- `CONFIG_DMA_OPS=y`（6.1.116）与 `CONFIG_DMA_OPS_HELPERS=y`（6.12）是内核 DMA 框架随版本演进的符号变化；不应按符号名称不同就认定 DMA 功能缺失。
+- `CONFIG_DWMAC_DWC_QOS_ETH=y) 仅在 6.1.116 启用；两版本 Panther 实际使用的 `CONFIG_DWMAC_ROCKCHIP=y) 都启用。该额外 QOS 驱动选项不能证明 Panther GMAC 路径受其控制。
+- `CONFIG_STMMAC_ETHTOOL`、`CONFIG_STMMAC_FULL` 在 6.12 启用，6.1.116 config 未出现；属于 STMMAC 功能/工具选项差异，不代表基础 MAC DMA 发送能力缺失。
+- 6.12 增加 `CONFIG_DMA_NEED_SYNC=y` 与 `CONFIG_DMA_BOUNCE_UNALIGNED_KMALLOC=y`；6.1.116 配置中没有对应符号。其存在是 DMA API 行为/平台能力差异的线索，但单凭配置无法判断 GMAC TX ring 或 skb DMA mapping 实际是否走到相关分支。
+- IOMMU strict 模式、Rockchip IOMMU、IOMMU DMA 与 SWIOTLB 两版本均启用；配置层面没有发现 6.12 独有的 IOMMU/SWIOTLB 缺失。
+
+### 15.5 本轮结论
+
+**已验证：**
+1. 6.1.116 实际内核 config 已取得并与 6.12.81 的目标 config 逐项比较。
+2. Panther 所需的 STMMAC/Rockchip GMAC/PHY/MDIO 驱动选项两版本一致启用。
+3. 两版本物理地址宽度均为 48 位，DMA 地址类型均为 64 位；39/48 位差异是 VA_BITS。
+4. 两版本均启用 IOMMU DMA、Rockchip IOMMU、strict DMA mode 和 SWIOTLB。
+
+**未验证：**
+1. 运行时 GMAC 设备实际 DMA mask/coherent mask。
+2. Panther GMAC 的 IOMMU domain 是否成功附着、映射是否成功。
+3. TX descriptor ring 的实际 DMA 地址、DMA mapping 错误、tail pointer 与 DMA channel 状态。
+4. DHCP Discover 是否由 NetworkManager 生成并成功进入 stmmac TX ring。
+
+**当前判断：** 内核配置层面没有找到能直接解释 6.12.81 DHCP 故障的缺失项。下一步不再泛泛追查“DMA 地址宽度”，而应聚焦 6.12.81 与已知正常 6.1.116 的运行时 DMA/IOMMU 接入、GMAC TX ring 初始化和发送完成路径差异。暂不建议改内核配置、PHY delay 或盲目 cherry-pick 补丁。
