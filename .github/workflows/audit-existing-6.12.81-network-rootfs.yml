@@ -27,7 +27,7 @@ jobs:
         with:
           name: panther-x2-minimal-6.12.81-noble
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
+          run-id: ${{ inputs.source_run_id || '43682186779' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: source-artifact
 
@@ -51,7 +51,7 @@ jobs:
 
           {
             echo "Panther X2 6.12.81 Noble rootfs network static audit"
-            echo "Source workflow run: ${{ inputs.source_run_id }}"
+            echo "Source workflow run: ${{ inputs.source_run_id || '43682186779' }}"
             echo "Image artifact: $image_gz"
             echo
             echo "===== PACKAGE VERSIONS ====="
