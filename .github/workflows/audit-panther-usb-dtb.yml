@@ -40,8 +40,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git -C kernel apply --check patches/panther-x2-usb2-host-phy.patch
-          git -C kernel apply patches/panther-x2-usb2-host-phy.patch
+          git -C kernel apply --check ../patches/panther-x2-usb2-host-phy.patch
+          git -C kernel apply ../patches/panther-x2-usb2-host-phy.patch
           dts=kernel/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
           test "$(grep -c 'phys = <&u2phy0_host>;' "$dts")" -eq 2
           test "$(grep -c '<&usb2phy0>;' "$dts")" -eq 2
