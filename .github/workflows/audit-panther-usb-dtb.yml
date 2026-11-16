@@ -101,10 +101,10 @@ jobs:
           lines = ["Merged DTB USB topology audit", "This report describes the built DTB, not physical PCB routing.", ""]
           for name in names:
               lines.append(f"===== {name} =====")
-              candidates = [b for b in re.findall(r"(?ms)^\\s*[^\\n{]+\\s*\\{.*?^\\s*\\};", src) if name in b]
+              candidates = [b for b in re.findall(r"(?ms)^\s*[^\n{]+\s*\{.*?^\s*\};", src) if name in b]
               lines.extend(candidates[:2] or ["No textual label/reference found in decompiled DTB."])
               lines.append("")
-          out.write_text("\\n".join(lines))
+          out.write_text("\n".join(lines))
           print(out.read_text())
           PY
           grep -n -E -B5 -A18 'usbdrd|usbhost|usb_host0|usb_host1|usb2phy0|usb2phy1|u2phy0|u2phy1' audit/rk3566-panther-x2.merged.dts > audit/usb-topology-excerpts.txt || true
