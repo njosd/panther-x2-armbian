@@ -144,7 +144,7 @@ jobs:
               dest.write_bytes(data)
               image_type = props.get("type", b"").rstrip(bytes([0])).decode(errors="replace")
               lines.append(f"{name}: type={image_type} offset=0x{offset:x} size={size} sha256={actual} VERIFIED")
-          if not (out / "uboot.bin").is_file() or not (out / "fdt.bin").is_file():
+          if not (out / "u-boot-proper.bin").is_file() or not (out / "fdt.bin").is_file():
               raise SystemExit("Required U-Boot proper or FDT payload not found")
           (report / "verified-payloads.txt").write_text(chr(10).join(lines) + chr(10))
           print(chr(10).join(lines))
@@ -158,9 +158,9 @@ jobs:
 
           {
             echo "U-Boot proper SHA-256:"
-            sha256sum audit/extracted/uboot.bin
+            sha256sum audit/extracted/u-boot-proper.bin
             echo "U-Boot proper size:"
-            stat -c '%s bytes' audit/extracted/uboot.bin
+            stat -c '%s bytes' audit/extracted/u-boot-proper.bin
           } | tee audit/report/proper-extraction.txt
 
       - name: Disassemble U-Boot proper and index relevant strings
