@@ -1,4 +1,4 @@
-name: Audit Panther X2 USB device tree (Ophub 6.12.81)
+name: Audit Panther X2 USB device tree (Ophub 6.12.81, patched)
 
 on:
   workflow_dispatch:
@@ -36,6 +36,28 @@ jobs:
             echo "DTS source: arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
           } | tee source-revision.txt
 
+      - name: Apply the isolated Panther X2 USB2 Host PHY fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C kernel apply --check patches/panther-x2-usb2-host-phy.patch
+          git -C kernel apply patches/panther-x2-usb2-host-phy.patch
+          dts=kernel/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
+          test "$(grep -c 'phys = <&u2phy0_host>;' "$dts")" -eq 2
+          test "$(grep -c '<&usb2phy0>;' "$dts")" -eq 2
+          if grep -A8 -E '^&usb_host0_(ehci|ohci) \{' "$dts" | grep -q 'usb2phy1'; then
+            echo "::error::USB Host still references PHY1"
+            exit 1
+          fi
+          echo "USB2 Host DTS patch applied and source-level checks passed."
+
+      - name: Build the merged Panther X2 DTB
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd kernel
+          make ARCH=arm64 defconfig
+
       - name: Build the merged Panther X2 DTB
         shell: bash
         run: |
@@ -48,6 +70,25 @@ jobs:
           cp arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dtb ../audit/
           sha256sum ../audit/rk3566-panther-x2.dtb > ../audit/dtb-sha256.txt
           dtc -I dtb -O dts -o ../audit/rk3566-panther-x2.merged.dts ../audit/rk3566-panther-x2.dtb 2> ../audit/dtc-warnings.txt
+
+      - name: Verify merged USB Host references
+        shell: bash
+        run: |
+          set -euo pipefail
+          dts=audit/rk3566-panther-x2.merged.dts
+          for node in fd800000 fd840000; do
+            awk -v node="$node" '
+              $0 ~ node "\.usb" { in_node=1 }
+              in_node { print }
+              in_node && /^\t};/ { exit }
+            ' "$dts"
+          done
+          grep -q 'usb2phy0' "$dts"
+          grep -q 'u2phy0_host' "$dts"
+          if grep -A20 -E 'usb@fd800000|usb@fd840000' "$dts" | grep -q 'usb2phy1'; then
+            echo "::error::Merged DTB still references USB PHY1"
+            exit 1
+          fi
 
       - name: Extract final USB topology and dependencies
         shell: bash
@@ -64,57 +105,22 @@ jobs:
               "usb2phy0", "u2phy0_host", "u2phy0_otg",
               "usb2phy1", "u2phy1_host", "u2phy1_otg",
           ]
-          labels = {}
-          # dtc emits label comments in many builds; also retain node path/address matches.
-          for name in names:
-              hits = []
-              for m in re.finditer(r"(?m)^\s*([^\n{]+)\s*\{", src):
-                  start = m.start()
-                  depth = 0
-                  end = None
-                  for i in range(m.end()-1, len(src)):
-                      if src[i] == "{": depth += 1
-                      elif src[i] == "}":
-                          depth -= 1
-                          if depth == 0:
-                              end = i + 1
-                              break
-                  if end is None: continue
-                  block = src[start:end]
-                  if name in block[:240] or name in block:
-                      if re.search(r"(?m)^\s*(?:label\s*=\s*\""+re.escape(name)+r"\"|"+re.escape(name)+r"\s*:)", block) or name in block[:240]:
-                          hits.append(block)
-              if hits:
-                  labels[name] = hits[:3]
-          lines = [
-              "Merged DTB USB topology audit",
-              "This report describes the built DTB, not physical PCB routing.",
-              "",
-          ]
+          lines = ["Merged DTB USB topology audit", "This report describes the built DTB, not physical PCB routing.", ""]
           for name in names:
               lines.append(f"===== {name} =====")
-              # Match common node addresses/names when dtc has removed source labels.
-              candidates = []
-              for block in re.findall(r"(?ms)^\s*[^\n{]+\s*\{.*?^\s*\};", src):
-                  if name in block:
-                      candidates.append(block)
-              if candidates:
-                  lines.extend(candidates[:2])
-              else:
-                  lines.append("No textual label/reference found in decompiled DTB.")
+              candidates = [b for b in re.findall(r"(?ms)^\\s*[^\\n{]+\\s*\\{.*?^\\s*\\};", src) if name in b]
+              lines.extend(candidates[:2] or ["No textual label/reference found in decompiled DTB."])
               lines.append("")
-          out.write_text("\n".join(lines))
+          out.write_text("\\n".join(lines))
           print(out.read_text())
           PY
-
-          # Keep concise, line-numbered excerpts for quick review.
           grep -n -E -B5 -A18 'usbdrd|usbhost|usb_host0|usb_host1|usb2phy0|usb2phy1|u2phy0|u2phy1' audit/rk3566-panther-x2.merged.dts > audit/usb-topology-excerpts.txt || true
 
       - name: Upload merged DTB and audit reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: panther-x2-6.12.81-merged-usb-dtb-audit
+          name: panther-x2-6.12.81-patched-usb-dtb-audit
           path: |
             source-revision.txt
             audit/rk3566-panther-x2.dtb
