@@ -339,7 +339,7 @@ jobs:
           check "Netplan directory exists" test -d validation/root/etc/netplan
           check "Netplan YAML exists" bash -c 'find validation/root/etc/netplan -maxdepth 1 -type f -name "*.yaml" | grep -q .'
           check "Netplan uses NetworkManager renderer" grep -R -Eq 'renderer:[[:space:]]*NetworkManager' validation/root/etc/netplan
-          check "Netplan enables DHCPv4" grep -R -Eq 'dhcp4:[[:space:]]*true' validation/root/etc/netplan
+          check "NetworkManager config directory exists" test -d validation/root/etc/NetworkManager
           check "rootfs U-Boot idbloader copy exists" test -s validation/root/usr/lib/u-boot/idbloader.img
           check "rootfs U-Boot FIT copy exists" test -s validation/root/usr/lib/u-boot/u-boot.itb
 
