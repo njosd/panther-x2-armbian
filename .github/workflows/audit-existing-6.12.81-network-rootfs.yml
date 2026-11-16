@@ -1,6 +1,11 @@
 name: Audit existing Panther X2 6.12.81 network rootfs
 
 on:
+  push:
+    branches:
+      - diagnostic/6.12.81-uart-rootfs
+    paths:
+      - .github/workflows/audit-existing-6.12.81-network-rootfs.yml
   workflow_dispatch:
     inputs:
       source_run_id:
