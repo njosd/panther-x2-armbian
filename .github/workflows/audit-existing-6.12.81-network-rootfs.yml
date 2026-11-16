@@ -55,7 +55,7 @@ jobs:
             echo "Image artifact: $image_gz"
             echo
             echo "===== PACKAGE VERSIONS ====="
-            awk '
+            sudo awk '
               BEGIN { RS=""; FS="\n" }
               /^Package: (network-manager|netplan.io|systemd|ifupdown|cloud-init)$/ {
                 for (i=1;i<=NF;i++) if ($i ~ /^(Package|Version|Status):/) print $i
@@ -68,7 +68,7 @@ jobs:
             for f in "$root"/etc/netplan/*.yaml "$root"/etc/netplan/*.yml; do
               [ -f "$f" ] || continue
               echo "--- ${f#$root} ---"
-              sed -n '1,240p' "$f"
+              sudo sed -n '1,240p' "$f"
             done
 
             echo "===== NETWORKMANAGER CONFIG ====="
@@ -80,13 +80,13 @@ jobs:
                   */system-connections/*) continue ;;
                 esac
                 echo "--- ${f#$root} ---"
-                sed -n '1,240p' "$f"
+                sudo sed -n '1,240p' "$f"
               done < <(find "$d" -maxdepth 3 -type f ! -path '*/system-connections/*' -print | sort)
             done
 
             echo "===== NETWORKMANAGER STATE ====="
             for f in "$root/var/lib/NetworkManager/no-auto-default.state" "$root/var/lib/NetworkManager/NetworkManager.state"; do
-              if [ -f "$f" ]; then echo "--- ${f#$root} ---"; cat "$f"; fi
+              if [ -f "$f" ]; then echo "--- ${f#$root} ---"; sudo cat "$f"; fi
             done
 
             echo "===== IFUPDOWN / NETWORKD / CLOUD INIT ====="
@@ -95,7 +95,7 @@ jobs:
               find "$d" -maxdepth 3 -type f -print | sort
               while IFS= read -r f; do
                 echo "--- ${f#$root} ---"
-                sed -n '1,200p' "$f"
+                sudo sed -n '1,200p' "$f"
               done < <(find "$d" -maxdepth 3 -type f -print | sort)
             done
 
@@ -103,13 +103,13 @@ jobs:
             for f in "$root/usr/lib/udev/rules.d/85-nm-unmanaged.rules" "$root/etc/udev/rules.d/"*; do
               [ -f "$f" ] || continue
               echo "--- ${f#$root} ---"
-              sed -n '1,200p' "$f"
+              sudo sed -n '1,200p' "$f"
             done
 
             echo "===== SERVICE ENABLEMENT ====="
             for unit in NetworkManager.service systemd-networkd.service networking.service; do
               echo "--- $unit ---"
-              systemctl --root="$root" is-enabled "$unit" 2>&1 || true
+              sudo systemctl --root="$root" is-enabled "$unit" 2>&1 || true
             done
             echo "===== SYSTEMD NETWORK UNIT LINKS ====="
             find "$root/etc/systemd/system" -maxdepth 5 \( -iname '*network*manager*' -o -iname '*networkd*' -o -iname 'networking.service' \) -printf '%y %p -> %l\n' 2>/dev/null | sort || true
