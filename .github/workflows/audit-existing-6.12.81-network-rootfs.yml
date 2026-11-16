@@ -1,0 +1,123 @@
+name: Audit existing Panther X2 6.12.81 network rootfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Existing image build run ID
+        required: true
+        default: "43682186779"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download existing image artifact (no rebuild)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: panther-x2-minimal-6.12.81-noble
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source-artifact
+
+      - name: Mount image read-only and inspect network configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_gz=$(find source-artifact -type f -name '*.img.gz' -print -quit)
+          test -n "$image_gz"
+          mkdir -p audit/root
+          gzip -dc "$image_gz" > audit/panther-x2-6.12.81.img
+          loop=$(sudo losetup --find --show --partscan audit/panther-x2-6.12.81.img)
+          cleanup() {
+            sudo umount audit/root 2>/dev/null || true
+            sudo losetup -d "$loop" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo mount -o ro,noload "${loop}p2" audit/root
+          root="$PWD/audit/root"
+          report="$PWD/audit/NETWORK-ROOTFS-REPORT.txt"
+
+          {
+            echo "Panther X2 6.12.81 Noble rootfs network static audit"
+            echo "Source workflow run: ${{ inputs.source_run_id }}"
+            echo "Image artifact: $image_gz"
+            echo
+            echo "===== PACKAGE VERSIONS ====="
+            awk '
+              BEGIN { RS=""; FS="\n" }
+              /^Package: (network-manager|netplan.io|systemd|ifupdown|cloud-init)$/ {
+                for (i=1;i<=NF;i++) if ($i ~ /^(Package|Version|Status):/) print $i
+                print ""
+              }
+            ' "$root/var/lib/dpkg/status" || true
+
+            echo "===== NETPLAN ====="
+            find "$root/etc/netplan" -maxdepth 2 -type f -print 2>/dev/null | sort || true
+            for f in "$root"/etc/netplan/*.yaml "$root"/etc/netplan/*.yml; do
+              [ -f "$f" ] || continue
+              echo "--- ${f#$root} ---"
+              sed -n '1,240p' "$f"
+            done
+
+            echo "===== NETWORKMANAGER CONFIG ====="
+            for d in "$root/etc/NetworkManager" "$root/usr/lib/NetworkManager/conf.d" "$root/lib/NetworkManager/conf.d"; do
+              [ -d "$d" ] || continue
+              find "$d" -maxdepth 3 -type f -print | sort
+              while IFS= read -r f; do
+                case "$f" in
+                  */system-connections/*) continue ;;
+                esac
+                echo "--- ${f#$root} ---"
+                sed -n '1,240p' "$f"
+              done < <(find "$d" -maxdepth 3 -type f ! -path '*/system-connections/*' -print | sort)
+            done
+
+            echo "===== NETWORKMANAGER STATE ====="
+            for f in "$root/var/lib/NetworkManager/no-auto-default.state" "$root/var/lib/NetworkManager/NetworkManager.state"; do
+              if [ -f "$f" ]; then echo "--- ${f#$root} ---"; cat "$f"; fi
+            done
+
+            echo "===== IFUPDOWN / NETWORKD / CLOUD INIT ====="
+            for d in "$root/etc/network" "$root/etc/systemd/network" "$root/etc/cloud/cloud.cfg.d"; do
+              [ -d "$d" ] || continue
+              find "$d" -maxdepth 3 -type f -print | sort
+              while IFS= read -r f; do
+                echo "--- ${f#$root} ---"
+                sed -n '1,200p' "$f"
+              done < <(find "$d" -maxdepth 3 -type f -print | sort)
+            done
+
+            echo "===== UDEV NETWORK RULES ====="
+            for f in "$root/usr/lib/udev/rules.d/85-nm-unmanaged.rules" "$root/etc/udev/rules.d/"*; do
+              [ -f "$f" ] || continue
+              echo "--- ${f#$root} ---"
+              sed -n '1,200p' "$f"
+            done
+
+            echo "===== SERVICE ENABLEMENT ====="
+            for unit in NetworkManager.service systemd-networkd.service networking.service; do
+              echo "--- $unit ---"
+              systemctl --root="$root" is-enabled "$unit" 2>&1 || true
+            done
+            echo "===== SYSTEMD NETWORK UNIT LINKS ====="
+            find "$root/etc/systemd/system" -maxdepth 5 \( -iname '*network*manager*' -o -iname '*networkd*' -o -iname 'networking.service' \) -printf '%y %p -> %l\n' 2>/dev/null | sort || true
+          } > "$report"
+
+          sudo umount audit/root
+          sudo losetup -d "$loop"
+          trap - EXIT
+          cat "$report"
+
+      - name: Upload compact static audit report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: panther-x2-6.12.81-network-rootfs-audit
+          path: audit/NETWORK-ROOTFS-REPORT.txt
+          retention-days: 14
