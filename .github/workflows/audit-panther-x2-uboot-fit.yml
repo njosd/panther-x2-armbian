@@ -63,51 +63,105 @@ jobs:
             strings -a -t x "$fit" | grep -Ei 'vendor_storage|LAN_MAC|ethaddr|eth1addr|rockchip_set_ethaddr|MAC addresses|local-mac-address|gmac|ethernet|fdt' || true
           } 2>&1 | tee audit/report/fit-inspection.txt
 
-          proper_count=0
-          fdt_count=0
-          for index in $(seq 0 31); do
-            candidate="audit/extracted/image-${index}.bin"
-            extracted_type=""
-            if dumpimage -T standalone -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
-              extracted_type="standalone"
-            elif dumpimage -T flat_dt -p "$index" -o "$candidate" "$fit" >/dev/null 2>&1; then
-              extracted_type="flat_dt"
-            else
-              rm -f "$candidate"
-              continue
-            fi
+          python3 - <<'PY'
+          import hashlib, struct
+          from pathlib import Path
 
-            magic=$(od -An -tx1 -N4 "$candidate" | tr -d ' \n')
-            bytes=$(stat -c '%s' "$candidate")
-            if [ "$extracted_type" = "flat_dt" ] && [ "$magic" = "d00dfeed" ]; then
-              fdt_count=$((fdt_count + 1))
-              dtb="audit/extracted/fdt-${index}.dtb"
-              dts="audit/extracted/fdt-${index}.dts"
-              mv "$candidate" "$dtb"
-              dtc -I dtb -O dts -o "$dts" "$dtb" 2>"audit/extracted/fdt-${index}-dtc-warnings.txt"
-              {
-                echo "===== FIT FDT index $index ($bytes bytes) ====="
-                echo "DTB: $dtb"
-                echo "DTS: $dts"
-                grep -Ein -C 3 'model|compatible|ethernet|gmac|mac-address|local-mac-address|aliases' "$dts" || true
-              } >> audit/report/fdt-details.txt
-            elif [ "$extracted_type" = "standalone" ] && [ "$bytes" = "1208600" ]; then
-              proper_count=$((proper_count + 1))
-              mv "$candidate" audit/extracted/u-boot-proper.bin
-              echo "U-Boot proper payload index=$index size=$bytes" | tee audit/report/proper-extraction.txt
-            else
-              echo "FIT payload index=$index type=$extracted_type size=$bytes magic=$magic" >> audit/report/other-payloads.txt
-              mv "$candidate" "audit/extracted/payload-${index}.bin"
-            fi
-          done
+          src = Path("audit/input/panther-x2-u-boot.itb")
+          out = Path("audit/extracted")
+          report = Path("audit/report")
+          blob = src.read_bytes()
+          fields = struct.unpack(">10I", blob[:40])
+          magic, total, off_struct, off_strings, _off_mem, _ver, _last, _boot, size_strings, size_struct = fields
+          if magic != 0xd00dfeed or total > len(blob):
+              raise SystemExit("Invalid FIT/FDT header")
+
+          strings = blob[off_strings:off_strings + size_strings]
+          def string_at(offset):
+              end = strings.find(b"\\0", offset)
+              if end < 0:
+                  raise ValueError("Invalid FDT string-table offset")
+              return strings[offset:end].decode()
+
+          nodes = {}
+          stack = []
+          pos = off_struct
+          struct_end = off_struct + size_struct
+          while pos < struct_end:
+              token = struct.unpack_from(">I", blob, pos)[0]
+              pos += 4
+              if token == 1:  # FDT_BEGIN_NODE
+                  end = blob.find(b"\\0", pos)
+                  if end < 0:
+                      raise ValueError("Unterminated FDT node name")
+                  stack.append(blob[pos:end].decode())
+                  pos = (end + 4) & ~3
+              elif token == 2:  # FDT_END_NODE
+                  if not stack:
+                      raise ValueError("Unbalanced FDT_END_NODE")
+                  stack.pop()
+              elif token == 3:  # FDT_PROP
+                  length, nameoff = struct.unpack_from(">II", blob, pos)
+                  pos += 8
+                  name = string_at(nameoff)
+                  value = blob[pos:pos + length]
+                  if len(value) != length:
+                      raise ValueError("Truncated FDT property")
+                  pos = (pos + length + 3) & ~3
+                  nodes.setdefault("/".join(stack), {})[name] = value
+              elif token == 4:  # FDT_NOP
+                  continue
+              elif token == 9:  # FDT_END
+                  break
+              else:
+                  raise ValueError(f"Unknown FDT token {token:#x} at {pos - 4:#x}")
+
+          # This FIT stores external payloads at a 256-byte-aligned base after
+          # the FDT structure. Every extracted payload is accepted only after
+          # matching its own SHA-256 hash node.
+          data_base = (total + 0xff) & ~0xff
+          lines = [f"FIT totalsize: 0x{total:x}", f"External data base: 0x{data_base:x}", ""]
+          for path, props in nodes.items():
+              if not path.startswith("/images/") or "data-size" not in props:
+                  continue
+              name = path.rsplit("/", 1)[-1]
+              size = int.from_bytes(props["data-size"], "big")
+              if "data-position" in props:
+                  offset = int.from_bytes(props["data-position"], "big")
+              elif "data-offset" in props:
+                  offset = data_base + int.from_bytes(props["data-offset"], "big")
+              else:
+                  raise ValueError(f"{name}: no external data-position/data-offset")
+              if offset + size > len(blob):
+                  raise ValueError(f"{name}: payload extends beyond FIT file")
+              data = blob[offset:offset + size]
+              hash_props = nodes.get(path + "/hash", {})
+              expected = hash_props.get("value", b"").hex()
+              actual = hashlib.sha256(data).hexdigest()
+              if not expected or actual != expected:
+                  raise ValueError(f"{name}: SHA-256 mismatch expected={expected} actual={actual}")
+              dest = out / f"{name}.bin"
+              dest.write_bytes(data)
+              image_type = props.get("type", b"").rstrip(b"\\0").decode(errors="replace")
+              lines.append(f"{name}: type={image_type} offset=0x{offset:x} size={size} sha256={actual} VERIFIED")
+          if not (out / "uboot.bin").is_file() or not (out / "fdt.bin").is_file():
+              raise SystemExit("Required U-Boot proper or FDT payload not found")
+          (report / "verified-payloads.txt").write_text("\\n".join(lines) + "\\n")
+          print("\\n".join(lines))
+          PY
+
+          dtc -I dtb -O dts -o audit/extracted/fdt.dts audit/extracted/fdt.bin 2>audit/extracted/fdt-dtc-warnings.txt
+          {
+            echo "===== FIT FDT details ====="
+            grep -Ein -C 3 'model|compatible|ethernet|gmac|mac-address|local-mac-address|aliases' audit/extracted/fdt.dts || true
+          } | tee audit/report/fdt-details.txt
 
           {
-            echo "U-Boot proper payload count: $proper_count"
-            echo "FDT payload count: $fdt_count"
-          } | tee audit/report/extraction-summary.txt
-
-          test "$proper_count" -eq 1
-          test -s audit/extracted/u-boot-proper.bin
+            echo "U-Boot proper SHA-256:"
+            sha256sum audit/extracted/uboot.bin
+            echo "U-Boot proper size:"
+            stat -c '%s bytes' audit/extracted/uboot.bin
+          } | tee audit/report/proper-extraction.txt
 
       - name: Disassemble U-Boot proper and index relevant strings
         shell: bash
