@@ -9,7 +9,7 @@
 1. **6.12.81 的网络内核配置没有发现明显缺项。** `CONFIG_NET`、`CONFIG_INET`、`CONFIG_PACKET`、`CONFIG_STMMAC_ETH`、`CONFIG_DWMAC_ROCKCHIP`、`CONFIG_PHYLIB`、`CONFIG_REALTEK_PHY`、`CONFIG_MDIO_BUS`、`CONFIG_OF_MDIO`、`CONFIG_PHYLINK` 均启用。
 2. **本次实机 GMAC/RTL8211F 已完成 probe 和千兆链路协商。** 当前 UART 报告 eth0、RTL8211F、RGMII、1Gbps/Full；DTS 中 TX/RX delay 与实机日志的 0x30/0x10 一致。没有证据支持“网卡驱动缺失”或“PHY 没起来”。
 3. **历史 hEX 侧排障已经把重点指向 DHCP 报文未从 Panther X2 正常发出/到达 hEX**：其他客户端 DHCP 正常，Panther 对应 lease 为 waiting；同步抓包未见 Panther MAC 的 DHCP 报文。IPv6/L2 已有可用证据，不再重复排查网线、端口和 DHCP 服务。
-4. **目前最值得优先审计的是镜像 rootfs 的 Netplan/NetworkManager 实际配置，以及内核版本差异；根因尚未证实。** 当前构建脚本没有明确生成 Panther X2 的 eth0 DHCP profile，而是依赖 Armbian/NetworkManager 的默认自动连接行为；既有构建验证还存在一个实际执行失败的问题。
+4. **当前最需要确认的是最终 rootfs 中 NetworkManager 是否真正管理 eth0，以及 DHCP 客户端实际使用的配置/后端；根因尚未证实。** Armbian 的 Netplan 仅设置 renderer 是其有意设计（注释明确说明 carrier 出现后 NetworkManager 会自动 DHCP），不能仅因没有显式 eth0 stanza 就认定配置缺陷。既有构建验证确实有 shell 语法错误，尚未完成 rootfs 网络配置检查。
 
 ## 1. 已有实机和历史证据
 
@@ -120,14 +120,14 @@ Armbian 固定源码 `lib/functions/configuration/main-config.sh` 的默认规�
 - `extensions/network/config-nm/netplan/00-default-use-network-manager.yaml` 的内容只有顶层 `renderer: NetworkManager`；它没有明确写出 Panther X2 的 `eth0`、`match` 和 `dhcp4: true`。
 - 同一目录的 NetworkManager 配置主要是说明文件及 Wi-Fi 随机 MAC/省电设置，没有 Panther X2 有线专用 profile。
 
-Armbian 上游该文件注释的设计预期是“设备检测到 carrier 后由 NetworkManager 自动 DHCP”。这是一种依赖 NM 自动默认连接的通用策略，不是对 Panther X2 eth0 的显式 DHCP 配置。
+Armbian 上游该文件的注释明确写明：“Let NetworkManager manage all devices on this system. Any device will come up with DHCP, once carrier is detected.” 因此只有 renderer 的 Netplan 文件是上游预期设计，并不自动等于配置错误；NetworkManager 应对所有检测到 carrier 的接口创建/使用自动 DHCP 连接。真正要验证的是最终 rootfs 中有没有把 eth0 标记为 unmanaged、是否存在禁用自动默认连接的配置、是否有冲突网络管理器/遗留规则，以及 NM 的 DHCP backend 设置。
 
 当前 workflow 的验证条件：
 - 检查 Netplan 目录存在；
 - 检查任意 YAML 文件中存在 `renderer: NetworkManager`；
 - 检查任意 YAML 文件中存在 `dhcp4: true`。
 
-这个 grep 条件没有验证 `dhcp4: true` 是否位于 Panther X2 的以太网接口 stanza，也没有验证接口匹配是否为当前 `eth0`。因此即使通过，也不足以证明正确的 eth0 DHCP profile 已生成。
+最后一项与 Armbian 这个默认配置设计并不匹配：Netplan 不显式列出每个接口，而是将设备交给 NetworkManager，由 NM 在 carrier 出现后自动 DHCP。因此不能把 `dhcp4: true` 缺失作为故障证据。这个 grep 检查本身也不能证明 eth0 真的由 NM 管理。应改为对最终 rootfs 的 NM 配置、udev unmanaged 规则、NetworkManager service enablement、Netplan renderer 和冲突配置做静态检查。
 
 ### 4.2 现有 build run 的验证步骤实际上没有完成
 
@@ -153,19 +153,21 @@ syntax error near unexpected token '('
 
 ### 当前重点
 
-1. **最终 rootfs 是否真正生成并启用了适用于 eth0 的 NetworkManager DHCP profile。** 当前构建源码依赖自动默认连接，现有 validation 没有严格验证接口级 profile。
-2. **NetworkManager 对 eth0 的实际管理状态及 DHCP backend 行为。** 历史记录显示它开始 DHCP transaction 后超时，但没有在 hEX 抓包中看到 Panther DHCP 帧。当前 Noble 的 NM 是 1.46.0，不是旧系统的 1.36.6。
-3. **若 rootfs 的显式 DHCP profile 与 NM 管理状态静态核验无误，再比较 6.1.116 与 6.1.174/6.12.81 的 stmmac TX 路径源码差异。** 目前没有证据足以把故障直接归咎于 RTL8211F、RGMII delay 或某一个内核提交。
+1. **NetworkManager 是否把 eth0 标记为 unmanaged，或没有为它启动自动默认连接。** 这比“缺少显式 Netplan eth0 stanza”更值得查。当前镜像用 Armbian 上游的全设备 renderer 设计，理应在 carrier 时自动 DHCP。
+2. **最终 rootfs 是否存在影响 eth0 的全局/设备级配置。** 包括 `unmanaged-devices`、`no-auto-default`、udev NM unmanaged rules、Netplan 额外 yaml、cloud-init、ifupdown、systemd-networkd 残留，以及 DHCP backend 选择。
+3. **内核 TX 路径差异暂列次级。** 对照 Ophub 6.1.y-rockchip `main` 与 6.12.81 源码快照时，Rockchip `dwmac-rk.c` 中 GMAC power-up/RGMII 配置函数保持一致；通用 `stmmac_xmit()` 有变化，6.12 新增针对 checksum-offload 不支持队列/非 IP EtherType 的软件 checksum fallback，并增加 EST max-SDU drop 判断。普通 DHCPv4 是 IPv4 流量，这些改动本身没有显示出必然丢弃 DHCP Discover 的路径；但 queue capability 与实际发送统计仍未验证。此源码比较不是严格的 6.1.116 release source 对 6.12.81 release source 的精确对比，不能据此排除内核回归。
 
 ## 6. 下一轮静态审计计划
 
-不要求用户重复抓包、ping、nmcli 或 hEX DHCP 检查。先离线完成：
+不要求用户重复抓包、ping、nmcli 或 hEX DHCP 检查。已新增独立的只读 GitHub Actions 工作流：
+`.github/workflows/audit-existing-6.12.81-network-rootfs.yml`
 
-1. 修复 build workflow 的 shell syntax error，确保网络配置检查实际执行。
-2. 对最终 rootfs 的 `/etc/netplan`、`/etc/NetworkManager`、`/usr/lib/NetworkManager/conf.d`、`/etc/systemd/network`、`/etc/network/interfaces` 做完整 inventory。
-3. 检查 Netplan 合并后的配置是否对当前命名 `eth0` 明确启用 DHCPv4；检查 NM effective config 中是否存在 `unmanaged-devices` 限制及 Netplan 生成的覆盖配置。
-4. 检查 rootfs 中是否存在来自 Odroid N2 base image 的遗留接口匹配规则。
-5. 若发现缺少显式 eth0 DHCP profile，提出最小镜像构建修正，并在 CI 静态验证生成的 NM connection/profile；未经授权不写入设备。
-6. 同时核对 6.12.81 实际发布 DTB SHA 与 6.1.116 已知工作 DTB SHA；再决定是否需要继续追查 GMAC 驱动源码差异。
+它按既有构建 run ID 下载已生成的镜像 artifact，在 runner 上只读挂载 rootfs，采集 Netplan、NetworkManager、udev、cloud-init、ifupdown、networkd 和 systemd enablement 信息，输出小型文本报告；不重建镜像、不写设备。当前连接器没有 workflow-dispatch 写入能力，因此该工作流尚未运行。
+
+下一步静态审计重点：
+1. 从现有 6.12.81 镜像 rootfs 报告确认 NetworkManager 是否被启用、eth0 是否可能被标记 unmanaged、是否有 `no-auto-default` 或冲突配置。
+2. 检查 NM 的 DHCP backend 与 Ubuntu Noble package defaults，结合既有旧版本 1.36.6 结果区分版本变化。
+3. 取得 6.12.81 发布 DTB 的实际 SHA，与 6.1.116 已知工作 DTB 做二进制/反编译差异核对。
+4. 若 rootfs 网络管理配置正常，再继续深挖 stmmac 的 TX checksum/descriptor 路径；目前不建议直接改 PHY delay 或重写 Netplan。
 
 所有后续结论仍分为“已验证 / 未验证 / 推测”。不修改 hEX、不改 Panther X2 当前系统、不重刷 TF/eMMC。
