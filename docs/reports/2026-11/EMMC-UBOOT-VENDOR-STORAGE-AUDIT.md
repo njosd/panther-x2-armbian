@@ -148,6 +148,48 @@ git hash-object /tmp/raw-emmc-u-boot.itb
 
 该字符串是 U-Boot FIT 内部的构建/配置线索，**不能单独证明 Panther X2 实物是 Radxa E25，也不能证明该二进制来自 E25 目录**。Panther X2 与 Ophub E25 目录的对应二进制文件大小及哈希此前已确认不同。
 
+
+## 5.1 idbloader 内部 SPL / FDT 指纹与旧 UART 日志交叉核对（2026-11-16，新增）
+
+对已从 Ophub 仓库取回、且已通过 Git Blob SHA-1 与 eMMC 原始 LBA 64 匹配的 `idbloader.img`，进一步提取可读字符串并解析其内嵌 FDT。
+
+### 二进制内部发现
+
+- 可读字符串包含：`U-Boot SPL 2017.09-armbian (Apr 23 2023 - 13:08:07)`。
+- 在偏移 283840 处解析到一个有效 FDT，声明总长度 20421 bytes。
+- 该 FDT 根节点属性为：
+  - `model = "Radxa E25"`
+  - `compatible = "radxa,e25", "rockchip,rk3568"`
+
+### 与旧 UART 记录的对应关系
+
+旧 UART 日志摘要记录了相同的 U-Boot 版本、相同构建时间，以及 `Model: Radxa E25`。因此，eMMC LBA 64 的 `idbloader.img` 与旧 UART 记录具有三项一致的内部指纹，强烈支持旧日志中的 SPL 来自这份二进制。
+
+**证据等级：高度吻合 / 强相关，不等同于对某次上电执行路径的直接观测。** 仍需保留以下边界：
+
+1. 从二进制解析到 FDT，证明该 FDT 被封装在 idbloader 内；仅凭静态解析不能证明 SPL 在每次启动中实际选择了它。
+2. 旧 UART 日志中的 `mmc 1` 是 U-Boot 设备编号，不能直接等同于 Linux 当前的 `/dev/mmcblk1`。
+3. 旧 UART 记录与当前 eMMC LBA 64 内容高度吻合，但没有该次启动的介质读取轨迹或硬件级读出记录，不能升级为“已证明实际执行”。
+
+### 对硬件身份的解释
+
+Radxa E25 官方板级资料将 E25 描述为 RK3568 平台；Panther X2 的现有设备证据则为 RK3566。故该 FDT 表明这份 SPL 至少内嵌了 E25/RK3568 板级描述，不能据此把 Panther X2 认定为 E25。E25 设备树是否适合 Panther X2 的具体 DDR、PMIC、GMAC、MMC 等初始化，需要逐项对照，不能因为它能够继续启动就认定配置正确。
+
+参考：
+
+- U-Boot E25 板级配置与设备树名称： https://lists.u-boot-project.org/pipermail/u-boot/2023-July/525397.html
+- Radxa E25 板级说明（RK3568）： https://lists.denx.de/pipermail/u-boot/2023-July/524203.html
+
+### 对 MAC / Vendor Storage 的后续线索
+
+Radxa 当前 U-Boot 参考源码的 `arch/arm/mach-rockchip/board.c` 中，`rockchip_set_ethaddr()` 受 `CONFIG_ROCKCHIP_SET_ETHADDR` 控制；只有启用 `CONFIG_ROCKCHIP_VENDOR_PARTITION` 时才调用 `vendor_storage_read(LAN_MAC_ID, ...)`。若读取失败或地址无效，代码会生成随机地址；在 Vendor Partition 配置启用时，还会尝试写回 Vendor Storage。该函数由 `board_late_init()` 在相应配置下调用。
+
+这提供了“Vendor Storage 中有有效 LAN_MAC 条目，但运行时却出现新地址”的一种可检验机制：若实际 U-Boot 未启用相关配置、Vendor Storage 读取失败、数据被判为无效，便可能走随机地址分支。但该参考源码不是已确认的当前二进制对应源码，**不能据此认定 Panther X2 当前 U-Boot 确实走了这条路径**。
+
+参考源码： https://github.com/radxa/u-boot/blob/next-dev-v2026.01/arch/arm/mach-rockchip/board.c
+
+下一步应优先取得与 2017.09-armbian 构建相对应的源代码/defconfig，或进一步静态分析当前 `u-boot.itb`，核实两个配置开关、Vendor Storage 初始化和 MAC 设置函数是否实际编入。不得通过写 Vendor Storage 或更改 MAC 来试错。
+
 ## 6. Rockchip Vendor Storage 与 LAN_MAC
 
 此前对 eMMC Vendor Storage 区域的只读检查发现：
@@ -182,7 +224,7 @@ git hash-object /tmp/raw-emmc-u-boot.itb
 
 ### 待验证
 
-1. 设备实际上电时是否确实从 eMMC 用户区 LBA 64 / LBA 16384 读取这些镜像，以及启动介质选择的证据。
+1. 设备实际上电时是否确实从 eMMC 用户区 LBA 64 / LBA 16384 读取这些镜像，以及启动介质选择的证据；当前 idbloader 与旧 UART 有三项强指纹吻合，但尚无直接执行轨迹。
 2. 设备实际上电时使用的启动介质、加载路径与运行中的 U-Boot 身份。
 3. 实际运行的 U-Boot 是否启用并成功执行 Vendor Storage LAN_MAC 读取流程。
 4. MAC 从 Vendor Storage 到运行时 FDT/网卡接口的传递链，以及当前地址变化发生在哪个阶段。
