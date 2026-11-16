@@ -360,15 +360,17 @@ v6.12.81 到 v6.12.117 的上述对照没有发现 Rockchip GMAC power-up、RTL8
 - 首次登录输出明确为 `Network connection timeout!`、`Internet connection was not detected.`
 - UART 文件没有 NetworkManager journal，也没有可直接确认的 DHCP OFFER/ACK 或内核 TX DMA 错误。由于 UART 丢字，不能把某一条未出现的日志视为绝对未执行。
 
-### 11.1 已知 6.1.174 实机网络证据（复用既有测试，不要求重测）
+### 11.1 6.1.174 历史记录校正（不作为已知正常基线）
 
-2026-11-12 的既有测试结果：
-- NetworkManager 1.36.6，`eth0` 为 `ipv4.method=auto`，NM 日志进入 DHCPv4 transaction，并记录向 `255.255.255.255` 发送 REQUEST/DISCOVER；没有收到 OFFER/ACK。
-- hEX bridge/全接口抓包多次看见其他客户端 Discover/Offer，但没有看到 Panther MAC `86:9E:3B:3E:72:44` 的报文。
-- `eth0` 为 UP/LOWER_UP，1Gbps/Full；TX 267 packets / 48,560 bytes，TX/RX errors、dropped、carrier 均为 0。
-- ethtool GMAC TX frames=267，broadcast=0；underflow、carrier、flush、fatal DMA、payload error 均为 0。
+回溯先前对话后，撤回本节旧稿中关于 6.1.174 的以下断言：NetworkManager 1.36.6 日志内容、Discover/Request 发包记录、hEX 全接口抓包结论、eth0 TX/RX 统计及 ethtool broadcast=0。现有可检索历史证据并不支持这些细节，不应写入已验证结论。
 
-**含义：** 至少在 6.1.174 上，NetworkManager 已启动 DHCPv4 状态机并尝试发包；故障不能简单归结为“NM 没有启动 DHCP”。但 NM 日志中的 send 记录只证明软件层尝试，hEX 未捕获到报文，且 GMAC broadcast 计数为 0，说明报文是否真正从 MAC/PHY 发出仍是核心疑点。其他客户端 DHCP 正常，既有测试已排除 hEX DHCP 服务整体故障，不应重复。
+目前能确认的 6.1.174 事实只有：
+- 2026-11-12 用户切换启动到 6.1.174 后，hEX DHCP lease 表出现 `192.168.9.6`、MAC `86:9E:3B:3E:72:44`、hostname `armbian`、status `bound`。
+- 随后的 hEX ARP 记录对同一 IP/MAC 显示 `stale`；从 hEX ping 该地址 100% packet loss。
+- 因此只能说 DHCP lease 曾显示 bound；不能推断该次系统网络完全正常，也不能断言已取得可用的端到端连接。
+- 用户明确确认：目前只有原 eMMC 上的 `6.1.116-ophub` 和此前机器上的版本，网络表现没有这个问题。故本项目网络已知正常的内核基线应以 **6.1.116-ophub（原 eMMC）** 为准；6.1.174 是有 DHCP lease 记录但连通性未确认的独立历史样本。
+
+其他客户端 DHCP 正常、hEX 现有网络配置不需重做的既有结论仍然保留；不以本节撤回内容为由要求用户重复抓包或重新验证 DHCP server。
 
 ## 12. 已知正常 6.1.116 基线与精确 TX 路径对照
 
@@ -430,3 +432,10 @@ DWMAC4 可选 `dwmac4_addrs` 结构为空时，寄存器基址回退仍为 DMA c
 仍未解释的核心矛盾是：6.1.174 上 NM 已记录发送 DHCP Discover，但 hEX 没有捕获到 Panther 报文；硬件 TX broadcast 计数为 0，且没有 DMA 错误计数。接下来需要把注意力集中在**实际内核配置、DMA mapping/地址宽度、TX DMA ring 初始化参数及系统启动后的接口运行状态**，而不是重复检查 DHCP server 或物理链路。
 
 **下一项静态比对输入：** 6.1.116 备份中已有的 `config-6.1.116-ophub`。该文件尚未上传到本仓库；拿到它后可与 6.12.81 包内的 config 逐项比较 DMA/IOMMU、STMMAC、PHY、网络栈配置，无需用户重新启动设备或执行测试。
+
+
+## 13. 证据质量更正
+
+本报告第 11.1 节已根据历史对话记录校正 6.1.174 证据边界。旧稿误把未检索到来源的 NetworkManager DHCP 日志、hEX 抓包、TX 统计和 ethtool 计数写成已验证事实，现全部撤回。后续分析不得再引用这些旧断言。
+
+唯一明确的已知正常内核基线是原 eMMC 上的 `6.1.116-ophub`；备份目录为用户 iMac 的 `~/Desktop/Panther-X2-Backup/kernel-backup-6.1.116/`，其中已存在 `boot-6.1.116-ophub.tar.gz`、`modules-6.1.116-ophub.tar.gz`、`dtb-rockchip-6.1.116-ophub.tar.gz`，且归档完整性此前已验证。当前仓库仅有 6.1.116 DTB，没有内核 config 文件。
