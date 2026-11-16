@@ -78,7 +78,7 @@ jobs:
 
           strings = blob[off_strings:off_strings + size_strings]
           def string_at(offset):
-              end = strings.find(b"\\0", offset)
+              end = strings.find(bytes([0]), offset)
               if end < 0:
                   raise ValueError("Invalid FDT string-table offset")
               return strings[offset:end].decode()
@@ -91,7 +91,7 @@ jobs:
               token = struct.unpack_from(">I", blob, pos)[0]
               pos += 4
               if token == 1:  # FDT_BEGIN_NODE
-                  end = blob.find(b"\\0", pos)
+                  end = blob.find(bytes([0]), pos)
                   if end < 0:
                       raise ValueError("Unterminated FDT node name")
                   stack.append(blob[pos:end].decode())
@@ -140,14 +140,14 @@ jobs:
               actual = hashlib.sha256(data).hexdigest()
               if not expected or actual != expected:
                   raise ValueError(f"{name}: SHA-256 mismatch expected={expected} actual={actual}")
-              dest = out / f"{name}.bin"
+              dest = out / ("u-boot-proper.bin" if name == "uboot" else f"{name}.bin")
               dest.write_bytes(data)
-              image_type = props.get("type", b"").rstrip(b"\\0").decode(errors="replace")
+              image_type = props.get("type", b"").rstrip(bytes([0])).decode(errors="replace")
               lines.append(f"{name}: type={image_type} offset=0x{offset:x} size={size} sha256={actual} VERIFIED")
           if not (out / "uboot.bin").is_file() or not (out / "fdt.bin").is_file():
               raise SystemExit("Required U-Boot proper or FDT payload not found")
-          (report / "verified-payloads.txt").write_text("\\n".join(lines) + "\\n")
-          print("\\n".join(lines))
+          (report / "verified-payloads.txt").write_text(chr(10).join(lines) + chr(10))
+          print(chr(10).join(lines))
           PY
 
           dtc -I dtb -O dts -o audit/extracted/fdt.dts audit/extracted/fdt.bin 2>audit/extracted/fdt-dtc-warnings.txt
