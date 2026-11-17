@@ -668,3 +668,9 @@ DWMAC4 channel register offsets 与位定义参考：
 TX 尚未完成的工作包括：单个 DHCP Discover 与 descriptor 提交/completion/MMC 增量的逐包关联；Panther 与 hEX 同时间窗口的逐包同步捕获；RGMII TXC/TXD 到 PHY MDI 的实际物理发送确认；以及 6.12.81 实际发布构建对应源码的完整 TX DMA 路径审计。
 
 下一步仍应优先完成 TX 路径静态审计和同一 DHCP Discover 的双端关联。RX dropped 作为独立支线保留，不得替代 TX 主线或被直接认定为 DHCP 故障原因。未经授权不主动 renew DHCP、不重启接口、不修改系统。
+
+## 16. TX 静态审计进度补充（2026-11-17）
+
+TX 专项报告第 20 节已完成本轮 MTL/FIFO 队列配置比较及 GMAC 时钟启动顺序复核。当前没有发现 TX MTL queue mode、scheduler、FIFO partition 或 queue0→DMA0 映射的直接版本回归。6.1 的 5 ms 与 6.12 的 100–200 μs clock-enable wait 是真实差异，但 Panther 的运行时时钟父项指向 PHY 提供的 125 MHz 外部时钟，clk_summary 也显示软件时钟树频率/使能符合 DT；该差异保留为待解释项，不认定为根因。
+
+下一步 TX 主线集中到 MAC TXC/TXD 物理输出边界。不得重复已完成 descriptor/MTL 静态审计；不得擅自执行 loopback、phy_lb、phy_lb_scan、接口重启或寄存器写入。详见：[TX 物理边界与源码审计](./PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md) 第 20 节。
