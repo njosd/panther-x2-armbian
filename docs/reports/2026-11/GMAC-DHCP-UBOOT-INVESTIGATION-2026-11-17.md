@@ -659,3 +659,63 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 4. 只有在确认 DHCP 报文实际 RX 到达而未交给客户端，或 dropped 继续增长时，才进一步定位普通 RX skb / NAPI 处理路径。
 5. 不重复已完成的基础 DHCP、链路、PHY ID、RGMII delay、GRF、时钟、pinmux 和 PHY reset GPIO 检查；不运行会停止网卡的 phy_lb。
 6. 未经明确授权，不安装软件、不修改内核/驱动/DTB/网络配置、不重启 NetworkManager 或 eth0。
+
+
+## 13. 2026-11-17 后续补充：6.12.69 GMAC RX / DMA / NAPI 统计与 MAC 身份线索
+
+本节记录随后一轮只读实机输出。与前文 6.12.81 专项快照分开记录，不将不同内核版本或不同启动周期的累计计数直接相减。
+
+### 13.1 接口与 MTU
+
+- 本轮用户标识的运行环境为 Linux 6.12.69。
+- eth0：UP / LOWER_UP，Carrier on，运行时 MTU=1500。
+- NetworkManager profile `Wired connection 1` 的 MTU 设置为 `auto`。
+- 内核日志筛选输出只明确显示 RTL8211F 链路 Up：1Gbps / Full / flow control rx/tx；没有看到 DMA reset failure、DMA engine initialization failure、Hw setup failure 或 Link Down 的匹配行。由于本轮 grep 输出并非完整启动日志，不能将“未显示”提升为完整日志审计结论。
+
+### 13.2 RX / IRQ / DMA / NAPI 计数快照
+
+| 指标 | 本轮读数 |
+|---|---:|
+| netdev RX packets | 25,539 |
+| netdev RX bytes | 2,244,918 |
+| netdev RX errors | 0 |
+| netdev RX dropped | 1,694 |
+| netdev RX missed | 0 |
+| netdev TX packets | 283 |
+| netdev TX errors / dropped | 0 |
+| `mmc_rx_framecount_gb` | 25,663 |
+| `mmc_rx_octetcount_gb` | 2,358,886 |
+| `rx_pkt_n` / `q0_rx_pkt_n` | 25,663 / 25,663 |
+| `rx_normal_irq_n` / `q0_rx_irq_n` | 25,649 / 25,649 |
+| `normal_irq_n` | 25,660 |
+| `napi_poll` | 51,984 |
+| IRQ 67（四 CPU 计数） | 154 / 0 / 0 / 25,875 |
+| IRQ 68（四 CPU 计数） | 0 / 0 / 0 / 0 |
+
+以下硬件/驱动错误计数本轮均为 0：MMC CRC、alignment、run、jabber、FIFO overflow、watchdog、discard；驱动 RX descriptor、overflow、checksum、CRC、length、MII、GMAC overflow、watchdog、missed、buffer unavailable、process stopped、fatal bus error 等相关项。
+
+### 13.3 解释边界
+
+1. GMAC MAC 接收统计、RX IRQ 与 NAPI 均有大量活动；本轮证据不支持“GMAC RX 完全未启动”或“RX DMA 整体没有工作”。
+2. `ip -s link` 的 RX dropped=1,694 是真实 netdev 统计，但本轮没有相邻采样，也没有将其定位到 DMA descriptor、驱动丢弃、协议栈或其他网络层的证据。不得直接把它归因于 DMA。
+3. netdev RX packets=25,539 与驱动/MMC RX frame=25,663 相差 124。各层统计口径可能不同；没有逐包关联和源码口径证明前，不将差值解释为线上丢包。
+4. `mmc_rx_framecount_gb` 与 `rx_pkt_n` 本轮均为 25,663，说明这两个统计在该快照数值相同，但不代表它们与 netdev RX packet 计数必须完全相等。
+5. IRQ 67 有活动、IRQ 68 为零；单凭这一点不能判定第二中断向量异常，需结合驱动实际中断申请与使用方式判断。
+
+### 13.4 MAC 地址身份线索（脱敏）
+
+- 已有 eMMC Vendor Storage 审计确认板载记录中存在以 `86:…` 开头的 GMAC 地址。
+- 本轮 Linux eth0 运行时地址以 `E6:…` 开头；历史实机记录中也出现过相同运行时地址。
+- 这两个地址前缀不同，是必须保留的启动链 / MAC 传递线索；本报告不公开完整地址。
+- 已知当前启动 U-Boot 读取 TF 卡上的 Vendor 数据，而不是 eMMC 上的 Vendor 数据。该事实不能被误写为“eMMC 没有保存板载 MAC”。
+- 运行时地址与 eMMC Vendor Storage 中的板载地址不同，本身尚不能证明 DHCP 故障由 MAC 不一致导致。DHCP Discover 是否发出、帧源 MAC、U-Boot/TF Vendor 数据、设备树 `local-mac-address` / `mac-address`、内核 NVMEM/平台数据及 NetworkManager 覆盖关系，仍需按实际启动链逐层建立对应关系。
+- MAC 不一致也不能单独解释 hEX 未见 Discover：必须先确认 Discover 的实际 Ethernet source address，以及该帧是否到达 Panther PHY 线侧。
+
+### 13.5 当前结论与下一步
+
+- 已降低“GMAC RX 时钟未启用 / RX DMA 完全失效”的可能性；Linux RX 通路正在处理大量流量。
+- RX dropped=1,694 的具体来源仍未知；它是接收侧独立问题，不应直接用来解释 DHCP Discover 的发送失败。
+- DHCP 故障边界仍是 Panther 本机 outgoing 抓包点之后、hEX 观察点之前；尚未确定是 MAC TX、RGMII、PHY、链路转发还是报文身份/过滤问题。
+- 下一步优先使用被动方式确认 DHCP 报文的 Ethernet source MAC，并与已知 eMMC Vendor Storage、TF Vendor 数据和运行时 FDT/NVMEM 来源对应；必要时再安排 Panther 与 hEX 同一时间窗口的双端抓包。
+- 本轮没有执行 DHCP renew、接口重启、驱动重载、软件安装、配置修改、寄存器写入或系统重启。
+
