@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [Linux 6.12.81 网络测试结果汇总（脱敏，2026-11-16）](./PANTHER-X2-ETHERNET-6.12.81-TEST-RESULTS-2026-11-16.md)：将分段提供的 6.12.81 网络测试结果合并归档，覆盖系统身份、启动介质、运行时 DT、GMAC/PHY、ethtool、MMC/DMA、IRQ、RX dropped、IPv4/IPv6 状态及待验证事项。
+
 - [网络与启动链阶段测试总记录（2026-11-16 至 2026-11-17）](./PANTHER-X2-NETWORK-AND-BOOT-TEST-LOG-2026-11-16-17.md)：按时间汇总 6.1.116 正常网络基线、6.12.81 DHCP/NDP 与 GMAC/DMA 检查、TF/eMMC/U-Boot/DTB 取证、JP-TvBox 启动结果及源码对照；明确区分已验证、未验证和证据缺口。
 
 - [GMAC / DHCP 与 TF U-Boot 启动链调查记录（2026-11-17）](./GMAC-DHCP-UBOOT-INVESTIGATION-2026-11-17.md)：汇总 Linux 抓包边界、GMAC1/RGMII/RTL8211F、GRF 与时钟读回、PHY reset GPIO、TF/eMMC 身份及当前 TF 启动链证据；已追加 TF 前 16 MiB 与 boot.scr 新证据。
