@@ -360,3 +360,85 @@ Ophub README 也明确区分 RK35xx 专用 BSP 内核，并说明可通过 `kern
 参考：
 - [Ophub RK35xx compile workflow](https://github.com/ophub/kernel/blob/main/.github/workflows/compile-rockchip-rk35xx-kernel.yml)
 - [Ophub kernel README](https://github.com/ophub/kernel/blob/main/README.md)
+
+
+## 14. DWMAC4 descriptor、DMA mapping 与 PHY fixup 的进一步对照（追加，2026-11-17）
+
+### 14.1 DWMAC4 TX descriptor 格式和 OWN 位设置
+
+对照两个 Rockchip 分支 `drivers/net/ethernet/stmicro/stmmac/dwmac4_descs.c`：
+- `dwmac4_rd_prepare_tx_desc()` 函数体逐字一致。
+- `dwmac4_set_tx_owner()` 函数体逐字一致。
+- `dwmac4_set_addr()` 函数体逐字一致：分别把 DMA address 的低 32 位写入 `des0`、高 32 位写入 `des1`。
+- `dwmac4_set_sec_addr()` 函数体也一致。
+
+普通 DWMAC4 descriptor 中：
+- payload buffer length 写入 `des2)；
+- packet length、FIRST/LAST、checksum insertion 和 OWN 标志写入 `des3)；
+- 首 descriptor 的 OWN 提交前，`dwmac4_rd_prepare_tx_desc()` 使用 `dma_wmb()`；
+- TX 发送结束后 `stmmac_flush_tx_descriptors()` 再用 `wmb()` 后更新 tail pointer。
+
+上述关键函数 6.1/6.12 未发现差异。当前没有源码证据支持“6.12 把 DWMAC4 TX OWN 位放错 descriptor word”或“DMA 地址高低位写反”。
+
+### 14.2 普通 AF_PACKET 小帧所经过的 DMA mapping
+
+两个分支的普通 `stmmac_xmit()` 都使用：
+- `dma_map_single(priv->device, skb->data, nopaged_len, DMA_TO_DEVICE)`
+- 检查 `dma_mapping_error()`
+- 保存返回的 DMA address；
+- 通过 DWMAC4 `set_addr` callback 写入 descriptor。
+
+两版 `dwmac4_set_addr()` 相同。两版设置 DMA host/device width 的代码也相同：先按硬件/平台 host DMA width 调用 `dma_set_mask_and_coherent()`，失败时回退 32-bit mask。
+
+实机日志证据：
+- 6.1.116 基线日志：GMAC 报告 `Using 32/32 bits DMA host/device width`。
+- 6.12.81 补充日志：同样报告 `Using 32/32 bits DMA host/device width`。
+
+这说明两套实机启动时驱动最终采用的 host/device DMA width 均为 32/32；降低了“6.12 改成 64-bit DMA 地址模式导致 descriptor 地址解释不同”的可能性。
+
+但仍需区分：
+- 32/32 width 是驱动设置的 DMA mask/硬件地址宽度摘要；
+- 它不能单独证明每一次 `dma_map_single()` 返回的 IOVA/物理 DMA address、cache maintenance 和 descriptor payload 内容正确；
+- 现有 kprobe 没有直接读取 descriptor DMA address 或 payload 内存内容，不能补造这类证据。
+
+### 14.3 GMAC 是否挂接 Rockchip IOMMU
+
+两个候选分支的 `rk356x.dtsi` 中 `gmac1: ethernet@fe010000` 节点均未声明 `iommus` 属性。Panther X2 板级 `&gmac1` 配置块也未额外声明 `iommus`。
+
+日志中的 IOMMU 默认 domain 为 Translated，不能因此推断 GMAC 自身使用 IOMMU。采集日志里出现的 `fdea0800.iommu` 属于 `vdpu_mmu`（视频解码单元），不是 GMAC1 的 IOMMU；不要将它与当前 TX 故障混为一谈。
+
+据当前 DTS 静态证据，GMAC1 没有通过设备树绑定到该 Rockchip IOMMU。DMA API 仍然必须正确工作，但“GMAC IOMMU page-table 映射错误”暂时缺少设备树基础，应降为低优先级。
+
+### 14.4 6.1 分支存在、6.12 分支缺失的 RTL8211F LED PHY fixup
+
+另发现一个与 PHY 有关、但目前不支持作为 TX 根因的分支差异：
+- 6.1 Rockchip 分支的 `stmmac_main.c` 存在 `#define LED_FIX 1` 代码块，并注册 RTL8211F PHY UID fixup。
+- RTL8211F fixup 切换 PHY 扩展页 `0xd04`，写寄存器 `0x10=0xc160`、`0x11=0x0008)，随后切回 page 0；源码注释将其标为 LED 配置。
+- 6.12 Rockchip 分支没有这组 `LED_FIX` 代码和 RTL8211F LED fixup 注册。
+
+当前判断：
+- 这是候选源码中真实存在的 PHY 初始化差异，值得保留在版本差异清单中。
+- 从函数内容和注释看，它调整的是 RTL8211F LED 配置，不是 RGMII delay、TX/RX 时钟、MAC interface mode 或 PHY advertisement。
+- 因而目前不把它当作 TX 无帧输出的根因。
+- 6.1.116 运行日志是否实际执行过该 fixup 尚无明确日志证据；不能把“源码存在 fixup”写成“6.1.116 实机已执行 fixup”。
+- 该 fixup 的寄存器读写返回值处理也不严谨，但不建议在未取得 PHY 数据手册/可靠驱动资料前推断其会破坏 PHY 正常收发。
+
+### 14.5 当前 DMA / descriptor 方向结论
+
+已确认相同的部分：
+- 32/32 DMA host/device width；
+- GMAC1 DTS 未挂接 IOMMU；
+- 普通 `dma_map_single(DMA_TO_DEVICE)` 调用模式；
+- DWMAC4 DMA address low/high word 写入；
+- DWMAC4 TX descriptor 格式；
+- OWN 位设置与 `dma_wmb()`；
+- tail pointer flush 的 `wmb()` 顺序。
+
+尚未确认的部分：
+- 6.12.81 实际发布二进制是否来自当前候选源码；
+- 实机每个测试帧对应的 DMA address 与 descriptor 内容；
+- DMA 读取的 payload 字节是否与 AF_PACKET 提交内容一致；
+- MAC TX 输出引脚上的 RGMII TXC/TXD 波形；
+- RTL8211F 线侧 MDI 发射是否正常。
+
+下一步应将重点从“源码里是否明显改坏 descriptor 格式”转向“实际 6.12.81 构建来源和 PHY/MAC 初始化路径差异”，同时继续审查 Rockchip GMAC 的 TX/RGMII 时钟及 PHY 状态配置；不得通过读取 dummy-syscon debugfs 寄存器或 devmem 获取现场寄存器值。
