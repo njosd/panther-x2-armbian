@@ -613,3 +613,31 @@ Ophub 项目公开的构建来源同时列有 `unifreq/linux-6.12.y-rockchip` �
 - 但仅凭本次内存快照不能排除短暂、局部的 NAPI 原子分配失败；同样不能据此认定 67 次 dropped 就来自该分支。
 - 下一步应先确认 `rx_dropped` 是否持续增长，而不是重复采集静态内存信息。若计数不再增长，67 很可能是早期累计事件；若持续增长，再围绕普通 RX skb 分配路径做更精确验证。
 
+
+
+## 22. RX dropped 一分钟增量复测
+
+用户于 2026-11-16 提供两次只读采样，间隔 60 秒：
+
+| 指标 | 04:49:08 | 04:50:08 | 增量 |
+|---|---:|---:|---:|
+| RX packets | 7,444 | 7,606 | +162 |
+| RX dropped（ip -s link） | 555 | 566 | +11 |
+| RX errors | 0 | 0 | 0 |
+| RX missed | 0 | 0 | 0 |
+| rx_gmac_overflow | 0 | 0 | 0 |
+| rx_overflow_irq | 0 | 0 | 0 |
+| rx_buf_unav_irq | 0 | 0 | 0 |
+| rx_process_stopped_irq | 0 | 0 | 0 |
+
+### 判断
+
+- RX dropped 在 60 秒内增加 11，证明该计数并非仅为启动早期的静态历史值，而是在持续增长。
+- 同期 RX packet counter 增加 162；两个计数的统计口径不同，不能将 +11/+162 解释为精确线上丢包率。
+- 本次采样中 GMAC overflow、missed、buffer unavailable、process stopped 等计数均未增长，暂不支持硬件 FIFO/DMA 接收资源耗尽是直接原因。
+- 结合此前未发现 XDP/TC/AF_XDP 附着，以及 v6.12.81 候选源码中普通 RX 路径的 `napi_alloc_skb()` 失败分支，普通 RX skb 分配失败仍是当前优先调查候选，但尚未被直接观测或证实。
+- 现有内存快照显示大量 MemAvailable，且 allocstall、pgscan、pgsteal、compact_stall/fail 均为 0；因此不能简单归因为系统整体内存不足。
+
+### 下一步研究方向
+
+优先确认实际运行 Image 对应的精确源码/补丁集，并针对普通 RX skb 分配失败路径寻找可观测证据；不要再重复泛化的内存压力采样，也不要修改驱动或内核参数。
