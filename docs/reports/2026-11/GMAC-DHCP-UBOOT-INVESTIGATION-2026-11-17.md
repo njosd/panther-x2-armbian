@@ -770,3 +770,37 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 - **纠错范围：** 第 13、16 节的运行内核版本标签已改为 6.12.81；第 7 节保留 6.12.69 作为源码 Makefile 比较基线，并明确其不是实机版本。
 
 证据来源：`evidence/uart/panther-jp-tvbox-u-boot-boot-20261117.txt`、`docs/reports/2026-11/PANTHER-X2-BOOT-MEDIA-AND-SOFTWARE-INVENTORY-20261117.md`、`config/versions.env`。本次更正不改变任何实机测试数据或故障分析结论。
+## 18. 排查方向澄清：TX 仍是主线，RX 统计仅为辅助证据（2026-11-17）
+
+此前第 13 节及总记录中新增 RX/IRQ/NAPI 统计，是为了核实 GMAC 接收侧是否整体失效、解释 RX dropped，并排除将 RX 时钟/DMA 整体故障误当作 DHCP 原因。**这不代表 DHCP 故障排查已从 TX 转向 RX。**
+
+**当前主故障方向仍为 TX：** Panther 本机 outgoing packet capture 能看到 DHCP Discover，而既有 hEX 抓包未观察到 Panther 的 Discover。故障边界仍在本机 outgoing 抓包点之后、hEX 观察点之前。
+
+### 已完成的 TX 证据（不等于 TX 根因已查明）
+
+- MAC_CONFIG 的 TE 位置位；DMA TX channel ST 位置位。
+- 已读取 TX descriptor ring base、tail pointer、current descriptor 和 buffer address 等现场寄存器；但寄存器快照只是采样瞬间，不能证明某一个 DHCP Discover 已到达 MAC/PHY。
+- 已核对 TX software completion 与 MMC hardware TX frame counters 的语义，并纠正跨启动/驱动生命周期累计值误比较的问题。同一已确认启动周期内，netdev TX packets、驱动 `tx_pkt_n` 与 MMC TX frame count 在可比采样中吻合。
+- 已检查现有 TX underflow、carrier error、fatal bus error、TX process-stopped、MTL TX FIFO 堵塞等计数，当前没有观察到对应异常。
+- 已完成部分 `stmmac_xmit()`、`stmmac_tx_clean()` 等函数的版本级比较；完整 TX descriptor ownership、DMA mapping、memory barrier、doorbell/channel start、TX IRQ/NAPI completion 的全路径审计尚未完成。
+
+### 明确未完成的 TX 关键问题
+
+1. 没有把某一个 DHCP Discover 与同一时刻的 TX descriptor 提交、DMA completion、MMC frame counter 增量逐项关联。
+2. 尚未通过同一时间窗口的 Panther 与 hEX 同步抓包，确认同一个 DHCP Discover 是否到达 hEX 入口；此前两端证据不是同步逐包关联。
+3. 尚未证明该帧从 GMAC MAC 经 RGMII TXC/TXD 到达 RTL8211F PHY，并由 PHY 从 MDI 端实际发出；没有 TXC/TXD 物理波形或独立线侧观测。
+4. 尚未完成当前实际运行的 6.12.81 发布构建与已审计源码之间的精确 commit/patch/config 对应，也未完成 TX DMA 全路径源码差异审计。
+
+### RX 数据的正确定位
+
+- RX IRQ/NAPI/GMAC 计数大量活动，说明 RX 通路并非整体停摆；RX dropped=1,694 的来源仍未知。
+- 这些 RX 结果用于排除“整个 GMAC/RX 子系统完全不工作”的宽泛假设，以及保留独立 RX dropped 线索；**不能用来解释 DHCP Discover 未到达 hEX，也不能据此将主线改为 RX。**
+
+### 下一步优先级（保持 TX 主线）
+
+1. 先完成只读静态审计：对齐当前 6.12.81 实际构建来源，继续核对 `stmmac_xmit()` 到 TX descriptor OWN/doorbell、DMA channel、completion/cleanup 的完整路径及相关配置；不重复已完成的寄存器基础检查。
+2. 在不主动触发 DHCP renew、不重启接口的前提下，利用自然出现的 DHCP Discover 做同一报文关联：Panther outgoing 捕获记录源 MAC/时间/报文标识，采集同窗口 TX 计数增量，并与 hEX 入口抓包对应。若无自然 Discover，再先讨论是否授权受控触发。
+3. 若 hEX 仍看不到同一报文，再把观测点向下细分到交换机端口/PHY 线侧；RGMII 波形测量属于后续硬件验证，不以软件 counters 代替。
+4. RX dropped 另列支线，只有在其增量或具体 RX 报文证据与主故障建立关联时才提升优先级。
+
+**结论：TX 排查尚未完成；没有找到发包失败根因。当前 RX 证据只是辅助排除项，主线仍是 DHCP Discover 从 Linux outgoing 抓包点到 hEX 入口之间的 TX 路径。**
