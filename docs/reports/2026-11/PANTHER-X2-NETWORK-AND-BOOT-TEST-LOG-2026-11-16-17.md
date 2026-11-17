@@ -509,3 +509,53 @@ DWMAC4 channel register offsets 与位定义参考：
 ### 10.4 下一步
 
 应将单个 DHCP Discover 与同一时间窗口的 TX software/MMC 计数增量关联起来，并结合 hEX 端同步抓包判断帧是否离开 Panther 的 PHY。不得再用不同启动或采样上下文的累计计数作直接比较。
+
+
+## 11. TX 计数连续性确认及 ethtool DMA dump 字段边界（2026-11-17）
+
+进一步核对上一轮 ethtool DMA dump 映射及当前启动周期计数。
+
+### 11.1 当前启动周期计数时间线
+
+本次启动时间 2026-11-16 03:59:45，GMAC 初始化/eth0 注册/Link Up 分别在 04:00:01、04:00:15、04:00:19。用户提供的当前启动期采样：
+- 初始：TX packets=23、tx_pkt_n=23、MMC framecount=23。
+- 04:49:08：TX packets=91。
+- 04:50:08：TX packets=92。
+- 随后寄存器采样：TX packets=116、tx_pkt_n=116、MMC framecount=116。
+- 最新：TX packets=118、tx_pkt_n=118、MMC framecount=118；MMC TX octets=30639；前一采样为29977，增量662 bytes。
+未见当前启动期间 eth0 unregister/register 或 GMAC reset 证据。
+
+因此当前启动期软件、netdev、MMC TX packet/frame 计数一致。此前 392/4 的来源生命周期未确认，不得用于当前启动的同生命周期差异结论。
+
+### 11.2 修正并明确 ethtool DMA dump 的映射边界
+
+按候选源码 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`：
+- `stmmac_ethtool_gregs()` 将 DWMAC4 channel base address 起始的一段寄存器复制到 ethtool DMA dump 区。
+- channel base = 0x1100，channel register stride = 0x80。
+- 该 dump 的 DMA Reg0..Reg22 对应偏移 0x00..0x58（每项 4 bytes）。
+
+已确认相关字段：
+- Reg0 = channel control（0x1100）
+- Reg1 = TX control（0x1104），ST bit0=1 表示 TX DMA start 置位
+- Reg2 = RX control（0x1108），SR bit0=1 表示 RX DMA start 置位
+- Reg5 = TX descriptor base low（0x1114）
+- Reg7 = RX descriptor base low（0x111c）
+- Reg8 = TX tail/end address（0x1120）
+- Reg10 = RX tail/end address（0x1128）
+- Reg11/12 = TX/RX ring length（0x112c/0x1130）
+- Reg13 = channel interrupt enable（0x1134），不是 DMA channel interrupt status
+- Reg14 = RX watchdog（0x1138）
+- Reg15 = slot control/status（0x113c）
+- Reg17 = current TX descriptor（0x1144）
+- Reg19 = current RX descriptor（0x114c）
+- Reg21 = current TX buffer address low（0x1154）
+
+重要限制：DMA channel interrupt status 位于 channel base + 0x60（索引 Reg24），不在当前 Reg0..Reg22 这段 ethtool dump 中。因此不能从这份 dump 的 Reg13 或其他字段直接宣称读到了 DMA channel 当前 status/error 位。TX tail pointer 与 current TX descriptor 相等只是一帧采样时的指针关系，不能单独证明 DHCP Discover 的线上发送成功。
+
+### 11.3 当前结论
+
+- 当前 MAC TE/RE 与 DMA TX/RX start 均置位。
+- 当前启动期 TX 计数连续且软件/netdev/MMC 相互吻合。
+- 未见 TX underflow、carrier error、fatal bus error 或 TX process stopped 统计。
+- 当前证据不支持持续 TX DMA 停摆；尚未证明单个 DHCP Discover 到达 MAC/PHY 线侧。
+- 下一步应对同一个 DHCP Discover 做 Panther eth0 outgoing 与 hEX 物理入口的同步抓包；不再用累计计数差异推断线上发送故障。
