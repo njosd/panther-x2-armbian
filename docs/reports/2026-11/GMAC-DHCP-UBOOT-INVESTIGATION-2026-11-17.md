@@ -537,3 +537,125 @@ Contents:
 5. 不因发现 E25 标识而直接刷写/替换 U-Boot，也不修改 delay、时钟、DTB 或网络配置。先完成源码和证据链审计。
 
 详细采集摘要另见：[TF 前 16 MiB 与 boot.scr 只读证据记录](./TF-FIRST16M-AND-BOOTSCR-READONLY-EVIDENCE-2026-11-17.md)。
+
+## 15. 6.12.81 GMAC RX / DMA / NAPI 与时钟只读复核（2026-11-17）
+
+用户补充了当前 Armbian 系统的接口状态、内核日志筛选结果、ip -s link、/proc/interrupts 和完整 ethtool -S eth0。仅记录本次实际输出；未执行 DHCP renew、接口重启、驱动重载或任何配置修改。
+
+### 15.1 接口与 NetworkManager 状态
+
+| 项目 | 结果 |
+|---|---|
+| 接口 | eth0，UP / LOWER_UP |
+| Carrier | on |
+| 当前 MTU | 1500 |
+| NetworkManager profile | Wired connection 1 |
+| profile 的 MTU 设置 | auto |
+| MAC | 已脱敏，不在报告公开 |
+
+nmcli 查询 profile MTU 返回 auto，表示 profile 未固定 MTU；运行时接口 MTU 为 1500。此前使用 connection.id 作为 nmcli -f 字段时收到 invalid field，因此未将该命令输出作为有效证据。
+
+### 15.2 RX 软件、驱动和 MAC 计数
+
+ip -s link show dev eth0：
+
+| 指标 | 结果 |
+|---|---:|
+| RX bytes | 2,244,918 |
+| RX packets | 25,539 |
+| RX errors | 0 |
+| RX dropped | 1,694 |
+| RX missed | 0 |
+| TX packets | 283 |
+| TX errors / dropped | 0 |
+
+ethtool -S eth0 关键字段：
+
+| 指标 | 结果 |
+|---|---:|
+| mmc_rx_framecount_gb | 25,663 |
+| mmc_rx_octetcount_gb | 2,358,886 |
+| rx_pkt_n | 25,663 |
+| q0_rx_pkt_n | 25,663 |
+| rx_normal_irq_n | 25,649 |
+| q0_rx_irq_n | 25,649 |
+| normal_irq_n | 25,660 |
+| napi_poll | 51,984 |
+| mmc_rx_crc_error | 0 |
+| mmc_rx_align_error | 0 |
+| mmc_rx_fifo_overflow | 0 |
+| mmc_rx_error | 0 |
+| rx_desc | 0 |
+| rx_gmac_overflow | 0 |
+| rx_missed_cntr | 0 |
+| rx_overflow_cntr | 0 |
+| rx_overflow_irq | 0 |
+| rx_buf_unav_irq | 0 |
+| rx_process_stopped_irq | 0 |
+| rx_watchdog_irq | 0 |
+| fatal_bus_error_irq | 0 |
+
+/proc/interrupts 中出现两条 eth0 相关 IRQ：
+- IRQ 67：CPU 计数列为 154 / 0 / 0 / 25875。
+- IRQ 68：各 CPU 计数均为 0。
+
+### 15.3 证据解释与限制
+
+1. **已验证：** 本次快照中 GMAC MAC 统计、驱动 RX 统计、RX IRQ 和 NAPI poll 均有显著非零计数。RX 接收通路不是完全静默状态。
+2. **已验证：** 当前快照未报告 CRC、alignment、FIFO overflow、RX buffer unavailable、RX process stopped 或 fatal bus error 计数。
+3. **已验证：** Linux netdev 累计 RX dropped 为 1,694，RX errors 和 missed 为 0。
+4. **待解释：** ip -s link 的 RX packets=25,539，与 rx_pkt_n / q0_rx_pkt_n / mmc_rx_framecount_gb=25,663 不同，差 124。两组计数来自不同层次，命令也非严格同时采样；不能把 124 直接解释为线上丢包数。
+5. **待解释：** netdev RX dropped=1,694 是累计统计，本次没有紧邻的前后两次采样，因此不能由此计算本次时间窗口的 dropped 增量，也不能直接归因于 DHCP 报文。
+6. **重要边界：** MAC 接收计数增长证明接收硬件路径正在处理流量，但不证明 DHCP Discover 已发出 PHY，也不证明 DHCP Offer 已被接收；本次数据不能单独定位 DHCP 故障方向。
+7. 用户终端粘贴过程中有多条命令发生错位；内核日志筛选输出仅明确显示 Nov 16 07:00:12 的 Link is Up - 1Gbps/Full。未看到 DMA reset 错误，但不能将该次筛选视为完整、无遗漏的日志审计。
+
+### 15.4 GMAC 初始化日志与时钟复核
+
+用户提供的 dmesg 关键记录包括：
+- GMAC1 fe010000.ethernet probe；
+- clock input from PHY、init for RGMII；
+- TX delay 0x30、RX delay 0x10；
+- Synopsys User ID 0x30、Synopsys ID 0x51，识别为 DWMAC4/5；
+- DMA capability、RX/TX checksum offload、TSO 等能力识别；
+- Register MEM_TYPE_PAGE_POOL RxQ-0；
+- RTL8211F PHY，MDIO 地址 0，IRQ=POLL；
+- PTP clock registered；
+- configuring for phy/rgmii link mode；
+- Link Up 1Gbps/Full，flow control rx/tx。
+
+运行时 clock-names 共 10 项：
+stmmaceth、mac_clk_rx、mac_clk_tx、clk_mac_refout、aclk_mac、pclk_mac、clk_mac_speed、ptp_ref、pclk_xpcs、clk_xpcs_eee。
+
+clk_summary 中 GMAC1 主要活动消费者及频率：
+- stmmaceth / clk_gmac1：125 MHz，enable/prepare 计数非零；
+- mac_clk_rx、mac_clk_tx / clk_gmac1_rx_tx：125 MHz，计数非零；
+- clk_mac_speed / clk_gmac1_rgmii_speed：125 MHz，计数非零；
+- gmac1_clkin：125 MHz，计数非零；
+- aclk_mac / aclk_gmac1：297 MHz，计数非零；
+- pclk_mac / pclk_gmac1：99 MHz，计数非零；
+- ptp_ref / clk_gmac1_ptp_ref：62.5 MHz，计数非零。
+- pclk_xpcs 与 clk_xpcs_eee 为 0/0；当前 PHY/RGMII 模式下不能仅凭未使能就判为故障，XPCS 时钟不应与基本 RGMII GMAC 时钟混为一谈。
+- clk_mac_refout 未显示为活动消费者；结合日志的 clock input from PHY，这种状态可能符合当前输入时钟配置，但仅凭 clk_summary 不能证明该 clock handle 从未被获取。
+
+**阶段判断：** 当前日志、clock_summary 和 RX 计数共同证明 GMAC 已完成 probe、PHY 识别、RGMII 配置、链路建立，并持续处理 RX 流量。当前证据不支持 GMAC RX 完全未启动或基本 GMAC 时钟全部缺失。它们仍不能排除更细粒度的 DMA 描述符、包过滤、特定帧处理或 TX 物理边界问题。
+
+### 15.5 6.1 / 6.12 源码对照的证据等级
+
+本轮查看了 Linux 6.1.116 上游源码与 Rockchip Linux 6.12 开发分支快照：
+- stmmac_rx_refill() 主体未发现实质差异；
+- stmmac_init_dma_engine() 主体流程相近，存在描述符配置等差异；
+- stmmac_rx() 存在后续版本功能路径变化（包含 XDP/VLAN/checksum 相关逻辑），当前没有证据证明这些变化导致普通 DHCP 报文被丢弃；
+- RTL8211F PHY suspend 实现存在版本差异：6.1.116 路径使用 genphy_suspend，所查 6.12 分支增加 rtl821x_suspend 及可选 PHY clock 关闭逻辑。
+
+**限制：** 上述 6.12 开发分支快照尚未证明与设备当前运行的 6.12.81-rk35xx-ophub Image 精确对应；因此这些只是候选源码差异，不能写成当前运行二进制的确定行为。当前运行时 PHY 节点未见 clocks / clock-names 属性，故可选 PHY clock 关闭路径在本机是否实际生效也未证实。
+
+另发现上游同类问题报告：RK3566 + RTL8211F-VD + RGMII 在接口重开、PHY 接收时钟尚未恢复时，可能触发 Failed to reset the dma；报告场景涉及 NetworkManager 设置 MTU 后重开接口。该问题是条件性候选，不是本机已发生事实。本次 MTU profile 为 auto、运行时 MTU=1500，提供的日志片段未出现 DMA reset 错误；但本轮日志筛选过程有粘贴错位，不能据此彻底排除。上游修复参考：https://github.com/torvalds/linux/commit/06232cb44bc8
+
+### 15.6 下一步定位调整
+
+1. 将研究重点从 GMAC 是否完全收不到包，调整为 DHCP 报文在 Linux、MAC/PHY、交换网络和 hEX 之间的具体边界。
+2. 下一项有区分度的证据是被动监听 eth0 的 UDP 67/68 报文，确认 Discover/Offer 是否实际经过接口；不主动 renew，不重启接口。
+3. 若需定位 TX 边界，应把同一个 DHCP Discover 与 hEX 入口同步抓包关联；本机 outgoing packet capture 本身不等于 PHY 线侧发送成功。
+4. 只有在确认 DHCP 报文实际 RX 到达而未交给客户端，或 dropped 继续增长时，才进一步定位普通 RX skb / NAPI 处理路径。
+5. 不重复已完成的基础 DHCP、链路、PHY ID、RGMII delay、GRF、时钟、pinmux 和 PHY reset GPIO 检查；不运行会停止网卡的 phy_lb。
+6. 未经明确授权，不安装软件、不修改内核/驱动/DTB/网络配置、不重启 NetworkManager 或 eth0。
