@@ -4,7 +4,7 @@
 
 ## Panther X2 网络与启动链
 
-- [Ethernet TX 物理边界测试与 STMMAC 源码审计（2026-11-17）](./PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md)：归档 AF_PACKET 自定义帧与 iMac 持续抓包结果、TX ftrace/kprobe 和 MMC 计数、6.1/6.12 Rockchip STMMAC/DWMAC4 源码对照、危险 debugfs 读取事故及后续只读研究路线。
+- [Ethernet TX 物理边界测试与 STMMAC 源码审计（2026-11-17）](./PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md)：归档 AF_PACKET 自定义帧与 iMac 持续抓包结果、TX ftrace/kprobe 和 MMC 计数、6.1.116/6.12.81 精确源码对照、TX descriptor/DMA/MTL/FIFO/时钟审计、危险 debugfs 读取事故及后续 MAC TXC/TXD 物理边界研究路线。
 
 - [Linux 6.12.81 网络测试结果汇总（脱敏，2026-11-16）](./PANTHER-X2-ETHERNET-6.12.81-TEST-RESULTS-2026-11-16.md)：将分段提供的 6.12.81 网络测试结果合并归档，覆盖系统身份、启动介质、运行时 DT、GMAC/PHY、ethtool、MMC/DMA、IRQ、RX dropped、IPv4/IPv6 状态及待验证事项。
 
