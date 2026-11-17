@@ -686,3 +686,135 @@ Release 描述明确说明文件名带 `flippy` 的包由 Flippy 手动上传，
 - `dwmac4_dma_init()` 的函数签名移除了旧的 `atds` 参数，但函数体对 DMA_SYS_BUS_MODE、DMA_BUS_MODE 的配置步骤一致；旧参数在该函数体内没有被使用。
 
 因此目前没有发现 DWMAC4 TX channel PBL、OSP、descriptor base address 初始化行为发生实质变化。此项继续降低了“6.12 初始化 TX DMA channel 时漏设关键寄存器”的可能性。
+
+
+## 19. 6.1.116 工作内核的真实基线重新锁定：它是 Ophub 通用内核，不是 RK35xx 专用内核（重大纠正，2026-11-17）
+
+此前把 `unifreq/linux-6.1.y-rockchip` 作为 6.1.116 工作系统对照源，是不准确的。结合用户原系统元数据与 2024 年 Ophub 构建工作流，现已找到更匹配的真实基线。
+
+### 19.1 6.1.116 构建类型与源码候选
+
+用户原系统元数据为：
+- `KERNEL_SIGNATURE='ophub'`
+- `KERNEL_TAGS='stable'`
+- `KERNEL_REPO='ophub/kernel'`
+- uname build time：`Sun Nov 10 08:21:17 EST 2024`
+
+Ophub 在 2024-11-10 的 workflow 文件：
+`.github/workflows/compile-release-general-kernel.yml`
+明确设置：
+- workflow 时区 `America/New_York`；
+- `kernel_source` 默认值 `unifreq`（可选 `codesnas`）；
+- `kernel_version` 可选 `6.1.y`；
+- `kernel_sign` 默认 `-ophub`；
+- `kernel_config` 默认 `kernel-config/release/general`；
+- release tag 为 `kernel_stable`。
+
+与此不同，专用 RK35xx workflow 的默认签名是 `-rk35xx-ophub`，release tag 是 `kernel_rk35xx`。
+
+在 `unifreq/linux-6.1.y` 上按 2024-11-10 13:21:17 UTC（即 08:21:17 EST）查找当时 HEAD，得到：
+- source commit：`5eb841b59d6ead6e264163785a634e78f0253c8e`
+- commit date：2024-11-09 08:06:23 UTC
+- commit message：`up to 6.1.116`
+
+同一时点 `codesnas/linux-6.1.y` 也指向相同 SHA。因此即使当时 workflow 输入选择了 codesnas，源码 commit 仍相同。
+
+**判断：** 用户原 6.1.116 系统极高概率来自 Ophub 通用 stable kernel workflow，使用 Linux 6.1.116 通用源码 commit `5eb841b`，而不是后来的 RK35xx 专用 6.1 分支。由于 2024 年对应的旧 Actions run log / 原始安装包哈希尚未取得，仍保留“高置信度重建”而非二进制级确认。
+
+参考：
+- [Ophub 2024 general kernel workflow](https://github.com/ophub/kernel/blob/8f6eb6e392d68b89a4708c8c45caf9d3f46eadaa/.github/workflows/compile-release-general-kernel.yml)
+- [6.1.116 source commit](https://github.com/unifreq/linux-6.1.y/commit/5eb841b59d6ead6e264163785a634e78f0253c8e)
+- [Ophub workflow/config update commit, 2024-11-10](https://github.com/ophub/kernel/commit/8f6eb6e392d68b89a4708c8c45caf9d3f46eadaa)
+
+### 19.2 两次内核构建实际上来自不同内核系列/构建配置
+
+| 项目 | 工作正常的 6.1.116 | 故障的 6.12.81 |
+|---|---|---|
+| Ophub workflow | general kernel | RK35xx kernel |
+| kernel source | `unifreq/linux-6.1.y`（高置信度） | `ophub/linux-6.12.y-rockchip` |
+| source SHA | `5eb841b...`（高置信度） | `661b2d8...`（Actions log 确认） |
+| signature | `-ophub` | `-rk35xx-ophub` |
+| config family | `kernel-config/release/general/config-6.1` | `kernel-config/release/rk35xx/config-6.12` |
+| source basis | 通用 Linux 6.1.y | Rockchip vendor 6.12 BSP |
+
+这说明不能把问题简单归类为“同一 RK35xx BSP 从 6.1 升级到 6.12”。实际是从通用 6.1 kernel 切换到 Rockchip vendor 6.12 BSP。此前使用 `unifreq/linux-6.1.y-rockchip` 对照得到的 6.1 侧结论，不再代表用户原来正常工作的 6.1.116 系统；后续以本节的 `unifreq/linux-6.1.y@5eb841b` 为工作基线。
+
+### 19.3 设备树：板级 GMAC 与 pinctrl 实际保持一致
+
+对比两个准确候选 source commit：
+- 6.1：`unifreq/linux-6.1.y@5eb841b`
+- 6.12：`ophub/linux-6.12.y-rockchip@661b2d8`
+
+结果：
+- Panther X2 DTS 的完整 `&gmac1` 板级配置块规范化空白后完全一致；
+- 六个 GMAC1 pinctrl group 内容逐字一致：
+  - `gmac1m0_miim`
+  - `gmac1m0_clkinout`
+  - `gmac1m0_rx_bus2`
+  - `gmac1m0_tx_bus2`
+  - `gmac1m0_rgmii_clk`
+  - `gmac1m0_rgmii_bus`
+- TX/RX 引脚及 drive-level 配置没有变化；
+- 两版 Panther DTS 都使用 `phy-mode="rgmii"`、`clock_in_out="input"`、`tx_delay=0x30`、`rx_delay=0x10`、PHY addr 0、相同 reset GPIO 与 reset delays。
+
+SoC `rk356x.dtsi` 的 GMAC1 clock-names 在 6.12 增加了 `pclk_xpcs` 和 `clk_xpcs_eee`，与 SGMII/QSGMII XPCS 支持有关；对 Panther 当前 RGMII 模式，新驱动仅在 SGMII/QSGMII 分支获取这两项。
+
+### 19.4 Rockchip GMAC glue 的真实差异：时钟管理和 GRF 写入顺序
+
+这次从真正的 6.1.116 generic source 比较后，发现此前未覆盖的实际差异：
+
+**A. GMAC clock enable 稳定等待时间变化**
+- 6.1.116 generic `gmac_clk_enable()`：bulk enable clocks、执行可选 clock selection 后，`mdelay(5)`，即等待约 5 ms。
+- 6.12.81 RK35xx `gmac_clk_enable()`：逐项 enable clock、执行 clock selection 与 CSU disable 后，`usleep_range(100, 200)`，等待约 100–200 µs。
+
+这是实际存在的约 25–50 倍等待时间缩短。两版对 Panther RGMII 实际需要的核心时钟（`aclk_mac`、`pclk_mac`、`mac_clk_tx`、`clk_mac_speed`）均有 enable 路径；旧版额外 bulk 获取的 `pclk_xpcs` 对 RGMII 不应是必要时钟。
+
+当前判断：这是值得重点审查的启动时序差异，但 PHY 后续有 GPIO reset delays（20 ms + 100 ms）且系统最终能够 link-up，因此还不能仅凭等待时间缩短就认定根因。
+
+**B. RK3568 RGMII GRF 写入顺序变化**
+- 6.1.116：先向 GMAC1 CON0 写 TX/RX delay value，再向 CON1 写 RGMII interface select 与 RX/TX delay enable bits。
+- 6.12.81：先向 CON1 写 RGMII interface select 与 `DELAY_ENABLE()`，再向 CON0 写 `DELAY_VALUE()`。
+
+在当前 `phy-mode=rgmii` 且 TX/RX delay 都非零（0x30/0x10）时，两版预期最终 enable/value 状态相同；但硬件寄存器写入顺序确实相反。需要保留为候选时序差异，不将其夸大为已证实故障。
+
+**C. 6.12 新增 CSU 支持对 Panther GMAC 节点应无作用**
+6.12 的 `rk_gmac_csu_init()` 查找 `rockchip,csu`，而当前 Panther GMAC1 节点没有该属性；`rockchip_csu_get()` 因缺少 phandle 返回错误，驱动将句柄置 NULL，后续 CSU helper 对 NULL 返回 0。因此不能把 CSU disable 当作当前 Panther 实际执行的配置步骤。
+
+### 19.5 配置差异与 DMA 路径
+
+Ophub 2024 general config：
+- file blob：`c5e4598301c3ef3675be0058b99b9b6044a14bbf`
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_STMMAC_SELFTESTS=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_REALTEK_PHY=y`
+- `CONFIG_PHYLINK=y`
+- `CONFIG_ARCH_DMA_ADDR_T_64BIT=y`
+- `CONFIG_ROCKCHIP_IOMMU=y`
+- `CONFIG_IOMMU_DEFAULT_DMA_STRICT=y`
+- `CONFIG_DMA_API_DEBUG` 未启用
+
+Ophub 2026 RK35xx config：
+- file blob：`966f4b6ac7c0ad59179d6ae272423500601fab07`
+- 上述主要驱动/架构配置相同；
+- `CONFIG_STMMAC_SELFTESTS` 未启用；
+- 新增 `CONFIG_DWMAC_ROCKCHIP_TOOL=y`；
+- 新增 `CONFIG_STMMAC_ETHTOOL=y`。
+
+所以用户此前记录的 `CONFIG_STMMAC_SELFTESTS=y` 对应旧 6.1.116 general config；6.12.81 正式 config 中该项未启用。这解释了两版测试能力不同，但不是普通 TX 数据路径故障证据。
+
+在实际 6.1.116 generic source 与实际 6.12.81 BSP source 间再次核对：
+- DWMAC4 descriptor `dwmac4_rd_prepare_tx_desc()`、`dwmac4_set_tx_owner()`、`dwmac4_set_addr()` 仍一致；
+- `stmmac_flush_tx_descriptors()` 仍一致，OWN barrier 和 TX tail pointer 顺序未变；
+- `dwmac4_dma_ops` 两版均无 `.enable_dma_transmission` callback，均绑定 `.start_tx = dwmac4_dma_start_tx`；
+- `stmmac_xmit()` 6.12 新增 EST max-SDU 检查及非 IP/不支持 COE 情况的 checksum software fallback；Panther DTS 未配置 EST，用户 AF_PACKET EtherType 0x88B5 raw frame 正常情况下不会进入 checksum fallback。其 descriptor/DMA mapping/flush 主体仍一致。
+
+### 19.6 下一步最有价值的现场只读核对
+
+6.12 新 `rk_gmac_clk_init()` 使用 `devm_clk_get()` 分别获取 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed` 等时钟，但对部分获取错误只打印 `cannot get clock ...`，没有直接让 probe 失败。源 DTS 的 clock-names 正确，不等于 TF 卡当前实际加载的运行时 DTB 一定具有完全相同的 `clock-names`。
+
+因此，在任何 loopback 或硬件修改测试之前，最小且安全的下一项证据是读取运行时 DT 的：
+`/proc/device-tree/ethernet@fe010000/clock-names`
+确认它确实含有 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed`。这是普通只读设备树文件，不读取 MMIO/debugfs 寄存器。
+
+本节的源代码/配置比较均为静态分析；没有对 Panther 执行 loopback、写入 GRF、修改系统配置或读取 dummy-syscon。
