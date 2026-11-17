@@ -552,3 +552,64 @@ Ophub 项目公开的构建来源同时列有 `unifreq/linux-6.12.y-rockchip` �
 - 尚未取得设备 Image 对应的精确源码 commit；源码候选与实际运行二进制的逐字节对应关系仍未验证。
 - 未执行设备配置修改、驱动修改或软件安装。
 
+
+
+## 21. XDP/AF_XDP 与内存压力排查补充
+
+### 21.1 XDP / TC / AF_XDP 检查
+
+用户提供的只读输出：
+
+- `ip -details link show dev eth0`：接口详细信息中未显示 XDP program / program ID。
+- `tc filter show dev eth0 ingress`：无输出。
+- `tc filter show dev eth0 egress`：无输出。
+- `ss -a -f xdp`：仅显示表头，无 AF_XDP socket。
+
+结论：当前检查时没有发现 eth0 上挂载的 XDP 程序、TC ingress/egress filter 或 AF_XDP socket。结合 v6.12.81 候选源码，XDP_CONSUMED 与 XSK zero-copy 两类 `rx_dropped` 路径目前缺少运行时支持证据。该结果是当前状态快照，不证明此前整个统计累计窗口从未短暂挂载过相关程序/socket。
+
+### 21.2 内存状态快照
+
+| 指标 | 结果 |
+|---|---:|
+| MemTotal | 4,003,116 kB |
+| MemFree | 3,579,128 kB |
+| MemAvailable | 3,643,080 kB |
+| Buffers | 17,232 kB |
+| Cached | 165,192 kB |
+| Slab | 139,192 kB |
+| SReclaimable | 28,848 kB |
+| SUnreclaim | 110,344 kB |
+| KernelStack | 2,048 kB |
+| PageTables | 1,552 kB |
+| nr_free_pages | 894,782 |
+
+`/proc/pressure/memory` 不可用（PSI unavailable）。
+
+以下 VM 计数均为 0：
+
+- allocstall（dma/dma32/normal/movable）
+- pgscan（kswapd/direct/khugepaged/anon/file/direct_throttle）
+- pgsteal（kswapd/direct/khugepaged/anon/file）
+- compact_stall
+- compact_fail
+
+`/proc/buddyinfo` 显示 DMA zone 仍有大量高阶空闲块；Normal zone 各阶分布不均，但结合约 3.64 GiB MemAvailable、零 allocstall/回收/压缩计数，当前快照没有系统级内存紧张或明显碎片回收压力的迹象。
+
+### 21.3 内核日志
+
+用户提供的筛选日志包含 GMAC probe、PAGE_POOL RxQ-0 注册、RTL8211F PHY 初始化及 1Gbps Full 链路建立记录。筛选结果未发现：
+
+- page allocation failure
+- out of memory / OOM killer
+- allocation failed
+
+仍出现的 `IRQ sfty not found`、`No Safety Features support found` 是先前已记录的安全特性提示；当前无证据表明它们与 RX dropped 或 DHCP 失败有关。
+
+### 21.4 当前判断
+
+- 当前系统有充足可用内存，没有系统级内存压力证据。
+- 当前没有 XDP/TC/AF_XDP 配置的证据。
+- 在普通 RX 路径中，`napi_alloc_skb()` 返回 NULL 仍是候选源码里最直接的剩余 `rx_dropped` 分支。
+- 但仅凭本次内存快照不能排除短暂、局部的 NAPI 原子分配失败；同样不能据此认定 67 次 dropped 就来自该分支。
+- 下一步应先确认 `rx_dropped` 是否持续增长，而不是重复采集静态内存信息。若计数不再增长，67 很可能是早期累计事件；若持续增长，再围绕普通 RX skb 分配路径做更精确验证。
+
