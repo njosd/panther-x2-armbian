@@ -870,3 +870,66 @@ Ophub 2026 RK35xx config：
 - 6.12 运行时 MAC TX output waveform 与 PHY 输入采样时序。
 
 **下一步继续围绕“MAC TX/RGMII TXC/TXD 是否真实输出”推进，不转向 RX dropped。** 不重复已完成的 TX descriptor/MTL 静态比较，不执行 loopback、phy_lb、phy_lb_scan、接口重启或任何寄存器写入；若需要示波器/逻辑分析仪测量，应先说明测点和所需设备，再由用户决定。
+
+
+## 21. RGMII TX 物理测量点与判读方法（追加，2026-11-18）
+
+本轮只进行公开硬件资料研究和既有证据边界整理；未要求用户拆机、探测引脚或执行设备侧操作。
+
+### 21.1 Panther X2 板级资料可获得性
+
+公开资料可以确认 Panther X2 使用 RK3566、千兆 Ethernet，第三方实机拆机资料识别其 PCB 为 BROWAN H1GW V04；但本轮没有找到可核验的 H1GW V04 Ethernet 原理图、PCB netlist 或 RGMII 测试点编号。故不能把其他 RK3566 板卡的电阻编号、走线位置或电压配置直接套用到 Panther X2。
+
+参考：
+- [Panther X2 hardware identification (BROWAN H1GW V04)](https://lorenzogangemi.com/blog/repurposing-panther-x2/)
+- [Panther X2 product manual / FCC filing](https://fccid.io/)
+
+### 21.2 可直接定位的 RTL8211F RGMII TX 测点
+
+当前运行日志识别 PHY 为 RTL8211F Gigabit Ethernet。RTL8211F 40-pin QFN datasheet 给出 MAC→PHY 输入脚：
+
+| RTL8211F pin | 信号 | 用途 |
+|---:|---|---|
+| 20 | TXC | MAC 提供给 PHY 的发送参考时钟 |
+| 19 | TXCTL | 发送控制 |
+| 18 | TXD0 | 发送数据 bit 0 |
+| 17 | TXD1 | 发送数据 bit 1 |
+| 16 | TXD2 | 发送数据 bit 2 |
+| 15 | TXD3 | 发送数据 bit 3 |
+
+在 1000BASE-T 模式，TXC 为 125 MHz；TXD[3:0] 与 TXCTL 按时钟上升沿和下降沿传输。PHY datasheet 的 RGMII timing table 给出 8 ns 标称时钟周期，并列出 sub-ns 级边沿/时序参数。
+
+**物理边界判定：** 若能在 PHY 输入侧的 TXC/TXCTL/TXD[3:0] 观察到与测试发送同步的活动，说明信号至少到达 RTL8211F 的 RGMII 输入端；若 MAC 发送计数增长、但 PHY 输入侧没有相应 TXC/TXCTL/TXD 活动，则故障边界仍在 GMAC/RGMII pinmux/GRF/板级走线到 PHY 输入之间。仅有 TXC 时钟而没有 TXCTL/data 不能算作帧已传输。
+
+参考：[Realtek RTL8211F datasheet, sections 6.3, 7.11.1 and RGMII timing](https://file3.dzsc.com/datasheet/22/04/14/150904366.pdf)。
+
+### 21.3 电压与测量安全约束
+
+- RK3566 RGMII IO domain 可为 1.8 V 或 3.3 V，必须与 PHY RGMII IO 电平一致；公开的 RK3566 设计指南没有给出 Panther H1GW V04 的具体选择。因此在取得 Panther 原理图或确认 PHY VDDIO 实际电压之前，不应按 3.3 V 或 1.8 V 预设探头逻辑阈值。
+- Rockchip 参考设计要求 TXD/TXEN/TXCLK 串联电阻靠近 RK3566，TXCLK 与 TXD/TXEN 走线时延匹配；指南列出 50 Ω ±10% 单端阻抗及 TX/RX 相关布线约束。这些是通用设计要求，不代表已证明 Panther PCB 不符合。
+- 不能用普通逻辑探头直接接触 0.4 mm pitch QFN 邻脚进行试探；应优先寻找 TX 信号串联电阻的可接触焊盘或专用测试点，并使用高阻、低电容探头和可靠接地。探测 PHY 芯片脚存在短路风险。
+- 若要只判断“有没有发送活动”，可先以 TXCTL 触发观察 TXC/TXD；若要逐位解码并核验整个帧，需要同时采集 TXC、TXCTL、TXD0–3 六路信号。RGMII 为 DDR，采样/带宽必须足以分辨 125 MHz 时钟两边沿的数据；低速、低采样率逻辑分析仪不能用于时序合规判断。
+- 任何探测都应先确认探测点、电压、地参考和仪器输入规格。不得为找测点而使用 devmem、dummy-syscon debugfs、写寄存器或改 delayline。
+
+### 21.4 当前可以下的结论与不能下的结论
+
+**已知：**
+- Linux outgoing、驱动接受、descriptor 清理和 MAC MMC TX 计数有正向证据；
+- iMac 持续抓包未收到自定义广播/单播测试帧；
+- 当前软件时钟树显示外部 125 MHz reference clock 与 GMAC 时钟链已启用；
+- PHY 型号和其 RGMII TX 输入引脚定义可以由公开资料确定。
+
+**未知：**
+- Panther H1GW V04 的 RGMII 实际 IO 电压；
+- PHY 输入脚/串联电阻在 PCB 上的准确可接触位置；
+- 发送测试帧期间 TXC/TXCTL/TXD[3:0] 是否出现符合时序的电气波形；
+- PHY MDI 四对差分线是否真正发出对应编码信号。
+
+### 21.5 下一项行动顺序
+
+1. 先确认是否能取得 Panther X2 PCB 清晰近照（能看到 RTL8211F 芯片标记、周边电阻/丝印）或 H1GW V04 原理图；仅用于识别测点，不要求拆焊或改动。
+2. 由板级资料确定 RGMII IO 电压与 TX 串联电阻/测试点。
+3. 若有合适示波器及探头，再决定是否做一次只读波形观察；先看 TXC 与 TXCTL 活动，再视仪器通道数决定是否同时采集四条 TXD。
+4. 只有在 RGMII 输入波形正常后，才继续把物理边界向 RTL8211F MDI 侧推进。
+
+本阶段没有执行任何 Panther 设备命令、loopback、PHY reset、接口重启或硬件探测。下一轮仍聚焦 TX，不转向 RX dropped。
