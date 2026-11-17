@@ -184,3 +184,120 @@ grep -n -A8 -B2 'compatible ='
 ## 10. 防止重复调查
 
 后续 Panther X2 U-Boot 调查应先读取本记录及关联基线报告。已确认的 TF 启动介质、FIT 整体哈希、默认 configuration、FDT image 元数据、真实 FDT payload 偏移、FDT 哈希、dtc 解析成功状态和工具版本不得重复询问或重新采集，除非用户报告启动介质/镜像/工具环境已变更。
+
+
+## 11. 已验证 U-Boot control FDT 的 GMAC1 配置（2026-11-17）
+
+用户对已通过 FIT SHA256 校验的 `/tmp/tf-uboot-control-raw2.dtb` 执行了完整节点输出。关键实机内容：
+
+```dts
+/ {
+    compatible = "radxa,e25", "rockchip,rk3568";
+    model = "Radxa E25";
+
+    aliases {
+        ethernet0 = "/ethernet@fe2a0000";
+        ethernet1 = "/ethernet@fe010000";
+    };
+
+    ethernet@fe010000 {
+        compatible = "rockchip,rk3568-gmac", "snps,dwmac-4.20a";
+        reg = <0x00 0xfe010000 0x00 0x10000>;
+        ...
+        status = "disabled";
+        u-boot,dm-pre-reloc;
+        phy-mode = "rgmii";
+        clock_in_out = "output";
+        snps,reset-gpio = <0x1000005d 0x19 0x01>;
+        snps,reset-active-low;
+        snps,reset-delays-us = <0x00 0x4e20 0x186a0>;
+        pinctrl-names = "default";
+        pinctrl-0 = <0x1000005e 0x1000005f 0x10000060
+                     0x10000061 0x10000062>;
+        tx_delay = <0x4f>;
+        rx_delay = <0x26>;
+        phy-handle = <0x10000063>;
+        ...
+        mdio {
+            compatible = "snps,dwmac-mdio";
+            ...
+            phy@0 {
+                compatible = "ethernet-phy-ieee802.3-c22";
+                reg = <0x00>;
+            };
+        };
+    };
+};
+```
+
+以上摘录中的省略号代表用户原始输出未在此重复列出，不表示节点缺少属性。
+
+### 11.1 直接可确认的事实
+
+- U-Boot control FDT 的根兼容字符串是 `radxa,e25`、`rockchip,rk3568`，model 是 `Radxa E25`。
+- `aliases.ethernet1` 指向 GMAC1（`/ethernet@fe010000`）；alias 只提供名称/序号映射，不代表设备启用。
+- Panther Linux 正在使用的 GMAC1 MMIO 地址是 `0xfe010000`，与该节点一致。
+- 该 GMAC1 节点明确含有 `status = "disabled"`。
+- 同一节点含有 `u-boot,dm-pre-reloc`，但该标记不是启用开关，不能覆盖 disabled 状态。
+- 节点还描述了 RGMII、output clock、reset GPIO、pinctrl、delay 和 PHY 地址 0；这些只是 DT 属性，不能据此证明 U-Boot 曾实际操作它们。
+- 此 control FDT 的 `tx_delay=0x4f`、`rx_delay=0x26` 与 Linux 当前运行时 DT 的 `0x30`、`0x10` 不同；但因为节点 disabled，不能把这种静态差异直接解释成 U-Boot 写入了不同 GRF 值。
+
+### 11.2 U-Boot Driver Model 语义（源码/官方文档）
+
+U-Boot Driver Model API 对 `ofnode_is_enabled()` 的定义是：检查节点的 `status`；若存在该属性，只有值为 `okay` 才返回 enabled；若没有 status 才按默认启用处理。U-Boot 文档亦说明 `ofnode_set_enabled()` 通过设置 status 决定节点是否可用于 Driver Model 初始化。
+
+参考：
+- U-Boot v2025.04 Driver Model API： https://docs.u-boot.org/en/v2025.04/api/dm.html
+- U-Boot v2025.10 Driver Model 源码： https://github.com/u-boot/u-boot/tree/v2025.10/drivers/core
+- U-Boot v2025.10 Rockchip DWC EQOS driver（仅用于区分 GMAC 控制器路径）： https://github.com/u-boot/u-boot/blob/v2025.10/drivers/net/dwc_eth_qos_rockchip.c
+- U-Boot v2025.10 Rockchip GMAC driver： https://github.com/u-boot/u-boot/blob/v2025.10/drivers/net/gmac_rockchip.c
+
+**当前合理判断：** 在标准、基于此 control FDT 的 U-Boot Driver Model 设备扫描路径中，`status = "disabled"` 的 GMAC1 节点不会作为正常启用设备绑定/初始化；`u-boot,dm-pre-reloc` 本身不改变这一点。
+
+**判断边界：** 这不是对该二进制实际运行行为的直接观测。仍需检查 TF FIT 中 U-Boot 二进制对应的确切源码/配置，以及是否有 board-specific 代码、手工 bind、传统非-DM 驱动或 SPL/ATF 代码绕过该节点直接操作 GMAC1。不能仅凭 DTB 排除这些路径。
+
+### 11.3 对 DHCP 故障假设的影响
+
+这项证据显著降低了“U-Boot 标准 DM 路径按该节点初始化 GMAC1，并把 E25 的 delay/reset/pinctrl 状态交给 Linux”这一假设的可信度。
+
+但尚不能排除：
+- SPL、ATF 或更早启动阶段直接配置过 GMAC1/GRF/CRU/GPIO；
+- U-Boot board code 或非-DM代码直接访问 GMAC1；
+- U-Boot 对其他共享资源的配置间接影响 Linux；
+- Linux 自己初始化后的 MAC/PHY 时序、DMA、收发路径问题。
+
+因此目前不能把 DHCP 故障归因于 U-Boot，也不能据此宣告 U-Boot 与故障无关。
+
+### 11.4 后续有针对性的只读检查
+
+下一步不需要用户重复 FIT 提取。优先在源码侧完成：
+1. 确认 FIT 中 U-Boot 二进制实际来源版本/提交，而不是用晚于 2023-04-23 的 Radxa 源码猜测。
+2. 对该版本检查 `gmac_rockchip` / `dw_eth_qos`、Rockchip board init、`board_late_init`、SPL 和 ATF 是否有 GMAC1 直接寄存器访问。
+3. 查明 phandle `0x1000005d` 的 GPIO provider 和 `pinctrl-0` 五个 phandle 的具体组名；不能仅凭 phandle 数字推断 bank/line。
+4. 如源码没有绕过 DM 的初始化路径，再把 U-Boot GMAC1 初始化假设进一步降级，转向 Linux 接管后的收发链路与 PHY/MAC 物理时序证据。
+
+无需为了验证 disabled 节点而在实机修改 FDT、启用 GMAC 或执行网络测试。
+
+## 12. 当前结论状态补充（2026-11-17）
+
+**已验证：**
+- 已取得真实、哈希正确的 U-Boot control FDT。
+- 根节点标识为 Radxa E25 / RK3568。
+- GMAC1 节点位于 `0xfe010000`，明确 `status = "disabled"`。
+- 节点同时含 `u-boot,dm-pre-reloc`；这不等于 enabled。
+- GMAC1 节点声明 RGMII、output clock、reset GPIO、pinctrl、delay 0x4f/0x26、PHY address 0。
+
+**源码语义支持的判断：**
+- 标准 U-Boot DM 扫描逻辑以 status 决定节点是否 enabled；disabled 节点不会按普通启用设备路径初始化。
+
+**尚未验证：**
+- TF 中 U-Boot binary 的确切源码提交/构建配置。
+- 任何 SPL/ATF/board-specific/非-DM代码是否绕过 disabled 节点直接配置 GMAC1。
+- reset GPIO phandle 与 pinctrl phandle 的具体 provider/group 映射。
+- U-Boot 对 GMAC1 的任何实际寄存器写入。
+- U-Boot 与 Linux DHCP 故障的因果关系。
+
+**后续分析重点修正：**
+- 不再把 control FDT 中的 `tx_delay=0x4f`、`rx_delay=0x26` 或 reset GPIO 属性当作 U-Boot 已执行配置的证据。
+- 不再把单纯的 E25/Linus DT 参数差异当作启动交接冲突证据。
+- 先查是否存在绕过 Driver Model 的初始化代码，再决定是否继续追 U-Boot 初始化路径。
