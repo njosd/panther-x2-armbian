@@ -641,3 +641,47 @@ Ophub 项目公开的构建来源同时列有 `unifreq/linux-6.12.y-rockchip` �
 ### 下一步研究方向
 
 优先确认实际运行 Image 对应的精确源码/补丁集，并针对普通 RX skb 分配失败路径寻找可观测证据；不要再重复泛化的内存压力采样，也不要修改驱动或内核参数。
+
+## 23. 2026-11-17 GMAC RX / DMA / NAPI 只读复核补充
+
+本次用户提供的接口状态和 ethtool -S eth0 完整输出补充如下。当前阶段系统版本记录为 6.12.81-rk35xx-ophub；本次这一组命令未重新提供 uname 输出，因此版本身份沿用本阶段既有系统记录。
+
+### 23.1 接口状态
+
+- eth0：UP / LOWER_UP，Carrier on。
+- 当前 MTU=1500。
+- NetworkManager profile Wired connection 1 的 802-3-ethernet.mtu=auto。
+- TX packets=283，TX errors/dropped=0。
+
+### 23.2 RX 统计快照
+
+| 指标 | 结果 |
+|---|---:|
+| netdev RX bytes | 2,244,918 |
+| netdev RX packets | 25,539 |
+| netdev RX dropped | 1,694 |
+| netdev RX errors / missed | 0 / 0 |
+| MMC RX framecount_gb | 25,663 |
+| MMC RX octetcount_gb | 2,358,886 |
+| driver rx_pkt_n / q0_rx_pkt_n | 25,663 / 25,663 |
+| rx_normal_irq_n / q0_rx_irq_n | 25,649 / 25,649 |
+| normal_irq_n | 25,660 |
+| napi_poll | 51,984 |
+| CRC / alignment / FIFO overflow | 0 / 0 / 0 |
+| rx_gmac_overflow / rx_missed_cntr | 0 / 0 |
+| rx_buf_unav_irq / rx_process_stopped_irq | 0 / 0 |
+| fatal_bus_error_irq | 0 |
+
+### 23.3 结论与边界
+
+- 本次快照证明 GMAC 接收统计、RX IRQ 与 NAPI 均有活动；不能再将当前状态描述为 GMAC RX 完全没有启动。
+- 未见硬件 CRC、FIFO overflow、RX buffer unavailable、RX process stopped 或 fatal bus error 计数。
+- netdev RX dropped 累计为 1,694，但本次没有前后相邻采样，不能计算增量，也不能直接将其归因于 DHCP。
+- netdev RX packets=25,539 与驱动/MMC 的 25,663 相差 124；计数层次和采样时刻不同，不能直接认定为丢包数。
+- /proc/interrupts 的 eth0 IRQ 67 计数分布为 154/0/0/25875，IRQ 68 为 0/0/0/0。
+- dmesg 片段确认 RTL8211F、RGMII、PTP、PAGE_POOL RxQ-0 初始化及 1Gbps Full Link Up。
+- 日志筛选命令粘贴发生错位，实际只明确看到 Link Up 行；未显示 DMA reset 错误不等于完整日志已排除该错误。
+
+### 23.4 调查方向
+
+下一步优先确认 DHCP Discover/Offer 是否真正经过 eth0，以及报文在 Panther 本机抓包点、PHY/交换网络、hEX 入口之间的边界。先被动监听 UDP 67/68；不主动续租、不重启接口。RX dropped 若需归因，应先通过相邻只读采样确认是否持续增长，再定位具体驱动路径。
