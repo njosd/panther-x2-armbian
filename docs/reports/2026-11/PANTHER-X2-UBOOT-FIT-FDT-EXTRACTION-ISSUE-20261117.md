@@ -50,33 +50,80 @@ a0c4eff46050d0bd9ede8d59bc1bbc4e4cc249f6b1032e7f05f8e55d86ba9330  /tmp/tf-uboot-
 FATAL ERROR: Blob has incorrect magic number
 ```
 
-## 3. 结论边界
+## 3. 后续文件检查结果（2026-11-17）
+
+用户继续执行 `stat`、`od` 和 `dumpimage -V`，得到：
+
+```text
+/tmp/tf-u-boot.itb 1431552 bytes
+/tmp/tf-uboot-control.dtb 20421 bytes
+
+Extracted file first 64 bytes:
+00 00 00 00 00 00 00 00 00 00 00 00 d0 0d fe ed
+00 00 4f c5 00 00 00 38 00 00 47 50 00 00 00 28
+00 00 00 11 00 00 00 10 00 00 00 00 00 00 08 75
+00 00 47 18 00 00 00 00 00 00 00 00 00 00 00 00
+
+FIT file first 64 bytes:
+d0 0d fe ed 00 00 09 f3 00 00 00 38 00 00 09 30
+00 00 00 28 00 00 00 11 00 00 00 10 00 00 00 00
+00 00 00 c3 00 00 08 f8 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00
+
+dumpimage version 2025.10
+```
+
+### 3.1 直接观察
+
+- 提取文件大小是 20,421 bytes，与 FIT 列出的 FDT image Data Size 数字相同。
+- 提取文件的前 12 bytes 全为 `00`。
+- FDT magic `d0 0d fe ed` 出现在提取文件偏移 12，而不是偏移 0。
+- 偏移 16 开始的 FDT header totalsize 字段为 `0x00004fc5`（20,421 bytes）。
+- 因此，若 FDT 从偏移 12 开始，header 声明的完整 FDT 长度将超出当前提取文件末尾 12 bytes。这与文件整体 SHA256 不匹配、dtc magic 检查失败相互吻合。
+- FIT 容器本身开头即为 FDT/FIT magic；文件大小为 1,431,552 bytes。
+- 当前工具版本为 `dumpimage 2025.10`。
+
+### 3.2 结论边界
+
+**已验证：** 提取输出存在 12-byte 零前缀；其后的 FDT header 声明总长度 20,421 bytes，而当前文件总长仅 20,421 bytes。因此不能简单删除前 12 bytes 后就认定得到完整 DTB；这样会只剩 20,409 bytes，短缺 12 bytes。
+
+**仍未验证：**
+- 为什么当前 `dumpimage -T flat_dt -p 6 -o` 产生此输出布局。
+- 是否是命令参数组合/工具实现的提取行为，或 FIT 内部数据布局导致。
+- FIT 原始 FDT payload 是否完整有效。
+- FDT 中 GMAC1 属性。
+
+不要直接对现有文件做 `dd` 截取后就把它当作完整 FDT；必须先找到 FIT payload 的正确提取方式，并以 FIT 内部 hash `e611e583...` 验证原始 payload。
+
+## 4. 文件是否会在运行中改变
+
+用户询问提取文件是否会在运行中改变。说明：
+- `/tmp/tf-u-boot.itb` 与 `/tmp/tf-uboot-control.dtb` 是普通临时文件，不会因为系统持续运行、网络活动或 U-Boot 已启动而自行变化。
+- 除非进程显式写入/覆盖、用户修改/删除，内容应保持不变。
+- `/tmp` 通常是临时目录，重启后可能清理；这不代表文件在正常运行期间会自动变化。
+- 后续命令应保留现有文件，新的提取尝试使用不同输出文件名。
+
+## 5. 结论边界（总）
 
 **已验证：**
 - `dumpimage` 报告选择并提取了 FIT Image 6（名称 `fdt`）。
 - FIT 中该 image 的元数据哈希为 `e611e583...`。
 - 输出文件的 SHA256 为 `a0c4eff4...`，与 FIT 元数据哈希不一致。
-- `dtc` 无法将输出文件识别为有效 FDT blob，报错 `Blob has incorrect magic number`。
-
-**尚未验证：**
-- 输出文件是否包含额外头部、偏移或其他非 DTB 数据。
-- 当前 `dumpimage` 的版本、参数组合和 FIT extraction 行为是否导致输出格式/偏移问题。
-- FIT 中原始 FDT payload 是否完整且有效。
-- U-Boot FDT 的 GMAC1 节点属性及 U-Boot 是否 probe GMAC1。
+- 输出文件偏移 12 处出现 FDT magic，且 dtc 无法识别文件开头的 magic。
+- `dumpimage` 版本为 2025.10。
 
 **不能下的结论：**
 - 不能据此认定 FIT 内原始 FDT 已损坏。
 - 不能据此认定 TF 卡或 U-Boot 镜像错误。
 - 不能据此推断 GMAC1 节点启用/禁用或任何 RGMII 配置。
 
-## 4. 后续排查要求
+## 6. 后续排查要求
 
 1. 保留现有 `/tmp/tf-u-boot.itb` 和 `/tmp/tf-uboot-control.dtb`，不必重新读取 TF 卡或重新切分前 16 MiB。
-2. 下一步先只读检查输出文件大小和开头字节（例如使用 `stat`、`od`），确认是否有头部/偏移；不要覆盖原文件。
-3. 对照本机 `dumpimage` 版本及 U-Boot 工具文档/源码，确认 FIT image payload 提取的正确调用方式。
-4. 如需再次提取，输出到新文件名；成功后必须先验证 SHA256 与 FIT image hash 一致，再交给 `dtc` 解析。
-5. 在有效 FDT 得到之前，不讨论其中 GMAC1 的具体配置，也不把这次提取异常等同于原始 FIT 损坏。
+2. 对照 U-Boot 2025.10 `dumpimage` 工具的 FIT 提取语法/实现，找出输出多出 12-byte 零前缀且尾部少 12 bytes 的原因。
+3. 新的提取尝试输出到新文件名；成功后必须先验证 SHA256 与 FIT image hash 完全一致，再交给 `dtc` 解析。
+4. 在有效 FDT 得到之前，不讨论其中 GMAC1 的具体配置，也不把这次提取异常等同于原始 FIT 损坏。
 
-## 5. 防止重复调查
+## 7. 防止重复调查
 
-后续 Panther X2 U-Boot 调查应先读取本记录及关联基线报告。已确认的 TF 启动介质、FIT 哈希、默认 configuration、FDT image 名称和内部哈希不得重复询问或重新采集，除非用户报告启动介质/镜像已变更。
+后续 Panther X2 U-Boot 调查应先读取本记录及关联基线报告。已确认的 TF 启动介质、FIT 哈希、默认 configuration、FDT image 名称、内部哈希、提取文件的异常字节布局及工具版本不得重复询问或重新采集，除非用户报告启动介质/镜像/工具环境已变更。
