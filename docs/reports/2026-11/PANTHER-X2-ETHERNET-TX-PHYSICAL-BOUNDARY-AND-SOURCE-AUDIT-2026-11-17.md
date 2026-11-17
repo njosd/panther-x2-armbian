@@ -505,3 +505,113 @@ Ophub README 也明确区分 RK35xx 专用 BSP 内核，并说明可通过 `kern
 - TX DMA completion 之后 GMAC MAC TX/RGMII 输出是否有有效波形。
 
 下一轮应检查实际源码构建身份与 phylink link-up 回调参数/调用时序，并继续从已有启动日志找 PHY attach、link-up、clock rate 记录。无需新增设备侧测试；禁止读取 dummy-syscon 寄存器。
+
+
+## 16. 6.12.81 实际构建来源已由 GitHub Actions 日志锁定（重大进展，2026-11-17）
+
+此前第 13 节将实际构建来源列为未知。现在已找到与实机内核 build timestamp 完全吻合的 Ophub GitHub Actions run，并从该 run 的 job log 取得 source hash、编译参数和 config 来源。该部分结论应覆盖第 13 节原先的“尚无法确定”状态。
+
+### 16.1 对应的构建任务
+
+- Workflow run：[`43405957386`](https://github.com/ophub/kernel/actions/runs/43405957386)
+- Workflow：`Compile rockchip rk35xx kernel`
+- 开始时间：2026-11-13 10:01:57 UTC
+- Job：`build`，成功完成
+- Job ID：`131820239401`
+- 运行时读取的 kernel source：`ophub/linux-6.12.y-rockchip`
+- Branch：`main`
+- 精确 source commit：`661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- 自动查询并构建的 kernel：`6.12.81`
+- 输出 LOCALVERSION：`-rk35xx-ophub`
+- 编译日志明确输出 kernel output name：`6.12.81-rk35xx-ophub`
+
+用户提供的运行内核标识：
+`6.12.81-rk35xx-ophub #1 SMP Fri Nov 13 11:02:28 UTC 2026`
+
+Actions 日志在 2026-11-13 11:02:28.858 UTC 记录：
+`UPD include/generated/utsversion.h`
+随后在 11:03:00.573 UTC 记录：
+`OBJCOPY arch/arm64/boot/Image`
+
+因此，实机 `uname -v` 的秒级 build timestamp 与这次构建中更新 UTS version header 的时刻完全一致；版本字符串和 LOCALVERSION 也一致。这构成非常强的构建来源指纹。**当前可以高置信度将实机 6.12.81 对应到该次 Actions 构建任务**，但在没有设备上已安装 Image 的 SHA256 或原始安装包文件名时，仍不声称已经对设备当前 Image 做了二进制哈希验证。
+
+### 16.2 构建参数和补丁状态
+
+该次 Actions log 明确记录：
+- `kernel_source = ophub/linux-6.12.y-rockchip`
+- `kernel_version = 6.12.y`
+- `kernel_auto = true`
+- `kernel_package = all`
+- `kernel_toolchain = gcc`
+- `kernel_sign = -rk35xx-ophub`
+- `kernel_config = kernel-config/release/rk35xx`
+- `kernel_patch = false`
+- `auto_patch = false`
+- `No custom kernel patches provided.`
+- 构建时从 `ophub/linux-6.12.y-rockchip/main` clone 源码；
+- 日志确认解析出的版本为 `6.12.81`；
+- 使用 `config-6.12` 作为初始 `.config`。
+
+source commit SHA 是 `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，而 workflow 自身 commit 为 `f8925391bb2ba2634bb8ca55da39e1a2f4029ffe`。两者不能混为一谈：前者是 Linux kernel source commit，后者用于确定 Ophub 构建仓库中的 workflow/config 文件版本。
+
+### 16.3 6.12 实际构建源码与此前候选源码逐文件核对
+
+从 `ophub/linux-6.12.y-rockchip@661b2d8` 读取源文件，并与此前用来对照的 `unifreq/linux-6.12.y-rockchip` 默认分支比较，以下文件内容和 Git blob SHA 完全一致：
+- `drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c`
+- `stmmac_main.c`
+- `stmmac_platform.c`
+- `stmmac_mdio.c`
+- `dwmac4_dma.c`
+- `dwmac4_core.c`
+- `dwmac4_descs.c`
+- `dwmac4.h`
+- `descs.h`
+- `hwif.h`
+- `drivers/net/phy/realtek.c`
+- `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`
+- `arch/arm64/boot/dts/rockchip/rk356x.dtsi`
+
+这意味着此前关于 6.12 TX DMA、descriptor、Rockchip GMAC glue、phylink、RTL8211F、Panther X2 DTS 的代码对照，虽然当时拿的是 unifreq 6.12 候选分支，但现在已经由文件 blob SHA 证明：**这些被审计文件与实机高置信度构建源 commit 完全一致。** 之前的代码分析可升级为针对实际 6.12.81 源码的有效审计结论，而不再只是近似候选。
+
+### 16.4 该次构建使用的正式配置
+
+从 workflow commit `f8925391bb2ba2634bb8ca55da39e1a2f4029ffe` 读取：
+`kernel-config/release/rk35xx/config-6.12`
+Blob SHA：`966f4b6ac7c0ad59179d6ae272423500601fab07`
+
+与当前排查相关的配置：
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_STMMAC_PLATFORM=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_DWMAC_ROCKCHIP_TOOL=y`
+- `CONFIG_PHYLINK=y`
+- `CONFIG_PHYLIB=y`
+- `CONFIG_REALTEK_PHY=y`
+- `CONFIG_ARCH_DMA_ADDR_T_64BIT=y`
+- `CONFIG_IOMMU_DEFAULT_DMA_STRICT=y`
+- `CONFIG_ROCKCHIP_IOMMU=y`
+- `# CONFIG_STMMAC_SELFTESTS is not set`
+- `# CONFIG_DMA_API_DEBUG is not set`
+
+注意：`CONFIG_ROCKCHIP_IOMMU=y` 是全局 SoC 驱动配置，不代表 GMAC1 绑定到 IOMMU；GMAC1 DTS 仍未声明 `iommus`。此外，正式构建配置中 `CONFIG_STMMAC_SELFTESTS` 明确未启用。若设备侧曾观察到相反的 running config 值，则需要区分该值来自哪一版内核/哪份 config，不能把不同版本混为一谈。
+
+### 16.5 发布资产与精确安装包的边界
+
+同一 workflow run 在 11:14:34 UTC 成功打包：
+- `6.12.81.tar.gz`
+- `deb-6.12.81.tar.gz`
+
+对应 release asset `6.12.81.tar.gz` 于 11:14:36 UTC 创建，SHA256：
+`72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`
+
+同一 release 另有 `6.12.81-rk35xx-flippy-2611b.tar.gz`，于 11:04:04 UTC 创建，SHA256：
+`a5b0bc5d3c8311cee472c105e5ee2d1c9e6395a94efb4488253a0faae132d064`
+Release 描述明确说明文件名带 `flippy` 的包由 Flippy 手动上传，而无该后缀的包是在线自动编译。不能把两种资产误认成同一个构建产物。实机的 build timestamp 强烈指向上述 11 月 13 日构建，但尚未从设备现有安装记录确认实际使用了哪个 archive。
+
+### 16.6 对研究路线的影响
+
+1. 6.12.81 的源码来源已锁定为 Ophub repo commit `661b2d8`，配置来源也已锁定。
+2. 前面审计过的 6.12 STMMAC / DWMAC4 / Rockchip glue / Realtek PHY / Panther DTS 文件均与该 commit 完全一致。
+3. 当前应把研究重心转向：该精确 6.12 源 commit 相对实际 6.1.116 工作版本的变更，以及两者正式配置差异。
+4. 6.1.116 的精确源码 commit/config/package 来源仍未锁定；不能默认它就是当前 unifreq 6.1 分支的任意 HEAD。
+5. 不需要在 Panther 上重复发送帧或抓包，也不需要修改设备。任何后续现场取证应先从只读文件/日志着手。
