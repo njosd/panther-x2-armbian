@@ -809,12 +809,64 @@ Ophub 2026 RK35xx config：
 - `dwmac4_dma_ops` 两版均无 `.enable_dma_transmission` callback，均绑定 `.start_tx = dwmac4_dma_start_tx`；
 - `stmmac_xmit()` 6.12 新增 EST max-SDU 检查及非 IP/不支持 COE 情况的 checksum software fallback；Panther DTS 未配置 EST，用户 AF_PACKET EtherType 0x88B5 raw frame 正常情况下不会进入 checksum fallback。其 descriptor/DMA mapping/flush 主体仍一致。
 
-### 19.6 下一步最有价值的现场只读核对
+### 19.6 运行时 clock-names 核对（已完成）
 
-6.12 新 `rk_gmac_clk_init()` 使用 `devm_clk_get()` 分别获取 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed` 等时钟，但对部分获取错误只打印 `cannot get clock ...`，没有直接让 probe 失败。源 DTS 的 clock-names 正确，不等于 TF 卡当前实际加载的运行时 DTB 一定具有完全相同的 `clock-names`。
-
-因此，在任何 loopback 或硬件修改测试之前，最小且安全的下一项证据是读取运行时 DT 的：
-`/proc/device-tree/ethernet@fe010000/clock-names`
-确认它确实含有 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed`。这是普通只读设备树文件，不读取 MMIO/debugfs 寄存器。
+此前建议只读核对的 `/proc/device-tree/ethernet@fe010000/clock-names` 已有实测结果，不再列为待办。运行时 FDT 共 10 项：
+`stmmaceth`、`mac_clk_rx`、`mac_clk_tx`、`clk_mac_refout`、`aclk_mac`、`pclk_mac`、`clk_mac_speed`、`ptp_ref`、`pclk_xpcs`、`clk_xpcs_eee`。
+因此当前运行时 DT 确实提供 6.12 Rockchip glue 对 RGMII 所需的 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed` 名称。该项已关闭，不重复要求用户读取。
 
 本节的源代码/配置比较均为静态分析；没有对 Panther 执行 loopback、写入 GRF、修改系统配置或读取 dummy-syscon。
+
+
+## 20. TX MTL/FIFO 配置路径与时钟启动差异复核（追加，2026-11-17）
+
+本轮继续只审计 TX，不执行设备侧测试。比较基线为实际 6.12.81 source commit `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 与 6.1.116 高置信度工作基线 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`。
+
+### 20.1 DWMAC4 TX MTL queue operation mode
+
+- `dwmac4_dma_tx_chan_op_mode()` 的 6.1/6.12 主要配置逻辑相同：store-and-forward/threshold、TXQEN、TQS 的处理没有实质变化；变化主要是 DWMAC4 register address helper 的调用接口。
+- `dwmac4_prog_mtl_tx_algorithms()` 两版函数体逐字一致。
+- `stmmac_dma_operation_mode()` 存在变化：6.1 总是按 RX/TX queue 数量拆分 FIFO；6.12 仅对 `has_gmac4` 或 `has_xgmac` 拆分。Panther 运行时 compatible 为 `snps,dwmac-4.20a`，被识别为 GMAC4；运行时 DT 的 TX queue 配置为 1，因此两版对当前 Panther 的 FIFO 分配结果相同。
+- `dwmac4_map_mtl_dma()` 的版本差异涉及 `MTL_RXQ_DMA_MAP0/1`，实现的是 RX queue 到 DMA channel 的映射，不是 TX queue 的数据发送映射。TX queue 0 仍由普通发送路径直接索引 TX DMA channel 0。
+
+**结论：** 当前没有发现 6.1→6.12 的 TX MTL queue mode、TX scheduling algorithm、TX FIFO partition 或 queue0→DMA0 路径变化足以解释普通 DHCP/raw frame 无法到达外部接收端。
+
+### 20.2 6.12 时钟启用等待时间缩短：真实差异，但尚非根因
+
+逐函数核对实际 6.12.81 的 `dwmac-rk.c` 与 6.1.116 工作基线：
+
+- 6.1.116：通过 `clk_bulk_prepare_enable()` 启用核心时钟，检查返回值；随后调用 clock-selection callback，并等待 `mdelay(5)`（约 5 ms）。
+- 6.12.81：逐个调用 `clk_prepare_enable()`；这些调用的返回值没有被检查；随后等待 `usleep_range(100, 200)`（约 100–200 μs），再将 `clk_enabled` 设为 true。
+- 等待时间缩短约 25–50 倍，是明确的源码差异。6.12 的个别 clock lookup 错误只打印日志而不直接终止 probe；但本机运行时 clock-names 已核实存在，且 clk_summary 显示核心 GMAC 时钟链已启用，故当前没有证据证明某个 clock lookup/enable 实际失败。
+
+历史依据：2014 年 Rockchip GMAC 驱动提交讨论中，维护者被问及 `mdelay(5)` 是否用于 PLL source stabilization，作者答复“yes”。这说明旧等待时间原本有稳定时钟源的设计意图；但该历史讨论不能单独证明当前 RK3566 RGMII 输入时钟配置也必须等待 5 ms。参考：[Linux Rockchip GMAC driver discussion](https://lists.infradead.org/pipermail/linux-rockchip/2014-November/001611.html)。
+
+### 20.3 Panther 当前时钟父项使该差异暂时降级
+
+现有实机证据：
+
+- 运行时 FDT：`clock_in_out = "input"`。
+- `assigned-clock-parents` 的末级 parent 指向外部固定时钟节点 `gmac1_clkin`。
+- 运行时 clk_summary：`gmac1_clkin`、`clk_gmac1`、`clk_gmac1_rgmii_speed`、`clk_gmac1_rx_tx` 均显示 125 MHz 且处于 enable 状态。
+- `mac_clk_tx`、`clk_mac_speed` 的 consumer 均落在 `clk_gmac1_rx_tx` 这条 125 MHz 时钟链上。
+
+因此，当前 Panther 使用 PHY 输入的 125 MHz reference clock，而不是简单依赖内部 PLL 产生 GMAC1 参考时钟。软件时钟树的 parent/rate/enable 状态符合运行时 DT 设计；这降低了“当前时钟父项选错/频率错误/时钟未使能”的可能性。
+
+仍然不能据 clk_summary 证明 GMAC TXC/TXD 引脚上实际有正确的 125 MHz RGMII 波形，也不能证明启动时钟稳定瞬态完全没有问题。故将 5 ms→100–200 μs 保留为**待解释的时序差异**，但优先级低于直接检查 MAC TX/RGMII 物理输出；不把它写成根因。
+
+### 20.4 本轮 TX 审计状态更新
+
+已完成：
+- 普通 SKB/AF_PACKET TX descriptor 构造、DMA mapping、OWN、barrier、tail pointer；
+- DWMAC4 TX channel start 与 queue0→DMA0；
+- TX MTL queue mode、scheduler、FIFO partition；
+- 6.1.116 与 6.12.81 的 32/32 DMA width、无 GMAC IOMMU 绑定；
+- 当前运行时 GMAC 时钟名称、父项及软件频率状态。
+
+仍未完成/未验证：
+- 单个 DHCP Discover 对应的 TX descriptor DMA address、descriptor 内容和 payload 内容；
+- 同一个 Discover 是否从 GMAC TXC/TXD 引脚实际发出；
+- RTL8211F MDI 侧实际发射与外部接收端的逐帧边界；
+- 6.12 运行时 MAC TX output waveform 与 PHY 输入采样时序。
+
+**下一步继续围绕“MAC TX/RGMII TXC/TXD 是否真实输出”推进，不转向 RX dropped。** 不重复已完成的 TX descriptor/MTL 静态比较，不执行 loopback、phy_lb、phy_lb_scan、接口重启或任何寄存器写入；若需要示波器/逻辑分析仪测量，应先说明测点和所需设备，再由用户决定。
