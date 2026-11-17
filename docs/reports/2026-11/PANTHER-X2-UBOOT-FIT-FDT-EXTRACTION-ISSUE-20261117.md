@@ -367,3 +367,80 @@ provider 是 gpio@fe750000，reg 为 0xfe750000，compatible 为 rockchip,gpio-b
 新增事实使“U-Boot FDT 中 GMAC1 的静态硬件接线描述与 Panther Linux 实际使用方案不一致”成为已验证结论；但“U-Boot 真正把 GMAC1 配成 M1、GPIO89 reset、0x4f/0x26 delay”仍未验证。
 
 因此接下来应优先做源码路径审计：检查对应 U-Boot 构建的 SPL、Rockchip board init、pinctrl、GMAC driver，以及可能的直接 GRF/CRU/GPIO 寄存器访问。不要为此修改实机配置或重复 DHCP 测试。
+## 14. 找到 U-Boot Vendor MAC → Linux FDT 的完整源码路径（2026-11-17）
+
+本节使用在当前 FIT 构建时间（2023-04-23）之前已提交的 Rockchip U-Boot 参考源码：
+- Rockchip U-Boot commit `8af253525b7de5f29f7f97dffd18adb77db6456a`，committer date 2023-03-23。
+- 对照源码文件均取自该 commit，而不是使用晚于 FIT 构建时间的当前主线。
+
+### 14.1 U-Boot 在 board_late_init 中读取 Vendor MAC
+
+`arch/arm/mach-rockchip/board.c` 在该提交中已有：
+```c
+int board_late_init(void)
+{
+#ifdef CONFIG_ROCKCHIP_SET_ETHADDR
+    rockchip_set_ethaddr();
+#endif
+    ...
+}
+```
+`rockchip_set_ethaddr()`：
+- 读取 `LAN_MAC_ID`，缓冲区容量为两个 Ethernet MAC（`MAX_ETHERNET = 2`）。
+- 调用 `vendor_storage_read(LAN_MAC_ID, ethaddr, sizeof(ethaddr))`。
+- 若读取失败或地址无效，生成随机 MAC；启用 Vendor Partition 时将 MAC 写回 Vendor Storage。
+- 将第一个 MAC 写入 U-Boot 环境变量 `ethaddr`，第二个写入 `eth1addr`。
+
+同一提交的 `arch/arm/mach-rockchip/Kconfig` 中 `CONFIG_ROCKCHIP_SET_ETHADDR` 默认 `y`。`CONFIG_ROCKCHIP_VENDOR_PARTITION` 取决于 `RKIMG_BOOTLOADER`。当前二进制的精确 `.config` 尚未从二进制直接恢复；但用户此前已实机确认当前 U-Boot 读取的是 TF 卡上的 Vendor Storage，而不是 eMMC Vendor Storage。
+
+### 14.2 Vendor Storage 绑定当前启动设备，而非固定 eMMC
+
+同一提交 `arch/arm/mach-rockchip/vendor.c` 的 `vendor_ops()` 调用 `rockchip_get_bootdev()`，然后依据所返回设备的 `if_type` 选择 Vendor Storage 地址。
+`arch/arm/mach-rockchip/boot_rkimg.c` 的 `rockchip_get_bootdev()` 使用 `devtype` 和 `devnum` 环境变量获取 block device；同一文件 `get_bootdev_type()` 明确规定 MMC `devnum=1` 的 boot media 为 `sd`，MMC `devnum=0` 为 `emmc`。
+
+因此，若启动设备识别为 MMC 1/SD，Vendor Storage 读写就落在该 SD/TF 启动设备。它不会自动转去 eMMC 读取板载 MAC。此源码机制与用户已确认的 TF Vendor Storage 读取结果一致。
+
+### 14.3 U-Boot 会把环境 MAC 写入传给 Linux 的设备树
+
+同一提交 `common/image-fdt.c` 的 Linux FDT setup 路径调用 `fdt_fixup_ethernet(blob)`。`common/fdt_support.c` 中该函数：
+- 遍历 Linux DTB 的 `/aliases` 中 `ethernet*` 属性；
+- 读取相应 U-Boot 环境变量（根据 `FDT_SEQ_MACADDR_FROM_ENV` 配置选择 `ethaddr`/`eth1addr` 等）；
+- 通过 `do_fixup_by_path()` 将 MAC 写入对应节点的 `mac-address` 和 `local-mac-address`。
+
+因此，U-Boot 读取到的 Vendor MAC 不只停留在 U-Boot 环境中；在标准 Linux FDT setup 路径中，它可以被写入即将交给 Linux 的 kernel DTB。
+
+### 14.4 Panther X2 的 Linux DTB alias 使这条路径直接指向 GMAC1
+
+项目固定内核源码 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 中 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts` 明确：
+```dts
+aliases {
+    ethernet0 = &gmac1;
+    mmc0 = &sdmmc0;
+    mmc1 = &sdhci;
+    mmc2 = &sdmmc1;
+};
+```
+且 `&gmac1` 为 `status = "okay"`，没有在该节点中静态定义 `local-mac-address` 或 `mac-address`。
+
+这意味着在这份 Panther X2 kernel DTB 上，U-Boot 的 `fdt_fixup_ethernet()` 会按 `ethernet0` alias 把对应环境 MAC 写到 GMAC1 节点。若 `FDT_SEQ_MACADDR_FROM_ENV` 开启，代码会按其序号规则选择 `eth1addr`；若未开启，则通常按 `ethernet0` 选择 `ethaddr`。两者均由 `rockchip_set_ethaddr()` 从同一启动设备的 Vendor Storage 读取/生成。
+
+### 14.5 当前因果判断
+
+**源码机制已建立：** TF 启动设备 → Rockchip Vendor Storage 读取 → U-Boot 环境 `ethaddr`/`eth1addr` → Linux FDT `ethernet0` alias → Panther X2 GMAC1 的 `local-mac-address`/`mac-address`。
+
+**与用户实机现象高度吻合：** 用户已确认 eMMC 中保存的板载 MAC 与 U-Boot 从 TF 读取到的 MAC 来源不同。该机制可解释为什么 Linux 最终使用的 MAC 可能不是 eMMC 中的板载 MAC。
+
+**仍需实机闭环：** 需要将 `/sys/firmware/fdt` 中 `/aliases/ethernet0`、GMAC1 的 `mac-address`/`local-mac-address` 与 `ip link` 的 eth0 MAC 对照，并与 TF Vendor Storage MAC/eMMC 板载 MAC 比较。若运行时 FDT 的 GMAC1 MAC 等于 TF Vendor MAC，而不等于 eMMC 板载 MAC，即可直接证实 U-Boot FDT fixup 影响了 Linux 最终 MAC。
+
+**重要限制：** 错误/不同的 source MAC 本身并不能自动解释 DHCP Discover 未到达 hEX。普通以太网帧允许使用合法的本地管理单播源 MAC；即使 MAC 与 eMMC 板载值不同，也不必然阻止 DHCP 广播发出或被交换机接收。因此这条路径首先解释 MAC 来源错位，不能未经进一步证据就宣布它是 DHCP 丢包根因。
+
+### 14.6 源码链接与版本边界
+
+- `board.c`（2023-03-23 之前已提交的代码）：https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456a/arch/arm/mach-rockchip/board.c
+- `vendor.c`：https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456a/arch/arm/mach-rockchip/vendor.c
+- `boot_rkimg.c`：https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456a/arch/arm/mach-rockchip/boot_rkimg.c
+- `common/fdt_support.c`：https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456a/common/fdt_support.c
+- `common/image-fdt.c`：https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456a/common/image-fdt.c
+- Panther X2 6.12 DTS：项目固定源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，文件 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`。
+
+注意：另一个 commit `b3372aa61eccf92db6a5461674e70854344cacd2` 虽在 GitHub history 中显示 author date 2023-04-11，但 committer date 为 2023-11-13，晚于当前 FIT 构建日期；不应把它当作 2023-04-23 前已发布的代码依据。本节改以 2023-03-23 前已提交的 `8af253...` 版本为依据。
