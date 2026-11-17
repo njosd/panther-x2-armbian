@@ -688,3 +688,14 @@ TX 专项报告第 20 节已完成本轮 MTL/FIFO 队列配置比较及 GMAC 时
 用户明确要求：所有板级硬件审计放最后。由于同一 Panther X2 硬件在 Linux 6.1.116 环境下 Ethernet 正常，当前优先比较 6.1.116 与 6.12.81 软件路径差异，重点核对 GMAC probe/open/link-up 中的时钟、GRF、pinctrl、RGMII delay、PHY reset/MDIO/phylink 初始化及 MAC address 传递。软件可调整的硬件控制项排第二；板级照片、RGMII 波形、MDI 侧物理审计排最后，仅在软件路径无法解释后再考虑。
 
 这不绝对排除 6.12 软件对硬件控制方式的回归，但不应把板级测量作为当前前置条件。详见 TX 专项报告第 22 节。
+
+
+## 19. 软件优先审计：GMAC clock enable 与 MAC fallback（2026-11-18）
+
+6.1.116/6.12.81 Rockchip glue 源码对照发现：
+- Panther 的 `phy-mode=rgmii`、`tx_delay=0x30`、`rx_delay=0x10` 下，两版 RGMII delay 最终 GRF 值等价；写入顺序不同。
+- 6.12 将 clock enable 从 bulk enable + 检查返回值改为逐项 enable 但不检查返回值，并将等待由约 5 ms 缩短为 100–200 μs。实机 clk_summary 显示相关时钟当前 125 MHz 且 enable，尚不能归因。
+- 6.12 新增 `get_eth_addr=rk_get_eth_addr`。若 UMAC address 无效，回调会读 Rockchip Vendor Storage；失败则生成随机 MAC 并尝试写回。当前尚未证明回调实际执行，也未确认运行内核 Vendor provider 和底层介质。
+- MAC 不一致本身不能解释 hEX 未见广播 Discover。
+
+下一项仅需从本次 boot kernel log 确认 `rk_get_eth_addr`、Vendor read failure、random MAC fallback 是否出现；该检查只读，不涉及任何 Vendor Storage 写操作。详见 TX 专项报告第 23 节。
