@@ -959,3 +959,81 @@ Ophub 2026 RK35xx config：
 回到纯软件审计：以已确认的 6.1.116 正常环境和 6.12.81 异常环境为对照，先审计 Rockchip GMAC glue driver 在 probe/open/link-up 中对时钟、GRF、pinctrl、RGMII delay 与 PHY/phylink 的配置调用链；对照仓库已有运行时 DT、boot log、clk_summary、PHY 信息，列出确实发生变化且当前运行时证据尚未排除的项目。
 
 不重复 TX descriptor/MTL/FIFO 已完成的比较；不转向 RX dropped；不做板级物理测量，不运行 phy_lb，不写寄存器，不重启接口。
+
+
+## 23. Software-first audit: Rockchip GMAC glue / MAC identity differences (2026-11-18)
+
+本轮按第 22 节新优先级，只比较 6.1.116 与 6.12.81 软件源码；没有设备操作、配置修改或板级测量。
+
+### 23.1 RGMII delay 配置：Panther 当前参数下最终值等价
+
+实际运行时 Panther DT 已核实：
+- `phy-mode = "rgmii"`（不是 `rgmii-id`）；
+- `tx_delay=0x30`、`rx_delay=0x10`；
+- GMAC1 M0 pinctrl；
+- GRF_MAC1_CON0/CON1 实测最终值 `0x00001030 / 0x00000013`。
+
+6.1.116 的 `rk3568_set_to_rgmii()` 将 delay 值写入 CON0，再将 RGMII interface 与 TX/RX delay enable 写入 CON1。6.12.81 改为：
+- 使用 `DELAY_VALUE(RK3568, tx_delay, rx_delay)` 写 CON0；
+- 使用 `DELAY_ENABLE(RK3568, tx_delay, rx_delay)` 与 RGMII mode 写 CON1；
+- 写入顺序变为 CON1 后 CON0。
+
+6.12 新宏以 delay 是否 `>= 0` 决定 enable/disable；Panther 当前两个 delay 均为正值，因此两版最终 CON0/CON1 值一致。该差异不足以解释当前故障；写入顺序差异仅为初始化瞬态候选，暂不升级为根因。
+
+### 23.2 GMAC clock enable 错误处理：存在真实回归候选，但当前运行时状态不支持直接归因
+
+6.1.116：
+- 使用 `clk_bulk_prepare_enable()` 启用核心 clocks；
+- 检查返回值，失败则返回错误；
+- 对 `clk_phy` 也检查返回值；
+- 时钟选择后等待约 5 ms。
+
+6.12.81：
+- 分别调用多个 `clk_prepare_enable()`；
+- 没有检查这些调用的返回值；
+- `clk_phy` 也仅在非 ERR_PTR 时调用，未检查 enable 返回值；
+- 新增 CSU clock control；
+- 等待改为约 100–200 μs。
+
+这属于明确的软件控制流程变化。它意味着某个 clock enable 失败时，6.12 可能仍将 `clk_enabled` 置 true 并继续 probe/powerup，而旧版会在失败时中止。**但** Panther 运行时 `clk_summary` 已确认 GMAC1 相关 clocks 为 125 MHz 且 enable，运行时 clock-names 也齐全；因此不能仅凭源码差异断言本次发生了 enable failure。仍需日志/启动时序证据。
+
+### 23.3 新增 `rk_get_eth_addr()`：必须核实是否实际执行
+
+6.12.81 的 `rk_gmac_probe()` 新增：
+`plat_dat->get_eth_addr = rk_get_eth_addr`
+6.1.116 没有该回调赋值。
+
+6.12 stmmac core 的 `stmmac_check_ether_addr()` 只有在当前 netdev MAC 无效时，先尝试读取 MAC UMAC register；若仍无效，才调用平台 `get_eth_addr`。Rockchip 回调的逻辑：
+1. 若传入地址有效，直接返回；
+2. 否则调用 `rk_vendor_read(LAN_MAC_ID, ...)`；
+3. Vendor read 失败或地址无效时，调用 `eth_random_addr()`；
+4. 随后尝试 `rk_vendor_write(LAN_MAC_ID, ...)`。
+
+`rk_vendor_read()` 的公共封装在没有 provider 注册时返回 `-1`。6.12 的 `flash_vendor_storage.c` 通过异步 init thread 完成 vendor storage 初始化及 `rk_vendor_register()`；若此路径确实是当前内核配置所用 provider，理论上存在 GMAC probe 先于 provider 注册完成的竞态窗口。**目前尚未确认 Panther 运行内核启用了该 provider、实际 provider 是哪一个，也没有证据证明竞态在本次启动发生。**
+
+与实机线索的关系：
+- eMMC Vendor Storage 已有审计确认包含 LAN_MAC（ID 3）条目及板载 GMAC 地址；
+- 当前运行 eth0 曾显示 E6 前缀地址，板载记录为 86 前缀；
+- 当前 U-Boot 读取 TF Vendor 数据而不是 eMMC Vendor 数据，是已确认事实；
+- 不能据此直接断言 Linux 6.12 的 `rk_vendor_read()` 读的是 eMMC 或 TF，必须先确认 provider/底层读设备。
+- MAC 地址不一致本身不能解释 hEX 看不到 DHCP Discover；有效的本地单播 MAC 仍应能发送广播 DHCP 帧。
+
+**本项当前状态：** 源码路径已确认；回调是否执行、Vendor provider 类型及读取设备、是否生成随机地址，均待实机日志/配置证据。
+
+### 23.4 其他已对照项
+
+- 6.12 `rk_gmac_probe()` 还新增 `STMMAC_FLAG_SPH_DISABLE`、integrated PHY power callback、CSU 初始化和 loopback sysfs；Panther 使用外置 RTL8211F，integrated PHY callback 不应直接影响该 PHY。
+- `rk_fix_speed()` 新增 mode 参数，但实际 speed clock 设置逻辑与 6.1 相同；Panther 已经协商到 1000Mbps Full Duplex，不能据此解释当前 Discover 丢失。
+- 6.12 `stmmac_phy_setup()` 调整 phylink config / fwnode 选择并新增 `mac_requires_rxc`；当前 1Gbps Link Up 已证明 PHY/phylink 至少完成基本协商，尚无证据把这些差异与 TX 丢帧关联。
+
+### 23.5 下一项最小只读验证
+
+先只确认新回调是否执行，以及是否发生 Vendor read fallback。读取本次启动内核日志中是否存在：
+- `rk_get_eth_addr: mac address`
+- `rk_vendor_read eth mac address failed`
+- `generate random eth mac address`
+- `device MAC address`
+
+该结果只用于关闭/确认 MAC identity 支线，不会改变 DHCP TX 主线边界。不要调用 vendor read/write 接口，不做任何 MAC 写入或配置修改。
+
+**当前软件审计结论：** 已发现 clock enable 错误处理和 MAC address fallback 两个真实版本差异；尚未找到能直接解释 TX Discover 在本机 outgoing 之后消失的已证实根因。下一步先确认 MAC callback 是否执行，再继续审计尚未完成的 GMAC open/link-up/PHY path。硬件物理审计仍排最后。
