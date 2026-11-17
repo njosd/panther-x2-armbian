@@ -419,3 +419,121 @@ cat /tmp/panther-boot.scr.txt
 - 真实 MAC 地址及其可还原字节不写入公开仓库。
 - 新发现与旧结论冲突时，保留旧证据并新增纠错记录，不覆盖历史事实。
 - 不重复已完成测试；优先用能区分假设的最小只读证据推进。
+
+
+---
+
+## 14. 2026-11-17 补充：TF 卡前 16 MiB 与实际 boot.scr 取证
+
+本节为本日后续实机输出的追加记录，优先级高于本文前文中“TF 原始启动区尚未提取”“boot.scr 解码尚未提供”等旧状态描述。原有历史记录保留，避免静默改写调查过程。
+
+### 14.1 TF 卡前 16 MiB 只读取证
+
+用户确认读取命令的目标是 TF 卡启动介质，读取结果：
+
+~~~text
+32768+0 records in
+32768+0 records out
+16777216 bytes (17 MB, 16 MiB) copied, 0.730722 s, 23.0 MB/s
+~~~
+
+输出文件：`/tmp/panther-tf-first16m.bin`
+
+SHA-256：
+
+~~~text
+75c7e878c4ea78aea76fb9ecb3b037becfe413ba467603df34a4258d9688a70f  /tmp/panther-tf-first16m.bin
+~~~
+
+`file` 识别结果：
+
+~~~text
+DOS/MBR boot sector; partition 1 : ID=0xee, startsector 1, 124735487 sectors
+~~~
+
+这是 GPT protective MBR 的正常表现；不能据此认为该 TF 卡不是 Rockchip 启动盘。读取范围是 LBA 0–32767（16 MiB），其中既有 GPT/前部空隙，也包含 Rockchip 启动镜像区域。
+
+### 14.2 关键启动镜像字符串
+
+在这份 TF 原始前 16 MiB 数据中，`strings -a -t x` 找到以下相互印证的字符串：
+
+~~~text
+0x3ec09  U-Boot SPL 2017.09-armbian (Apr 23 2023 - 13:08:07)
+0x3f138  rockchip,rk3566
+0x4d50c  radxa,e25
+0x4d516  rockchip,rk3568
+0x4d563  7Radxa E25
+0x80007c FIT Image with ATF/OP-TEE/U-Boot
+0x8000f4 U-Boot(64-bit)
+0x800768 U-Boot dtb
+0x800848 rk3568-radxa-e25
+0x8ddd8f board=evb_rk3568
+0x8ddda0 board_name=evb_rk3568
+0x8dde8d fdtfile=rockchip/rk3568-radxa-e25.dtb
+0x8df174 Model: %s Firm: %s Ser#: %s
+0x8f5c3e gmac_rockchip
+0x8f5c4c rockchip,rk3568-gmac
+0x8f9cf5 U-Boot 2017.09-armbian (Apr 23 2023 - 13:08:07 +0000)
+~~~
+
+另有 SPL DDR 初始化字符串 `DDR Version V1.13 20220218`，以及 Rockchip RK3568 CRU、GRF、pinctrl、GMAC 驱动相关字符串。
+
+**证据结论：**
+- **已验证：** TF 卡前 16 MiB 中包含 SPL 和 U-Boot proper 的可识别字符串，构建标识均为 U-Boot 2017.09-armbian（2023-04-23）。
+- **已验证：** 该启动数据包含 Radxa E25 / RK3568 的板级标识、内嵌 U-Boot DTB 名称 `rk3568-radxa-e25`，环境默认值包含 `board=evb_rk3568` 与 `fdtfile=rockchip/rk3568-radxa-e25.dtb`。
+- **已验证：** 同一镜像包含 Rockchip RK3568 GMAC 驱动匹配字符串。
+- **重要限制：** 字符串存在不等于对应驱动一定在本次启动中 probe，也不等于 GMAC1 一定被初始化；仍需结合启动日志、U-Boot DM probe 结果、精确 DTS 和代码调用路径确认。
+- **重要限制：** TF 卡内嵌 E25/RK3568 U-Boot 控制 DTB 与 Linux 最终使用的 Panther X2/RK3566 DTB 是不同阶段、不同用途的设备树。不能混为一谈。
+- **风险判断：** 对 RK3566 Panther X2 而言，实际启动链包含 E25/RK3568 板级配置，是明确的板级适配错配风险，值得优先审计；但目前仍不足以单独证明它导致 DHCP 报文未到达 hEX。
+
+本次 `xxd` 检查未成功执行，终端提示 `zsh: command not found: xxd`。没有因此安装软件；也没有原始 16 MiB 二进制附件上传到仓库。本记录保存哈希、字符串偏移及可复核的命令输出摘要。
+
+### 14.3 实际 TF boot.scr 已解码
+
+用户提供的 `dumpimage -l` 信息：
+
+~~~text
+Image Name:
+Created:      Tue Apr 25 10:03:55 2023
+Image Type:   ARM Linux Script (uncompressed)
+Data Size:    3318 Bytes = 3.24 KiB
+Load Address: 00000000
+Entry Point:  00000000
+Contents:
+   Image 0: 3310 Bytes = 3.23 KiB
+~~~
+
+已解码脚本的关键行为：
+1. 从 U-Boot 当前 `${devtype} ${devnum}` 设备读取 `armbianEnv.txt` 并导入环境变量。
+2. 通过 `part uuid ${devtype} ${devnum}:1 partuuid` 取得当前设备第一分区 PARTUUID。
+3. 从同一当前设备加载 `uInitrd`、`Image` 和 `dtb/${fdtfile}`。
+4. 应用 kernel overlays / fixup script（若配置并存在）。
+5. 最后执行 `booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}`。
+
+解码输出中的默认变量包括 `rootdev=/dev/mmcblk0p1`，但脚本随后会尝试从启动分区读取 `armbianEnv.txt` 并导入其配置；不能仅凭脚本默认值推断最终 root 设备。此前运行时 `/proc/cmdline` 的 root UUID 和 `ubootpart` PARTUUID 均已对应 TF 卡分区。
+
+**时间差异：** boot.scr 镜像头创建时间为 2023-04-25；当前 boot.cmd 文件系统时间为 2026-11-15。两者时间明显不同，不能假定当前 boot.scr 是由当前 boot.cmd 生成。应以实际 boot.scr 解码内容作为本次 U-Boot 执行脚本证据。
+
+### 14.4 U-Boot 线索更新后的判断
+
+| 项目 | 状态 | 结论 |
+|---|---|---|
+| 本轮实际启动数据来自 TF 卡 | 已验证（结合此前设备身份、PARTUUID、挂载证据及本次 TF 原始区读取） | 不应再用 eMMC 历史镜像代替本轮 U-Boot |
+| TF 前 16 MiB 中 SPL 版本 | 已验证 | U-Boot SPL 2017.09-armbian，2023-04-23 |
+| TF 前 16 MiB 中 U-Boot proper 版本字符串 | 已验证 | U-Boot 2017.09-armbian，2023-04-23 |
+| TF U-Boot 内嵌控制 DTB 标识 | 已验证 | rk3568-radxa-e25 / Radxa E25 |
+| U-Boot 默认 fdtfile | 已验证（镜像字符串） | rockchip/rk3568-radxa-e25.dtb |
+| 当前 Linux 使用 Panther X2 DTB | 已验证（运行时 FDT 与 /boot 文件） | 不代表 U-Boot 控制 DTB 也是 Panther X2 |
+| U-Boot proper 是否实际 probe GMAC1 | 未验证 | 字符串只能证明代码/匹配表被编入镜像 |
+| U-Boot 是否更改 GMAC1 CRU/GRF/pinctrl 并遗留状态 | 未验证 | Linux 最终读回值不能还原交接瞬间状态 |
+| E25/RK3568 板级适配导致 DHCP 故障 | 高优先级假设，未证实 | 需精确核对实际 U-Boot DTS、probe 路径及寄存器交接 |
+
+### 14.5 下一轮最有价值的只读审计
+
+1. 对照 TF U-Boot proper 内嵌 DTB 的完整 GMAC1 节点：status、reg、phy-mode、clock、clock-names、assigned-clocks、assigned-clock-parents、pinctrl、reset GPIO、PHY 节点及 MDIO。
+2. 查明 TF U-Boot 构建对应的确切源码/补丁集；追踪 SPL board init、U-Boot board init 和 `gmac_rockchip` / DWC ETH QoS probe 是否会触及 GMAC1。
+3. 对比 E25 U-Boot DT 与 Panther X2 Linux DT：尤其 GMAC1 M0/M1 pinmux、PHY reset GPIO、时钟源、RGMII delay、PHY 供电/复位时序。不能只比较 compatible 字符串。
+4. 如能从历史 UART 找到 U-Boot 启动时的 `Model:`、`Net:`、GMAC probe、PHY link 或 `fdtfile` 日志，优先用来判断实际运行路径；没有日志则标为未验证。
+5. 不因发现 E25 标识而直接刷写/替换 U-Boot，也不修改 delay、时钟、DTB 或网络配置。先完成源码和证据链审计。
+
+详细采集摘要另见：[TF 前 16 MiB 与 boot.scr 只读证据记录](./TF-FIRST16M-AND-BOOTSCR-READONLY-EVIDENCE-2026-11-17.md)。
