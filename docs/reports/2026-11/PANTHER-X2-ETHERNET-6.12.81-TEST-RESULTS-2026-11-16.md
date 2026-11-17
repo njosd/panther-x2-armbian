@@ -456,3 +456,29 @@ qdisc：
 
 本文把原先分段提交的 6.12.81 网络测试信息集中为单一可检索文档。对话中没有提供完整原始终端输出的项目，仅记录可确认的关键值与证据边界；不将总结性描述伪装成原始日志。若后续找到原始采集文件，应另行作为脱敏证据附件保存，并在本文追加 SHA-256 和来源说明，不覆盖本报告。
 
+
+
+## 19. MAC 状态补充核查（后续只读输出）
+
+本节记录后续补充的只读检查。为避免泄露设备标识，具体 MAC 字节值不在此重复。
+
+| 检查项 | 结果 | 解释 |
+|---|---|---|
+| `/sys/class/net/eth0/addr_assign_type` | `0` | Linux 将接口地址标记为 permanent 类型 |
+| `ethtool -P eth0` | 与当前地址一致 | 驱动报告的 permanent address 与运行地址相同 |
+| `/sys/class/net/eth0/address` | 与 permanent address 一致 | 当前接口地址一致 |
+| Live DT `mac-address` | 与当前地址一致 | 运行时 FDT 中存在该属性 |
+| Live DT `local-mac-address` | 与当前地址一致 | 运行时 FDT 中存在该属性 |
+| Live DT `nvmem-cells` | absent | GMAC 节点未声明该属性 |
+| Live DT `nvmem-cell-names` | absent | GMAC 节点未声明该属性 |
+| `/sys/bus/nvmem/devices` | 存在 `rockchip-otp0` | 仅证明系统注册了 OTP NVMEM provider，不证明 GMAC MAC 从该 provider 读取 |
+| MAC 相关 FDT 节点 | 包含 GMAC1、pinctrl、clock 等节点 | 与本节 MAC 地址来源判断无直接新增证据 |
+
+### 本节结论
+
+1. 当前接口 MAC、驱动报告的 permanent MAC，以及运行时 FDT 的 `mac-address` / `local-mac-address` 三者一致。
+2. `addr_assign_type=0` 表示 Linux 当前将其标记为永久地址类型；不应称为 Linux 临时随机生成地址。
+3. GMAC 节点没有显式 NVMEM cell 引用；系统存在 `rockchip-otp0` 并不能据此推断该 MAC 来自 OTP。
+4. 用户此前已通过启动链调查确认本轮 MAC 来源与 TF 卡数据有关。该来源结论作为既有调查结论保留，不在当前 DHCP 主线重复追查。
+5. MAC 来源/传递链降为最低优先级；除非后续出现直接证据表明它影响 DHCP 报文收发，否则不继续投入排查资源。
+
