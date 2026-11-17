@@ -681,3 +681,10 @@ TX 专项报告第 20 节已完成本轮 MTL/FIFO 队列配置比较及 GMAC 时
 已根据 Realtek RTL8211F datasheet 与 Rockchip RK3566 Hardware Design Guide 整理 PHY 输入侧测点：RTL8211F pin 20 TXC、pin 19 TXCTL、pin 18–15 TXD0–3。1000BASE-T 下 TXC 为 125 MHz，数据在时钟双边沿传输。Panther X2 使用 BROWAN H1GW V04，但本轮未找到可核验的该板 Ethernet 原理图/PCB netlist，因此其 RGMII IO 电压、串联电阻编号和测试点位置仍未知，不得套用其他 RK3566 板卡的编号或电压。
 
 下一步先确认板级近照/原理图能否定位 TX 测点和实际 IO 电压；未确认前不做电气探测。详见 TX 专项报告第 21 节。
+
+
+## 18. 调查优先级调整（2026-11-18）
+
+用户明确要求：所有板级硬件审计放最后。由于同一 Panther X2 硬件在 Linux 6.1.116 环境下 Ethernet 正常，当前优先比较 6.1.116 与 6.12.81 软件路径差异，重点核对 GMAC probe/open/link-up 中的时钟、GRF、pinctrl、RGMII delay、PHY reset/MDIO/phylink 初始化及 MAC address 传递。软件可调整的硬件控制项排第二；板级照片、RGMII 波形、MDI 侧物理审计排最后，仅在软件路径无法解释后再考虑。
+
+这不绝对排除 6.12 软件对硬件控制方式的回归，但不应把板级测量作为当前前置条件。详见 TX 专项报告第 22 节。
