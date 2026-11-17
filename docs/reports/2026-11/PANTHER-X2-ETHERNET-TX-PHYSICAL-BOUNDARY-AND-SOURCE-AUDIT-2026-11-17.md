@@ -331,3 +331,32 @@ MMCs category counters（包括 unicast / 64-octet 类计数）为 0，而总 fr
 4. 对现有安全证据重新判断是否能定位到 DMA descriptor 已完成之后、RGMII/PHY 之前的边界。
 
 以上为候选源码对照结果，不代表实际运行二进制已被证明与候选源码逐字节对应。
+
+
+## 13. Ophub 发布构建流程与实际二进制来源核验（追加，2026-11-17）
+
+已读取 Ophub 仓库当前 `.github/workflows/compile-rockchip-rk35xx-kernel.yml`（workflow blob SHA `ea1e0c531b1b10c2ce67e3ab08ed46f8d6541f66`）和 `README.md`。
+
+该 workflow 明确显示：
+- `kernel_source` 是可选输入，允许选择 `unifreq/linux-6.12.y-rockchip` 或 `ophub/linux-6.12.y-rockchip` 等来源。
+- `kernel_version` 可选择 `6.12.y`。
+- `kernel_auto` 默认 true。
+- workflow 在构建前通过 GitHub API 读取所选源码仓库 `main` 分支的当前 HEAD SHA，并写入环境变量 `source_hash`。
+- `kernel_config` 默认指向 `kernel-config/release/rk35xx`，也允许关闭该配置覆盖。
+- kernel 构建通过 `ophub/amlogic-s9xxx-armbian@main` 执行。
+- 构建产物上传到可更新的 `kernel_rk35xx` release tag。
+
+因此，仅凭运行内核字符串 `6.12.81-rk35xx-ophub` 和构建日期，无法唯一反推出：
+1. 选择的是 unifreq 还是 ophub 的 6.12 Rockchip 源码仓库；
+2. 构建时对应 `main` 分支的确切 commit；
+3. `kernel_auto` 实际解析到的源码版本；
+4. 当次构建实际应用的 config 与 patch 集；
+5. 当前设备的 Image 是否就是该 workflow 某次发布的原始资产，或经过二次打包/替换。
+
+Ophub README 也明确区分 RK35xx 专用 BSP 内核，并说明可通过 `kernel-config` 与 `kernel-patch` 自定义构建。由此，当前对 `unifreq/linux-6.12.y-rockchip` 的源码审计只能作为有针对性的候选对照，不能声称已审计了 Panther 当前运行的精确构建源代码。
+
+**后续最小化证据目标：** 从设备现有 Image 的 build metadata、安装/下载记录、kernel package 文件名与哈希，或当次 GitHub Actions workflow run/构建日志中，寻找 source repository、source SHA、kernel config 与 patch 应用记录。若设备侧现存文件没有这些元数据，则需要用户提供当时下载的原始 kernel package 或其文件名/哈希；不要求重启或修改设备。
+
+参考：
+- [Ophub RK35xx compile workflow](https://github.com/ophub/kernel/blob/main/.github/workflows/compile-rockchip-rk35xx-kernel.yml)
+- [Ophub kernel README](https://github.com/ophub/kernel/blob/main/README.md)
