@@ -658,13 +658,13 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 6. 未经明确授权，不安装软件、不修改内核/驱动/DTB/网络配置、不重启 NetworkManager 或 eth0。
 
 
-## 13. 2026-11-17 后续补充：6.12.69 GMAC RX / DMA / NAPI 统计与 MAC 身份线索
+## 13. 2026-11-17 后续补充：同一 Linux 6.12.81 启动环境的 GMAC RX / DMA / NAPI 统计与 MAC 身份线索
 
-本节记录随后一轮只读实机输出。与前文 6.12.81 专项快照分开记录，不将不同内核版本或不同启动周期的累计计数直接相减。
+本节记录同一 Linux 6.12.81 内核环境下随后一轮只读实机输出。它是不同采样时点的统计快照，不代表更换或运行过另一套 6.12.69 内核；不同启动周期/驱动生命周期的累计计数仍不得直接相减。
 
 ### 13.1 接口与 MTU
 
-- 本轮用户标识的运行环境为 Linux 6.12.69。
+- 本轮运行环境仍为 Linux 6.12.81-rk35xx-ophub；用户确认期间只更换过 U-Boot，没有更换 Linux 内核包。
 - eth0：UP / LOWER_UP，Carrier on，运行时 MTU=1500。
 - NetworkManager profile `Wired connection 1` 的 MTU 设置为 `auto`。
 - 内核日志筛选输出只明确显示 RTL8211F 链路 Up：1Gbps / Full / flow control rx/tx；没有看到 DMA reset failure、DMA engine initialization failure、Hw setup failure 或 Link Down 的匹配行。由于本轮 grep 输出并非完整启动日志，不能将“未显示”提升为完整日志审计结论。
@@ -717,9 +717,9 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 - 本轮没有执行 DHCP renew、接口重启、驱动重载、软件安装、配置修改、寄存器写入或系统重启。
 
 
-## 16. 2026-11-17 补充：6.12.69 ethtool 统计字段完整性与 DHCP 被动监听状态
+## 16. 2026-11-17 补充：同一 Linux 6.12.81 环境的 ethtool 统计字段完整性与 DHCP 被动监听状态
 
-本节补充 13.2 表格未逐项展开、但用户在同一轮 `ethtool -S eth0` 输出中提供的字段。它们属于同一 6.12.69 运行环境快照；不与 6.12.81 或其他启动周期的累计值混算。
+本节补充 13.2 表格未逐项展开、但用户在同一轮 `ethtool -S eth0` 输出中提供的字段。它们属于同一 Linux 6.12.81 环境的同一采样快照；与其他采样时点或不同驱动生命周期的累计值分开处理。
 
 ### 16.1 其他 RX / 协议分类计数
 
@@ -758,3 +758,15 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 - 目标是确认本轮 Discover/Offer 是否经过 eth0，并在需要时与 hEX 入口同一时间窗口的抓包对应；本机 outgoing capture 仍不能单独证明 PHY 线侧发送成功。
 
 **本节状态：** 仅整理既有只读输出，没有在设备上执行新命令或改变配置。
+
+## 17. 版本标签纠错：6.12.69 是源码比较基线，不是 Panther 实机内核
+
+此前第 13、16 节曾将后续 RX/IRQ/NAPI 统计快照误标为 Linux 6.12.69。这是报告整理错误，现予更正。
+
+- **实机运行内核：** `6.12.81-rk35xx-ophub`。2026-11-17 JP-TvBox U-Boot 实机启动 UART 原始日志中的 `Linux version` 行明确报告该版本；`/boot` 内核文件名也为 `vmlinuz-6.12.81-rk35xx-ophub`。
+- **本轮实际使用的内核包基线：** Ophub `kernel_rk35xx` 标准资产 `6.12.81.tar.gz`，记录大小 141,437,450 bytes，SHA-256 `72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`。Flippy 资产是另一个独立发布变体，虽曾被离线审计，但没有证据表明它被安装或用于本次实机启动。
+- **6.12.69 的真实含义：** 源码对照章节中 Rockchip `develop-6.12` 分支 Makefile 的 `SUBLEVEL=69`，用于与 Ophub 6.12.81 源码做函数级比较；它不是本机 `uname -r`，也不是另一次内核安装或启动。
+- **实机测试变量：** 用户确认相关测试期间没有更换 Linux 内核包，只更换过 U-Boot。因而网络测试报告中的各轮 6.12 统计均应按同一 Linux 6.12.81 内核环境理解；不同时间采样或驱动生命周期仍需分开，不能直接比较累计计数。
+- **纠错范围：** 第 13、16 节的运行内核版本标签已改为 6.12.81；第 7 节保留 6.12.69 作为源码 Makefile 比较基线，并明确其不是实机版本。
+
+证据来源：`evidence/uart/panther-jp-tvbox-u-boot-boot-20261117.txt`、`docs/reports/2026-11/PANTHER-X2-BOOT-MEDIA-AND-SOFTWARE-INVENTORY-20261117.md`、`config/versions.env`。本次更正不改变任何实机测试数据或故障分析结论。
