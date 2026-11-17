@@ -301,3 +301,69 @@ U-Boot Driver Model API 对 `ofnode_is_enabled()` 的定义是：检查节点的
 - 不再把 control FDT 中的 `tx_delay=0x4f`、`rx_delay=0x26` 或 reset GPIO 属性当作 U-Boot 已执行配置的证据。
 - 不再把单纯的 E25/Linus DT 参数差异当作启动交接冲突证据。
 - 先查是否存在绕过 Driver Model 的初始化代码，再决定是否继续追 U-Boot 初始化路径。
+
+## 13. GMAC1 reset GPIO 与 pinctrl phandle 已解析（2026-11-17）
+
+用户对已验证 FDT 执行 phandle 上下文检索，实机输出确认：
+
+- 0x1000005d 指向 GPIO 控制器节点 gpio@fe750000。
+- 0x1000005e → gmac1m1-miim。
+- 0x1000005f → gmac1m1-tx-bus2。
+- 0x10000060 → gmac1m1-rx-bus2。
+- 0x10000061 → gmac1m1-rgmii-clk。
+- 0x10000062 → gmac1m1-rgmii-bus。
+
+GMAC1 节点引用顺序：
+```dts
+pinctrl-0 = <0x1000005e 0x1000005f 0x10000060
+             0x10000061 0x10000062>;
+```
+因此它引用的是上述五个 M1 pin groups。gmac1m1-clkinout 虽在 FDT 中存在，但没有出现在这五个 pinctrl-0 phandle 中；不可把“组存在”说成“该组被该节点引用”。
+
+### 13.1 M1 pin group 的 rockchip,pins 编码
+
+每组 tuple 按 Rockchip pinctrl 约定表示 bank、pin、mux、配置 phandle。实机 FDT 内容：
+
+| 组 | FDT 中的 pin tuples | 含义 |
+|---|---|---|
+| MIIM | <4 14 3 ...>、<4 15 3 ...> | GPIO4 pin14、pin15，mux3 |
+| TX bus | <4 4 3 ...>、<4 5 3 ...>、<4 6 3 ...> | GPIO4 pin4–6，mux3 |
+| RX bus | <4 7 3 ...>、<4 8 3 ...>、<4 9 3 ...> | GPIO4 pin7–9，mux3 |
+| RGMII clock | <4 3 3 ...>、<4 0 3 ...> | GPIO4 pin3、pin0，mux3 |
+| RGMII bus | <4 1 3 ...>、<4 2 3 ...>、<3 30 3 ...>、<3 31 3 ...> | GPIO4 pin1–2、GPIO3 pin30–31，mux3 |
+
+这些是 FDT 描述的 M1 复用组，不是实机 pinmux 当前状态的读回。
+
+### 13.2 Reset GPIO 的解码
+
+GMAC1 属性：
+```dts
+snps,reset-gpio = <0x1000005d 0x19 0x01>;
+snps,reset-active-low;
+```
+provider 是 gpio@fe750000，reg 为 0xfe750000，compatible 为 rockchip,gpio-bank。
+
+解码：
+- GPIO bank provider：gpio@fe750000，即 GPIO2。
+- line offset：0x19 = 十进制 25。
+- GPIO2 pin25 对应 GPIO2_D1（按每 bank 32 pins、A/B/C/D 每组 8 pins 编号）。
+- 传统全局编号：2 × 32 + 25 = 89，即 GPIO89。
+- flags cell 0x01 与节点 snps,reset-active-low 一致表达低有效复位。
+
+这与 Linux 当前运行时 FDT 的 GMAC reset GPIO（GPIO3-1 / GPIO97）不同。两者目前只能认定为静态设备树描述差异；因为 U-Boot GMAC1 节点 status = disabled，尚无证据证明 U-Boot 实际请求或驱动过 GPIO89。
+
+### 13.3 与 Linux 运行时 pinmux 的差异
+
+既有实机 pinmux 输出已确认 Linux 当前 GMAC1 使用 gmac1m0-*，而此 U-Boot control FDT GMAC1 节点引用 gmac1m1-*。这确认两份设备树的静态 pinmux 方案不同。
+
+但须保持证据边界：
+- U-Boot control FDT 节点 status = disabled。
+- u-boot,dm-pre-reloc 不是启用状态，也不证明 pinctrl 被应用。
+- 当前 Linux pinmux 读回证明 Linux 接管后 M0 已生效，不可反推 U-Boot 早期阶段从未短暂设置过 M1。
+- 是否存在 SPL、ATF、board-specific 或非-DM代码直接设置 M1/GRF/GPIO89，仍需源码核对。
+
+### 13.4 对故障调查的意义
+
+新增事实使“U-Boot FDT 中 GMAC1 的静态硬件接线描述与 Panther Linux 实际使用方案不一致”成为已验证结论；但“U-Boot 真正把 GMAC1 配成 M1、GPIO89 reset、0x4f/0x26 delay”仍未验证。
+
+因此接下来应优先做源码路径审计：检查对应 U-Boot 构建的 SPL、Rockchip board init、pinctrl、GMAC driver，以及可能的直接 GRF/CRU/GPIO 寄存器访问。不要为此修改实机配置或重复 DHCP 测试。
