@@ -659,3 +659,12 @@ DWMAC4 channel register offsets 与位定义参考：
 实机运行版本以 UART 原始启动日志 `Linux version 6.12.81-rk35xx-ophub` 为准。相关测试期间用户确认只更换 U-Boot，没有更换内核包。第 12、13 节记录的是同一 Linux 6.12.81 环境下不同时间/批次的统计，不构成 6.12.69 与 6.12.81 的实机对照。
 
 内核包基线为 Ophub `kernel_rk35xx` 标准资产 `6.12.81.tar.gz`（141,437,450 bytes；SHA-256 `72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`）。Flippy 变体虽曾被离线审计，但没有证据表明它用于本次实机启动。
+## 15. 排查方向澄清：TX 未结案，RX 计数不是主线切换（2026-11-17）
+
+新增的 RX/IRQ/NAPI 快照仅用于判断 GMAC 接收侧是否整体失效，并记录 RX dropped=1,694 这一独立待解释现象；它不构成将 DHCP 故障排查从 TX 转向 RX 的依据。
+
+**主故障仍是 TX：** DHCP Discover 已在 Panther 本机 outgoing 抓包点可见，但既有 hEX 抓包未观察到 Panther 报文。MAC TE、DMA TX ST 置位、TX 软件完成计数与 MMC TX frame 计数在同一可比启动周期内吻合，且未见 TX underflow/carrier/fatal bus/FIFO 堵塞计数异常。这些只能排除部分“TX 整体停摆”假设，不能证明特定 DHCP 帧已从 PHY 发出。
+
+TX 尚未完成的工作包括：单个 DHCP Discover 与 descriptor 提交/completion/MMC 增量的逐包关联；Panther 与 hEX 同时间窗口的逐包同步捕获；RGMII TXC/TXD 到 PHY MDI 的实际物理发送确认；以及 6.12.81 实际发布构建对应源码的完整 TX DMA 路径审计。
+
+下一步仍应优先完成 TX 路径静态审计和同一 DHCP Discover 的双端关联。RX dropped 作为独立支线保留，不得替代 TX 主线或被直接认定为 DHCP 故障原因。未经授权不主动 renew DHCP、不重启接口、不修改系统。
