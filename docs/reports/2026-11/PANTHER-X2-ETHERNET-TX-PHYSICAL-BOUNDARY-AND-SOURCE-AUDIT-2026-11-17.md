@@ -442,3 +442,66 @@ Ophub README 也明确区分 RK35xx 专用 BSP 内核，并说明可通过 `kern
 - RTL8211F 线侧 MDI 发射是否正常。
 
 下一步应将重点从“源码里是否明显改坏 descriptor 格式”转向“实际 6.12.81 构建来源和 PHY/MAC 初始化路径差异”，同时继续审查 Rockchip GMAC 的 TX/RGMII 时钟及 PHY 状态配置；不得通过读取 dummy-syscon debugfs 寄存器或 devmem 获取现场寄存器值。
+
+
+## 15. Rockchip glue、phylink 与 RTL8211F 初始化路径继续对照（追加，2026-11-17）
+
+### 15.1 RK3568/RK3566 专用 RGMII 配置函数保持一致
+
+再次逐函数核对两个 Rockchip 分支的 `dwmac-rk.c`：
+- `rk_gmac_powerup()` 一致；
+- `rk_gmac_clk_init()` 一致；
+- `rk3568_set_to_rgmii()` 一致；
+- `rk3568_set_gmac_speed()` 一致；
+- `rk3568_ops` 中 GMAC1 的资源地址、RGMII speed callback 绑定一致；
+- `rk_fix_speed()` 的函数签名从 `(priv, speed)` 改为 `(priv, speed, mode)`，但函数体仍按相同的 PHY interface mode 调用 `set_rgmii_speed()`，新增的 `mode` 参数未参与配置。
+
+对当前运行时 DT 的 `phy-mode = "rgmii"`、`clock_in_out = "input"`、TX/RX delay 0x30/0x10 而言，候选源码两版的 Rockchip RGMII 选择、delay 写入和按链路速率设置 `clk_mac_speed` 逻辑没有发现差异。
+
+### 15.2 Rockchip glue 初始化有结构性变化，但当前未构成故障证据
+
+`rk_gmac_setup()` 在 6.12 做了更严格的 GRF 获取检查：
+- 6.1 对 `rockchip,grf` lookup 结果保存后继续初始化，后续 RGMII 函数遇到错误会打印并跳过 GRF 写入；
+- 6.12 对 `rockchip,grf` lookup 失败直接 probe 失败；
+- 6.12 还按 SoC ops 的 `php_grf_required` 条件获取 PHP GRF，并在要求但缺失时 probe 失败。
+
+当前 6.12 实机 GMAC 驱动已成功 probe，运行时设备树的 `rockchip,grf` 属性存在，故“GRF phandle 缺失导致未配置 RGMII”不符合当前证据。不能为验证这一点读取任何 dummy-syscon MMIO/debugfs registers。
+
+### 15.3 phylink / PHY fwnode 解析接口有变化
+
+`stmmac_init_phy()` 在 6.1 从 `plat->phylink_node` 取得 firmware node；6.12 改用 `plat->port_node`，并在手动 PHY 连接分支新增 `phy_support_eee()`（仅当 DMA capability 支持 EEE）。
+
+`stmmac_mdio_register()` 同样从旧的 `phylink_node` 改为 `port_node`，并调整 MDIO C22/C45 callback 和 PHY mask 处理。
+
+当前设备树 PHY 节点仍为 `mdio/ethernet-phy@0`，PHY addr 0 已由 MDIO/PHY ID 证据确认。尚未找到证据显示 6.12 把 Panther 的 PHY 连接到了错误节点；但 port-node 迁移是值得与实际 DT parse/运行时 phylink attachment 日志交叉核验的版本变化，暂列“结构性变化、影响未证实”。
+
+### 15.4 RTL8211F config_init 细节变化
+
+两个候选分支的 `rtl8211f_config_init()` 对当前 RGMII 模式的核心动作一致：
+- 配置 ALDPS；
+- 对 `PHY_INTERFACE_MODE_RGMII` 将 PHY 内部 TX delay 和 RX delay 都设置为 0；
+- 写入扩展页 `0xd08` 的 delay 控制位。
+
+这与当前设备树 `phy-mode = "rgmii"` 及 Rockchip GMAC 内部 `tx_delay=0x30/rx_delay=0x10` 的设计相匹配：延迟由 MAC/SoC 侧配置，PHY 侧关闭内部 RGMII delay。没有看到 6.12 在这两项 delay 选择上与 6.1 不同。
+
+差异主要是 LED 恢复流程：
+- 6.1 的部分路径读取 DT `realtek,led-data` 并直接写 LED 页；
+- 6.12 改为调用 `rtl8211f_restore_leds()`，并在部分提前返回路径也恢复 LED；
+- `has_phycr2` 路径的软复位与 LED restore 顺序也有调整。
+
+这些变化看起来集中在 LED 配置恢复，而不是 MAC/PHY 数据通道配置。除非后续找到 LED fixup 对 PHY page selector/复位状态造成副作用的证据，否则优先级低。
+
+### 15.5 本轮收敛结论
+
+当前候选源码对照没有发现 RK3568 RGMII delay、MAC speed clock rate、RTL8211F 内部 TX/RX delay 选择存在 6.1→6.12 的直接变化。
+
+新增需要保留的两个版本变化：
+1. `stmmac_init_phy()` / MDIO 注册改用 `port_node`，其影响需结合实际运行时 phylink attachment 确认；
+2. Realtek RTL8211F LED restore/config 逻辑改变，但暂未显示与数据帧 TX 有直接关系。
+
+因此，当前更重要的未知量仍是：
+- 实际 6.12.81 构建是否应用了候选源码之外的补丁；
+- 6.12.81 实际 phylink/PHY attachment 和 link-up 回调链；
+- TX DMA completion 之后 GMAC MAC TX/RGMII 输出是否有有效波形。
+
+下一轮应检查实际源码构建身份与 phylink link-up 回调参数/调用时序，并继续从已有启动日志找 PHY attach、link-up、clock rate 记录。无需新增设备侧测试；禁止读取 dummy-syscon 寄存器。
