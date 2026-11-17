@@ -615,3 +615,74 @@ Release 描述明确说明文件名带 `flippy` 的包由 Flippy 手动上传，
 3. 当前应把研究重心转向：该精确 6.12 源 commit 相对实际 6.1.116 工作版本的变更，以及两者正式配置差异。
 4. 6.1.116 的精确源码 commit/config/package 来源仍未锁定；不能默认它就是当前 unifreq 6.1 分支的任意 HEAD。
 5. 不需要在 Panther 上重复发送帧或抓包，也不需要修改设备。任何后续现场取证应先从只读文件/日志着手。
+
+
+## 17. 实际构建中启用的 Rockchip 专用 loopback 工具及其诊断边界（追加，2026-11-17）
+
+通过已锁定的实际 config：
+`CONFIG_DWMAC_ROCKCHIP_TOOL=y`
+以及同一 source commit 的 STMMAC Makefile：
+`dwmac-rockchip-$(CONFIG_DWMAC_ROCKCHIP_TOOL) += dwmac-rk-tool.o`
+确认 Panther 当前 6.12.81 构建包含 Rockchip 专用测试工具 `dwmac-rk-tool.c`。它与 `CONFIG_STMMAC_SELFTESTS` 是不同的机制；实际发布 config 中 `CONFIG_STMMAC_SELFTESTS` 未启用，因此不能期待 `ethtool -t` 暴露 STMMAC self-test。
+
+### 17.1 工具提供的三类 sysfs 功能
+
+源码创建的属性：
+- `rgmii_delayline`：读写缓存的 TX/RX delayline 值；
+- `mac_lb`：MAC 内部 loopback；
+- `phy_lb`：PHY BMCR loopback；
+- `phy_lb_scan`：扫描 RGMII delayline 组合。
+
+### 17.2 `rgmii_delayline` 读取不是硬件寄存器回读
+
+`dwmac_rk_get_rgmii_delayline()` 只返回 `bsp_priv->tx_delay` 与 `bsp_priv->rx_delay` 两个软件缓存值；这些值在 probe 时从设备树读取，写入 delayline sysfs 时也同步更新。
+
+所以读取该 sysfs 文件只会显示驱动缓存的值，不能证明 GRF 硬件寄存器实际写入成功，也不能替代 pinctrl/GRF 的独立验证。当前不能把它当作新的现场硬件证据。
+
+### 17.3 MAC loopback 与 PHY loopback 的覆盖范围
+
+- `mac_lb` 设置 GMAC `GMAC_CONTROL_LM`，在 MAC 内部形成回环。它检查专用 DMA descriptor ring、DMA TX/RX、MAC 内部数据路径，但不经过 RGMII 和 RTL8211F 的数据接口。
+- `phy_lb` 设置 PHY `MII_BMCR.BMCR_LOOPBACK`，同时强制 MAC/PHY 速率，然后由 MAC TX 发测试帧，经 RGMII TX 到 PHY，再由 PHY 内部回环经 RGMII RX 返回 MAC RX。它能覆盖 MAC↔PHY 的 RGMII 数据路径，但不验证 PHY MDI 线侧发射器、磁性器件、网线和外部 iMac 收包。
+- `phy_lb_scan` 会反复调用 `dwmac_rk_set_rgmii_delayline()`，写入 Rockchip GRF 的 RGMII delay 值，属于主动硬件调参，不是只读检查。
+
+### 17.4 loopback 测试本身具有明显影响，未执行
+
+`dwmac_rk_loopback_run()` 会：
+1. 获取 RTNL lock；
+2. 如果网卡处于 UP 状态，调用 `ndo_stop()` 停止网卡；
+3. assert/deassert STMMAC reset，并对 PHY 发起 BMCR reset polling；
+4. 设置 PHY/MAC loopback；
+5. 重新初始化专用 DMA descriptor ring、DMA channel 0、MAC core、MTL/MAC 队列；
+6. 发送测试包并检查 RX；
+7. 释放专用 DMA 资源、关闭 loopback，再重新 `ndo_open()`。
+
+因此执行 `mac_lb` 或 `phy_lb` 会短暂中断 eth0 网络并复位 GMAC/PHY；执行 `phy_lb_scan` 还会修改 GRF delay 配置。当前用户未授权任何设备配置/硬件状态修改，本轮只做静态源码审计，没有执行这些操作。
+
+### 17.5 6.1 与实际 6.12 工具代码存在差异，影响测试结果解释
+
+- 6.1 的 `dwmac_rk_xmit()` 调用旧版 `stmmac_enable_dma_transmission(priv, ioaddr)`；6.12 增加 queue 参数并传入 0。
+- 6.1 的 loopback 等待逻辑使用 TX/RX interrupt 条件组合，且循环条件存在不合理的 `delay <= 0`；6.12 改为等待 RX interrupt，并以 `delay > 0` 控制超时。
+- 6.1 的 `dwmac_rk_rx_validate()` 会检查接收帧并调用 payload 内容校验；6.12 版本主要验证接收长度是否与预期相同，不再逐字节比较 payload。
+
+所以 6.12 工具比旧版修正了等待 RX 完成的逻辑，但其 PASS 结果只证明 RX descriptor 完成且帧长符合预期，不能当作完整 payload 逐字节校验。
+
+### 17.6 后续可用作定点分界测试，但需单独授权
+
+如果后续决定进行一次有控制的主动验证，优先级是：
+1. `phy_lb`（1000 Mbps）：验证 MAC↔RGMII↔PHY internal loopback 的完整内部数据路径；
+2. 与现有外部 iMac 收包失败证据结合，判断问题更靠近 PHY 线侧发射还是更靠近 MAC/RGMII；
+3. 不先运行 `phy_lb_scan`，因为它会批量写入 GRF delayline，且会改变当前配置。
+
+本轮没有运行 loopback、没有写入 delayline，也没有读取任何 dummy-syscon/MMIO debugfs 寄存器。
+
+---
+
+## 18. 6.12 DWMAC4 DMA 初始化函数差异再核对（追加，2026-11-17）
+
+针对精确 6.12.81 source commit `661b2d8` 与 6.1 Rockchip 分支继续比较 `dwmac4_dma.c`：
+- `dwmac4_dma_init_channel()` 一致；
+- `dwmac4_dma_init_rx_chan()` 一致；
+- `dwmac4_dma_init_tx_chan()` 一致；
+- `dwmac4_dma_init()` 的函数签名移除了旧的 `atds` 参数，但函数体对 DMA_SYS_BUS_MODE、DMA_BUS_MODE 的配置步骤一致；旧参数在该函数体内没有被使用。
+
+因此目前没有发现 DWMAC4 TX channel PBL、OSP、descriptor base address 初始化行为发生实质变化。此项继续降低了“6.12 初始化 TX DMA channel 时漏设关键寄存器”的可能性。
