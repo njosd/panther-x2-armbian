@@ -195,3 +195,88 @@ JP-TvBox 是目前最值得继续研究的候选，但不能直接刷写：
 - 对照 Armbian 官方 Panther X2 rock-3c-rk3566_defconfig 所指向的 Radxa U-Boot 源码，确认 SPL DDR loader 与 board DTS。
 - 检查 JP-TvBox 与 Panther X2 的 DDR 配置源文件、LPDDR4 参数和 U-Boot build config。
 - 对照 Linux 6.12.81 运行时 FDT 的 USB 控制器、PHY、vbus/5V regulator、GPIO 和 pinctrl；不重复已完成的 GMAC Linux 配置验证。
+
+
+## 9. 新发现：Armbian 官方 Panther X2 U-Boot 修复路线（2026-11-17）
+
+### 9.1 Armbian PR #9243：直接的 Panther X2 启动实测线索
+
+Armbian/build PR #9243（Fix Panther-X2）于 2026-01-14 合并，merge commit `0e2fec109e12e01bf982b3c565dbda17c7279aa4`。
+PR 作者说明：原有 Panther X2 build 在 U-Boot 层面有问题；测试多个 build 后，Radxa `stable-4.19-rock3` branch 能够正常启动，因此将 Panther X2 的 U-Boot source 改为该分支，并禁用其他 U-Boot patch。
+
+当前 Armbian `config/boards/panther-x2.eos` 仍采用：
+- `BOOTCONFIG="rock-3c-rk3566_defconfig"`
+- `BOOTSOURCE=https://github.com/radxa/u-boot.git`
+- `BOOTBRANCH=branch:stable-4.19-rock3`
+- `BOOTPATCHDIR="none"`、`BOOTPATCHES="none"`
+- kernel DTB 仍为 `rockchip/rk3566-panther-x2.dtb`
+
+来源：
+- https://github.com/armbian/build/pull/9243
+- https://github.com/armbian/build/commit/0e2fec109e12e01bf982b3c565dbda17c7279aa4
+- https://github.com/armbian/build/blob/main/config/boards/panther-x2.eos
+
+这比单个 JP-TvBox 社区报告更强：Armbian 官方 Panther X2 构建配置已明确将 Radxa ROCK 3C U-Boot 作为启动修复路线，而且 PR 作者说明有多组构建测试后能正常启动。限制是 PR 没有详细列出测试硬件的网络、USB、存储逐项结果，也没有明确说“仅换 U-Boot、其余所有变量完全不变”。
+
+### 9.2 当前 Armbian 构建使用的 RK3566 固件组件
+
+当前 Armbian `config/sources/families/include/rockchip64_common.inc` 的 RK3566 默认组件为：
+- DDR TPL：`rk35/rk3566_ddr_1056MHz_v1.21.bin`
+- ATF BL31：`rk35/rk3568_bl31_v1.44.elf`
+- `BOOT_SOC_MKIMAGE="rk3568"`（用于 RK3566 的 mkimage 参数兼容）
+
+来源：https://github.com/armbian/build/blob/main/config/sources/families/include/rockchip64_common.inc
+
+这说明若以当前 Armbian 官方构建流程重建 Radxa `stable-4.19-rock3` U-Boot，使用的 DDR/ATF blob 与 2023 JP-TvBox 二进制中检测到的 DDR V1.10 不同。注意：这是当前构建默认值，不代表 2026-01 PR 合并时所用的确切 blob 版本，也不代表 V1.21 已经在本 Panther X2 上验证。
+
+### 9.3 JP-TvBox 与 Panther X2 Linux DTS 的 USB/GMAC 差异需要谨慎解释
+
+本轮重新对照当前 Linux Panther X2 DTS（固定 Linux source commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`）：
+- Linux Panther X2 GMAC1 使用 M0 pinctrl、`clock_in_out="input"`、reset GPIO3_PA1、TX/RX delay 0x30/0x10。
+- JP-TvBox SPL FDT GMAC1 使用 M1 pinctrl、`clock_in_out="output"`、reset GPIO3_PC0、TX/RX delay 0x47/0x27。
+- Linux Panther X2 DTS 启用 USB host0 EHCI/OHCI 与 USB2 PHY0 host；JP ROCK3C SPL FDT 还启用 USB host1 EHCI/OHCI、第二 USB2 PHY 及 GPIO 控制的 host 5V regulator。
+
+因此 JP-TvBox 的网卡成功案例虽强，但 JP 的 U-Boot FDT 与 Panther X2 Linux DTS 的 GMAC 参数并不相同；JP 的额外 USB host 电源 GPIO 也尚未证明与 Panther X2 板级线路相符。不能将 JP-TvBox 二进制直接认定为完整正确的 Panther X2 板级固件。
+
+### 9.4 新发现：Nabu Casa / HAOS 的 Panther X2 专用 U-Boot patch
+
+在 `wuwweizn/ZG-HAOS` 公开构建配置中发现一套针对 Panther X2 的 U-Boot v2025.01 patch，且固定使用：
+- U-Boot base：upstream U-Boot v2025.01，基线 commit `6d41f0a39d6423c8e57e92ebbe9f8c0333a63f72`
+- DDR TPL：`rk3566_ddr_1056MHz_v1.18.bin`
+- ATF：`rk3568_bl31_v1.43.elf`
+- 新增 Panther X2 board code、Panther X2 kernel DTS 与 `rk3566-panther-x2-u-boot.dtsi`
+- board code 从 I2C EEPROM 读取板版本、序列号和 MAC（MAC offset 0x22）
+
+来源：
+- https://github.com/wuwweizn/ZG-HAOS/blob/main/buildroot-external/configs/panther_x2_defconfig
+- https://github.com/wuwweizn/ZG-HAOS/blob/main/buildroot-external/board/panther/x2/patches/uboot/0001-add-panther-x2-uboot.patch
+- https://github.com/u-boot/u-boot/commit/6d41f0a39d6423c8e57e92ebbe9f8c0333a63f72
+
+但此 patch 中 `CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3568-evb1-v10"`，而 `CONFIG_DEFAULT_FDT_FILE="rockchip/rk3566-panther-x2.dtb"`。即 U-Boot control FDT 仍指向 RK3568 EVB，Panther X2 DTB 是默认启动时传给 Linux 的 FDT；虽然 patch 新增 Panther X2 U-Boot DTSI，但当前 defconfig 没有选它作为 control FDT。必须进一步审计 build flow，不能只凭 patch 文件名认定 U-Boot proper 已使用 Panther X2 control FDT。
+
+此外，该 board code 的 I2C EEPROM MAC 读取机制与本项目已确认的 eMMC/TF vendor data MAC 路径不同；尚未证明 Panther X2 实物板上存在它预期的 I2C EEPROM 内容和地址，不能直接套用。
+
+### 9.5 OpenWrt 衍生构建中的 Panther X2 U-Boot target
+
+另在 OpenWrt 衍生仓库 `coolsnowwolf/lede` 的 U-Boot Rockchip package 中发现 `panther-x2-rk3566` target，包版本 `2026.07`，RK3566 默认 TPL `rk3566_ddr_1056MHz_v1.23.bin`、ATF `rk3568_bl31_v1.44.elf`。
+
+但其 `316-rockchip-rk3566-Add-support-for-panther-x2.patch` 新增的 defconfig 仍设置 `CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3568-evb1-v10"` 和 `CONFIG_TARGET_EVB_RK3568=y`，仅把 `CONFIG_DEFAULT_FDT_FILE` 指向 `rk3566-panther-x2.dtb`。因此它是一个可研究的现代构建入口，但 control FDT 选择仍有板级匹配疑问，不能仅因 target 名称为 Panther X2 就认定已解决本项目问题。
+
+来源：
+- https://github.com/coolsnowwolf/lede/blob/d75c7ff94b00a475db7fef465cf17155cd733131/package/boot/uboot-rockchip/Makefile
+- https://github.com/coolsnowwolf/lede/blob/d75c7ff94b00a475db7fef465cf17155cd733131/package/boot/uboot-rockchip/patches/316-rockchip-rk3566-Add-support-for-panther-x2.patch
+
+### 9.6 候选排序更新
+
+1. **第一优先：Armbian 官方 Panther X2 构建路线：Radxa `stable-4.19-rock3` + `rock-3c-rk3566_defconfig`，按当前 Armbian build 组件构建。** 有 Panther X2 官方 build 修复 PR 的实测说明，且当前 build 明确沿用；先审计其 control FDT、GMAC reset、USB PHY/host 和 DDR TPL 版本。
+2. **第二优先：Nabu Casa/HAOS Panther X2 专用 patch。** 具备专门的 board code、Panther X2 DTS 和 EEPROM MAC 读取，但 control FDT 默认仍是 RK3568 EVB，MAC 数据来源也尚未与本机硬件对应。需先厘清构建选择和板级适配。
+3. **第三优先：Ophub JP-TvBox 2023 二进制。** 有 Panther X2 网络恢复的直接社区报告，但 DDR V1.10 较旧，且 GMAC reset/delay、USB host 电源与 Panther X2 DTS 有明确差异；只作为对照样本。
+4. **辅助参考：OpenWrt 2026.07 Panther X2 target。** TPL V1.23/BL31 V1.44 较新，但 defconfig 的 control FDT 仍为 RK3568 EVB，先审计，不直接作为候选固件。
+
+### 9.7 下一步
+
+- 获取 Radxa `stable-4.19-rock3` 对应 Armbian 构建的完整构建参数和生成物（尤其 idbloader、u-boot.itb、FIT control FDT、ATF/DDR blob 版本），以静态证据验证实际内容。
+- 重点确认 ROCK3C U-Boot 的 GMAC reset GPIO3_PC0 是否会在 Panther X2 上驱动错误线路；结合 U-Boot DM probe/legacy 初始化路径判断是否真的执行。
+- 比较 Panther X2 真实 USB 物理端口与 Linux DTS 中 USB host0/PHY0 映射，避免误启用 ROCK3C 特有的 host1/5V GPIO。
+- 检查 DDR TPL v1.21/v1.23 与本机 4GB LPDDR4 的训练参数。版本号更高不等于已验证适配。
+- 继续保持只读研究；未完成候选审计和明确授权前，不改 TF/eMMC 启动区。
