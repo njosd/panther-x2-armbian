@@ -482,3 +482,73 @@ qdisc：
 4. 用户此前已通过启动链调查确认本轮 MAC 来源与 TF 卡数据有关。该来源结论作为既有调查结论保留，不在当前 DHCP 主线重复追查。
 5. MAC 来源/传递链降为最低优先级；除非后续出现直接证据表明它影响 DHCP 报文收发，否则不继续投入排查资源。
 
+
+
+## 20. STMMAC 6.12.81 源码审计：`rx_dropped` 的实际增加路径
+
+### 20.1 源码样本与版本边界
+
+本轮对照了以下可访问源码快照：
+
+- Linux stable：[`gregkh/linux` 的 `v6.12.81` STMMAC 源码](https://github.com/gregkh/linux/blob/v6.12.81/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)，文件内容 SHA-1（Git blob）：`5016b8c39b6847fbeced096842daac1412fb221e`。
+- Rockchip BSP 候选：[ `unifreq/linux-6.12.y-rockchip` 的 `v6.12.81` STMMAC 源码](https://github.com/unifreq/linux-6.12.y-rockchip/blob/v6.12.81/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)，文件内容 SHA-1（Git blob）：`495e98f7b71654393d357de2c348f75b9d8b686b`。
+- Ophub Rockchip kernel 当前分支的同路径文件与 unifreq 当前分支文件内容相同（Git blob：`bdd0db20864b1aa6b331b3185ae65d87cdd9f3fc`）；但它不是设备镜像的构建提交证明。
+
+Ophub 项目公开的构建来源同时列有 `unifreq/linux-6.12.y-rockchip` 与 `ophub/linux-6.12.y-rockchip` 等选项。因此，当前 `6.12.81-rk35xx-ophub` 内核版本字符串和构建日期，尚不足以唯一确定设备镜像采用的具体源码仓库、commit 和补丁集合。上述两个 v6.12.81 文件是高度相关的审计候选，不冒充已从本机 Image 反推出的精确构建源码。
+
+### 20.2 在 v6.12.81 候选源码中，直接增加 `rx_dropped` 的位置
+
+逐项检索 `stmmac_main.c` 后，归纳出四类实际增加路径：
+
+| 路径 | 代码位置（unifreq v6.12.81） | 触发条件 | 对普通以太网 RX 是否默认发生 |
+|---|---|---|---|
+| ZC skb 构造失败 | `stmmac_dispatch_skb_zc()`，约 5115–5118 行 | `napi_alloc_skb()` 返回 NULL | 否；属于 AF_XDP zero-copy 分支 |
+| XSK/XDP 消费丢弃 | `stmmac_rx_zc()`，约 5352–5362 行 | XDP verdict 为 CONSUMED，或 XSK_CONSUMED | 否；属于 AF_XDP zero-copy 分支 |
+| 普通 RX 的 XDP_CONSUMED | `stmmac_rx()`，约 5561–5580 行 | 已附加的 XDP 程序返回 CONSUMED | 只有挂载并执行 XDP 程序时才可能 |
+| 普通 RX skb 分配失败 | `stmmac_rx()`，约 5592–5601 行 | `napi_alloc_skb(&ch->rx_napi, buf1_len)` 返回 NULL | 是；这是无 XDP 程序时普通 RX 路径仍可能触发的分支 |
+
+另有 `stmmac_get_stats64()` 将 `priv->xstats.rx_dropped` 赋给 netdev 的 `stats->rx_dropped`（约 7101 行）。因此，`ip -s link` 的 RX dropped 在该驱动实现中确实反映上述驱动路径汇总，而非简单的 CRC/FIFO 错误计数。
+
+### 20.3 哪些常见怀疑在这份源码中不是直接的 `rx_dropped` 来源
+
+- `stmmac_rx_status()` 返回 `discard_frame` 时，普通 RX 路径回收 page、标记 frame error，并在未启用 RX timestamp 时增加 `rx_errors`；该分支不是这里的 `rx_dropped++` 路径。
+- 普通 RX 代码对 FCS 做长度扣除；VLAN tag 处理调用 VLAN helper。该 v6.12.81 代码路径没有在这些操作失败时增加本处的 `rx_dropped`。
+- `stmmac_rx_refill()` 中 `page_pool_alloc_pages()` 失败会停止 refill loop，但本身不增加 `rx_dropped`。它可能造成 RX descriptor 补充不足，是另一条应结合 buffer-unavailable / ring 状态检查的路径。
+- 当前设备快照的 `rx_buf_unav_irq=0`、`rx_process_stopped_irq=0`、`fatal_bus_error_irq=0`，暂不支持已经发生明显 DMA buffer-unavailable 或 process-stopped 故障；但单次计数快照不能完全排除短暂 refill 问题。
+
+### 20.4 对此前两个上游补丁线索的修正
+
+此前查到的 2026-11-13 `napi_build_skb()` multi-descriptor 修复，针对的是包含 `napi_build_skb()` 的较新 STMMAC RX 代码路径。上面核对的 Linux stable v6.12.81 和 unifreq Rockchip v6.12.81 两份文件中均没有 `napi_build_skb()` 调用，而使用 `napi_alloc_skb()`。因此，**不能把该 11 月 13 日补丁当作当前 6.12.81 故障的直接解释**。补丁原文：[2026-11-13 stmmac patch](https://lore-kernel.gnuweeb.org/b4-sent/20261113-stmmac-rx-skb-fail-v1-1-fcaae89f2d2c%40gmail.com/T/)。
+
+同理，先前提到的 `napi_build_skb()` 失败后 page 回收指针未清理问题，不能直接套用到上述 v6.12.81 代码。该版本中已检查到的普通 page recycle 分支会将 `buf->page` 置为 NULL；而 skb 分配失败分支并没有先 recycle 当前 page。必须以实际构建源码为准，不能把其他较新代码的缺陷移植成当前故障结论。
+
+### 20.5 当前最值得验证的两个候选
+
+在暂不考虑 XDP/AF_XDP 的前提下，普通 RX 路径中最直接的 `rx_dropped` 来源是 `napi_alloc_skb()` 分配失败。若设备确实挂载了 XDP 程序，XDP_CONSUMED 也会增加该计数。AF_XDP zero-copy 分支另有两种计数来源，但需要相应 XSK socket/pool 活动。
+
+所以，现阶段不能直接宣布“67 次 skb 分配失败”；必须先确认：
+
+1. eth0 是否挂载 XDP 程序。
+2. 是否存在 AF_XDP socket / XSK pool。
+3. 采集时是否有内存分配失败或 memory pressure 证据。
+4. 设备实际运行的 Ophub 内核构建究竟来自哪个源码仓库、commit 和补丁集合。
+
+### 20.6 计数器语义补充
+
+在上述 v6.12.81 源码中：
+
+- `rxq_stats->napi.rx_packets`：普通 RX 成功交给 GRO 的 packet 数。
+- `rxq_stats->napi.rx_pkt_n`：NAPI 处理计数 `count`，其统计口径不是成功交付协议栈的 packet 数；多 descriptor frame、错误/丢弃分支会影响 count 的含义。
+- `priv->xstats.rx_dropped`：独立的驱动丢弃累计值。
+- `stmmac_get_stats64()` 分别读取/赋值上述统计。
+
+因此，不能用 `rx_pkt_n`、netdev `rx_packets`、MMC RX framecount 三个数相等或不等，直接推断 67 次丢弃发生在哪个分支。当前快照中它们恰好接近/相等，仍需结合采集时间和分支状态解释。
+
+### 20.7 本轮结论
+
+- 已从 v6.12.81 候选源码列出全部直接增加 `rx_dropped` 的主要分支。
+- 目前最优先排查的是普通 RX 的 `napi_alloc_skb()` 分配失败路径，以及是否存在 XDP/AF_XDP 相关分支。
+- CRC、FIFO、VLAN、FCS、DMA fatal error 不是这份 v6.12.81 源码中普通 `rx_dropped` 计数的直接增加位置。
+- 尚未取得设备 Image 对应的精确源码 commit；源码候选与实际运行二进制的逐字节对应关系仍未验证。
+- 未执行设备配置修改、驱动修改或软件安装。
+
