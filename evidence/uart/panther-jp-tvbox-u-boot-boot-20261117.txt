@@ -911,3 +911,4 @@ Starting kernel ...
 Armbian-unofficial 26.11.0-trunk Noble ttyS2 
 
 armbian login: 
+
