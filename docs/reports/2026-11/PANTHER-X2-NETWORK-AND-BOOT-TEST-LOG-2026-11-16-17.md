@@ -674,3 +674,10 @@ TX 尚未完成的工作包括：单个 DHCP Discover 与 descriptor 提交/comp
 TX 专项报告第 20 节已完成本轮 MTL/FIFO 队列配置比较及 GMAC 时钟启动顺序复核。当前没有发现 TX MTL queue mode、scheduler、FIFO partition 或 queue0→DMA0 映射的直接版本回归。6.1 的 5 ms 与 6.12 的 100–200 μs clock-enable wait 是真实差异，但 Panther 的运行时时钟父项指向 PHY 提供的 125 MHz 外部时钟，clk_summary 也显示软件时钟树频率/使能符合 DT；该差异保留为待解释项，不认定为根因。
 
 下一步 TX 主线集中到 MAC TXC/TXD 物理输出边界。不得重复已完成 descriptor/MTL 静态审计；不得擅自执行 loopback、phy_lb、phy_lb_scan、接口重启或寄存器写入。详见：[TX 物理边界与源码审计](./PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md) 第 20 节。
+
+
+## 17. RGMII TX 物理测量准备（2026-11-18）
+
+已根据 Realtek RTL8211F datasheet 与 Rockchip RK3566 Hardware Design Guide 整理 PHY 输入侧测点：RTL8211F pin 20 TXC、pin 19 TXCTL、pin 18–15 TXD0–3。1000BASE-T 下 TXC 为 125 MHz，数据在时钟双边沿传输。Panther X2 使用 BROWAN H1GW V04，但本轮未找到可核验的该板 Ethernet 原理图/PCB netlist，因此其 RGMII IO 电压、串联电阻编号和测试点位置仍未知，不得套用其他 RK3566 板卡的编号或电压。
+
+下一步先确认板级近照/原理图能否定位 TX 测点和实际 IO 电压；未确认前不做电气探测。详见 TX 专项报告第 21 节。
