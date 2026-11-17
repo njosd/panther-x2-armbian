@@ -471,3 +471,41 @@ DWMAC4 channel register offsets 与位定义参考：
 - 同一轮采集 `ip -s link show dev eth0` 与 `ethtool -S eth0` 中 tx_pkt_n、tx_normal_irq_n、tx_clean、tx_undeflow_irq、tx_process_stopped_irq、tx_early_irq、fatal_bus_error_irq、tx_underflow、tx_carrier、tx_loss_carrier、mmc_tx_framecount_gb、mmc_tx_octetcount_gb。
 
 不执行任何寄存器写入、驱动重载或网络配置修改。
+
+
+## 10. TX 计数跨采样生命周期复核与更正（2026-11-17）
+
+用户补充了启动时间、完整 eth0 生命周期日志及同一轮 TX 计数。
+
+### 10.1 启动/驱动生命周期
+
+- `uptime -s`: `2026-11-16 03:59:45`
+- `/proc/uptime`: `4044.25` 秒（采样时约 67 分钟 uptime）
+- dmesg: GMAC probe/init 在 04:00:01；eth0 注册在 04:00:15；链路 Up 在 04:00:19。
+- 用户提供的 eth0/stmmac 生命周期日志中未见之后的 eth0 unregister/register 或 GMAC reset。
+
+### 10.2 当前启动周期内的 TX 计数
+
+| 采样 | netdev TX packets | tx_pkt_n | MMC TX framecount_gb |
+|---|---:|---:|---:|
+| 初始测试快照 | 23 | 23 | 23 |
+| 04:49:08 | 91 | 未单独提供 | 未单独提供 |
+| 04:50:08 | 92 | 未单独提供 | 未单独提供 |
+| 前一轮寄存器采样 | 116 | 116 | 116 |
+| 本次计数采样 | 118 | 118 | 118 |
+
+本次 MMC TX octetcount_gb=30639；前一轮为29977，增加662 bytes；TX packet/frame 增加2。TX underflow、carrier error、TX process stopped、TX early IRQ、fatal bus error 均为0。
+
+### 10.3 对此前“392 对 4”结论的更正
+
+此前分析将 `tx_pkt_n=392` 与 `mmc_tx_framecount_gb=4` 作为 6.12.81 同一生命周期中的异常差异，这是证据不足的跨上下文比较。当前已确认的本次启动周期数据从 23、91/92、116 到118持续增长，且有完整生命周期日志，没有显示驱动重注册；软件 TX 完成包数与 MMC TX frame count 在可对照快照中一致。
+
+因此：
+- 撤销“本次 6.12.81 启动内 TX 软件完成计数与 MAC MMC 计数严重不一致”的结论。
+- `392/4` 数据应标记为来源/生命周期未确认，不可用于当前根因判断。
+- 当前快照不支持 TX DMA 长期停摆、MAC TX disabled、TX FIFO underflow 或总线错误。
+- DHCP Discover 在本机 outgoing packet capture 可见、但 hEX 未观察到的现象仍待解释；packet socket outgoing capture 发生在真正线上发送确认之前，不能单凭它证明帧已经到达 PHY 线侧。
+
+### 10.4 下一步
+
+应将单个 DHCP Discover 与同一时间窗口的 TX software/MMC 计数增量关联起来，并结合 hEX 端同步抓包判断帧是否离开 Panther 的 PHY。不得再用不同启动或采样上下文的累计计数作直接比较。
