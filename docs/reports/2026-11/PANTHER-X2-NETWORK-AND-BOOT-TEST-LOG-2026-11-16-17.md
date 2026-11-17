@@ -575,3 +575,79 @@ DWMAC4 channel register offsets 与位定义参考：
 **操作记录限制：** 用户终端粘贴过程中多条命令错位；日志筛选输出只明确显示 Link Up 行。因此本次未见 DMA reset 错误，但不视为完整日志审计。没有执行 DHCP renew、接口重启、驱动重载或配置修改。
 
 **下一步：** 从泛化的 GMAC 接收时钟怀疑转向 DHCP Discover/Offer 的实际报文路径，优先被动监听 eth0 UDP 67/68，并在需要时与 hEX 入口同步抓包；不重复已完成的时钟、PHY、RGMII、GRF 和基础 DHCP 检查。
+
+
+## 13. 2026-11-17 后续实机复核：Linux 6.12.69 RX 计数与 DHCP 定位边界
+
+本节单独记录用户随后确认的 **Armbian / Linux 6.12.69** 当前运行快照。它与第 12 节的 6.12.81 晚间快照分开保留；即使部分计数值相同，也不将不同内核启动周期合并或相减。
+
+### 13.1 接口、MTU 与内核日志
+
+- NetworkManager 活动 profile：`Wired connection 1`。
+- profile MTU 设置：`auto`；eth0 运行时 MTU：1500。
+- eth0 状态：`UP, LOWER_UP`；当前链路为 1Gbps / Full，flow control rx/tx。
+- 本次日志筛选只得到一条明确匹配记录：`Link is Up - 1Gbps/Full - flow control rx/tx`。
+- 筛选结果没有显示 `Failed to reset the dma`、`DMA engine initialization failed`、`Hw setup failed` 或 `Link is Down`。但这是 grep 筛选片段，不是完整启动日志审计；只能记为“本次提供的筛选输出未见”，不能据此证明整个启动期间从未发生。
+
+### 13.2 Linux netdev 与 GMAC RX 计数
+
+`ip -s link show dev eth0`：
+
+| 指标 | 读数 |
+|---|---:|
+| RX bytes | 2,244,918 |
+| RX packets | 25,539 |
+| RX errors | 0 |
+| RX dropped | 1,694 |
+| RX missed | 0 |
+| TX packets | 283 |
+| TX errors / dropped | 0 |
+
+`ethtool -S eth0` 关键计数：
+
+| 指标 | 读数 |
+|---|---:|
+| `mmc_rx_framecount_gb` | 25,663 |
+| `mmc_rx_octetcount_gb` | 2,358,886 |
+| `rx_pkt_n` / `q0_rx_pkt_n` | 25,663 / 25,663 |
+| `rx_normal_irq_n` / `q0_rx_irq_n` | 25,649 / 25,649 |
+| `normal_irq_n` | 25,660 |
+| `napi_poll` | 51,984 |
+| `ipv4_pkt_rcvd` / `ipv6_pkt_rcvd` | 3,536 / 182 |
+| `ip_csum_bypassed` | 21,939 |
+| `no_ptp_rx_msg_type_ext` | 25,663 |
+| `mmc_rx_multicastframe_g` | 2,168 |
+| `mmc_rx_broadcastframe_g` / `mmc_rx_unicast_g` | 0 / 0 |
+| `tx_pkt_n` / `q0_tx_pkt_n` | 283 / 283 |
+| `tx_normal_irq_n` / `q0_tx_irq_n` | 11 / 11 |
+| `tx_clean` | 26,335 |
+| `tx_set_ic_bit` | 11 |
+
+以下相关硬件/驱动错误计数均为 0：MMC CRC、alignment、run、jabber、FIFO overflow、watchdog、discard；RX descriptor、overflow、checksum error、CRC、length、MII、GMAC overflow、watchdog、missed、buffer unavailable、process stopped、watchdog IRQ、fatal bus error 等。
+
+`/proc/interrupts`：
+
+- IRQ 67：四 CPU 计数为 154 / 0 / 0 / 25,875。
+- IRQ 68：四 CPU 计数为 0 / 0 / 0 / 0。
+
+### 13.3 证据判读
+
+1. **已验证：** GMAC MAC RX 统计、驱动 RX 统计、RX IRQ 与 NAPI 均有大量活动；本轮数据不支持“GMAC RX 完全没有启动”或“RX DMA 整体完全停摆”。
+2. **已验证：** 本次快照中上述硬件/驱动 RX 错误计数为 0。
+3. **已验证但原因未知：** Linux netdev 累计 RX dropped 为 1,694。没有相邻时间点采样，无法计算本次窗口的 dropped 增量；没有证据将其归因于 DMA descriptor、驱动、协议栈或 DHCP。
+4. **待解释：** netdev RX packets=25,539，与 GMAC/MMC/驱动 RX frame=25,663 相差 124。统计层次和采样时刻不同；没有逐包关联前，不把 124 解释为线上丢包。
+5. **待解释：** `mmc_rx_unicast_g=0`、`mmc_rx_broadcastframe_g=0` 与总 RX frame、驱动及 NAPI 活动并存。需按该硬件 counter 定义、统计使能和驱动读取方式核对，不能仅据此断言没有单播或广播流量。
+6. **未验证：** IRQ 68 为 0 是否异常；需结合驱动申请/使用中断向量的实现，不能单凭计数判断。
+7. **未验证：** DHCP Discover 是否到达 PHY 线侧、hEX 是否收到，以及 DHCP Offer 是否返回 Panther。RX 活动不能证明特定 DHCP TX/RX 帧成功通过物理链路。
+8. **当前不支持的解释：** 现有快照不支持把问题简单归因于 GMAC 全局时钟未使能或 RX DMA 完全失效；但也不能排除特定报文、特定描述符或 TX 物理边界问题。
+
+### 13.4 下一步最小只读验证
+
+- 先检查现有系统是否已有 `tcpdump`（仅查询命令是否存在，不安装软件）。
+- 若工具已存在，再被动监听 eth0 的 UDP 67/68，观察自然发生的 DHCP Discover/Offer；不主动执行 DHCP renew，不重启 eth0、NetworkManager 或驱动。
+- 若需要判定报文是否离开 Panther，应将同一时间窗口的 Panther outgoing 观察与 hEX 入口抓包对应；本机 outgoing 抓包和累计 TX 计数都不能替代线侧/对端证据。
+- 继续把 RX dropped 的归因与 DHCP TX 边界分开处理，避免把两个尚未建立因果关系的现象混为一谈。
+
+**操作记录：** 本轮仅整理用户提供的既有只读输出；没有安装软件、修改配置、执行 DHCP renew、重启接口/服务、重载驱动或重启系统。真实 MAC、家庭地址及其他可识别信息不写入公开报告。
+
+详细计数器与 MAC 来源线索另见：[GMAC / DHCP 与 TF U-Boot 启动链调查记录](./GMAC-DHCP-UBOOT-INVESTIGATION-2026-11-17.md) 的 6.12.69 补充章节。
