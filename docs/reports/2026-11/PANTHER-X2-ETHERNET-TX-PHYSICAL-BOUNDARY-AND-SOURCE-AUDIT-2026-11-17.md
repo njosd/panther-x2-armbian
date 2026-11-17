@@ -270,3 +270,64 @@ MMCs category counters（包括 unicast / 64-octet 类计数）为 0，而总 fr
 - [6.1.116 Ethernet 基线原始采集（脱敏）](../../evidence/network/panther-eth-baseline-redacted.txt)
 - [6.1.116 Ethernet 补充采集（脱敏）](../../evidence/network/panther-eth-supplement-redacted.txt)
 
+
+
+## 12. TX queue / DMA channel 调用链的进一步核实（追加，2026-11-17）
+
+继续读取两个 Rockchip 分支的 `hwif.h`、`dwmac4_dma.c`、`dwmac4_lib.c` 与 `stmmac_main.c)，得到以下更精确结论。
+
+### 12.1 `stmmac_enable_dma_transmission()` 并不是 DWMAC4 的 TX channel start
+
+- `stmmac_enable_dma_transmission()` 是通过 `stmmac_do_void_callback()` 调用 `dma_ops->enable_dma_transmission` 的通用包装。
+- 6.1 和 6.12 的 `stmmac_do_void_callback()` 宏相同：仅当对应 callback 非 NULL 时才调用，否则返回 `-EINVAL`，不执行硬件操作。
+- 两个分支的 `dwmac4_dma_ops` / `dwmac410_dma_ops` 初始化表均未设置 `.enable_dma_transmission` 字段。
+- 因而 Panther X2 当前使用 DWMAC4 DMA ops 时，普通 `stmmac_xmit()` 中该 callback 调用不会启动 DWMAC4 TX DMA。真正的 descriptor 提交动作由后续 `stmmac_flush_tx_descriptors()` 更新 TX tail pointer 完成。
+- 6.12 将通用 callback 参数从 `(ioaddr)` 扩展为 `(ioaddr, queue)`，对当前 DWMAC4 callback=NULL 的路径没有直接作用。不能把这项 API 变化本身当作 Panther TX 故障原因。
+
+### 12.2 DWMAC4 的 channel start 实现两版相同
+
+`dwmac4_dma_start_tx()` 在 6.1 与 6.12 的实现一致：
+1. 读取对应 channel 的 `DMA_CHAN_TX_CONTROL`。
+2. 设置 `DMA_CONTROL_ST`。
+3. 写回 TX channel control。
+4. 读取 `GMAC_CONFIG`，设置 `GMAC_CONFIG_TE` 并写回。
+
+`dwmac4_dma_ops` 的 `.start_tx` 在两版均绑定 `dwmac4_dma_start_tx`。未发现此函数在两个候选源码分支间的行为差异。
+
+### 12.3 普通 TX queue 到 DMA channel 的关系
+
+两版 `stmmac_main.c` 的 TX queue 初始化和发送路径均显示：
+- TX DMA channel 初始化循环以 `chan` 遍历 `tx_cnt)，使用 `tx_queue[chan]`。
+- `stmmac_init_tx_chan(..., tx_q->dma_tx_phy, chan)` 用相同的 `chan` 初始化该 TX queue 的 DMA channel。
+- 普通发送从 `skb_get_queue_mapping(skb)` 取得 `queue`，选择 `tx_queue[queue]`。
+- `stmmac_flush_tx_descriptors(priv, queue)` 对应的 `stmmac_set_tx_tail_ptr(..., tx_tail_addr, queue)` 把 tail pointer 写入同编号 DMA channel。
+- 因此当前 queue 0 发送路径使用 DMA channel 0；这是 TX queue 与 DMA channel 的直接索引关系，不依赖 `dwmac4_map_mtl_dma()`。
+
+用户记录的 TX 统计为 q0 路径，且测试帧进入普通 `stmmac_xmit()`。所以应优先核对 DMA channel 0 的 descriptor ring/tail pointer 提交行为，而不是 RX MTL queue mapping。
+
+### 12.4 TX descriptor flush 与 memory barrier 两版相同
+
+6.1 与 6.12 的 `stmmac_flush_tx_descriptors()` 函数内容一致：
+- 根据 enhanced descriptor / TBS 选择 descriptor size；
+- 在更新 tail pointer 前执行 `wmb()`；
+- 计算 `dma_tx_phy + cur_tx * desc_size`；
+- 通过 `stmmac_set_tx_tail_ptr()` 将新 tail address 写到与 queue 同编号的 DMA channel。
+
+函数注释明确要求 OWN bit 是 descriptor 准备阶段最后设置的状态，再以 barrier 确保 descriptor 内容在交给 DMA 前可见。当前两分支该 flush/barrier 顺序没有差异。
+
+### 12.5 方向修正后的源码审计重点
+
+目前：
+- RX MTL queue→DMA mapping 的版本差异已确认，但与当前 TX 故障不是同一条路径，暂降为低优先级。
+- DWMAC4 TX start 函数一致。
+- queue 0→DMA channel 0 的 TX 索引关系一致。
+- TX flush、`wmb()` 和 tail pointer 更新函数一致。
+- `stmmac_xmit()` 的 6.1/6.12 普通发送路径仍有少量顺序变化（6.12 新增 `skb_tx_timestamp()` 的位置等），但 descriptor OWN 与 flush 的核心次序尚未发现被反转或移除。
+
+下一步重点应收敛到：
+1. 6.12 与 6.1 的 descriptor prepare / set owner 实际实现及 DWMAC4 descriptor format；
+2. DMA address mapping、IOMMU/coherent DMA 属性和 TX ring memory；
+3. Ophub 6.12.81 发布二进制对应的确切源码 commit 与 patch/config 集合；
+4. 对现有安全证据重新判断是否能定位到 DMA descriptor 已完成之后、RGMII/PHY 之前的边界。
+
+以上为候选源码对照结果，不代表实际运行二进制已被证明与候选源码逐字节对应。
