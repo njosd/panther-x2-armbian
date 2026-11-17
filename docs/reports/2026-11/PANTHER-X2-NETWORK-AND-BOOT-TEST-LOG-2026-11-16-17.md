@@ -409,3 +409,65 @@ DHCP Discover 已被 Panther 本机 outgoing 抓包捕获，而 hEX 未收到。
 RX dropped 是持续存在的独立接收侧异常，不应直接拿来解释 DHCP Discover 的发送失败。
 
 **状态：** 计数定义与跨版本异常已得到源码及归档数据支持；TX 根因仍未确认。未执行设备配置修改或驱动/内核操作。
+
+
+## 9. GMAC/DMA 寄存器现场解码（2026-11-17）
+
+用户提供 `ethtool -d eth0`、TX 相关 `ethtool -S` 与 `ip -s link` 快照。
+
+### 9.1 MAC 与 DMA enable 状态
+
+按 DWMAC4 寄存器定义解码：
+
+| dump 项 | 值 | 寄存器含义 | 观察 |
+|---|---:|---|---|
+| GMAC Reg0 | `0x08072203` | MAC_CONFIG | bit0 RE=1，bit1 TE=1；MAC RX/TX enable 均置位 |
+| DMA Reg1 | `0x00081011` | DMA channel TX control（base + 0x04） | bit0 ST=1；TX DMA channel start 置位 |
+| DMA Reg2 | `0x00080C01` | DMA channel RX control（base + 0x08） | bit0 SR=1；RX DMA channel start 置位 |
+| DMA Reg5 | `0xE0198000` | TX descriptor list base low（base + 0x14） | TX descriptor ring 基地址 |
+| DMA Reg8 | `0xE0198740` | TX descriptor tail pointer（base + 0x20） | 当前尾指针 |
+| DMA Reg17 | `0xE0198740` | current TX descriptor（base + 0x44） | 与尾指针相等 |
+| DMA Reg21 | `0xDF3A8000` | current TX buffer address（base + 0x54） | 当前/最近 DMA buffer 地址 |
+
+DWMAC4 channel register offsets 与位定义参考：
+- `dwmac4.h`：MAC_CONFIG、GMAC_CONFIG_RE、GMAC_CONFIG_TE。
+- `dwmac4_dma.h`：DMA_CHAN_TX_CONTROL、DMA_CHAN_RX_CONTROL、DMA_CONTROL_ST、DMA_CONTROL_SR、TX/RX descriptor pointers。
+- `stmmac_ethtool.c`：GMAC4 dump 将 DMA channel registers 从 base 0x1100 位置复制到 ethtool 输出区。
+
+### 9.2 本次发送统计
+
+| 指标 | 本次结果 |
+|---|---:|
+| ip link TX packets | 116 |
+| q0_tx_pkt_n | 116 |
+| mmc_tx_framecount_gb | 116 |
+| mmc_tx_octetcount_gb | 29,977 |
+| tx_underflow | 0 |
+| mmc_tx_underflow_error | 0 |
+| mmc_tx_carrier_error | 0 |
+| tx_loss_carrier | 0 |
+| fatal_bus_error_irq | 0 |
+| mtl_tx_status_fifo_full | 0 |
+| mtl_tx_fifo_not_empty | 0 |
+| mtl_tx_fifo read-control write/wait/read/idle | 均为 0 |
+| ip link TX errors/dropped/carrier | 均为 0 |
+
+本次 ip link TX packets、驱动 q0_tx_pkt_n 与 MAC MMC framecount_gb 均为 116，软件完成计数和 MAC 计数在本快照中完全一致。
+
+### 9.3 当前判断
+
+- 当前 MAC TE/RE 使能，DMA TX/RX start 置位；本快照没有显示 TX 通道停止。
+- TX tail pointer 与 current TX descriptor pointer 相同，瞬时状态看不出待处理 TX descriptor backlog；这不代表此前 DHCP Discover 发送时也如此。
+- 当前无 TX underflow、carrier error、fatal bus error 或 MTL TX FIFO 堵塞计数证据。
+- 这份快照不支持“TX DMA 当前持续停摆”或“MAC TX 被关闭”的判断。
+- 先前 6.12.81 快照的 `tx_pkt_n=392` 与 `mmc_tx_framecount_gb=4`，而本次两者为 116。由于这些软件累计统计在同一驱动实例中不应自然倒退，跨快照比较前必须确认中间是否发生过重启、驱动 unbind/rebind、接口重初始化或计数器复位；不能把两个不同生命周期的累计值直接相减或比较。
+
+### 9.4 下一步验证
+
+先只读确认当前启动/驱动生命周期，再取得同一时间点的完整 TX 计数：
+
+- `uptime -s`、`cat /proc/uptime`
+- `dmesg -T | grep -Ei 'fe010000|eth0|stmmac|reset|unregister|register|link is'`
+- 同一轮采集 `ip -s link show dev eth0` 与 `ethtool -S eth0` 中 tx_pkt_n、tx_normal_irq_n、tx_clean、tx_undeflow_irq、tx_process_stopped_irq、tx_early_irq、fatal_bus_error_irq、tx_underflow、tx_carrier、tx_loss_carrier、mmc_tx_framecount_gb、mmc_tx_octetcount_gb。
+
+不执行任何寄存器写入、驱动重载或网络配置修改。
