@@ -112,3 +112,86 @@ Ophub 设备数据库将 JP-TvBox 列为 RK3566，配置 rk3566-jp-tvbox.dtb、i
 - 已验证：当前与旧 6.1.116 U-Boot 文件逐字节相同；JP-TvBox 候选文件在 Ophub 仓库存在，文件大小及 Git blob SHA-1 已取得；公开 Issue #2027 有 Panther X2 换 JP-Box U-Boot 后 RK 内核 eth0 恢复的用户报告。
 - 未验证：JP-TvBox U-Boot 在当前 Panther X2 实物上的启动稳定性；对 USB 的影响；对 4GB LPDDR4 的 DDR 初始化适配；与 Linux 6.12.81 的完整兼容性。
 - 不推断：不能因为旧 U-Boot 与新内核组合出现网络故障，就仅凭版本相同认定 U-Boot 是唯一根因。应通过同一 Linux Image/DTB 下替换 U-Boot 的对照实验建立因果关系。
+
+
+## 8. 第一轮二进制静态对照：JP-TvBox SPL 内嵌 FDT（2026-11-17）
+
+本轮通过 Ophub GitHub 文件接口以 base64 只读取得两份 idbloader.img，并在内存中解析 Rockchip RKNS 镜像字符串及其内嵌 FDT。未写入任何设备。
+
+### 8.1 SPL / DDR loader 指纹
+
+| 项目 | JP-TvBox 候选 | 当前 Panther X2 基线 |
+|---|---|---|
+| idbloader 大小 | 309,248 bytes | 305,152 bytes |
+| Git blob SHA-1 | 4bf6c334d4bf16b83c4317286907a361de8be489 | d22b624fc90c46e656baf98894bee182316e692e |
+| SPL build string | U-Boot SPL 2017.09-armbian (Nov 12 2023 - 15:05:14) | U-Boot SPL 2017.09-armbian (Apr 23 2023 - 13:08:07) |
+| DDR loader 字符串 | DDR Version V1.10 20210810 | DDR Version V1.13 20220218 |
+| 内嵌 FDT 起始偏移 | 283,840 (0x454c0) | 283,840 (0x454c0) |
+| 内嵌 FDT totalsize | 23,946 (0x5d8a) | 20,421 (0x4fc5) |
+| FDT root compatible | radxa,rock3c / rockchip,rk3566 | radxa,e25 / rockchip,rk3568 |
+| FDT model | Radxa ROCK3 Model C | Radxa E25 |
+
+关键判断：
+- JP-TvBox 候选的 SPL 不是当前旧 Panther X2 SPL 的简单重打包；其 SPL build 时间晚约 7 个月，DDR loader 字符串也不同。
+- JP-TvBox SPL 的 FDT 是 RK3566 ROCK 3C，而当前 Panther X2 SPL 的 FDT 是 RK3568 E25。
+- DDR Version 字符串只识别出 DDR 初始化代码/loader 版本，不能据此推断它实际按 8GB 或 4GB 参数训练，也不能证明 JP-TvBox SPL 一定适配 Panther X2 的 4GB LPDDR4。容量/颗粒/总线宽度/Rank/频率和训练结果仍需源码或实际日志验证。
+- 两个镜像均含 LPDDR2/LPDDR3/LPDDR4/LPDDR4X 支持字符串；这只说明固件包含相应类型支持代码，不等于具体板级参数相同。
+
+### 8.2 GMAC1 FDT 对照
+
+| 属性 | JP-TvBox SPL FDT | 当前 Panther X2 SPL FDT |
+|---|---|---|
+| 节点 | ethernet@fe010000 | ethernet@fe010000 |
+| status | okay | disabled |
+| phy-mode | rgmii | rgmii |
+| clock_in_out | output | output |
+| pinctrl | GMAC1 M1 | GMAC1 M1 |
+| tx_delay | 0x47 | 0x4f |
+| rx_delay | 0x27 | 0x26 |
+| reset GPIO controller | gpio@fe760000（GPIO3） | gpio@fe750000（GPIO2） |
+| reset GPIO offset | 0x10 | 0x19 |
+| reset active low | 是 | 是 |
+| reset delays | 0 / 20000 / 100000 us | 0 / 20000 / 100000 us |
+
+这是值得关注的差异：
+- 当前 E25 GMAC1 节点 status=disabled；JP ROCK3C 节点 status=okay。虽然 U-Boot DM 是否实际 probe 仍需结合 U-Boot 源码/运行日志确认，但 JP 配置明确把 GMAC1 作为启用设备描述。
+- 两者均用 M1 与 clock output；因此不能笼统说 JP 候选只是把 M1 改成 M0。真正差异是 enable 状态、delay 值和 reset GPIO。
+- JP 的 reset GPIO 是 GPIO3 line 16；当前 E25 是 GPIO2 line 25。Linux 运行时 Panther X2 FDT 又使用 GPIO3 line 1。三个阶段/配置不能混为一谈。
+- JP 的 tx/rx delay 0x47/0x27 与 Panther X2 Linux 当前 0x30/0x10 不同。尚不能仅凭数值判断哪个物理时序正确。
+
+### 8.3 USB FDT 对照
+
+JP-TvBox SPL FDT 相比当前 Panther X2/E25 SPL FDT，除两者均包含 USB3 DWC3 OTG/Host 外，还明确包含：
+- USB2 EHCI：usb@fd800000、usb@fd880000，status=okay。
+- USB2 OHCI：usb@fd840000、usb@fd8c0000，status=okay。
+- 第二个 USB2 PHY：usb2-phy@fe8b0000，host-port 和 otg-port 均 status=okay。
+- 固定 5V host regulator：vcc5v0-host-regulator，GPIO0 bank line 21 控制，enable-active-high。
+- 两组 USB2 PHY 分别服务两组 EHCI/OHCI host 控制器。
+
+当前 Panther X2/E25 SPL FDT 中未发现上述 EHCI/OHCI 节点、第二个 USB2 PHY 和 vcc5v0-host-regulator；只看到 USB3 DWC3 OTG/Host 及 usb2-phy@fe8a0000。
+
+这与用户报告的 USB 异常形成了新的、具体的板级配置对照方向。需要强调：这是 U-Boot/SPL 内嵌 FDT 差异，不等于 Linux 6.12 运行时设备树也缺少这些节点；也不能仅凭 U-Boot FDT 证明 Linux USB 故障由此造成。下一步应把 JP FIT 内的 U-Boot control FDT 与 Linux 运行时 Panther X2 FDT 的 USB 节点逐项对照。
+
+### 8.4 FIT 文件静态解析限制
+
+本轮 GitHub 文件接口能够读取两份 idbloader.img，但对大于 1 MB 的 u-boot.itb 返回空内容，因此本轮尚未解析 JP-TvBox FIT 内的：
+- U-Boot proper 版本/build string；
+- FIT configuration 与 ATF image 版本；
+- FIT 内 U-Boot control FDT；
+- U-Boot proper 中 GMAC/USB driver-model 节点和实际配置。
+
+因此 8.1–8.3 的对照严格限定为 SPL/idbloader 内嵌 FDT，不能替代 FIT/u-boot.itb 分析。
+
+### 8.5 当前阶段结论
+
+JP-TvBox 是目前最值得继续研究的候选，但不能直接刷写：
+1. 它提供了 RK3566 ROCK 3C 的 SPL/FDT，而当前基线是 RK3568 E25。
+2. 它将 GMAC1 设为 okay，并使用不同的 reset GPIO 和 delay 值。
+3. 它提供了当前 E25 SPL FDT 缺少的 USB2 EHCI/OHCI、第二 PHY 和 host 5V regulator 描述。
+4. 它的 DDR loader 版本较旧（V1.10），而当前基线为 V1.13；必须查清实际 DDR 参数与 4GB LPDDR4 适配，不能只看它曾被 Panther X2 用户用于网卡恢复的报告。
+
+下一步优先级：
+- 获取/分析 JP-TvBox u-boot.itb 的 FIT control FDT（当前 GitHub binary fetch 路径无法直接返回该大文件，需寻找可审计的替代来源或源码构建产物）。
+- 对照 Armbian 官方 Panther X2 rock-3c-rk3566_defconfig 所指向的 Radxa U-Boot 源码，确认 SPL DDR loader 与 board DTS。
+- 检查 JP-TvBox 与 Panther X2 的 DDR 配置源文件、LPDDR4 参数和 U-Boot build config。
+- 对照 Linux 6.12.81 运行时 FDT 的 USB 控制器、PHY、vbus/5V regulator、GPIO 和 pinctrl；不重复已完成的 GMAC Linux 配置验证。
