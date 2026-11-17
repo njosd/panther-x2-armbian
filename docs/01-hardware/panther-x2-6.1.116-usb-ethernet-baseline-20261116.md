@@ -135,3 +135,13 @@ GitHub 显示文件大小：161,606 bytes。
 具体 LAN 地址不在公开记录中。上述结果补充确认：6.1.116 不仅获得 DHCP 地址和默认路由，而且到 hEX 与另一台 LAN 主机的 IPv4 通信正常。
 
 **证据边界：** 本补充来自用户提供的历史对话文字；尚未取得对应原始终端输出或抓包文件。因此可将测试结果标记为“用户确认已验证”，但不能把本段当作逐条原始命令输出，也不能据此声称已完成 DNS、互联网或完整应用层测试。
+
+
+## 原始网络采集证据（脱敏副本）
+
+用户此前上传的两份原始采集文件已重新读取，并将脱敏副本归档到仓库：
+
+- [panther-eth-baseline-redacted.txt](../../evidence/network/panther-eth-baseline-redacted.txt)：6.1.116 启动身份、内核日志、运行时设备树、GMAC/PHY/EEE、ethtool 与驱动计数器、中断、接口统计、IPv4/IPv6 地址路由、NetworkManager 状态等完整采集输出。
+- [panther-eth-supplement-redacted.txt](../../evidence/network/panther-eth-supplement-redacted.txt)：6.1.116 运行内核与软件包版本核对、Image/uInitrd/DTB 指向与哈希、运行时设备树身份、网关和 iMac ping、最终接口状态及收集结束记录。
+
+脱敏范围：家庭 IPv4/IPv6 地址、MAC 地址、文件系统/分区 UUID、构建主机标识。测试时间、内核版本、驱动信息、寄存器/计数器、错误状态和 ping 统计均保留。仓库文件是可审计的脱敏文本副本，不是字节级原件；原始上传附件保持不变。
