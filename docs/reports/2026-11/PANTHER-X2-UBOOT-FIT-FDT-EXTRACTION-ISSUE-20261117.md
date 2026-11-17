@@ -2,156 +2,182 @@
 
 - 日期：2026-11-17
 - 关联基线报告：[PANTHER-X2-BOOT-MEDIA-AND-SOFTWARE-INVENTORY-20261117.md](./PANTHER-X2-BOOT-MEDIA-AND-SOFTWARE-INVENTORY-20261117.md)
-- 状态：FIT FDT 提取输出异常；偏移元数据原因待实机确认
+- 状态：已定位 FIT 外部 FDT payload 的理论文件偏移；待直接提取并校验哈希
 - 原则：只记录实机输出与源码可证实行为；不推断原始 FIT 损坏或 GMAC 配置
 
-## 1. 已知输入基线
+## 1. 输入镜像基线
 
-当前启动介质为 TF 卡。TF 卡启动区切分得到的 `/tmp/tf-u-boot.itb` SHA256：
+TF 启动区切分得到的 `/tmp/tf-u-boot.itb` SHA256：
 
 ```text
 3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af
 ```
 
-此前 `dumpimage -l /tmp/tf-u-boot.itb` 已确认：
+FIT 文件大小（实机 stat）：1,431,552 bytes。
+
+此前 `dumpimage -l` 已确认：
 - 默认 FIT configuration：`conf`
 - configuration 描述：`rk3568-radxa-e25`
 - configuration 引用 FDT image：`fdt`
 - FDT image 数据大小：20,421 bytes
-- FIT 内部 FDT hash（SHA256）：`e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228`
+- FIT 内部 FDT SHA256：`e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228`
 
-## 2. 实机提取操作与输出
+## 2. 实机提取异常
 
 用户执行：
 
 ```sh
-dumpimage -T flat_dt \
-  -p 6 \
-  -o /tmp/tf-uboot-control.dtb \
-  /tmp/tf-u-boot.itb
-
+dumpimage -T flat_dt -p 6 -o /tmp/tf-uboot-control.dtb /tmp/tf-u-boot.itb
 sha256sum /tmp/tf-uboot-control.dtb
-
-dtc -I dtb -O dts /tmp/tf-uboot-control.dtb |
-grep -n -A70 -B10 -E 'ethernet@fe010000|gmac@fe010000'
+dtc -I dtb -O dts /tmp/tf-uboot-control.dtb
 ```
 
-实机输出摘要：
+实机结果：
+- `dumpimage` 报告选择 FIT Image 6（`fdt`），Data Size 20,421 bytes，内部 hash 为 `e611e583...`。
+- 输出文件大小：20,421 bytes。
+- 输出文件 SHA256：`a0c4eff46050d0bd9ede8d59bc1bbc4e4cc249f6b1032e7f05f8e55d86ba9330`，与 FIT 声明 hash 不同。
+- 输出文件开头 12 bytes 全为零；FDT magic `d0 0d fe ed` 位于偏移 12。
+- FDT header 的 totalsize 为 `0x4fc5`（20,421 bytes）。
+- `dtc` 报 `FATAL ERROR: Blob has incorrect magic number`。
+- 实机工具版本：`dumpimage version 2025.10`。
 
-```text
-Extracted:
-  Image 6 (fdt)
-  Description: U-Boot dtb
-  Data Size: 20421 Bytes
-  Hash value: e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228
+该输出不能作为有效 DTB。不能简单剥掉 12 bytes，因为这样只剩 20,409 bytes，短于 FDT header 声明的 20,421 bytes。
 
-a0c4eff46050d0bd9ede8d59bc1bbc4e4cc249f6b1032e7f05f8e55d86ba9330  /tmp/tf-uboot-control.dtb
+## 3. FIT 原始容器中的 fdt 节点属性（2026-11-17 实机确认）
 
-FATAL ERROR: Blob has incorrect magic number
+用户直接对原始 FIT 容器执行：
+
+```sh
+dtc -I dtb -O dts /tmp/tf-u-boot.itb |
+grep -n -A35 -B3 -E '^[[:space:]]*fdt \\{|data-offset|data-position|data-size'
 ```
 
-## 3. 文件大小、字节布局与工具版本（实机）
+输出中 `/images/fdt` 节点为：
 
-用户执行 `stat`、`od` 和 `dumpimage -V`，得到：
+```dts
+fdt {
+    data-size = <0x4fc5>;
+    data-offset = <0x157e00>;
+    description = "U-Boot dtb";
+    type = "flat_dt";
+    arch = "arm64";
+    compression = "none";
+    hash {
+        value = <0xe611e583 0xd008c7b7 0x384a74c8 0x7fe5cd25
+                 0x05a7838e 0x2a8ec369 0xcc3f7587 0x74948228>;
+        algo = "sha256";
+    };
+};
+```
+
+原始 FIT header 开头 64 bytes（此前实机 `od`）：
 
 ```text
-/tmp/tf-u-boot.itb 1431552 bytes
-/tmp/tf-uboot-control.dtb 20421 bytes
-
-Extracted file first 64 bytes:
-00 00 00 00 00 00 00 00 00 00 00 00 d0 0d fe ed
-00 00 4f c5 00 00 00 38 00 00 47 50 00 00 00 28
-00 00 00 11 00 00 00 10 00 00 00 00 00 00 08 75
-00 00 47 18 00 00 00 00 00 00 00 00 00 00 00 00
-
-FIT file first 64 bytes:
 d0 0d fe ed 00 00 09 f3 00 00 00 38 00 00 09 30
 00 00 00 28 00 00 00 11 00 00 00 10 00 00 00 00
 00 00 00 c3 00 00 08 f8 00 00 00 00 00 00 00 00
 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00
-
-dumpimage version 2025.10
 ```
 
-### 3.1 直接观察
+FIT header 的 `totalsize` 字段为 `0x000009f3`（2,547 bytes）。
 
-- 提取文件大小是 20,421 bytes，与 FIT 列出的 FDT image Data Size 数字相同。
-- 提取文件的前 12 bytes 全为 `00`。
-- FDT magic `d0 0d fe ed` 出现在提取文件偏移 12，而不是偏移 0。
-- 偏移 16 开始的 FDT header totalsize 字段为 `0x00004fc5`（20,421 bytes）。
-- 因此，若 FDT 从偏移 12 开始，header 声明的完整 FDT 长度将超出当前提取文件末尾 12 bytes。
-- FIT 容器本身开头即为 FDT/FIT magic；文件大小为 1,431,552 bytes。
-- 当前工具版本为 `dumpimage 2025.10`。
+## 4. 按 U-Boot FIT 规则计算 FDT payload 文件偏移
 
-## 4. 初步源码调查：FIT 外部数据偏移处理
+U-Boot 官方 v2025.10 `boot/image-fit.c` 中 `fit_image_get_data()` 对外部数据的处理：
+- `data-position` 存在时，使用其绝对偏移；
+- 否则 `data-offset` 存在时，将其加到 FIT structure 总长度向 4 字节对齐后的基址；
+- 再使用 `data-size` 作为 payload 长度。
 
-已查阅 U-Boot 官方仓库 tag `v2025.10` 的源码：
-
-- `tools/fit_image.c`：`fit_image_extract()` 调用 `fit_image_get_data()` 获取 payload 指针和长度，再由 `imagetool_save_subimage()` 将该内存区域原样写出。
-- `boot/image-fit.c`：`fit_image_get_data()` 的处理逻辑为：
-  1. 如果 image 节点有 `data-position`，把它作为相对于 FIT 起始地址的绝对偏移；
-  2. 否则如果有 `data-offset`，则把它加到 FIT 结构体总长度向 4 字节对齐后的基址；
-  3. 两者都没有时，从 image 节点的内嵌 `data` 属性取数据。
-- 同一源码中，`fit_image_extract()` 没有在写文件前对 FDT payload 做额外的 12-byte 前缀处理；它直接写出 `fit_image_get_data()` 返回的指针及长度。
-
-官方源码链接：
-- https://github.com/u-boot/u-boot/blob/v2025.10/tools/fit_image.c
+源码：
 - https://github.com/u-boot/u-boot/blob/v2025.10/boot/image-fit.c
+- https://github.com/u-boot/u-boot/blob/v2025.10/tools/fit_image.c
 
-### 4.1 当前推断（尚未证实）
+本例没有看到 `data-position`，而 `fdt` 节点明确有 `data-offset` 和 `data-size`。
 
-目前观察到的“12 个零字节前缀 + 后面才出现 FDT magic”与数据指针/外部数据偏移解释不正确的现象相符。需要读取 FIT 的 `/images/fdt` 节点，确认它使用的是：
-- 内嵌 `data`；
-- 外部 `data-position`；
-- 或外部 `data-offset` 加 `data-size`。
+计算：
 
-在取得这些属性前，不能确定 12-byte 偏移究竟来自 FIT 元数据、镜像 payload 本身，还是工具对该 FIT 布局的处理。
+```text
+FIT totalsize                 = 0x9f3
+4-byte aligned FIT totalsize  = (0x9f3 + 3) & ~3 = 0x9f4
+fdt data-offset               = 0x157e00
+absolute FDT payload offset   = 0x9f4 + 0x157e00 = 0x1587f4
+decimal offset                = 1,411,060
+fdt data-size                 = 0x4fc5 = 20,421 bytes
+payload end (exclusive)       = 1,411,060 + 20,421 = 1,431,481
+FIT file size                 = 1,431,552 bytes
+remaining trailing bytes      = 71 bytes
+```
 
-**不能直接认定 dumpimage 2025.10 有 bug。** 也不能认定原始 FDT 已损坏。FIT 内部存储的 SHA256 是声明值；当前尚未独立验证原始 payload 的 SHA256 是否等于该值。
+**当前可得结论：** 根据 FIT 元数据与 U-Boot v2025.10 的偏移规则，FDT payload 理论上从原始 FIT 文件偏移 `0x1587f4`（十进制 1,411,060）开始，长度 20,421 bytes。它完整落在 1,431,552-byte FIT 文件范围内，后面还有 71 bytes。
 
-## 5. 文件是否会在运行中改变
+这解释了如何直接从原始 FIT 中取出 payload，绕开异常的 `dumpimage` 输出。但在直接提取并验证 SHA256 前，仍将其标为“按元数据计算的预期位置”，不是已经通过哈希验证的实际 payload。
 
-用户询问提取文件是否会在运行中改变。说明：
+## 5. 下一步只读提取与验证
+
+保留现有 `/tmp/tf-u-boot.itb` 和异常文件 `/tmp/tf-uboot-control.dtb`。不要覆盖它们。使用新文件名直接按 FIT 元数据取 payload：
+
+```sh
+dd if=/tmp/tf-u-boot.itb \
+   of=/tmp/tf-uboot-control-raw.dtb \
+   bs=1 skip=1411060 count=20421 status=none
+
+echo "===== RAW FDT SIZE ====="
+stat -c '%n %s bytes' /tmp/tf-uboot-control-raw.dtb
+
+echo "===== RAW FDT SHA256 ====="
+sha256sum /tmp/tf-uboot-control-raw.dtb
+
+echo "===== RAW FDT HEADER ====="
+od -An -tx1 -N32 /tmp/tf-uboot-control-raw.dtb
+
+echo "===== PARSE GMAC1 ====="
+dtc -I dtb -O dts /tmp/tf-uboot-control-raw.dtb |
+grep -n -A70 -B10 -E 'ethernet@fe010000|gmac@fe010000'
+```
+
+成功条件：
+1. 文件大小必须为 20,421 bytes。
+2. SHA256 必须与 FIT 内部 FDT hash 完全一致：`e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228`。
+3. 文件偏移 0 必须以 FDT magic `d0 0d fe ed` 开始。
+4. `dtc` 成功解析后，才分析 U-Boot GMAC1 节点。
+
+若 hash 不一致，停止，不要解析或修改文件；再检查 offset 计算和 FIT 数据布局。
+
+## 6. 源码调查：dumpimage 提取路径
+
+已查阅 U-Boot 官方仓库 tag `v2025.10`：
+- `tools/fit_image.c`：`fit_image_extract()` 调用 `fit_image_get_data()` 取得 payload 指针和长度，再将该内存区域写出。
+- `boot/image-fit.c`：`fit_image_get_data()` 根据 `data-position`、`data-offset` 或内嵌 `data` 属性决定 payload 地址。
+
+当前现象是 `dumpimage` 输出前面多 12 个零字节，而后面的 FDT header 声明完整长度仍为 20,421 bytes。FIT 元数据计算出的原始 payload 位置可通过上述 dd 命令独立验证。尚未证明该 12-byte 前缀的具体成因，也不能据此认定 `dumpimage 2025.10` 存在 bug。
+
+## 7. 文件是否会在运行中改变
+
 - `/tmp/tf-u-boot.itb` 与 `/tmp/tf-uboot-control.dtb` 是普通临时文件，不会因为系统持续运行、网络活动或 U-Boot 已启动而自行变化。
 - 除非进程显式写入/覆盖、用户修改/删除，内容应保持不变。
 - `/tmp` 通常是临时目录，重启后可能清理；这不代表文件在正常运行期间会自动变化。
-- 后续命令应保留现有文件，新的提取尝试使用不同输出文件名。
+- 新的提取尝试使用不同输出文件名。
 
-## 6. 当前结论边界
+## 8. 当前结论边界
 
 **已验证：**
-- `dumpimage` 报告选择并提取了 FIT Image 6（名称 `fdt`）。
-- FIT 中该 image 的元数据哈希为 `e611e583...`。
-- 输出文件的 SHA256 为 `a0c4eff4...`，与 FIT 元数据哈希不一致。
-- 输出文件偏移 12 处出现 FDT magic，且 dtc 无法识别文件开头的 magic。
-- `dumpimage` 版本为 2025.10。
-- 官方 U-Boot v2025.10 源码按 `data-position`、`data-offset` 或内嵌 `data` 属性确定 FIT payload 地址。
+- 当前 TF FIT 身份与整体 SHA256。
+- FIT 默认配置、fdt image 名称及其声明的数据大小和 SHA256。
+- FIT 的 `fdt` 节点采用 `data-offset=0x157e00`、`data-size=0x4fc5`。
+- FIT header `totalsize=0x9f3`。
+- 按 U-Boot v2025.10 规则计算的 payload 绝对偏移为 `0x1587f4`（1,411,060）。
+- 直接提取命令尚待实机执行；payload hash 和 DTB 内容尚待验证。
 
 **尚未验证：**
-- 当前 FIT 的 `fdt` image 实际使用哪种数据存储属性。
-- 12-byte 零前缀是否由数据位置元数据或工具解析造成。
-- 原始 FDT payload 的实际 SHA256。
-- FDT 中 GMAC1 属性及 U-Boot 是否 probe GMAC1。
+- 直接从计算偏移提取后的 payload 是否与 FIT hash 一致。
+- U-Boot FDT 的 GMAC1 属性及 U-Boot 是否 probe GMAC1。
 
 **不能下的结论：**
-- 不能据此认定 FIT 内原始 FDT 已损坏。
-- 不能据此认定 TF 卡或 U-Boot 镜像错误。
-- 不能据此认定 dumpimage 2025.10 存在缺陷。
-- 不能据此推断 GMAC1 节点启用/禁用或任何 RGMII 配置。
+- 不能认定 FIT 内原始 FDT 损坏。
+- 不能认定 TF 卡或 U-Boot 镜像错误。
+- 不能认定 dumpimage 2025.10 有 bug。
+- 不能推断 GMAC1 节点启用/禁用或 RGMII 配置，直到取得哈希正确的 DTB。
 
-## 7. 下一步只读检查
+## 9. 防止重复调查
 
-读取 FIT 容器本身（不是提取文件）的设备树结构，检查 `/images/fdt` 节点的数据属性。FIT 容器开头本身是有效 FDT magic，故应直接对容器执行：
-
-```sh
-dtc -I dtb -O dts /tmp/tf-u-boot.itb |
-grep -n -A35 -B3 -E '^[[:space:]]*fdt \{|data-offset|data-position|data-size'
-```
-
-目标是确认 `fdt` 节点的 `data` / `data-offset` / `data-position` / `data-size`。若输出未能明确归属到 fdt 节点，再完整导出 FIT DTS 到一个新的临时文本文件并查看该节点；不覆盖现有镜像文件。
-
-确认属性后，再按 FIT 格式语义计算 payload 的真实文件偏移，使用只读方式取样并验证 SHA256。不要先对现有提取文件简单删除 12 bytes；若去掉前缀会缺少末尾 12 bytes，不能恢复完整 DTB。
-
-## 8. 防止重复调查
-
-后续 Panther X2 U-Boot 调查应先读取本记录及关联基线报告。已确认的 TF 启动介质、FIT 哈希、默认 configuration、FDT image 名称、内部哈希、提取文件的异常字节布局、工具版本及 U-Boot v2025.10 源码偏移处理逻辑不得重复询问或重新采集，除非用户报告启动介质/镜像/工具环境已变更。
+后续 Panther X2 U-Boot 调查应先读取本记录及关联基线报告。已确认的 TF 启动介质、FIT 哈希、默认 configuration、FDT image 名称、内部哈希、FIT 外部数据属性、理论 payload 偏移、提取文件异常字节布局及工具版本不得重复询问或重新采集，除非用户报告启动介质/镜像/工具环境已变更。
