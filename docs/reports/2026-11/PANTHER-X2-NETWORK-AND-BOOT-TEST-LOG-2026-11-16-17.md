@@ -30,7 +30,7 @@
 
 - 用户从 eMMC 启动已安装的 Ophub Armbian。
 - 运行内核确认是 `6.1.116-ophub`。
-- `/boot/Image` 与 `/boot/uInitrd` 指向 6.1.116 文件；当时没有 6.1.192 对应的已安装内核包/模块。
+- `/boot/Image` 指向 `vmlinuz-6.1.116-ophub`，`/boot/uInitrd` 指向 `uInitrd-6.1.116-ophub`；实际 DTB 为 `rk3566-panther-x2.dtb`，运行时设备树确认 Panther X2 / RK3566。`6.1.192` 仅出现在已安装软件包记录中，是升级遗留；没有证据表明它参与本次启动。
 - 该轮测试的目的，是先确认旧内核在同一 Panther X2 硬件上的网络基线，再与 TF 卡上的 6.12.81 比较。
 
 ### 2.2 IPv4 网络状态
@@ -42,7 +42,7 @@
 - LAN 网段配置正常。
 - 用户明确确认：6.1.116 网络正常；后续项目记忆记录了该轮系统地址及默认网关均存在。
 
-**证据边界：** 目前归档资料可以确认 DHCP 地址和默认路由已获得、用户确认网络正常；但本轮没有留存与 6.12 故障轮次相同的 hEX 双端 DHCP 抓包，也没有证据显示逐项完成了网关、LAN 主机、DNS、互联网的全套 ping/trace 测试。不得把未留存的逐项连通性测试补写为已执行。
+**证据边界（补充后）：** 用户提供的历史对话进一步确认，本轮曾 ping hEX（LAN 网关）与 iMac（LAN 主机），两项均为 0% 丢包；RX/TX errors、dropped、carrier errors 均为 0。具体 LAN 地址不在公开记录中。该补充来自对话文字而非原始终端输出，故标记为“用户确认已验证”，不伪装成原始日志。仍未留存与 6.12 故障轮次相同的 hEX 双端 DHCP 抓包，也没有 DNS、互联网或完整应用层测试的证据。
 
 ### 2.3 PHY、链路与 EEE 的实际过程
 
@@ -72,10 +72,11 @@
 
 ### 2.4 6.1.116 这轮测试的证据缺口
 
-历史对话明确确认：本轮没有采集 `ethtool -S`、独立 PHY counters、NetworkManager 状态快照或 DHCP 双端抓包。因而：
+历史对话明确确认：本轮没有采集 `ethtool -S`、独立 PHY counters、NetworkManager 状态快照或 DHCP 双端抓包。用户随后补充确认，本轮还完成了到 hEX 与 iMac 的 ping，均为 0% 丢包，且 RX/TX errors、dropped、carrier errors 均为 0。因而：
 
-- 已确认 DHCP 地址、默认路由和用户确认的正常网络状态。
+- 已确认 DHCP 地址、默认路由、到 hEX 和 iMac 的 IPv4 连通性，以及用户确认的正常网络状态。
 - 已确认链路最终恢复 1Gbps Full，EEE disabled。
+- 已确认错误、丢弃和载波错误计数为 0（依据用户补充的对话记录；原始输出尚未归档）。
 - 未留存可与 6.12.81 完全同条件比较的 DHCP Discover/Offer 抓包。
 - 未留存 6.1.116 的 GMAC MMC hardware TX/RX counters 与 6.12 的逐项对照。
 - 不应为了补齐表格而要求用户重做已经完成的正常网络验证；若将来必须精确比较，应先确认是否仍有原始采集文件。
@@ -330,3 +331,18 @@ iMac 端：
 - [JP-TvBox UART 原始日志](../../../evidence/uart/panther-jp-tvbox-u-boot-boot-20261117.txt)
 - [JP-TvBox 启动测试清单](../../../evidence/manifests/panther-jp-tvbox-u-boot-boot-20261117.md)
 
+
+
+## 补充记录：6.1.116 启动身份与 LAN 连通性（用户提供历史对话）
+
+本节补入此前未纳入阶段总记录的对话结论：
+
+- 实际运行内核为 `6.1.116-ophub`。
+- `/boot/Image` → `vmlinuz-6.1.116-ophub`；`/boot/uInitrd` → `uInitrd-6.1.116-ophub`。
+- 实际 DTB 为 `rk3566-panther-x2.dtb`，运行时设备树确认 Panther X2 / RK3566。
+- `6.1.192` 仅见于已安装软件包记录，是升级遗留；无证据表明其参与本次启动。
+- eth0 为 `UP, LOWER_UP`，1000 Mbps Full Duplex；DHCP 获得 IPv4 /24 地址。
+- ping hEX（LAN 网关）与 iMac（LAN 主机）均为 0% 丢包。
+- RX/TX errors、dropped、carrier errors 均为 0。
+
+**证据性质：** 上述细节来自用户在 2026-11-17 提供的历史对话文本，不是原始终端日志。具体 LAN 地址不公开；该段只补充“用户确认已完成”的测试结果，不声称仓库已包含原始命令输出。它修正了此前“没有证据显示逐项完成网关和 LAN 主机 ping”的记录。DNS、互联网和 DHCP 双端抓包仍不在这段证据范围内。
