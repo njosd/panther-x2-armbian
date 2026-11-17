@@ -356,3 +356,56 @@ iMac 端：
 - [补充采集输出（脱敏）](../../evidence/network/panther-eth-supplement-redacted.txt)
 
 这两份采集文件提供了此前摘要未完整呈现的驱动统计、PHY/EEE、接口计数器、中断、路由和 NetworkManager 等信息。脱敏仅处理家庭 IP、MAC、UUID 和构建主机标识；原始上传附件未修改。脱敏副本保留原始诊断输出结构，但不等同于字节级原件。
+
+
+## 8. TX 软件完成计数与 MAC MMC 发送帧计数的语义核对（2026-11-17）
+
+### 8.1 源码定义
+
+对照源码：
+- Ophub Linux 6.12 candidate：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- Linux 6.1 BSP 参考：`unifreq/linux-6.1.y` 当前分支快照（不是已证明的 6.1.116 精确构建 commit）
+
+已核实：
+
+1. `tx_pkt_n` 在 `stmmac_tx_clean()` 中累计。驱动轮询 TX descriptor，确认 DMA OWN 位已清除后读取 descriptor status；当该 descriptor 是一个 packet 的最后 segment，且未报告 `tx_err`，才增加 `tx_packets`，最终写入 `tx_pkt_n`。
+2. `tx_clean` 仅表示执行 TX cleanup 的次数，不是发送包数；`tx_normal_irq_n` 是 TX normal IRQ 统计，也不是发送包数。
+3. `mmc_tx_framecount_gb` 对应 DWMAC MMC 的 `MMC_TX_FRAMECOUNT_GB` 硬件计数器。源码注释明确：`_GB` 表示 good and bad frames，`_G` 表示 good only。
+4. `stmmac_mmc_setup()` 设置 `MMC_CNTRL_RESET_ON_READ | MMC_CNTRL_COUNTER_RESET | MMC_CNTRL_PRESET | MMC_CNTRL_FULL_HALF_PRESET`。
+5. `dwmac_mmc_read()` 将硬件寄存器读数累加到 `priv->mmc` 软件累计字段（`+= readl(...)`）。因此正常驱动路径下，reset-on-read 是硬件读取机制，不意味着 ethtool 展示值只代表最后一次读取窗口。
+
+源码参考：
+- [Ophub 6.12 stmmac_main.c](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)
+- [Ophub 6.12 mmc_core.c](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/mmc_core.c)
+- [Linux MMC counter register definitions and GB/G semantics](https://code.googlesource.com/linux/torvalds/linux/+/b8910630c967ffee582289451ddb5f9f19c26872/drivers/net/ethernet/stmicro/stmmac/mmc_core.c)
+
+### 8.2 6.1.116 与 6.12.81 已有计数对照
+
+| 统计来源 | 6.1.116 正常基线 | 6.12.81 异常快照 |
+|---|---:|---:|
+| 软件 TX completed packets（`tx_pkt_n`） | 1,550 | 392 |
+| MAC MMC TX frame count GB | 1,557 | 4 |
+| 差值（仅作观察） | 7 | 388 |
+
+6.1.116 基线原始脱敏文件还记录 `q0_tx_pkt_n=1550`、`tx_normal_irq_n=68`、`tx_clean=4365`。6.12.81 网络测试阶段记录 `q0_tx_pkt_n=392`、`tx_normal_irq_n=15`、`tx_clean=16345`。
+
+### 8.3 解释与限制
+
+- 这组跨版本差异比单独比较 `tx_pkt_n` 或 `mmc_tx_framecount_gb` 更有诊断价值：6.1.116 两种统计大致吻合，6.12.81 则严重偏离。
+- `tx_pkt_n` 表示驱动基于 DMA descriptor status 认定的成功完成包数；MMC 是 MAC 硬件帧计数。它们不是同一层计数，但在同一驱动生命周期内通常应有合理关联。
+- 不能将 392−4 直接认定为恰好 388 个线上丢包。尚需排除两次采样时刻/驱动生命周期不同、计数器是否发生过重置、ethtool 统计读数完整性及硬件 MMC 功能状态等因素。
+- MMC 的 `mmc_tx_octetcount_gb=1050` 与 `mmc_tx_framecount_gb=4` 同时偏低，提示不能仅将帧计数差异视为某个单一统计字段显示错误。
+- 6.12.81 与 6.1 参考源码中的 `stmmac_tx_clean()` 主体相同；6.12 增加的 XSK TX metadata completion 路径与当前未发现 AF_XDP socket 的状态不匹配，暂不作为本机解释。
+- 普通 `stmmac_xmit()` 路径有 queue-aware DMA enable 和 checksum queue capability 等版本变化，但当前证据不足以把其中任一改动认定为故障原因。6.12.81 发布 Image 的精确源码 commit/补丁集仍未被证明等于当前源码候选。
+
+### 8.4 当前优先级调整
+
+DHCP Discover 已被 Panther 本机 outgoing 抓包捕获，而 hEX 未收到。结合 TX 软件完成计数与 MMC 硬件计数严重偏离，当前首要调查方向应为：
+
+1. TX descriptor status / DMA completion 与 MAC MMC 统计之间的断层；
+2. GMAC MAC TX enable、MTL TX queue/FIFO、DMA TX channel 状态及错误状态；
+3. MAC 到 PHY 的 RGMII TXC/TXD 物理发送路径。
+
+RX dropped 是持续存在的独立接收侧异常，不应直接拿来解释 DHCP Discover 的发送失败。
+
+**状态：** 计数定义与跨版本异常已得到源码及归档数据支持；TX 根因仍未确认。未执行设备配置修改或驱动/内核操作。
