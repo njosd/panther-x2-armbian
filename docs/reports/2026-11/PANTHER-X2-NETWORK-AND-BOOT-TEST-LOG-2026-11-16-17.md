@@ -559,3 +559,19 @@ DWMAC4 channel register offsets 与位定义参考：
 - 未见 TX underflow、carrier error、fatal bus error 或 TX process stopped 统计。
 - 当前证据不支持持续 TX DMA 停摆；尚未证明单个 DHCP Discover 到达 MAC/PHY 线侧。
 - 下一步应对同一个 DHCP Discover 做 Panther eth0 outgoing 与 hEX 物理入口的同步抓包；不再用累计计数差异推断线上发送故障。
+
+## 12. 2026-11-17 晚间补充：GMAC RX / DMA / NAPI 现场快照
+
+用户提供当前 eth0 与 GMAC 只读统计：
+- eth0 为 UP / LOWER_UP，Carrier on，运行时 MTU=1500；NetworkManager profile Wired connection 1 的 MTU 设置为 auto。
+- ip -s link：RX packets=25,539、bytes=2,244,918、errors=0、dropped=1,694、missed=0；TX packets=283，TX errors/dropped=0。
+- ethtool -S：mmc_rx_framecount_gb=25,663、rx_pkt_n=25,663、q0_rx_pkt_n=25,663；rx_normal_irq_n=25,649、q0_rx_irq_n=25,649、normal_irq_n=25,660、napi_poll=51,984。
+- CRC、alignment、FIFO overflow、RX missed、RX buffer unavailable、RX process stopped、fatal bus error 等相关计数均为 0。
+- /proc/interrupts：eth0 IRQ 67 的 CPU 计数为 154/0/0/25875；IRQ 68 为 0/0/0/0。
+- dmesg 片段显示 RTL8211F、RGMII、PTP clock、PAGE_POOL RxQ-0 初始化及 1Gbps Full Link Up。
+
+**判断：** GMAC RX、驱动 RX 统计、接收 IRQ 与 NAPI 均有活动；本次证据不支持 GMAC RX 完全未启动。但 netdev RX dropped 累计 1,694 尚未归因；netdev RX packets 与驱动/MMC 计数差 124，不能直接解释为线上丢包。当前快照没有相邻采样，不能计算 dropped 增量。
+
+**操作记录限制：** 用户终端粘贴过程中多条命令错位；日志筛选输出只明确显示 Link Up 行。因此本次未见 DMA reset 错误，但不视为完整日志审计。没有执行 DHCP renew、接口重启、驱动重载或配置修改。
+
+**下一步：** 从泛化的 GMAC 接收时钟怀疑转向 DHCP Discover/Offer 的实际报文路径，优先被动监听 eth0 UDP 67/68，并在需要时与 hEX 入口同步抓包；不重复已完成的时钟、PHY、RGMII、GRF 和基础 DHCP 检查。
