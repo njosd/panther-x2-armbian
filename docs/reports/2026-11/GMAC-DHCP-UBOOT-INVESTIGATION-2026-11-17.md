@@ -197,8 +197,7 @@ devm_gpiod_put(priv->device, reset_gpio);
 
 /proc/cmdline 关键内容：
 
-~~~text
-root=UUID=9c7ff1a4-9beb-4346-b396-cdd1d4d1feea
+~~~textroot=UUID=9c7ff1a4-9beb-4346-b396-cdd1d4d1feea
 rootwait rootfstype=ext4 rootflags=rw,errors=remount-ro
 ubootpart=57ba8610-bc1c-4f13-9ce4-c864b229d25e
 ~~~
@@ -397,8 +396,7 @@ cat /tmp/panther-boot.scr.txt
 | 项目 | 状态 | 说明 |
 |---|---|---|
 | DHCP Discover 到达 Linux 抓包点 | 已验证 | 本机 tcpdump 捕获 |
-| DHCP Discover 成功发出 PHY 引脚 | 未验证 | 抓包点不等于 PHY 引脚 |
-| hEX 收到 Panther DHCP Discover | 未观察到 | 既有抓包结果 |
+| DHCP Discover 成功发出 PHY 引脚 | 未验证 | 抓包点不等于 PHY 引脚 || hEX 收到 Panther DHCP Discover | 未观察到 | 既有抓包结果 |
 | 1000Mbps Full Duplex Link | 已验证 | 换网线后恢复 |
 | PHY RTL8211F / 地址 0 | 已验证 | MDIO / 驱动识别 |
 | Linux GMAC1 DT M0 RGMII | 已验证 | 运行时 FDT + pinmux |
@@ -598,7 +596,6 @@ ethtool -S eth0 关键字段：
 /proc/interrupts 中出现两条 eth0 相关 IRQ：
 - IRQ 67：CPU 计数列为 154 / 0 / 0 / 25875。
 - IRQ 68：各 CPU 计数均为 0。
-
 ### 15.3 证据解释与限制
 
 1. **已验证：** 本次快照中 GMAC MAC 统计、驱动 RX 统计、RX IRQ 和 NAPI poll 均有显著非零计数。RX 接收通路不是完全静默状态。
@@ -719,3 +716,45 @@ clk_summary 中 GMAC1 主要活动消费者及频率：
 - 下一步优先使用被动方式确认 DHCP 报文的 Ethernet source MAC，并与已知 eMMC Vendor Storage、TF Vendor 数据和运行时 FDT/NVMEM 来源对应；必要时再安排 Panther 与 hEX 同一时间窗口的双端抓包。
 - 本轮没有执行 DHCP renew、接口重启、驱动重载、软件安装、配置修改、寄存器写入或系统重启。
 
+
+## 16. 2026-11-17 补充：6.12.69 ethtool 统计字段完整性与 DHCP 被动监听状态
+
+本节补充 13.2 表格未逐项展开、但用户在同一轮 `ethtool -S eth0` 输出中提供的字段。它们属于同一 6.12.69 运行环境快照；不与 6.12.81 或其他启动周期的累计值混算。
+
+### 16.1 其他 RX / 协议分类计数
+
+| 字段 | 读数 | 解释边界 |
+|---|---:|---|
+| `ipv4_pkt_rcvd` | 3,536 | 驱动统计的 IPv4 接收包数 |
+| `ipv6_pkt_rcvd` | 182 | 驱动统计的 IPv6 接收包数 |
+| `ip_csum_bypassed` | 21,939 | checksum bypass 相关计数；不等于校验失败数 |
+| `no_ptp_rx_msg_type_ext` | 25,663 | PTP message type extension 相关计数；不据此推断普通数据包异常 |
+| `mmc_rx_broadcastframe_g` | 0 | MMC 广播帧计数 |
+| `mmc_rx_multicastframe_g` | 2,168 | MMC 多播帧计数 |
+| `mmc_rx_unicast_g` | 0 | MMC 单播帧计数 |
+
+其中 `mmc_rx_framecount_gb=25,663`，但 `mmc_rx_unicast_g=0`、`mmc_rx_broadcastframe_g=0`，而多播计数为 2,168。此组合需要结合具体 MMC counter 定义、硬件统计使能和驱动读取方式再解释；不能仅凭 `mmc_rx_unicast_g=0` 推断接口没有接收单播流量，因为同一快照中 netdev、驱动 RX packet 和 IRQ/NAPI 计数均有大量活动。
+
+### 16.2 其他 TX / NAPI 计数
+
+| 字段 | 读数 |
+|---|---:|
+| `tx_pkt_n` | 283 |
+| `tx_normal_irq_n` | 11 |
+| `tx_clean` | 26,335 |
+| `tx_set_ic_bit` | 11 |
+| `q0_tx_pkt_n` | 283 |
+| `q0_tx_irq_n` | 11 |
+| `q0_rx_pkt_n` | 25,663 |
+| `q0_rx_irq_n` | 25,649 |
+
+这些是当前接口/驱动累计统计，不构成 DHCP Discover 已从 PHY 发出的证据。特别是 `tx_pkt_n=283` 只能说明驱动 TX completion 统计；不能替代对特定 DHCP 帧的线上确认。
+
+### 16.3 DHCP 被动监听状态
+
+- 当前尚未执行新的 DHCP 专项被动抓包。
+- 尚未先行核实 `tcpdump` 是否已安装；下一步应先检查工具是否存在，再决定是否运行只监听 UDP 67/68 的抓包。
+- 不主动触发 DHCP renew，不重启 eth0 / NetworkManager，不重载驱动，不修改网络配置。
+- 目标是确认本轮 Discover/Offer 是否经过 eth0，并在需要时与 hEX 入口同一时间窗口的抓包对应；本机 outgoing capture 仍不能单独证明 PHY 线侧发送成功。
+
+**本节状态：** 仅整理既有只读输出，没有在设备上执行新命令或改变配置。
