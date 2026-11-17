@@ -444,3 +444,114 @@ aliases {
 - Panther X2 6.12 DTS：项目固定源码 commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`，文件 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`。
 
 注意：另一个 commit `b3372aa61eccf92db6a5461674e70854344cacd2` 虽在 GitHub history 中显示 author date 2023-04-11，但 committer date 为 2023-11-13，晚于当前 FIT 构建日期；不应把它当作 2023-04-23 前已发布的代码依据。本节改以 2023-03-23 前已提交的 `8af253...` 版本为依据。
+
+## 15. Linux 实际运行 FDT 的 GMAC1 alias 与 MAC 已闭环（2026-11-17）
+
+用户对当前运行时 FDT（/sys/firmware/fdt）及 Linux 接口执行只读检查，实机输出：
+
+~~~dts
+/ {
+    aliases {
+        ethernet0 = "/ethernet@fe010000";
+        ...
+    };
+
+    ethernet@fe010000 {
+        local-mac-address = [e6 e0 02 b2 71 f9];
+        compatible = "rockchip,rk3568-gmac", "snps,dwmac-4.20a";
+        reg = <0x00 0xfe010000 0x00 0x10000>;
+        ...
+        status = "okay";
+        ...
+        clock_in_out = "input";
+        phy-mode = "rgmii";
+        ...
+    };
+};
+~~~
+
+Linux interface 输出：
+
+~~~text
+eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> ...
+link/ether e6:e0:02:b2:71:f9
+parentdev fe010000.ethernet
+altname end0
+altname enxe6e002b271f9
+~~~
+
+### 15.1 直接证实的事实
+
+- Linux 运行时 FDT 的 aliases.ethernet0 指向 GMAC1（/ethernet@fe010000）。
+- GMAC1 节点的 local-mac-address 是 e6:e0:02:b2:71:f9。
+- Linux 的 eth0 当前 MAC 同样是 e6:e0:02:b2:71:f9。
+- eth0 的 parent device 是 fe010000.ethernet，确认接口就是该 GMAC1。
+- 因此运行时 FDT 中的 GMAC1 MAC 与 Linux 实际接口 MAC 完全一致；这不是仅看接口名称推测出来的关系。
+
+### 15.2 与已验证 U-Boot control FDT 的对照
+
+U-Boot control FDT（FIT 内 SHA256 已验证）描述：
+- 根节点为 Radxa E25 / RK3568。
+- aliases.ethernet1 = "/ethernet@fe010000"。
+- GMAC1 节点 status = "disabled"。
+- GMAC1 pinctrl 为 M1、clock_in_out 为 output、delay 为 0x4f/0x26。
+
+Linux 实际运行 FDT 描述：
+- aliases.ethernet0 = "/ethernet@fe010000"。
+- GMAC1 节点 status = "okay"。
+- GMAC1 pinctrl 为 M0、clock_in_out 为 input、delay 为 0x30/0x10。
+- GMAC1 local-mac-address 为 e6:e0:02:b2:71:f9。
+
+这说明 U-Boot control FDT 与传给 Linux 的运行时 FDT 不是同一份原样配置；Linux 启动时使用的是 Panther X2 kernel DTB，并且 MAC 属性已存在于最终运行时 FDT。不能把 control FDT 中的 disabled/M1/output/delay 属性直接套用到 Linux 当前 GMAC1。
+
+### 15.3 与 U-Boot Vendor MAC fixup 源码路径的关系
+
+第 14 节已建立 Rockchip U-Boot 的源码路径：读取当前启动介质 Vendor Storage → 写入 U-Boot 环境 ethaddr/eth1addr → Linux FDT setup 中按 kernel DTB 的 /aliases/ethernet* 进行 MAC fixup。
+
+本次输出进一步闭环了该路径的后半段：
+- Panther X2 kernel DTB 的运行时 alias 将 ethernet0 指向 GMAC1；
+- 运行时 GMAC1 节点含 local-mac-address=e6:e0:02:b2:71:f9；
+- Linux eth0 实际采用同一个 MAC。
+
+**边界：** 这证明最终 FDT MAC 属性与接口 MAC 一致；单独这一份运行时输出仍不能证明该值究竟由 U-Boot fdt_fixup_ethernet() 写入、由其他 boot script/fixup 写入，还是由其他早期路径注入。结合第 14 节的源码机制和 kernel DTS 中没有静态 MAC 的事实，U-Boot Vendor MAC fixup 是目前有源码依据且与现象吻合的解释，但要把具体写入者提升为实机直接证实，仍需比对启动前原始 kernel DTB 与最终运行时 FDT，或读取可靠的 U-Boot 环境/启动日志。
+
+### 15.4 这是否解释 DHCP Discover 未到达 hEX？
+
+还不能。
+
+e6:e0:02:b2:71:f9 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 0、U/L 位为 1），在以太网中属于合法的 locally administered unicast address。MAC 与 eMMC 板载 MAC 不同，本身不会使 DHCP Discover 广播帧失效。
+
+当前已知：
+- Linux eth0 以 e6:e0:02:b2:71:f9 发出 DHCP Discover（此前本机 tcpdump 已观察到 UDP 68 → 67 广播）。
+- hEX 未观察到来自 Panther 的 DHCP 报文。
+- MAC 来源错位可以解释设备身份/地址来源不符合预期，但尚无证据证明它导致帧在到达 hEX 前丢失。
+
+后续应继续追踪实际帧离开 GMAC/PHY 的路径，而不是再次重复 DHCP 软件层检查。
+
+### 15.5 下一步优先级
+
+1. 在源码侧核对当前 U-Boot 构建是否启用 CONFIG_ROCKCHIP_SET_ETHADDR、CONFIG_FDT_FIXUP 及 MAC 序号配置；目前确切二进制 .config 尚未恢复。
+2. 如果仓库中已有 TF Vendor Storage 的 MAC 值与 eMMC 板载 MAC 值，直接与 e6:e0:02:b2:71:f9 对照，不要求用户重复读取已保存的介质镜像。
+3. 研究 Linux GMAC TX DMA/descriptor、stmmac transmit completion、PHY TX/RX 物理链路的证据链；目标是解释本机抓包可见但 hEX 抓包不可见的帧在哪一段消失。
+4. 不修改 U-Boot FDT、Linux DTB、MAC、GRF、GPIO 或网络服务；不重复此前 DHCP/hEX 抓包基础测试。
+
+## 16. 当前结论状态补充（2026-11-17）
+
+**已验证：**
+- Linux runtime FDT 的 ethernet0 alias 指向 GMAC1。
+- Linux runtime FDT 的 GMAC1 local-mac-address 是 e6:e0:02:b2:71:f9。
+- Linux eth0 的 parent 是 GMAC1，接口 MAC 与 runtime FDT 完全一致。
+- U-Boot control FDT 与 Linux runtime FDT 对 GMAC1 的启用状态、alias 序号、pinmux、时钟方向和 delay 属性存在明确差异。
+
+**源码机制支持、但尚未实机直接证明写入者：**
+- Rockchip U-Boot 可从当前启动介质 Vendor Storage 读取 MAC，并在 Linux FDT setup 阶段按 kernel DTB aliases 写入 MAC 属性。
+- 当前 runtime FDT 与 Linux DTS/alias 情况吻合该机制。
+
+**尚未验证：**
+- 当前 FIT 中 U-Boot 的确切构建配置及相关 CONFIG 值。
+- e6:e0:02:b2:71:f9 与 TF Vendor Storage 中具体 MAC 值的逐字节对照（如尚未在仓库中记录）。
+- 最终 MAC 属性的实际写入者。
+- 错误 MAC 来源是否与 DHCP 帧未到达 hEX 有任何因果关系。
+- Linux GMAC TX 到 PHY 物理引脚之间的实际帧传输状态。
+
+**后续方向：** 停止在“MAC 地址来源”层面打转；该层面已基本解释到 Linux 最终接口。调查重点转向 GMAC TX DMA/descriptor、stmmac TX 完成状态及 PHY 物理发送路径，找出 Discover 在本机抓包点之后、hEX 抓包点之前消失的具体位置。
