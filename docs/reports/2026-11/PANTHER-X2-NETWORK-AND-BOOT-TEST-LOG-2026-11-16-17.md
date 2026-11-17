@@ -346,3 +346,13 @@ iMac 端：
 - RX/TX errors、dropped、carrier errors 均为 0。
 
 **证据性质：** 上述细节来自用户在 2026-11-17 提供的历史对话文本，不是原始终端日志。具体 LAN 地址不公开；该段只补充“用户确认已完成”的测试结果，不声称仓库已包含原始命令输出。它修正了此前“没有证据显示逐项完成网关和 LAN 主机 ping”的记录。DNS、互联网和 DHCP 双端抓包仍不在这段证据范围内。
+
+
+## 6.1.116 原始网络采集文件补充归档
+
+此前用户上传的 `panther-eth-baseline.txt` 与 `panther-eth-supplement.txt` 已确认是本阶段 6.1.116 网络基线的直接采集材料。现已将两份文件制作脱敏副本并归档：
+
+- [完整基线采集输出（脱敏）](../../evidence/network/panther-eth-baseline-redacted.txt)
+- [补充采集输出（脱敏）](../../evidence/network/panther-eth-supplement-redacted.txt)
+
+这两份采集文件提供了此前摘要未完整呈现的驱动统计、PHY/EEE、接口计数器、中断、路由和 NetworkManager 等信息。脱敏仅处理家庭 IP、MAC、UUID 和构建主机标识；原始上传附件未修改。脱敏副本保留原始诊断输出结构，但不等同于字节级原件。
