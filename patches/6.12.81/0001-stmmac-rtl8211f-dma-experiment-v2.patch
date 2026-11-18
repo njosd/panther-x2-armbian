@@ -19,7 +19,7 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/eth
 +#include <linux/moduleparam.h>
 +#include <linux/of.h>
  #include <linux/mii.h>
-@@ -577,4 +579,110 @@
+@@ -575,4 +577,110 @@
  	xpcs_destroy(priv->hw->xpcs);
  	priv->hw->xpcs = NULL;
  }
