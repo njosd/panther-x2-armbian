@@ -2168,3 +2168,87 @@ Databook 还把 jabber timeout、no carrier/loss of carrier、late collision、f
 ### 43.4 下一步
 
 不要求用户重跑历史测试。后续若进行新的、经授权的最小验证，应在同一时间窗读取现有 `ethtool -S` 中 `mmc_tx_framecount_g` / `mmc_tx_octetcount_g` 与 `_gb` 的差值，并与一帧测试的时间点对应；在此之前，6.12.81 的 MAC good/bad 分类标为未验证。
+
+
+## 44. 6.12 当前启动周期 MMC Good-only TX 计数补充（2026-11-18）
+
+用户在本轮继续排查时提供了以下 `ethtool -S eth0` 只读输出：
+
+| Counter | Value |
+|---|---:|
+| `mmc_tx_framecount_gb` | 21 |
+| `mmc_tx_framecount_g` | 21 |
+| `mmc_tx_octetcount_gb` | 3720 |
+| `mmc_tx_octetcount_g` | 3720 |
+| `mmc_tx_underflow_error` | 0 |
+| `mmc_tx_carrier_error` | 0 |
+| `tx_underflow` | 0 |
+| `tx_carrier` | 0 |
+| `tx_losscarrier` | 0 |
+
+### 44.1 本次补充的意义
+
+- Good-only frame/octet counters 与 good+bad counters 完全相等。
+- 在本次 MMC 计数器累计范围内，21 帧、3720 octets 均被 MAC MMC 归类为 good；没有从这组计数看到 bad TX frame 的增量。
+- underflow、carrier、loss-of-carrier 错误计数仍为 0。
+- 这补上第 43 节所指出的 6.12.81 good-only counters 缺失项；此前 6.12 只有 GB 计数记录，不能判断 good/bad 分类。
+
+### 44.2 证据边界
+
+这是计数器当前累计值，不包含本轮测试前的同周期基线，也没有把某个具体测试帧与某次 counter 增量逐帧关联。因此它证明的是当前累计统计中的 MAC Good 分类，不证明每个测试帧均从 PHY MDI 侧发出，更不证明远端收到。
+
+本次命令输出片段本身没有附带 `uname -r`；其属于当前 6.12.81 故障排查轮次的证据归档。后续如需严格绑定内核身份，应沿用已确认的当前启动周期身份，不为此重复跑网络测试。
+
+### 44.3 更新后的故障边界
+
+当前证据可以表述为：
+1. Linux TX 请求进入 `stmmac_xmit()` 并被接受；
+2. TX descriptor 完成/清理路径有正向证据；
+3. Linux/netdev/driver/MMC GB TX 计数在当前启动期有一致增长记录；
+4. 本次新增 MMC Good-only counters 与 GB 相等，且错误计数为零；
+5. hEX 与持续监听的 iMac 未观察到对应外发帧。
+
+这比单纯 descriptor completion 更强，但 MMC 仍是 MAC 内部统计，不是 PHY 线侧或远端确认。故障边界仍在 MAC 内部 TX 统计与外部接收端可见性之间，尚未证明已经越过 GMAC RGMII TX 引脚。
+
+
+## 45. 6.12 Rockchip Vendor Storage provider 与 MAC fallback 适用性审计（2026-11-18）
+
+本轮继续第 23.3 节遗留的 `rk_get_eth_addr()` 支线，只读取实际 6.12.81 候选源码、官方构建时配置文件和已归档运行时 FDT；未执行设备命令、未访问 Vendor Storage、未写入 MAC。
+
+### 45.1 官方 6.12.81 构建配置没有启用可用的 Vendor Storage backend
+
+检查 `ophub/kernel` workflow commit `f8925391bb2ba2634bb8ca55da39e1a2f4029ffe` 中的 `kernel-config/release/rk35xx/config-6.12`（blob `966f4b6ac7c0ad59179d6ae272423500601fab07`）：
+
+- `CONFIG_ROCKCHIP_VENDOR_STORAGE=y`
+- `CONFIG_RK_FLASH` 未启用；
+- `CONFIG_ROCKCHIP_FLASH_VENDOR_STORAGE` 因 Kconfig 依赖 `ROCKCHIP_VENDOR_STORAGE && RK_FLASH` 而不能启用；
+- `CONFIG_ROCKCHIP_MTD_VENDOR_STORAGE` 未启用；
+- `CONFIG_ROCKCHIP_RAM_VENDOR_STORAGE` 未启用。
+
+该配置只启用 Vendor Storage 公共 API，不提供 flash/MTD/RAM backend。候选源码 `rk_vendor_read()` 在没有 provider 注册时返回 `-1`；`flash_vendor_storage.c` 的 provider 注册发生在异步 `vendor_init_thread()` 中，但当前默认 config 不会构建该 flash backend。
+
+配置证据边界：该文件是 6.12.81 对应官方 workflow 的默认 base config；workflow run 的全部手动 inputs 未直接公开，因此仍按高置信度默认配置证据表述，不声称读取了设备最终 `.config`。
+
+### 45.2 当前运行时 FDT 的有效 MAC 使 Linux fallback callback 不应执行
+
+已归档实机证据：
+- Linux 运行时 FDT 的 `/aliases/ethernet0` 指向 `/ethernet@fe010000`；
+- GMAC1 节点含有效 `local-mac-address`，首字节为 `E6`；
+- 运行时 `eth0` MAC 与该 FDT 值完全一致；
+- U-Boot 从 TF 启动介质 Vendor Storage 读取数据并通过 Ethernet FDT fixup 写入 MAC 的源码路径已建立。
+
+对照 6.12 源码：
+- `stmmac_probe_config_dt()` 先调用 `of_get_mac_address(np, mac)`；
+- `stmmac_check_ether_addr()` 只有在 `priv->dev->dev_addr` 无效时，才读取 MAC UMAC register，并在仍无效时调用平台 `get_eth_addr`；
+- Rockchip 的 `rk_get_eth_addr()` 是该 fallback callback。
+
+因此，当前运行时 FDT 已提供有效 MAC 且 eth0 与之相同，按该调用链 Linux 不需要进入 `rk_get_eth_addr()`。Vendor Storage backend 缺失不会在这条已观察启动路径中触发随机 MAC fallback，也不能解释当前 TX 外发失败。
+
+### 45.3 结论与处理
+
+- **已确认（源码配置）：** 官方默认 6.12.81 base config 没有启用 Vendor Storage flash/MTD/RAM backend。
+- **已确认（归档运行时证据）：** 最终运行时 FDT 已包含有效 GMAC1 MAC，且与 eth0 相同。
+- **源码推断：** `stmmac_check_ether_addr()` 因 MAC 已有效而跳过 `rk_get_eth_addr()`；当前 boot 不依赖 Linux Vendor Storage provider 来取得 eth0 MAC。
+- **关闭本支线：** 不再要求用户重复 grep `rk_get_eth_addr` 日志，不访问/修改 Vendor Storage，不调整 MAC。TF U-Boot 到运行时 FDT 的 MAC 传递链已是更直接的解释。
+- **故障关联：** 即使运行时 MAC 与 eMMC 板载记录不同，广播帧仍应使用有效 source MAC 发出；MAC 来源差异不能单独解释 hEX/iMac 均看不到广播/单播测试帧。
+
