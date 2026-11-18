@@ -1335,3 +1335,73 @@ Panther 运行时 PHY 节点没有 `realtek,clkout-disable` 属性，两版都�
 ### 28.6 下一步
 
 回到更接近故障边界的 MAC 初始化和 TX/RX DMA bring-up：审计 6.1.116 与 6.12.81 在 `stmmac_hw_setup()` 中 MAC reset、DMA reset、DMA channel init、RX ring refill/start 与 MAC RX/TX enable 的严格调用顺序和失败返回处理。优先静态比较函数调用图与 RK3568 实际 ops；已有 TX descriptor、DMA channel state、ST/Tail pointer、IRQ/NAPI、TX cleanup 及统计核对不重跑。若找到实际顺序差异，再决定是否需要一项新的、能区分 RX/TX 边界的定向验证。
+
+
+## 29. Newly found 6.1.116-only stmmac vendor patch: 1.5 s delay + unconditional MDIO writes (2026-11-18)
+
+本轮在审计 `stmmac_init_dma_engine()` 时，沿 Git 历史追查到一个此前未识别的关键版本差异。没有执行 Panther 实机命令或修改设备。
+
+### 29.1 差异来源已追到具体历史提交
+
+6.1.116 对照源码 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` 包含提交：
+- commit `49b5f340f346cc9a5b777499fce46150b691b70e`
+- message：`drv: net: ethernet: stmmac fix for jl2xx1 phy`
+
+该提交同时向两个函数加入代码：
+1. `stmmac_init_dma_engine()` 在 DMA SW reset 前新增 `msleep(1500)`；
+2. `stmmac_mdio_register()` 在 MDIO bus 注册后新增四条写操作：
+   - `stmmac_mdio_write(new_bus, 0, 31, 2627)`（page select = 0x0a43）
+   - `stmmac_mdio_write(new_bus, 0, 25, 0x1801)`
+   - `stmmac_mdio_write(new_bus, 0, 31, 0)`
+   - `stmmac_mdio_write(new_bus, 0, 0, 0x8000)`（BMCR software reset）
+
+这不是 6.1 主线 stmmac 通用初始化行为，而是一个提交标题明确指向 JL2xx1 PHY 的厂商/平台补丁。该提交没有按 PHY compatible/PHY ID 做条件判断。
+
+### 29.2 对 Panther 当前配置，这四条写操作会命中地址 0 的 RTL8211F
+
+已归档 Panther 运行时信息：PHY 地址 0、型号 RTL8211F、PHY ID `0x001cc916`，不是 fixed-link。6.1 `stmmac_mdio_register()` 的代码顺序是：
+- `of_mdiobus_register()` 成功后；
+- fixed-link 检查通过（Panther 没有 fixed-link）；
+- 执行上述四条写操作；
+- 之后才检查 `priv->plat->phy_node || mdio_node` 并跳过自动 PHY 扫描。
+
+因此，只要 Panther 使用该 6.1.116 源码路径且 `mdio_bus_data` 非空（已有 `stmmac-0:00` PHY 注册记录支持 MDIO bus 存在），这组硬编码 MDIO 写就会在 PHY address 0 执行。它不是只对没有 DT phy-handle 的自动扫描路径执行。
+
+6.12.81 候选源码 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `stmmac_mdio_register()` 不含这四条写操作；`stmmac_init_dma_engine()` 也没有 1.5 s 延时。
+
+### 29.3 写入目标确实是 RTL8211F PHYCR2，但存在必须解释的矛盾
+
+RTL8211F datasheet 将 page `0x0a43`、register `0x19`（十进制 25）定义为 PHYCR2。Rev 1.7 描述其中：
+- bit 0：CLKOUT enable；
+- bit 1：RXC clock output enable；
+- bit 5：PHY-mode EEE enable；
+- bit 11：CLKOUT 25/125 MHz 频率选择；
+- bit 13:12：CLKOUT SSC capability select。
+
+整字写入 `0x1801` 会设置 bit 12、bit 11、bit 0，同时把 bit 1、bit 5 等未置位位清零。之后执行 BMCR software reset。
+
+6.1 候选 Realtek 驱动的 `rtl821x_probe()` 会读取并缓存 PHYCR2 的 CLKOUT bit 0；随后 attach 时 `rtl8211f_config_init()` 只用 `phy_modify_paged(..., RTL8211F_CLKOUT_EN, priv->phycr2)` 恢复 bit 0，并不会恢复 bit 1 或 bit 5。因此，如果该序列确实在 RTL8211F 上成功执行，按源码字面推导，RXC enable / PHY-mode EEE enable 可能被清除。
+
+**但这与已验证的 6.1.116 正常双向网络通信事实形成矛盾。** 不能忽略这个反证，也不能直接宣称此序列导致 6.12 TX 故障。尚待查明的可能性包括：实际 6.1.116 二进制未包含该提交/该函数路径、MDIO 写操作未成功作用于该 PHY、具体芯片/寄存器语义与候选 datasheet 修订不一致，或 PHY 驱动/后续流程还有其他恢复机制。当前尚无运行时 MDIO trace 或 PHYCR2 前后值可确认写入结果。
+
+### 29.4 1.5 s delay 与四条 MDIO 写必须视为同一历史补丁组合，但分开评估
+
+`msleep(1500)` 与上述 MDIO 写在同一个 `49b5f340` 历史提交中加入。该等待发生在 `__stmmac_open()` 已完成 `pm_runtime_resume_and_get()`、`stmmac_init_phy()` / PHY attach 与 `phy_init_hw()` 后，随后才进入 DMA SW reset、DMA channel 初始化。phylink_start 则在 `stmmac_hw_setup()` 完成之后执行。
+
+因此它不是系统启动时的通用 1.5 秒等待，而是每次网卡 open/reopen 时，在 PHY 初始化后、DMA reset 前增加 1.5 秒等待。它可能是该旧平台补丁针对 PHY/时钟稳定性所需的时序 workaround，但 commit message 指向 JL2xx1，不能未经验证外推到 RTL8211F。
+
+### 29.5 本轮结论与证据等级
+
+- **已确认（源码）：** 6.1.116 候选源码含 `49b5f340` 补丁；6.12.81 候选源码没有 1.5 s delay 和四条硬编码 MDIO 写。
+- **已确认（代码路径）：** Panther 的地址 0、非 fixed-link MDIO 配置满足该 6.1 代码块的执行条件；该块位于 `phy_node/mdio_node` early-exit 判断之前。
+- **已确认（datasheet）：** 地址 0、page 0x0a43、reg 0x19 对 RTL8211F 是 PHYCR2；0x1801 整字写会清除 bit1 与 bit5。
+- **源码推断：** 后续 Realtek config_init 只恢复 CLKOUT bit0，不恢复 RXC/EEE bit，因此若写成功，寄存器位状态可能改变。
+- **未验证且存在反证：** 这组写操作是否真的作用于当前 PHY，以及 6.1.116 的实际二进制是否包含该补丁。正常双向网络结果不支持简单地认定 RXC 被禁用。
+- **根因状态：** 这是目前发现的最具体、最接近 PHY/RGMII 时钟边界的 6.1→6.12 代码差异之一，但尚不能定为根因。
+
+### 29.6 下一步（仍先静态查证，不要求用户重复实机测试）
+
+1. 继续查 `49b5f340` 补丁的来源/目标平台，确认 JL2xx1 PHY 的准确型号及寄存器意义，判断为什么补丁被无条件放入通用 stmmac 路径。
+2. 核对 6.1.116 的实际构建产物/构建工作流能否证明该补丁确实进入运行内核；若无法证明，降低该分支的权重。
+3. 对照 Panther 的 GMAC `clock_in_out = "input"`、pinctrl `clkinout` 和时钟树记录，判断 PHY CLKOUT 是否连接到 RK3566 的 GMAC clock input。不得重复读取已完成的 clock_summary / GRF / pinctrl 实机项目；使用已归档数据。
+4. 在没有解决“旧内核正常通信”这一反证前，不建议在 6.12 上直接补回这四条 MDIO 写，也不建议修改 PHYCR2。任何实机 MDIO 写操作都必须另行获得用户明确授权。
