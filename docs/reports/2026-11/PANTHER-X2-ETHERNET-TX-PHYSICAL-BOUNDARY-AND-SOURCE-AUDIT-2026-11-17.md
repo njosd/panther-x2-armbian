@@ -1875,3 +1875,65 @@ Rockchip `rk_gmac_pm_ops` 的 suspend/resume 仍走 `stmmac_suspend()` / `stmmac
 2. clock provider 的 `clk_prepare_enable()` 对这些时钟可能返回的错误条件，以及其父时钟/assigned-clock 配置是否会导致“稳态显示 enabled，但本次 enable 调用失败或 TX 输出时钟未建立”。
 
 优先用 RK3566 CRU 源码、DTS 和已有 clock tree 记录完成静态推演。若仍需要设备证据，只提出一个只读、低风险、无需寄存器直读/重启的定向验证，并先征求授权。
+
+
+## 38. RK3566 GMAC1 CRU topology and clock-enable failure-path assessment (2026-11-18)
+
+本轮完成第 37.7 节的第一项：对照 6.1.116 与 6.12.81 的 RK3568 CRU provider、Panther GMAC1 clock consumers、assigned-clock parent 链，并评估 6.12 忽略 `clk_prepare_enable()` 返回值是否具有现实故障路径。仅静态源码与已归档 clk_summary；未读取设备寄存器、未运行新实机测试。
+
+### 38.1 RK3566/RK3568 CRU 的 GMAC1 provider 定义两版一致
+
+比较 `drivers/clk/rockchip/clk-rk3568.c` 和 `rk3568-cru.h`：以下定义在 6.1 与 6.12 候选源码一致：
+- `SCLK_GMAC1`：MUX，父项 `clk_mac1_2top` 或 `gmac1_clkin`；
+- `SCLK_GMAC1_RGMII_SPEED`：MUX，父项 `clk_gmac1` / `clk_gmac1_tx_div50` / `clk_gmac1_tx_div5`；
+- `SCLK_GMAC1_RX_TX`：MUX，父项 `clk_gmac1_rgmii_speed` / `clk_gmac1_rmii_speed` / `clk_gmac1_xpcs_mii`；
+- `ACLK_GMAC1`、`PCLK_GMAC1`：普通 gate clocks，父项分别是 `aclk_usb`、`pclk_usb`；
+- GMAC1 相关 clock IDs 与 mux/gate 寄存器定义一致。
+
+因此没有发现 6.12 改坏 RK3566 GMAC1 CRU provider、改变 mux 父项列表或改变 gate bit 的源码差异。
+
+### 38.2 Panther 的时钟消费者映射与父链
+
+RK356x DTSI 的 `clock-names` 映射：
+- `stmmaceth` → `SCLK_GMAC1`；
+- `mac_clk_rx`、`mac_clk_tx`、`clk_mac_speed` → 同一个 `SCLK_GMAC1_RX_TX` clock ID；
+- `aclk_mac` → `ACLK_GMAC1`；
+- `pclk_mac` → `PCLK_GMAC1`。
+
+Panther `&gmac1` 的 `assigned-clocks` / `assigned-clock-parents` 形成：
+`SCLK_GMAC1_RX_TX` → `SCLK_GMAC1_RGMII_SPEED` → `SCLK_GMAC1` → `gmac1_clkin`。
+
+当前板级 DTS 声明 `gmac1_clkin` 为 125MHz fixed-clock，并设置 `clock_in_out="input"`。已有运行时 FDT/clk_summary 记录与该链一致：`gmac1_clkin`、`clk_gmac1`、`clk_gmac1_rgmii_speed`、`clk_gmac1_rx_tx` 均报告 125MHz/enabled。
+
+### 38.3 `mac_clk_tx` 与 `clk_mac_speed` 不是两条独立时钟
+
+两个 clock-name 实际引用同一个 `SCLK_GMAC1_RX_TX` ID。6.1 bulk 获取/启用这两个 consumer，6.12 分别 `devm_clk_get()` 再启用，最终都对同一个 CCF clock core 增加两次 prepare/enable reference；关闭时也分别 disable 两次，引用计数是平衡的。
+
+所以不能把 `mac_clk_tx` 与 `clk_mac_speed` 解释成两个独立 125MHz 输出，也不能认为 6.12 对它们重复 enable 本身就是错误。`stmmaceth` 是父链上的 `SCLK_GMAC1`，由 STMMAC core 管理；Rockchip glue 管理 `SCLK_GMAC1_RX_TX` 两个 consumer。
+
+### 38.4 6.12 忽略 enable 返回值仍是代码质量差异，但该具体 clock path 的失败可能性降低
+
+进一步检查 provider ops：
+- GMAC1 125MHz 关键链的 `SCLK_GMAC1`、`SCLK_GMAC1_RGMII_SPEED`、`SCLK_GMAC1_RX_TX` 都是 mux clocks，没有独立 `.prepare` / `.enable` 硬件操作；
+- `gmac1_clkin` 是 fixed-clock，provider 没有可失败的硬件 enable 操作；
+- `ACLK_GMAC1` / `PCLK_GMAC1` 使用通用 gate ops，gate enable 函数执行寄存器置位后返回 0。
+
+因此，在 provider 正常注册、父项关系正确的前提下，Panther 当前这条 RGMII 125MHz clock path 的 `clk_prepare_enable()` 没有明显会返回错误的 provider callback。6.12 没有检查返回值仍是实际的错误处理退化，但**目前没有发现该关键路径存在一个具体、可解释本次故障的正常错误返回源**。将“enable 返回值被忽略”从最高优先级根因候选降为低优先级代码风险；除非后续找到 parent prepare/enable 或 provider 注册失败证据，否则不再围绕它安排实机验证。
+
+### 38.5 clk_summary 的证明边界
+
+`gmac1_clkin` 是 DTS 中声明的 fixed-clock，clk_summary 显示 125MHz 只是 CCF 采用该声明值，不是对 SoC 输入引脚波形的频率测量。相同地，`clk_gmac1_rx_tx` 显示 enabled 说明 CCF 的引用计数/逻辑状态，不证明 RGMII TXC/TXD 引脚上真的出现符合时序的波形。
+
+这不推翻已有 clk_summary 记录，只明确它的边界：软件时钟树 parent/rate/enable 配置看起来正确，但外部时钟物理输入与 TX 输出波形仍未被软件摘要证明。
+
+### 38.6 本轮结论
+
+- **已确认：** RK3566 GMAC1 CRU provider 在两版源码中的 mux/gate 定义相同。
+- **已确认：** Panther assigned-clock parent 链将 GMAC1 输入时钟引到外部 `gmac1_clkin`，再经 RGMII speed mux 到 RX/TX mux；与已归档 125MHz 软件状态相符。
+- **已确认：** `mac_clk_tx` 与 `clk_mac_speed` 是同一个 CCF clock ID 的两个 consumer alias，两版启用/关闭引用计数都成对。
+- **降级：** 6.12 未检查 `clk_prepare_enable()` 返回值是代码风险，但对当前 mux/fixed-clock/gate provider 结构未发现可信的失败返回路径，暂不作为主要根因。
+- **未证明：** `gmac1_clkin` 物理输入波形和 RGMII TXC/TXD 引脚输出波形。
+
+### 38.7 下一步
+
+软件时钟树静态审计已经没有显示 6.1→6.12 的关键差异。下一步不再重复查 clock_summary、CRU mux、clock-name、pinctrl 定义或 PHY reset。回到剩余的软件候选，核对 6.12.81 发布构建所使用的 `stmmac` TX DMA/MAC 相关配置与模块构建选项是否存在影响普通非 checksum-offload 小帧发送的差异；同时把现有 MMC TX frame counter 语义与“帧离开 MAC core”边界严格区分。若该路径也没有差异，就应明确承认软件源码审计已无法把故障定位到更深层，而不是继续循环相同代码。
