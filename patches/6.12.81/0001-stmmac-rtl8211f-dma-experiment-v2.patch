@@ -22,7 +22,6 @@ accepts only 0 or 1500 ms.
 diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
 --- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
-@@ -17,2 +17,4 @@
  #include <linux/gpio/consumer.h>
  #include <linux/io.h>
  #include <linux/iopoll.h>
@@ -31,7 +30,7 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/eth
  #include <linux/mii.h>
  #include <linux/of_mdio.h>
  #include <linux/pm_runtime.h>
-@@ -565,1 +567,84 @@ void stmmac_pcs_clean(struct net_device *ndev)
+@@ -17,6 +17,8 @@
  	priv->hw->xpcs = NULL;
  }
  
@@ -139,7 +138,7 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/eth
  /**
   * stmmac_mdio_register
   * @ndev: net device structure
-@@ -646,1 +731,4 @@ int stmmac_mdio_register(struct net_device *ndev)
+@@ -565,6 +567,107 @@ void stmmac_pcs_clean(struct net_device *ndev)
  		goto bus_register_fail;
  	}
  
@@ -149,17 +148,17 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/eth
  	/* Looks like we need a dummy read for XGMAC only and C45 PHYs */
  	if (priv->plat->has_xgmac)
  		stmmac_xgmac2_mdio_read_c45(new_bus, 0, 0, 0);
+@@ -646,6 +749,9 @@ int stmmac_mdio_register(struct net_device *ndev)
 diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
 --- a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
-@@ -10,6 +10,8 @@
  #include <linux/clk.h>
 +#include <linux/delay.h>
  #include <linux/kernel.h>
 +#include <linux/moduleparam.h>
 +#include <linux/of.h>
  #include <linux/interrupt.h>
-@@ -66,3 +68,7 @@ static int watchdog = TX_TIMEO;
+@@ -10,3 +10,6 @@
  module_param(watchdog, int, 0644);
  MODULE_PARM_DESC(watchdog, "Transmit timeout in milliseconds (default 5s)");
  
@@ -171,7 +170,7 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/eth
  static int debug = -1;
  module_param(debug, int, 0644);
  MODULE_PARM_DESC(debug, "Message Level (-1: default, 0: no output, 16: all)");
-@@ -3046,4 +3053,19 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
+@@ -66,6 +69,10 @@ static int watchdog = TX_TIMEO;
  		priv->plat->dma_cfg->atds = 1;
  
 +	if (dma_delay_ms && priv->device->of_node &&
@@ -191,3 +190,5 @@ diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/eth
  	ret = stmmac_reset(priv, priv->ioaddr);
  	if (ret) {
  		dev_err(priv->device, "Failed to reset the dma\n");
+
+@@ -3046,5 +3053,19 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
