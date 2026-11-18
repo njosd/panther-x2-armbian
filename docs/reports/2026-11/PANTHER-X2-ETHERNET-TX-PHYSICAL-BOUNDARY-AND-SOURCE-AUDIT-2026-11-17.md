@@ -1937,3 +1937,54 @@ Panther `&gmac1` 的 `assigned-clocks` / `assigned-clock-parents` 形成：
 ### 38.7 下一步
 
 软件时钟树静态审计已经没有显示 6.1→6.12 的关键差异。下一步不再重复查 clock_summary、CRU mux、clock-name、pinctrl 定义或 PHY reset。回到剩余的软件候选，核对 6.12.81 发布构建所使用的 `stmmac` TX DMA/MAC 相关配置与模块构建选项是否存在影响普通非 checksum-offload 小帧发送的差异；同时把现有 MMC TX frame counter 语义与“帧离开 MAC core”边界严格区分。若该路径也没有差异，就应明确承认软件源码审计已无法把故障定位到更深层，而不是继续循环相同代码。
+
+
+## 39. 6.12.81 build-time STMMAC configuration audit (2026-11-18)
+
+本轮检查官方 `ophub/kernel` 构建 workflow、该次构建时仓库内的 RK35xx 6.12 配置文件，以及 STMMAC Kconfig/Makefile/hwif selection。目的是排除 6.12.81 构建时因裁剪 DWMAC4 full support 或未启用 Rockchip glue 而走错硬件实现。没有设备操作。
+
+### 39.1 6.12.81 发布构建所处时间点与配置文件版本
+
+官方 6.12.81 asset 对应 workflow run `43405957386`（2026-11-13 10:01:57Z 至 11:15:04Z）。该次 workflow 仓库 HEAD 为 `f8925391bb2ba2634bb8ca55da39e1a2f4029ffe`。该 workflow 默认 `kernel_config` 路径是 `kernel-config/release/rk35xx`，并在 build job 中 checkout 触发 workflow 的 commit。
+
+当时该路径的 `config-6.12` 文件头标注为 Linux 6.12.69；后续 `c23196e10d7702ee2906de4a05421d8971fb2717`（2026-11-13 13:55:36Z，晚于该次 build）才将配置文件更新为 6.12.81。故如果此次 build 使用 workflow 默认 config 路径，它的 base config 是 6.12.69，而不是后来更新的 6.12.81 config。
+
+两个 config 版本之间的 diff 没有改动 STMMAC、Rockchip GMAC、PHYLINK、MDIO、DMA engine、RK3568 clock controller 相关选项；新增的网络相关项是 Motorcomm/FUXI 网卡支持，与 Panther GMAC1 无关。
+
+**限制：** GitHub 公共 run API 不暴露此次 workflow_dispatch 的所有 inputs，不能直接证明该次 run 没有选择 `kernel_config=false` 或其它 source/config input。因此以下配置结论属于“默认路径高置信度推断”，不是对最终二进制 `.config` 的直接读取。
+
+### 39.2 与 Panther GMAC 直接相关的配置项均启用
+
+该次 workflow HEAD 下的 RK35xx `config-6.12` 包含：
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_STMMAC_PLATFORM=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_PHYLINK=y`
+- `CONFIG_PHYLIB=y`
+- `CONFIG_COMMON_CLK_ROCKCHIP=y`
+- `CONFIG_CLK_RK3568=y`
+- `CONFIG_DMA_ENGINE=y`
+- `CONFIG_STMMAC_FULL=y`
+- `CONFIG_DWMAC_ROCKCHIP_TOOL=y`
+
+其中 `CONFIG_STMMAC_FULL=y` 表示没有采用 Rockchip mini-kernel 的精简 STMMAC 变体。更重要的是，6.12 `hwif.c` 中 `DWMAC_CORE_4_10` entry 本身位于 `CONFIG_STMMAC_FULL` 之外，DWMAC4.20a 本就会匹配该 entry；该 entry使用 `dwmac410_dma_ops`、`dwmac410_ops` 和 ring mode。即使 FULL 未启用，4.20a 仍不会退化成旧 DWMAC4 core；当前 config 也明确启用了 FULL。
+
+### 39.3 与 6.1 配置的相关选项对照
+
+Ophub 6.1 stable reference config（版本 6.1.191，不是 6.1.116 实际二进制 config）同样启用 `STMMAC_ETH`、`STMMAC_PLATFORM`、`DWMAC_ROCKCHIP`、`PHYLINK`、`PHYLIB`、`DMA_ENGINE`、`COMMON_CLK_ROCKCHIP` 和 `CLK_RK3568`。`STMMAC_SELFTESTS` 在该 6.1 reference config 为 y、在 6.12 config 为 n；该选项只增加 ethtool self-test，不改变正常 skb/raw-frame TX datapath。6.12 增加的 `DWMAC_ROCKCHIP_TOOL` 提供 Rockchip 专用 loopback sysfs 测试接口，不改变普通 TX 路径。
+
+### 39.4 本轮结论
+
+- **高置信度：** 官方 6.12.81 build 默认配置没有裁掉 STMMAC、Rockchip glue、PHYLINK、RK3568 CRU 或 DMA engine。
+- **已确认源码行为：** DWMAC4.20a 选用的 `dwmac410` MAC/DMA ops 不依赖 `CONFIG_STMMAC_FULL` 宏才能进入硬件表；当前 base config 也明确 `STMMAC_FULL=y`。
+- **没有发现：** 任何一个可解释普通 TX 故障的明显 compile-time Kconfig 缺项。
+- **未直接验证：** 此次 GitHub Actions run 实际传入的全部 inputs 与最终 `.config`；也未取得 6.12.81 实机 `/proc/config.gz` 的归档副本。不得把 base config 推断写成最终二进制配置的绝对证明。
+
+### 39.5 下一步
+
+编译配置层面暂未找到根因。下一步回到 6.12.81 的 TX packet construction / checksum / DMA descriptor feature selection，重点只核对本次故障中已观察到的 DHCP Discover 和普通短帧路径：
+1. 判断 6.12 是否因不同 netdev feature flags 把小帧送入 checksum offload / VLAN / TSO 特殊分支；
+2. 对照 6.1 与 6.12 在普通非-GSO skb 上 `skb->ip_summed`、checksum insertion、descriptor FD/LD/IOC 等 flags 的设置；
+3. 只比较之前未完整覆盖的差异，不重跑抓包、不重复 descriptor/OWN/tail-pointer 检查。
+
+若这段代码也没有能解释外部无帧的差异，静态软件路径就基本闭合；届时应把剩余不确定性明确留在 MAC/RGMII 物理输出边界，而不是无限扩大源码搜索范围。
