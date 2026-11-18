@@ -1691,3 +1691,65 @@ RK3566 使用 DWMAC4 DMA ops。对照 `dwmac4_dma_reset()`：
 ### 34.6 下一步
 
 避免再对第 28 节已完成的 `mac_link_up()` 做重复逐函数比较。下一轮回到仍未完全闭合的 software boundary：检查 `stmmac_mac_set()` 的具体 TE/RE 位操作与 MAC core init/reset 后的寄存器写入覆盖关系，以及 DWMAC4 `core_init` 中 MAC_CONFIG 的默认值/PS 位处理是否可能在 link-up 之前或之后覆盖 TE。若源码两版同样，则当前静态代码审计可给出更明确的边界结论：TX descriptor/DMA/MTL/phylink/MAC enable 均未发现足以解释外部 TX 消失的 6.1→6.12 软件差异，下一步必须依靠已归档的运行时证据或未来经授权的引脚级 TXC/TXD 观测来区分 MAC output 与 PHY line-side；不重复既有 loopback、tcpdump、DMA 计数和时钟测试。
+
+
+## 35. DWMAC4 MAC enable callback and GMAC_CONFIG overwrite audit (2026-11-18)
+
+本轮闭合第 34.6 节：比较 `stmmac_mac_set()` 实际落到的 DWMAC4 callback、`dwmac4_core_init()`、MAC_CONFIG 的 TE/RE 写入覆盖关系，以及硬件接口选择。仅静态源码与已有运行时 DT 证据；未访问设备寄存器、未运行实机测试。
+
+### 35.1 Panther 选择 DWMAC4.10+ MAC ops，而不是 legacy MAC_CTRL callback
+
+现有运行时 DT 已确认 GMAC compatible 包含 `snps,dwmac-4.20a`。在 6.1.116 和 6.12.81 候选源码的 `hwif.c` 中，DWMAC4 core ID >= `DWMAC_CORE_4_10` 的 hwif entry 均选择 `dwmac410_ops`；其 `.set_mac = stmmac_dwmac4_set_mac`。4.20a 高于 4.10 门槛，因此 Panther 走该项（以实际 Synopsys core version 4.20a 记录为前提）。
+
+这点很重要：不能误用表中仅供更早 DWMAC4 entry 的 `dwmac4_ops`（其 `.set_mac = stmmac_set_mac`，操作旧 MAC_CTRL_REG）。Panther 的正确路径是 `stmmac_dwmac4_set_mac()`，直接读写 GMAC_CONFIG。
+
+### 35.2 `stmmac_dwmac4_set_mac()` 两版逐字相同
+
+6.1 与 6.12 的 `dwmac4_lib.c` 函数均为：
+- enable=true：`value |= GMAC_CONFIG_RE | GMAC_CONFIG_TE`；
+- enable=false：`value &= ~(GMAC_CONFIG_TE | GMAC_CONFIG_RE)`；
+- 仅在值变化时写回 GMAC_CONFIG。
+
+因此 link-up callback 与 `stmmac_hw_setup()` 调用 `stmmac_mac_set(..., true)` 时，都会明确置位 MAC RX/TX enable。两版没有 callback 映射差异，也没有 TE/RE 位掩码差异。
+
+### 35.3 `dwmac4_core_init()` 的 MAC_CONFIG 处理相同
+
+两版 `dwmac4_core_init()` 都先读 GMAC_CONFIG，再 OR `GMAC_CORE_INIT`；仅当 `hw->ps` 非零时才设置 TE 和 port-speed bits；随后写回 GMAC_CONFIG。
+
+Panther 是外接 PHY + RGMII，未配置内部 PCS，因此 `hw->ps` 通常保持 0；core_init 这一步本身不会置 TE。但这不构成问题：紧接着 `stmmac_hw_setup()` 无条件调用 `stmmac_mac_set(..., true)`，通过上述 DWMAC4 callback 同时置位 RE 和 TE。随后 DMA start helper 也会设置对应 RE/TE。故不能只看 core_init 的 `hw->ps==0` 就推断 MAC TX 未启用。
+
+两版 `dwmac4_core_init()` 对 MAC_CONFIG 的读-改-写逻辑逐字相同。其唯一相关函数体差异是 6.1 按 `FPESEL` 额外打开 FPE interrupt，6.12 删除该中断使能；不改 MAC_CONFIG 的 TE/RE。
+
+### 35.4 MAC link-up 对 MAC_CONFIG 的覆盖关系
+
+两版 `stmmac_mac_link_up()` 均先读取 MAC_CTRL_REG（对 DWMAC4，此宏对应 GMAC_CONFIG），保留原值并清除 speed mask，按协商速率写 speed bits；随后设置 duplex、flow-control，若值变化写回；最后调用 `stmmac_mac_set(..., true)` 再次强制置位 TE/RE。
+
+6.12 变化：
+- `fix_mac_speed` callback 新增 `mode` 参数（RK callback 当前不使用）；
+- 新增可选 SerDes powerup（Panther RGMII 不命中）；
+- 新增可选 timestamp latency correction（在 MAC enable 之后，且需平台 flag）。
+这些都没有清除或覆盖 TE。
+
+### 35.5 本轮结论：MAC enable/TE 覆盖路径已闭合
+
+- **已确认：** Panther DWMAC4.20a 使用 `dwmac410_ops`，`set_mac` callback 为 `stmmac_dwmac4_set_mac`。
+- **已确认：** 两版 `stmmac_dwmac4_set_mac()` 逐字相同，enable 时设置 GMAC_CONFIG.RE + TE。
+- **已确认：** 即使 `dwmac4_core_init()` 因无 PCS、`hw->ps=0` 而不置 TE，`stmmac_hw_setup()` 随后仍无条件开启 RE/TE；link-up 时又再次开启。
+- **已确认：** 两版 `dwmac4_core_init()` 的 MAC_CONFIG 写入逻辑一致，未发现后续软件路径把 TE 清零。
+- **结论：** 6.1→6.12 的普通 MAC enable/TE 控制流程没有找到可解释 TX 外部不可见的差异。当前不能再把“6.12 漏开 MAC TE”作为合理根因假设。
+
+### 35.6 重要补充：6.12 新增 unicast filter capability 修正只影响 RX
+
+6.12 `stmmac_hw_init()` 新增对 GMAC4 `dma_cap.multi_addr` 的检查：若硬件没有额外 unicast address registers，就清除 `IFF_UNICAST_FLT` 并令 `unicast_filter_entries=0`，避免 secondary unicast filter 被错误承诺。此变化针对 MAC 接收过滤；不会影响本机发出的 DHCP Discover，也不改变 TX queue/TE/descriptor。不得将它误判为 TX 故障根因。
+
+### 35.7 软件审计边界与下一步
+
+到此，普通 TX 路径已依次闭合：skb/descriptor → DMA channel0 → DMA start → MTL queue0/FIFO → phylink PHY link-up → MAC speed/duplex → GMAC_CONFIG.TE。以上候选 6.1.116 与 6.12.81 源码对照中，尚未发现一处足以解释“TX DMA 有完成计数，但 hEX/iMac 外部均收不到帧”的确定性软件差异。
+
+尚未完全覆盖的是：
+1. 6.12.81 实际发布二进制与公开 `ophub/linux-6.12.y-rockchip@661b2d8...` 候选源码是否逐文件一致（构建补丁/配置仍可能有差异）；
+2. MAC 到 RGMII TXD/TXC 引脚的最终硬件输出，以及 PHY line-side 发出状态。既有 loopback/scan 结果不能单独定位到 MAC output 或 PHY line-side；不得重复运行这些测试。
+
+**当前证据支持的最窄结论：** TX 帧已进入驱动/DMA处理并由 MAC/DMA 统计回收，但尚未证明它到达 GMAC RGMII TX 引脚或 PHY 介质侧。当前故障边界在“GMAC内部 TX 统计/descriptor completion”与“外部接收端未见帧”之间；现有静态代码证据不足以断言是 MAC core、RGMII pinmux/波形、PHY 或板级信号完整性中的哪一层。
+
+下一步不再重复常规 stmmac 主路径。应先继续静态核对 6.12.81 发布构建的补丁/配置来源，以及 `dwmac-rk.c` 中平台 reset/clock/pinctrl 的完整 probe→runtime PM→open 时序是否存在与已测正常 6.1.116 不同的、且当前实机记录尚未排除的状态切换。只有当静态证据无法再缩小范围时，才提出一个最小、非破坏性的新增验证，并先征求用户授权。
