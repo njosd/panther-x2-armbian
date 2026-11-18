@@ -480,3 +480,67 @@ Radxa `stable-4.19-rock3` 分支 `arch/arm/mach-rockchip/spl.c` 中 `spl_boot_de
 - https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/spl.c
 - https://github.com/radxa/u-boot/blob/stable-4.19-rock3/configs/rock-3c-rk3566_defconfig
 - https://github.com/radxa/u-boot/blob/stable-4.19-rock3/arch/arm/dts/rk3566-rock-3c.dts
+
+
+## 14. 关键勘误：TF 前 16 MiB 原始镜像与 JP 写入记录存在未解决矛盾（2026-11-18）
+
+在继续推断 BootROM 从 eMMC 启动之前，重新交叉核对 `TF-FIRST16M-AND-BOOTSCR-READONLY-EVIDENCE-2026-11-17.md` 后发现，现有证据存在必须先解决的介质状态矛盾。
+
+### 14.1 TF 原始镜像明确包含旧版 E25 两级启动镜像的字符串
+
+2026-11-17 从 TF 读取前 16 MiB，镜像 SHA-256：
+`75c7e878c4ea78aea76fb9ecb3b037becfe413ba467603df34a4258d9688a70f`
+
+该镜像 strings 结果中：
+- `0x1109b`：`DDR Version V1.13 20220218`
+- `0x3ec09`：`U-Boot SPL 2017.09-armbian (Apr 23 2023 - 13:08:07)`
+- `0x3f138`：`rockchip,rk3566`
+- `0x4d50c`：`radxa,e25`
+- `0x80007c`：FIT Image with ATF/OP-TEE/U-Boot
+- `0x800848`：`rk3568-radxa-e25`
+- `0x8dde8d`：`fdtfile=rockchip/rk3568-radxa-e25.dtb`
+- `0x8f9cf5`：`U-Boot 2017.09-armbian (Apr 23 2023 - 13:08:07 +0000)`
+
+LBA64 对应 byte offset 32,768；LBA16384 对应 byte offset 8,388,608。上面 SPL 字符串位于前者之后的启动镜像区域；FIT/U-Boot proper 字符串位于后者附近。因此这份 TF dump 的内容指纹与旧 E25 `idbloader.img` + 旧 E25 `u-boot.itb` 一致，而不是 JP-TvBox 两个候选文件的预期指纹。
+
+### 14.2 与“JP 两个文件写入 TF 并回读一致”的记录冲突
+
+另一份记录称 JP 文件曾写入 TF：
+- JP idbloader SHA-256：`e8450168f8ac0b35b4ebabe901654d58d6b73cc3d24a5154ef23384339975f63`，目标 LBA64；
+- JP u-boot.itb SHA-256：`a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`，目标 LBA16384；
+- 当时记录回读哈希与目标文件一致。
+
+两组结果不能同时代表同一时刻、同一张 TF 卡、同一用户区偏移的最终内容。现有仓库记录没有提供足够的时间戳/设备序列号/采集先后关系，无法判断原因究竟是：
+1. 前 16 MiB dump 发生在 JP 文件写入之前；
+2. JP 写入和回读操作针对了另一张 TF 卡或不同块设备；
+3. JP 文件写入后又被旧镜像覆盖；
+4. 记录中的设备映射或采集时间有遗漏。
+
+以上均为可能解释，不选择其中任何一个作为事实。
+
+### 14.3 对 BootROM 来源判断的影响：撤回“eMMC 高度吻合”的结论
+
+此前的推断是：BootROM 从 eMMC 加载旧 SPL，再由 SPL 从 TF 加载 JP proper。现在必须撤回其第一段“eMMC 来源高度吻合”的表述，理由是：
+- TF dump 本身也包含旧版 SPL 和旧版 E25 proper 的完整字符串指纹；
+- 如果该 dump 代表本次启动时 TF 的真实状态，则旧 SPL 也可能直接来自 TF；
+- UART 中的旧 SPL banner 只能识别运行代码版本，不能单独识别 BootROM 读取介质；
+- `Trying to boot from MMC2` / ATAGS `mmc 1` 说明 SPL 后续从 SD 加载 proper，不会反向证明 SPL 最初来自 eMMC。
+
+因此，当前可保留的结论只有：
+- 已验证：某次实机日志中执行的是 2023-04 旧 SPL/DDR V1.13，并随后执行 2023-11 JP proper；
+- 已验证：某次 TF 前 16 MiB 采集的内容指纹是旧 E25 SPL + 旧 E25 proper；
+- 已记录但需核对介质身份/时间：JP 两个文件曾被写入并回读到目标 SHA-256；
+- 未知：该次 UART 启动、TF dump、JP 写入回读是否对应同一张 TF 卡和同一时间点；
+- 未知：BootROM 本次到底从 eMMC 还是 TF 加载 SPL。
+
+### 14.4 下一步：先解决证据关联，不进行启动试错
+
+在当前 U-Boot 暂停现场不执行任何操作。后续先从既有原始终端记录中恢复以下关联信息：
+1. JP 文件写入前后对应的块设备名称、`/dev/disk/by-id` 或卡的 CID/序列号（若当时有记录）；
+2. 每次 `dd` 的输入、输出、`seek`、`count`、`bs`、`oflag` 和回读哈希；
+3. TF 前 16 MiB dump 的确切采集时间相对于 JP 写入时间；
+4. UART JP-TvBox 启动日志对应的 TF 卡身份，以及是否发生过换卡/重写。
+
+只有把“设备身份 + 时间顺序 + LBA64/LBA16384 内容哈希”关联起来，才能决定下一步是否需要重新只读读取当前介质。不得重复写入，不要求断电或重启，不修改 eMMC/TF。
+
+**研究优先级调整：先闭合介质身份和时间线，再讨论 BootROM eMMC/SD 选择。此前将 BootROM eMMC 启动作为高度吻合结论的表述已撤回。**
