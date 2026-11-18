@@ -1119,3 +1119,48 @@ Ophub 2026 RK35xx config：
 ### 24.7 下一步
 
 继续静态核对 Rockchip glue 对 `serdes_powerup`、`integrated_phy_power`、`fix_mac_speed` 的 callback 注册条件，以及 6.12.81 实际构建补丁/配置映射。若这些分支均未命中，再集中审计 6.12 新增/改写的 RX-clock/phylink PCS 逻辑是否影响 Panther RGMII 初始化。不得重跑 `mac_lb`、`phy_lb`、`phy_lb_scan`，不得重复 TX descriptor/MTL 审计，不进行设备侧改动。
+
+
+## 25. Software-first audit: Rockchip glue callback registration and applicability (2026-11-18)
+
+本轮继续第 24.7 节的静态源码审计，只核对 Rockchip dwmac-rk.c 对平台回调的注册、RK3568 ops 内容及其是否适用于 Panther X2 的 RK3566 + 外置 RTL8211F RGMII 组合。没有执行设备命令、环回测试、配置修改或硬件操作。
+
+源码候选：
+- 6.1：unifreq/linux-6.1.y，commit 5eb841b59d6ead6e264163785a634e78f0253c8e
+- 6.12：ophub/linux-6.12.y-rockchip，commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c
+
+### 25.1 RK3566 实际匹配的 Rockchip ops
+
+两版 dwmac-rk.c 均将 rockchip,rk3568-gmac 映射到 rk3568_ops。RK3566 设备树使用该 compatible，因此这部分是 Panther 应走的 Rockchip glue 实现，而不是其他 SoC 的 ops。
+
+两版 rk3568_ops 的关键回调一致：set_to_rgmii = rk3568_set_to_rgmii、set_rgmii_speed = rk3568_set_gmac_speed；set_to_rmii / set_to_sgmii / set_to_qsgmii 也均对应 RK3568 实现；GMAC1 resource 地址仍为 0xfe010000。因此，RK3568 ops 表本身没有发现与本次 TX 故障直接相关的回调替换。
+
+### 25.2 6.12 的 SerDes 延迟上电路径没有被 Rockchip glue 注册
+
+6.12 通用 stmmac 使用 plat->serdes_powerup 与 STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP。但在本次对照的 Rockchip dwmac-rk.c 中，rk_gmac_probe() 没有给 plat_dat->serdes_powerup 赋值，没有设置 STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP，RK3568 ops 也没有 SerDes powerup 回调成员。
+
+故 Panther 使用此 Rockchip glue 时，通用 stmmac 中新增的“PHY link-up 后才执行 SerDes powerup”条件分支没有已知回调可调用。6.1 在 open 阶段无条件检查 serdes_powerup 与 6.12 的条件式处理，对 Panther 都是空操作。本分支可从当前优先嫌疑中排除。
+
+### 25.3 6.12 新增 integrated PHY power callback 对 Panther 外置 PHY 不适用
+
+6.12 的 rk_gmac_probe() 新增 plat_dat->integrated_phy_power = rk_integrated_phy_power。stmmac_init_phy() 在 attach PHY 前调用该回调；关闭接口、suspend/resume 等路径也会调用它。Rockchip 回调首先检查 bsp_priv->integrated_phy、ops 与 ops->integrated_phy_power，条件不满足就直接返回 0，不执行 PHY 电源操作。
+
+RK3568 ops 未提供 integrated PHY power 实现；Panther 使用外置 RTL8211F，而不是 RK3568 SoC 内置 PHY。因此该新增回调在 Panther 上应为 no-op，不会改变外置 RTL8211F 的电源/复位时序。
+
+6.1 则在 Rockchip glue 的 rk_gmac_powerup()/powerdown() 中直接处理 integrated PHY。该差异只对 phy-is-integrated 的平台配置有意义，不适用于当前外置 RTL8211F 组合。
+
+### 25.4 6.12 新增 SPH_DISABLE 标志
+
+6.12 的 rk_gmac_probe() 新增 plat_dat->flags |= STMMAC_FLAG_SPH_DISABLE。这是针对 Split Header 模式的配置，不等于关闭普通 TX，也不改变 RGMII speed callback。现有 TX descriptor 审计及运行时普通 AF_PACKET 小帧路径没有证据表明 Panther 使用 SPH。该标志暂不构成普通 DHCP Discover 无法到达外部接收端的解释。
+
+### 25.5 本轮结论
+
+- 已确认：RK3566 使用 rk3568_ops；两版 RK3568 RGMII 设置和速率回调相同。
+- 已确认：Rockchip glue 没有注册 serdes_powerup，也没有设置 SerDes link-up 延迟标志；通用 stmmac SerDes 延迟路径不适用于 Panther 当前驱动组合。
+- 已确认：新增 integrated_phy_power 在外置 RTL8211F 配置下为 no-op，不会控制该外置 PHY。
+- 已确认：SPH_DISABLE 是 Split Header 相关标志，当前没有证据将它与普通小帧 TX 故障关联。
+- 根因状态：本轮排除了几个容易误判的新增回调分支，仍未发现直接根因。
+
+### 25.6 下一步
+
+继续追踪 6.12 stmmac_hw_setup() 中新增的 hw->phylink_pcs / phylink_pcs_pre_init() 路径：先静态确定 RK3568 + RGMII + 外置 RTL8211F 是否可能建立该 PCS 指针，以及它是否会改变 GMAC RX clock / DMA 初始化时序。若该指针在此组合中必为空，则可直接排除此支线，不需要 Panther 实机重复采集。随后再审计 6.12 新增的 MAC capability / mac_requires_rxc 逻辑。
