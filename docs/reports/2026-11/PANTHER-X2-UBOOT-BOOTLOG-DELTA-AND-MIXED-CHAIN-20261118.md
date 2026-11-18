@@ -191,3 +191,44 @@ Linux 后续启动使用 Panther X2 kernel DTB，实际 PHY/千兆链路状态�
 4. JP SPL/DDR V1.10 仍属于未执行候选；若未来需要验证，必须先单独设计不破坏 eMMC 的启动路径，明确介质选择和回退方式。当前不清除、不覆盖、不修改 eMMC 启动区。
 
 本轮不重复 TF 文件写入、SHA-256 回读、MAC 环回、TX/RX、PHY、DHCP 或 hEX 抓包测试。
+
+
+## 10. BootROM 优先级与 Rockchip SD Boot Card 标记的边界补充
+
+进一步核对 Rockchip RK3566 官方《Hardware Design Guide V1.1.0》§2.1.5 与《Rockchip SD Card Boot Reference V1.2.0》（2021-04）后，补充以下关键边界：
+
+- RK3566 Hardware Design Guide 给出的普通启动介质 BootROM 优先级为 SPI NOR、SPI NAND、NAND、eMMC、SDMMC。
+- Rockchip SD Card Boot Reference 区分普通 SD 卡、SD Boot Card、SD Upgrade Card 和 SD Repair Card。
+- Rockchip SD Boot Card 在 LBA 64 写入特殊 IDBLOCK boot flag；文档列出 magic `0xFCDC8C3B`，在 sector 64 + 616 bytes 处写入类型标记，boot card 的 flag 为 1。
+- 该文档明确说明：SPL 会检测 SD 卡及启动标记；如果 SD 卡被识别为可启动 SD Boot Card 且包含有效固件，SPL 会优先从 SD 卡加载下一阶段。
+- 文档的平台表对 RK3566/RK3568 标记支持 Android BCB 方法；传统 IDB flag 机制并非所有平台都支持，且文档说明该机制逐渐被淘汰。
+
+来源：
+- RK3566 Hardware Design Guide V1.1.0 §2.1.5：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- Rockchip SD Card Boot Reference V1.2.0：https://doc.9tripod.com/en/docs/rockchip-official-docs/MMC/Rockchip_Developer_Guide_SD_Boot_CN/
+
+### 10.1 对本次日志的精确解释
+
+必须区分两个阶段：
+1. BootROM 选择并加载 SPL；
+2. 已经运行的 SPL 决定从哪个介质加载 U-Boot proper。
+
+UART 中的 `Trying to boot from MMC2` 是 SPL 的输出，不是 BootROM 自身的启动介质报告。它直接说明当前运行的 SPL 正尝试从 MMC2 加载后续固件；结合 MMC2=SD/TF 的既有日志映射，与“eMMC SPL → TF U-Boot proper”相符。
+
+但仅凭这一行不能证明 BootROM 一定从 eMMC 读取 SPL。BootROM 介质选择仍须考虑 TF 卡是否被制作成 Rockchip 可启动 SD Boot Card、IDBLOCK/BCB 标记以及该芯片/ROM 版本所采用的启动策略。
+
+### 10.2 当前结论修订
+
+- **仍高度吻合：** 当前实机运行的 SPL 是 2023-04 / DDR V1.13 旧版本；随后由该 SPL 从 MMC2（TF/SD）加载 2023-11 JP U-Boot proper。
+- **尚未直接证实：** BootROM 最初从 eMMC LBA 64 读取该 SPL。eMMC LBA 64 的镜像哈希与 SPL 内部指纹吻合，RK3566 常规 BootROM 优先级也支持该解释，但仍缺本次 TF IDBLOCK/BCB boot-card 标记的完整审计及硬件级读介质轨迹。
+- **不再使用过度简化的表述：** 不能仅用“eMMC 优先于 SD”作为 BootROM 实际读取 eMMC 的唯一证明；需要同时核对 SD Boot Card 标记与 SPL 日志。
+
+### 10.3 下一项只读取证（不要求重复已有镜像哈希）
+
+如需进一步闭环，优先对现有 TF 卡原始 LBA 64 区域做只读检查：
+- 检查 IDBLOCK magic；
+- 检查 offset 616 bytes 的 boot-card flag；
+- 检查 BCB/misc 分区是否包含 Rockchip SD boot/recovery 标记；
+- 将实际值与 Rockchip SD Boot Reference 的定义对照。
+
+不重写 LBA 64，不改 BCB，不改 eMMC 启动区，也不为了验证而改变启动顺序。
