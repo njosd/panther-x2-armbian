@@ -2322,3 +2322,43 @@ Panther 的 MDIO firmware node 存在；`stmmac_mdio_setup()` 对存在 `mdio_no
 
 下一项最有价值的最小只读取证不是重跑网络测试，而是核对 6.1.116 实际启动文件链：`findmnt` 确认 boot media 与 `/boot` 的关系，取得 `/sys/firmware/fdt` 和当前 `/boot/dtb/rockchip/rk3566-panther-x2.dtb` 的哈希，并检查上述两个可选 fixup script 的存在性/内容。该采集不修改配置、不触发 PHY reset、不重启接口；取得结果后再判断 6.1 运行时 FDT 为何缺少源码中存在的 reset GPIO 属性。
 
+
+
+## 47. 重新启动 6.1.116：运行时 FDT 与双向网络正常性复核（2026-11-18）
+
+用户重新启动 Panther X2 的 6.1.116，并提供同一轮只读采集与网关 ping 前后接口计数。未修改设备配置、设备树、驱动或网络服务。
+
+### 47.1 内核与运行时 FDT
+
+- `uname -a`：`Linux 6.1.116-ophub`。
+- `/sys/firmware/fdt` SHA-256：`4a844ffd03482b0511b06cb3075563e22bc538f845626827547e154de191c1a5`。
+- GMAC1 节点：`rockchip,rk3568-gmac` / `snps,dwmac-4.20a`，状态 `okay`。
+- `phy-mode=rgmii`，`clock_in_out=input`，TX/RX delay 为 `0x30/0x10`。
+- **本次实际运行时 FDT 明确包含** `snps,reset-gpio`、`snps,reset-active-low` 与 `snps,reset-delays-us=<0 20000 100000>`。
+- reset GPIO 属性字节为 phandle `0x52`、line `1`、flags `1`；phandle 数值可因 FDT 编译而异，不能直接与另一启动 FDT 的 phandle 数字比较。其 line、有效电平和延时与此前 6.12.81 运行时记录的 GPIO3 line 1、低有效、20ms/100ms 配置在语义上相同。
+- 运行时 eth0 MAC 与 FDT 的 local/mac-address 一致；公开报告不重复暴露完整 MAC。
+
+### 47.2 链路与双向通信
+
+- eth0：`UP, LOWER_UP`，`Link detected: yes`。
+- 协商速率：1000 Mb/s，全双工。
+- ping `192.168.9.1`：10 transmitted、10 received、0% packet loss，平均 RTT 0.665 ms。
+- ping 前后 netdev 计数：
+  - TX packets：2243 → 2256（+13）
+  - RX packets：4635 → 4667（+32）
+  - TX/RX errors、dropped、carrier、collisions 均为 0。
+- 同轮 MMC 快照：TX good+bad 与 good-only frame count 均为 2236，octet count 均为 273004；underflow/carrier 相关错误计数为 0。该快照是累计值，不把全部累计帧归因于本次 10 个 ping。
+
+### 47.3 对第 46 节结论的更正
+
+第 46 节依据此前归档的 6.1.116 基线文件，曾记载该次 6.1.116 运行时 FDT 未列出 PHY reset GPIO 属性，并据此将它与 6.12.81 的 FDT 作差异比较。**本次重新启动的 6.1.116 实机运行时 FDT 明确包含同一语义的 PHY reset GPIO 配置，而且网络正常。**
+
+因此：
+- 第 46 节关于“6.1.116 正常环境没有 PHY reset GPIO、6.12.81 故障环境有该属性”的概括不能作为当前有效的版本差异结论；它只描述此前那份历史采集与本次新采集之间的不一致。
+- **已实机验证：** 带有该 PHY reset GPIO 属性的 6.1.116 可以正常建立千兆全双工链路，并与 hEX 完成双向 IP 通信。
+- **结论：** 单凭 PHY reset GPIO 属性的存在、低有效设置或 20ms/100ms 延时，不能解释 6.12.81 的 TX 故障。该支线降级，不再追查历史 116 当时究竟加载了哪个 DTB，除非未来出现能改变当前版本对照结论的新证据。
+- 本次运行时 FDT SHA-256 与此前历史采集不同，表明两次实际交给 Linux 的 FDT blob 不同；但不需要追溯旧 DTB 来源来回答当前核心问题，因为本次已经证明 6.1.116 在包含该 reset 配置的 FDT 下工作正常。
+
+### 47.4 后续研究方向
+
+不重复 116 网络测试、环回测试或 PHY 扫描。下一步将回到 6.1.116 与 6.12.81 的 Linux 软件路径对照，优先查找已知相同硬件/FDT 条件下仍可能不同的驱动初始化顺序、MAC/PHY 接口协商后状态管理，以及 6.12 发布构建实际应用的补丁；硬件电气审计继续放在最后。
