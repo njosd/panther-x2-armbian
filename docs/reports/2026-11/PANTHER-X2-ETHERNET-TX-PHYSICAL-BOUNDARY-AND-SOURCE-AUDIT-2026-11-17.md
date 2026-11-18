@@ -2134,3 +2134,37 @@ Databook 还把 jabber timeout、no carrier/loss of carrier、late collision、f
 ### 42.5 下一步
 
 静态软件审计的剩余项已很少。下一步不再重复 DMA/descriptor/clock/PHY ID/loopback/scan。应先检查现有报告中是否已经保存 `mmc_tx_framecount_g` 的逐次增量与自定义 60-byte 帧测试时间点；若没有，就把它标为“累计快照支持、单帧关联未独立证明”，不要求用户重跑。随后汇总目前证据，设计一个新的、最小、只读且不访问危险寄存器的 MAC→RGMII→PHY 边界验证，实施前先向用户说明并征求授权。
+
+
+## 43. MMC good-only counter evidence scope correction (2026-11-18)
+
+**重要更正：第 42 节引用的 `1557` good-only counters 来自 6.1.116 已知正常基线，不是 6.12.81 故障内核。** 原始文件 `evidence/network/panther-eth-baseline-redacted.txt` 开头明确记载 `uname -a` 为 `6.1.116-ophub`，采集时间 2026-11-17 12:50:26+08:00。
+
+### 43.1 两个内核的计数必须分开
+
+| 证据 | 6.1.116 已知正常基线 | 6.12.81 故障测试 |
+|---|---:|---:|
+| `mmc_tx_framecount_gb` | 1557 | 当前启动期后续采样 118（另有同周期 116） |
+| `mmc_tx_framecount_g` | 1557 | **没有归档值** |
+| `mmc_tx_octetcount_gb` | 156359 | 当前启动期后续采样 30639（另有前一采样 29977） |
+| `mmc_tx_octetcount_g` | 156359 | **没有归档值** |
+| Linux/netdev/driver TX packets | 基线约 1550 | 当前启动期 118 |
+
+6.12.81 网络测试日志第 11 节明确：当前启动期软件/netdev/MMC `GB` TX packet/frame counts 从 23 连续增加至 118，未见 eth0 unregister/register 或 GMAC reset。此前 `tx_pkt_n=392` 与 `mmc_tx_framecount_gb=4` 的快照属于统计生命周期不匹配，已撤销为当前启动期的差异证据。
+
+### 43.2 正确解释
+
+- **6.1.116：** `mmc_tx_framecount_g = mmc_tx_framecount_gb = 1557`，说明已知正常基线中 MMC 将累计计数帧全部归为 good；`mmc_tx_octetcount_g` 也与 `_gb` 相等。
+- **6.12.81：** 现有同生命周期数据只记录 `mmc_tx_framecount_gb`，未记录 good-only `mmc_tx_framecount_g`。因此目前不知道 6.12.81 的 118 个 MMC 计数帧中有多少被 MAC 归为 good、多少为 bad。
+- 6.12.81 当前 `GB` 与 Linux/netdev/driver packet counters 一致，只能说明此前认为的 392/4 严重差值不能用于当前启动期；不能把 `GB` 一致解释为 MAC good-only 成功。
+- 6.1.116 的 good-only 结果只能作为已知正常版本的参照，不能移植为 6.12.81 的事实。
+
+### 43.3 修正第 42 节的适用范围
+
+第 42 节 42.1/42.3/42.4 中“MAC 已将故障机帧计为 good transmission”这一表述不适用于 6.12.81，必须按本节修正。当前准确表述：
+
+**6.12.81 已确认 skb 进入驱动、TX descriptor completion 被回收、Linux/netdev/driver/MMC GB 计数在当前启动期一致；good-only MMC 计数未采集。** 因而 MAC 是否将这些帧全部视为 good 尚未证明。外部 iMac/hEX 未见帧的边界仍位于 Panther 本机 outgoing capture 之后，不能进一步断言已越过 GMAC MAC TX protocol engine。
+
+### 43.4 下一步
+
+不要求用户重跑历史测试。后续若进行新的、经授权的最小验证，应在同一时间窗读取现有 `ethtool -S` 中 `mmc_tx_framecount_g` / `mmc_tx_octetcount_g` 与 `_gb` 的差值，并与一帧测试的时间点对应；在此之前，6.12.81 的 MAC good/bad 分类标为未验证。
