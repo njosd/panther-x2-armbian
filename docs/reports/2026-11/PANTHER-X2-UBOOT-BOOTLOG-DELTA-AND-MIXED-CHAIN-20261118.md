@@ -363,3 +363,71 @@ Rockchip U-Boot 开发指南也说明 SPL 使用 `u-boot,spl-boot-order` 选择�
 - Rockchip U-Boot 源码 `spl.c`：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/spl.c
 - Rockchip U-Boot 源码 `param.c`：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/param.c
 - Rockchip U-Boot v2017(next-dev) 开发指南 §10.3.3–10.3.4：https://download.t-firefly.com/product/Board/RK356X/Document/Developer/Rockchip_Developer_Guide_UBoot_Nextdev_CN.pdf
+
+
+## 13. BootROM 与 SPL 的两级介质优先级：解释旧 SPL 从 eMMC 启动、再从 TF 取 proper（2026-11-18 追加）
+
+本节将 RK3566 官方硬件设计指南、Rockchip SD Card Boot Reference、Rockchip U-Boot 源码和 Panther X2 实机日志放在同一启动时序中核对。
+
+### 13.1 BootROM 的启动顺序与 SPL 的下一阶段选择不是同一件事
+
+Rockchip《RK3566 Hardware Design Guide V1.1.0》（2022-02-06）§2.1.5 明确列出芯片复位后 BootROM 的介质优先级：Serial NOR (FSPI) → Serial NAND (FSPI) → NAND → eMMC → SDMMC。该指南适用于 RK3566，并明确写明这是芯片内部 BootROM 的自动启动顺序。当前没有 Panther X2 板级证据表明另有 SPI/NAND 启动介质，因此在本机现有 eMMC + TF 的组合下，eMMC 排在 SDMMC 前面。
+
+### 13.2 SPL 会再次选择“从哪里加载 U-Boot proper”
+
+Rockchip《SD Card Boot Reference V1.2.0》（2021-04）§4.2 描述了另一个阶段：SPL 初始化后查找存储设备；若 SD 卡存在且有可启动的后续固件，则优先从 SD 加载下一阶段，否则再查找其他存储设备。
+
+Rockchip U-Boot `include/configs/rockchip-common.h` 的 proper boot target 也有明确注释：先尝试 SD（mmc index 1），再尝试 eMMC（index 0）。这属于 U-Boot proper 的启动文件扫描阶段，不能拿来代替 BootROM 的 ROM 搜索顺序。
+
+### 13.3 与 Panther X2 实机日志吻合
+
+现有实机记录：
+- eMMC LBA64 保存的 `idbloader.img` 与 2023-04-23 SPL / DDR V1.13 的版本、时间和内嵌 Radxa E25 FDT 指纹吻合。
+- 本次 SPL banner 确为 2023-04-23 / DDR V1.13。
+- SPL 输出 `Trying to boot from MMC2`。
+- proper 输出 `Bootdev(atags): mmc 1`，并枚举 `dwmmc@fe2b0000: 1 (SD)`。
+- proper 随后从 `mmc1:1` 找到 TF 上的 `/boot.scr`。
+
+因此，最简洁且与公开启动顺序完全一致的解释是：
+
+```text
+RK3566 BootROM
+  └─ 按 ROM 顺序先从 eMMC 找到有效 IDBLOCK
+       └─ 执行 eMMC LBA64 的旧 2023-04 SPL / DDR V1.13
+            └─ SPL 再按自身的下一阶段策略优先选择 SD/TF
+                 └─ 从 TF 加载 JP U-Boot proper
+                      └─ proper 从 TF 加载 /boot.scr、内核、initrd、Panther X2 DTB
+```
+
+这解释了为什么 TF 上虽然也写入了 JP `idbloader.img`，实机仍显示旧 SPL：在 eMMC 有有效 IDBLOCK 且 BootROM 的公开优先级为 eMMC 高于 SDMMC 的情况下，BootROM 会先选中 eMMC 的 SPL；TF 上的 JP SPL 不会因为 U-Boot proper 后来从 TF 启动而自动成为本次执行的 SPL。
+
+### 13.4 对 SD Boot flag / BCB 结论的精确限定
+
+Rockchip SD Card Boot Reference §4.1 明确将 RK3566/RK3568 的旧式 IDB block flag 支持栏留空，而 Android BCB 栏标记为支持。§4.2 又说明旧式 flag 逐渐废弃，并区分 SD Boot Card、SD Upgrade Card、SD Repair Card。
+
+因此不能把 LBA64+616 的旧式 flag 当成 RK3566 通用 BootROM 介质优先级开关；BCB 的 `recovery\\n--rk_fwupdate\\n` 在该文档中是 SD 升级/恢复路径标记，不是已证实可令普通 Armbian TF 卡越过 eMMC 的 BootROM 选择开关。当前 Armbian TF 仅有 BOOT/ROOTFS 两个 GPT 分区，也没有已知 Android misc 分区。
+
+### 13.5 证据等级
+
+| 结论 | 状态 |
+|---|---|
+| RK3566 BootROM 公布顺序中 eMMC 在 SDMMC 前 | 已由 Rockchip Hardware Design Guide 直接确认 |
+| Rockchip SPL 可在 BootROM 启动后优先从 SD 加载 U-Boot proper | 已由 Rockchip SD Card Boot Reference 描述；与实机日志吻合 |
+| 本次运行 SPL 从 TF 加载 JP U-Boot proper | 已由 SPL MMC2、ATAGS mmc1、proper 的 SD 映射和 TF 文件扫描日志闭环 |
+| 本次 BootROM 实际从 eMMC 加载旧 SPL | 高度吻合推断：eMMC LBA64 二进制指纹匹配 + ROM 优先级 + SPL banner；尚无该次启动的 BROM source register 直接读数 |
+| TF 上 JP SPL 本身能否独立初始化 Panther X2 DDR 并完成冷启动 | 未验证；本次实机并未执行 TF 上 JP SPL |
+
+### 13.6 研究决策
+
+目前不应通过清除 eMMC 启动区、改写 eMMC IDBLOCK、制作 Android SD Upgrade/Repair Card 或改变启动绑带来验证。那些做法会改变启动介质或有恢复风险，超出当前只读研究范围。
+
+后续应继续做离线源码/二进制审计：
+1. 查明 eMMC 旧 SPL 是否保留或输出 BootROM bootsource ID（Rockchip 源码定义 SRAM `BROM_BOOTSOURCE_ID_ADDR = CFG_IRAM_BASE + 0x10`，枚举中 eMMC=2、SD=5）；但不要在当前暂停现场贸然读地址，必须先确认当前 SPL/ATF 的内存映射和 U-Boot 命令能力。
+2. 追踪 eMMC 旧 SPL 的板级配置、MMC 控制器映射和 DDR V1.13 参数来源。
+3. 独立评估 JP SPL 的 DDR/PMIC/FDT 是否适配 Panther X2；不能因 JP proper 能在旧 SPL 环境下运行就推断 JP SPL 也能冷启动。
+
+参考：
+- Rockchip RK3566 Hardware Design Guide V1.1 §2.1.5：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- Rockchip SD Card Boot Reference V1.2 §4.1–4.2：https://doc.9tripod.com/en/docs/rockchip-official-docs/MMC/Rockchip_Developer_Guide_SD_Boot_CN/
+- Rockchip U-Boot `bootrom.h`（BROM bootsource IDs 与 SRAM 地址）：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/include/asm/arch-rockchip/bootrom.h
+- Rockchip U-Boot `rk_atags.c`、`spl.c`、`param.c`：见第 12 节源码链接。
