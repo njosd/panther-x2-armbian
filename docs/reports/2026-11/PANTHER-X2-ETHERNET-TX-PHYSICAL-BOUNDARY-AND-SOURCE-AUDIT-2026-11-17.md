@@ -2362,3 +2362,120 @@ Panther 的 MDIO firmware node 存在；`stmmac_mdio_setup()` 对存在 `mdio_no
 ### 47.4 后续研究方向
 
 不重复 116 网络测试、环回测试或 PHY 扫描。下一步将回到 6.1.116 与 6.12.81 的 Linux 软件路径对照，优先查找已知相同硬件/FDT 条件下仍可能不同的驱动初始化顺序、MAC/PHY 接口协商后状态管理，以及 6.12 发布构建实际应用的补丁；硬件电气审计继续放在最后。
+
+
+## 48. 6.1.116 完整软件基线采集：启动链、FDT、驱动、配置与时钟（2026-11-18）
+
+本节依据 6.1.116 当前正常启动后的完整只读采集归档。采集时间约为 2026-11-18 12:49 CST；未修改系统、未重启、未改变网络参数。
+
+### 48.1 启动链
+
+- 当前内核明确为 \`6.1.116-ophub\`。
+- \`/boot/armbianEnv.txt\` 指定 \`fdtfile=rockchip/rk3566-panther-x2.dtb\`，overlays 和 user_overlays 均为空。
+- \`boot.cmd\`/生成的 \`boot.scr\` 直接从当前启动设备加载 \`Image\`、\`uInitrd\` 和 \`dtb/\${fdtfile}\`。
+- boot script 随后会依次尝试加载：
+  1. \`dtb/rockchip/overlay/rk3566-fixup.scr\`；
+  2. 可选的 \`/boot/fixup.scr\`。
+- 因此，不能仅凭 \`rk3566-panther-x2.dtb\` 文件内容判断最终 FDT；当前 Linux 接收到的 FDT 还可能经过 fixup script 修改。
+- 当前运行时 FDT SHA-256 为 \`4a844ffd03482b0511b06cb3075563e22bc538f845626827547e154de191c1a5\`。
+- 当前用户空间只看到 \`u-boot-tools 2022.01+dfsg-2ubuntu2.5\`，这不是 U-Boot bootloader 本体版本，因此不能据此认定板载 U-Boot 版本。
+
+### 48.2 当前运行时 FDT 的 GMAC 条件
+
+GMAC1 \`fe010000.ethernet\`：
+- \`rockchip,rk3568-gmac\` + \`snps,dwmac-4.20a\`；
+- \`status=okay\`；
+- \`phy-mode=rgmii\`；
+- \`clock_in_out=input\`；
+- TX/RX delay = \`0x30 / 0x10\`；
+- PHY reset GPIO = phandle \`0x52\`、line 1、flags 1；
+- \`snps,reset-active-low\`；
+- reset delays = \`0 / 20000 / 100000 us\`；
+- MAC address 与运行时 FDT 的 local/mac-address 一致；
+- \`phy-handle\` 指向 MDIO PHY。
+
+这进一步确认：116 当前正常工作环境与此前 6.12 运行时 FDT 在 PHY reset 语义、RGMII delay、clock input 方向上不存在一个可以直接解释 TX 故障的简单差异。
+
+### 48.3 116 驱动实际初始化日志
+
+当前启动日志显示：
+- Rockchip GMAC 报 \`clock input or output? (input)\`；
+- TX delay 0x30、RX delay 0x10；
+- \`integrated PHY? (no)\`；
+- \`clock input from PHY\`；
+- \`init for RGMII\`；
+- Synopsys User ID 0x30 / Synopsys ID 0x51；
+- DWMAC4/5；
+- DMA HW capability、RX checksum、TX checksum、WOL、TSO 均识别正常；
+- 32/32-bit DMA host/device width；
+- RxQ-0 page-pool 注册；
+- RTL8211F PHY，PHY ID \`0x001cc916\`；
+- \`configuring for phy/rgmii link mode\`；
+- 最终 \`Link is Up - 1Gbps/Full - flow control rx/tx\`。
+
+因此 116 的完整 probe → DMA → MDIO/PHY → RGMII → Link 初始化链是闭合的。
+
+### 48.4 驱动配置与运行参数
+
+116 kernel config 确认：
+- \`CONFIG_STMMAC_ETH=y\`
+- \`CONFIG_STMMAC_PLATFORM=y\`
+- \`CONFIG_DWMAC_ROCKCHIP=y\`
+- \`CONFIG_DWMAC_GENERIC=y\`
+- \`CONFIG_MDIO_BUS=y\`
+- \`CONFIG_PHYLIB=y\`
+- \`CONFIG_PHYLINK=y\`
+- \`CONFIG_RESET_CONTROLLER=y\`
+- \`CONFIG_ROCKCHIP_GRF=y\`
+- \`CONFIG_ROCKCHIP_PHY=y\`
+- \`CONFIG_HZ=250\`
+- \`CONFIG_PREEMPT_VOLUNTARY=y\`
+- PTP 主配置未启用，但 optional 接口存在。
+
+stmmac 当前内建驱动参数：
+- \`buf_sz=1536\`
+- \`chain_mode=0\`
+- \`eee_timer=1000\`
+- \`flow_ctrl=3\`
+- \`pause=65535\`
+- \`tc=64\`
+- \`watchdog=5000\`
+
+### 48.5 当前网卡运行状态
+
+- driver: \`st_gmac\`
+- version: \`6.1.116-ophub\`
+- PHY: RTL8211F, ID \`0x001cc916\`
+- interface: RGMII
+- ring：RX 512 / TX 512（上限均 1024）
+- RX coalesce：327 us
+- TX coalesce：5000 us / 25 frames
+- TX/RX checksum offload、scatter-gather、TSO、GSO/GRO 均处于正常启用状态；没有为了“跑通网络”人为关闭 TX offload。
+
+### 48.6 当前时钟状态
+
+运行时 clock summary 显示：
+- \`clk_gmac1\`：125 MHz，enabled；
+- \`gmac1_clkin\`：125 MHz，enabled；
+- \`clk_gmac1_rgmii_speed\`：125 MHz，enabled；
+- \`clk_gmac1_rx_tx\`：125 MHz，enabled；
+- \`aclk_gmac1\`：300 MHz，enabled；
+- \`pclk_gmac1\`：100 MHz，enabled；
+- \`clk_gmac1_ptp_ref\`：62.5 MHz，enabled。
+
+因此 116 当前运行时 GMAC 相关 clock tree 是完整工作的。
+
+### 48.7 新的研究意义
+
+这份基线使 116→6.12 的比较进一步收敛：
+
+1. 116 正常时也使用 PHY reset GPIO；
+2. 116 正常时也使用 RGMII TX/RX delay 0x30/0x10；
+3. 116 正常时也使用 clock input from PHY；
+4. 116 正常时 DWMAC4/5、32/32 DMA、TSO、checksum offload 均正常；
+5. 116 正常时 RTL8211F 为同一 PHY ID；
+6. 116 正常时 GMAC 相关时钟均已使能。
+
+因此后续不应再把这些“存在/不存在”的静态条件作为 6.12 TX 故障的主要嫌疑。
+
+**下一步最有价值的工作是把这份 116 基线逐项与已经归档的 6.12.81 实机采集做差分，重点寻找“116 初始化后正常、6.12 初始化后异常”的运行时状态，而不是继续扩大 116 的测试范围。**
