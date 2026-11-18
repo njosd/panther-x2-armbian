@@ -1630,3 +1630,64 @@ RK3566 使用 DWMAC4 DMA ops。对照 `dwmac4_dma_reset()`：
 4. 是否存在“DMA ST=1、descriptor 已清理，但 MAC TE 或 speed clock 未处于正确状态”的代码路径。
 
 这比继续重复 MTL/DMA ring 检查更接近当前证据边界。仍只读源码和已有日志，不要求重跑设备测试。
+
+
+## 34. phylink core resolve/link-up sequencing cross-check (2026-11-18)
+
+本轮按第 33.6 节继续检查 phylink core 的 `phylink_resolve()` / `phylink_link_up()`，并回查第 28 节既有 stmmac callback 结论，避免重复做设备测试。仅静态比较 6.1.116 与 6.12.81 候选源码。
+
+### 34.1 PHY 自协商路径的 resolve 行为保持等价
+
+6.1 `phylink_resolve()` 使用 `cur_link_an_mode` switch；6.12 改用 `act_link_an_mode` if/else，并将 `link_failed` 状态管理与原 `mac_link_dropped` 重构。对于 Panther 的 `MLO_AN_PHY`：
+- 两版都从 `pl->phy_state` 取得 link state；
+- 两版都在 PHY link up 时设置 `mac_config=true`；
+- 两版都应用 manual flow-control policy；
+- 两版都在 interface 变化时先执行 link-down，再 `phylink_major_config()`；
+- 两版都在 link state 从 down→up 时调用 `phylink_link_up()`。
+
+6.12 将 `phylink_apply_manual_flow()` 从所有模式统一调用改为仅非 `MLO_AN_FIXED` 调用。Panther 是 `MLO_AN_PHY`，仍然执行，因此行为没有变化。
+
+### 34.2 6.1 的 legacy mac_config 重调在 Panther 上是空操作
+
+6.1 在 interface 未变化、没有 PCS 且 `legacy_pre_march2020` 条件满足时，会再次调用 `phylink_mac_config()`；6.12 删除了这个 legacy 分支。
+
+但 STMMAC 注册的 `stmmac_mac_config()` 函数本身仅有注释 `Nothing to do, xpcs_config() handles everything`，函数体为空。Panther 是 RGMII 且没有 PCS；因此即便 6.1 满足 legacy 条件，这次额外调用也不写 MAC/MTL/时钟寄存器。删除该调用不能解释 TX 差异。
+
+### 34.3 Link-up callback 的先后次序未变
+
+两版 `phylink_link_up()` 都执行：
+1. 从 PHY/link state 取得 speed、duplex、pause；
+2. 更新 `cur_interface`；
+3. 确定 negotiation mode；
+4. `phylink_pcs_link_up()`（Panther 无 PCS，为空操作）；
+5. 调用 `mac_ops->mac_link_up()`；
+6. 最后才 `netif_carrier_on()`。
+
+6.12 的 `cur_link_an_mode` 改为 `act_link_an_mode`，属于当前生效模式字段重命名/状态模型整理；在 Panther PHY 自协商模式下没有发现调用顺序变化。
+
+`stmmac_mac_link_up()` 两版均在 `mac_link_up` callback 中：
+- 先调用 Rockchip `fix_mac_speed()`，按已协商的 1000Mbps 将 `clk_mac_speed` 设为 125MHz；
+- 再更新 MAC speed/duplex 字段；
+- 调用 flow-control 配置；
+- 写 MAC control register（若值变化）；
+- 调用 `stmmac_mac_set(..., true)` 开启 MAC。
+
+6.12 新增的 SerDes powerup 在 link-up callback 开头执行，但 Panther 的 Rockchip glue 未注册该回调，且当前是 RGMII，不会产生动作。6.12 新增的 hwtstamp latency correction 在普通 MAC enable 后执行，不改变普通帧发送开关。
+
+### 34.4 Rockchip speed-clock callback 的变化是参数/对象管理，不是速率逻辑改变
+
+两版 `rk_fix_speed()` 都按 `bsp_priv->phy_iface` 选择 RGMII 分支，并调用 `set_rgmii_speed(bsp_priv, speed)`；6.12 增加的 `mode` 参数没有被使用。
+
+`rk3568_set_gmac_speed()` 两版都按 10/100/1000 Mbps 设置 2.5/25/125 MHz。6.1 从 bulk clock 数组索引取得 `clk_mac_speed`，6.12 从 `bsp_priv->clk_mac_speed` 直接取得；当前 Panther runtime clock_summary 已记录 125MHz 且 enabled，因此代码对象重构没有证据指向速率时钟缺失。
+
+### 34.5 本轮结论
+
+- **已确认：** Panther `MLO_AN_PHY` 下，6.1 与 6.12 phylink resolve/link-up 主调用顺序等价。
+- **已确认：** 6.12 删除的 legacy `mac_config` 重调对 STMMAC 是空函数调用，不改变寄存器。
+- **已确认：** `mac_link_up()` 中 fix speed → MAC speed/duplex → flow control → MAC enable 的顺序没有改变；PHY 自协商成功后才将 carrier 置为 on。
+- **已确认：** RK3568 speed callback 的速率表和 125MHz 目标值相同，6.12 仅新增未使用的 `mode` 参数并改变 clock 指针保存方式。
+- **结论：** phylink resolve / link-up 回调顺序目前可以从普通 TX 故障候选中降级；没有发现 6.12 在 PHY link-up 后遗漏 MAC TE enable 的代码路径。
+
+### 34.6 下一步
+
+避免再对第 28 节已完成的 `mac_link_up()` 做重复逐函数比较。下一轮回到仍未完全闭合的 software boundary：检查 `stmmac_mac_set()` 的具体 TE/RE 位操作与 MAC core init/reset 后的寄存器写入覆盖关系，以及 DWMAC4 `core_init` 中 MAC_CONFIG 的默认值/PS 位处理是否可能在 link-up 之前或之后覆盖 TE。若源码两版同样，则当前静态代码审计可给出更明确的边界结论：TX descriptor/DMA/MTL/phylink/MAC enable 均未发现足以解释外部 TX 消失的 6.1→6.12 软件差异，下一步必须依靠已归档的运行时证据或未来经授权的引脚级 TXC/TXD 观测来区分 MAC output 与 PHY line-side；不重复既有 loopback、tcpdump、DMA 计数和时钟测试。
