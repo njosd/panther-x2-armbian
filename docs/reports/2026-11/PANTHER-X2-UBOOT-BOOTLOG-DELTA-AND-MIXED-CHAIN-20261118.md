@@ -431,3 +431,52 @@ Rockchip SD Card Boot Reference §4.1 明确将 RK3566/RK3568 的旧式 IDB bloc
 - Rockchip SD Card Boot Reference V1.2 §4.1–4.2：https://doc.9tripod.com/en/docs/rockchip-official-docs/MMC/Rockchip_Developer_Guide_SD_Boot_CN/
 - Rockchip U-Boot `bootrom.h`（BROM bootsource IDs 与 SRAM 地址）：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/include/asm/arch-rockchip/bootrom.h
 - Rockchip U-Boot `rk_atags.c`、`spl.c`、`param.c`：见第 12 节源码链接。
+
+
+## 14. BootROM bootsource SRAM 读取路径与 Radxa stable-4.19-rock3 配置核验（2026-11-18）
+
+### 14.1 找到 Rockchip SPL 对 BootROM 来源寄存器的读取实现
+
+在 Rockchip U-Boot 源码中确认：
+- `arch/arm/include/asm/arch-rockchip/bootrom.h` 定义 BootROM source ID：eMMC=2、SD=5、SPI NOR=3、SPI NAND=4。
+- 同一头文件定义 `BROM_BOOTSOURCE_ID_ADDR = CONFIG_ROCKCHIP_IRAM_START_ADDR + 0x10`。
+- `arch/arm/mach-rockchip/spl.c` 的 `board_spl_was_booted_from()` 通过 `readl(BROM_BOOTSOURCE_ID_ADDR)` 读取该值，并按 `BROM_BOOTSOURCE_MASK`（新版本还处理 download bit）解析。
+- 该函数用于 SPL boot-order 中 `same-as-spl` 的来源识别；它不是 U-Boot proper 默认会打印的普通启动日志。
+
+重要限制：这是 Rockchip 通用 SPL 源码路径。不能仅凭该函数存在，就断言本机 2023-04 旧 SPL 一定包含该实现、启用了相应配置，或在当前 proper 阶段仍保留该 SRAM 内容。必须对齐 eMMC 实际旧 SPL 的精确源码版本/配置，才可决定是否能在当前 U-Boot prompt 读该地址。
+
+### 14.2 当前 Radxa stable-4.19-rock3 defconfig 的板级配置发现
+
+直接读取 `radxa/u-boot` 分支 `stable-4.19-rock3` 的 `configs/rock-3c-rk3566_defconfig`，文件 SHA `f7131f261fdd83d4c454577f91a455d01f6d41c3`：
+- `CONFIG_ROCKCHIP_RK3568=y`（Rockchip 对 RK3566/RK3568 共用该 SoC family Kconfig 名称）。
+- `CONFIG_TARGET_EVB_RK3568=y`。
+- `CONFIG_DEFAULT_DEVICE_TREE="rk3566-rock-3c"`。
+- 因此构建目标宏仍为 EVB RK3568，但编译时默认 U-Boot device tree 是 ROCK3 Model C；这不是 Panther X2 专用 board target/control FDT。
+- `CONFIG_GMAC_ROCKCHIP=y`、`CONFIG_DM_ETH=y`，具备 GMAC 驱动编译选项。
+
+同分支 `arch/arm/dts/rk3566-rock-3c.dts`（SHA `91a21bb2767de12e4645f60d4e25173dad2e4a73`）GMAC1 节点设置：
+- `clock_in_out = "output"`；
+- reset GPIO3_PC0，低有效，reset delays `<0 20000 100000>`；
+- GMAC1 M1 pinctrl；
+- TX delay `0x47`、RX delay `0x27`。
+
+这些设置与 Panther X2 Linux DTS 的 M0 / input / GPIO3_PA1 / TX 0x30 / RX 0x10 仍然存在已记录差异。因此该分支是 Armbian 官方修复路线的重要候选来源，但不能直接等同于 Panther X2 专用适配。
+
+### 14.3 关于 SPL MMC 启动选择，不从 proper 的 SD 优先策略反推
+
+Radxa `stable-4.19-rock3` 分支 `arch/arm/mach-rockchip/spl.c` 中 `spl_boot_device()` 默认返回 `BOOT_DEVICE_MMC1`，除特定 Chromebook 或 `ROCKCHIP_BACK_TO_BROM` 配置外没有固定返回 MMC2。其 `board_spl_was_booted_from()` 可读 BROM source SRAM，但默认 `boot_devices[]` 是 weak 空表。
+
+该分支 `rk3566-rock-3c.dts` 未找到 `/chosen/u-boot,spl-boot-order` 项。因此仅凭该分支当前可见的 SPL 源码和 DTS，不能解释本机旧 SPL 日志 `Trying to boot from MMC2`；这进一步说明不能把 Armbian 当前 Radxa 分支直接当作本机 2023-04 旧 SPL 的精确源码。需要继续追踪旧 SPL 的实际来源、构建 commit 和厂商补丁。
+
+### 14.4 当前可做与不可做的判断
+
+- 已确认存在通用源码读取 BootROM source ID 的路径和地址计算公式。
+- 未确认本机旧 SPL 是否编入该路径、当前运行的 proper 是否使用同一 IRAM base，或 SRAM 值是否仍有效。
+- 因此目前不向用户提供 `md.l` 读地址命令，不在当前暂停现场尝试读 SRAM；先离线核实 eMMC 旧 SPL 的精确构建源和 RK3566 IRAM base。
+- 不要求用户断电、reset、boot，不写 TF/eMMC，不改启动参数。
+
+源码：
+- https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/include/asm/arch-rockchip/bootrom.h
+- https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/spl.c
+- https://github.com/radxa/u-boot/blob/stable-4.19-rock3/configs/rock-3c-rk3566_defconfig
+- https://github.com/radxa/u-boot/blob/stable-4.19-rock3/arch/arm/dts/rk3566-rock-3c.dts
