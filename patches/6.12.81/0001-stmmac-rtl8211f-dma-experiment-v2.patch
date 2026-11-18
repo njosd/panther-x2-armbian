@@ -1,6 +1,3 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Panther X2 Research <research@example.invalid>
-Date: Wed, 18 Nov 2026 15:00:00 +0800
 Subject: [PATCH] stmmac: add opt-in Panther X2 RTL8211F and DMA experiments
 
 Target source:
@@ -17,17 +14,15 @@ the Panther X2 ethernet0 DT alias. The PHY experiment checks PHY ID
 The DMA delay is restricted to the same Panther X2 ethernet0 device and
 accepts only 0 or 1500 ms.
 
-Signed-off-by: Panther X2 Research <research@example.invalid>
 ---
- drivers/net/ethernet/stmicro/stmmac/stmmac_main.c | 31 ++++++++++++++
- drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c | 91 +++++++++++++++++++++++
+ drivers/net/ethernet/stmicro/stmmac/stmmac_main.c | 34 +++++++++++++++
+ drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c | 88 +++++++++++++++++++++++
  2 files changed, 122 insertions(+)
 
 diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
-index 000000000000..111111111111 100644
 --- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
-@@ -10,6 +10,8 @@
+@@ -17,2 +17,4 @@
  #include <linux/gpio/consumer.h>
  #include <linux/io.h>
  #include <linux/iopoll.h>
@@ -36,7 +31,7 @@ index 000000000000..111111111111 100644
  #include <linux/mii.h>
  #include <linux/of_mdio.h>
  #include <linux/pm_runtime.h>
-@@ -344,6 +346,89 @@ void stmmac_pcs_clean(struct net_device *ndev)
+@@ -565,1 +567,84 @@ void stmmac_pcs_clean(struct net_device *ndev)
  	priv->hw->xpcs = NULL;
  }
  
@@ -144,7 +139,7 @@ index 000000000000..111111111111 100644
  /**
   * stmmac_mdio_register
   * @ndev: net device structure
-@@ -431,6 +516,9 @@ int stmmac_mdio_register(struct net_device *ndev)
+@@ -646,1 +731,4 @@ int stmmac_mdio_register(struct net_device *ndev)
  		goto bus_register_fail;
  	}
  
@@ -155,7 +150,6 @@ index 000000000000..111111111111 100644
  	if (priv->plat->has_xgmac)
  		stmmac_xgmac2_mdio_read_c45(new_bus, 0, 0, 0);
 diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
-index 222222222222..333333333333 100644
 --- a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
 +++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
 @@ -10,6 +10,8 @@
@@ -163,19 +157,21 @@ index 222222222222..333333333333 100644
 +#include <linux/delay.h>
  #include <linux/kernel.h>
 +#include <linux/moduleparam.h>
++#include <linux/of.h>
  #include <linux/interrupt.h>
-@@ -74,6 +76,10 @@ static int watchdog = TX_TIMEO;
+@@ -66,3 +68,7 @@ static int watchdog = TX_TIMEO;
  module_param(watchdog, int, 0644);
  MODULE_PARM_DESC(watchdog, "Transmit timeout in milliseconds (default 5s)");
  
 +static int dma_delay_ms;
 +module_param_named(dma_delay_ms, dma_delay_ms, int, 0444);
-+MODULE_PARM_DESC(dma_delay_ms, "Panther X2 ethernet0 DMA reset delay: 0 or 1500 ms");
++MODULE_PARM_DESC(dma_delay_ms,
+		 "Panther X2 ethernet0 DMA reset delay: 0 or 1500 ms");
 +
  static int debug = -1;
  module_param(debug, int, 0644);
  MODULE_PARM_DESC(debug, "Message Level (-1: default, 0: no output, 16: all)");
-@@ -1168,6 +1174,21 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
+@@ -3046,4 +3053,19 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
  		priv->plat->dma_cfg->atds = 1;
  
 +	if (dma_delay_ms && priv->device->of_node &&
@@ -195,5 +191,3 @@ index 222222222222..333333333333 100644
  	ret = stmmac_reset(priv, priv->ioaddr);
  	if (ret) {
  		dev_err(priv->device, "Failed to reset the dma\n");
--- 
-2.43.0
