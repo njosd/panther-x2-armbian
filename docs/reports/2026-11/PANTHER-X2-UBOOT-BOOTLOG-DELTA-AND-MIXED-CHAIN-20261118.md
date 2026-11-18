@@ -783,3 +783,52 @@ Hit key to stop autoboot('CTRL+C'): 0
 本次发送 Ctrl+C：160 次
 串口已关闭。
 \`\`\`
+
+
+## 16. BootROM 来源 SRAM 的 U-Boot 实机只读读取（2026-11-18）
+
+本节记录本次在 U-Boot proper 命令提示符下完成的只读读取。它补上此前 BootROM 最初启动介质缺少直接现场证据的问题。
+
+### 16.1 操作与原始输出
+
+- 通过串口自动发送 Ctrl+C 中断 autoboot，脚本检测到 U-Boot 提示符后停止发送；本次累计发送 73 次 Ctrl+C。
+- 进入 `=>` 提示符后，仅执行一次内存读取命令：
+
+```text
+=> md.l 0xfdcc0010 4
+fdcc0010: 00000002 00000040 c08dfd97 5ef93ffc    ....@........?.^
+=>
+```
+
+- 命令为 U-Boot 内存显示（memory display），读取 4 个 32-bit word；本次没有执行写内存、保存环境变量、写 MMC、启动或重置命令。
+- 读取发生在 BL31 已执行、U-Boot proper 已运行之后。
+
+### 16.2 来源字段解释
+
+第一个 word（地址 `0xFDCC0010`）为 `0x00000002`。按此前核对的 Rockchip RK356x BootROM source 编码，`0x02` 对应 eMMC（MMC instance 0），`0x05` 对应 SD/TF（MMC instance 1）。
+
+因此，本次现场读数支持并直接确认：**本次启动的 BootROM 来源记录指向 eMMC，而不是 TF/SD。**
+
+这与本轮介质指纹和 SPL/U-Boot 日志相互吻合：
+- BootROM 从 eMMC 启动旧版 SPL（2023-04-23 / DDR V1.13）；
+- 该 SPL 输出 `Trying to boot from MMC2`；
+- 后续 U-Boot proper 将 SD/TF 枚举为 `mmc 1`，并从 TF 读取启动文件。
+
+### 16.3 SRAM 覆盖分析的结论边界
+
+此前对 FIT 中 BL31 的静态分析发现，BL31 存在将 `0xFDCC0000–0xFDCCB000` 先备份至低地址缓冲区、再恢复回 SRAM 的代码；恢复范围包含 `0xFDCC0010`。但此前没有确认该代码路径是否在本次普通启动中执行。
+
+现在可以确认的是：**BL31 执行之后，U-Boot proper 仍能从该地址读到有效的 eMMC 来源值 `0x02`。** 这说明该字段在本次启动结束时没有丢失或变成其他来源值。结合 BL31 的整段 SRAM 备份/恢复代码，不能简单地把“恢复范围包含该地址”解释成“来源记录必然被破坏”；恢复操作本身也可能是在保存并还原原有 SRAM 内容。
+
+第二个 word `0x00000040` 及后两个 word 暂不解释，避免在缺少对应字段定义时猜测。
+
+### 16.4 本轮结论更新
+
+| 事项 | 更新后的结论 |
+|---|---|
+| BootROM 最初启动介质 | **已由 U-Boot 现场 SRAM 只读读数确认：eMMC（source ID 0x02）** |
+| SPL 后续加载介质 | **已验证：TF/SD（MMC2，对应 proper 的 mmc 1）** |
+| U-Boot proper / Linux 启动文件 | **已验证：从 TF 继续加载** |
+| BL31 是否覆盖/恢复 SRAM 来源字段 | 已确认 BL31 代码存在覆盖该地址的备份/恢复范围；本次运行后读数仍为正确的 eMMC 来源值。没有必要再为此重启或重复读取。 |
+
+本轮实验到此结束。没有写入 TF/eMMC，没有修改启动配置，也没有继续启动 Linux。
