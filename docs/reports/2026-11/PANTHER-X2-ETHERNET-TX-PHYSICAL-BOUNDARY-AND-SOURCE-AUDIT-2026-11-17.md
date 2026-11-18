@@ -1584,3 +1584,49 @@ RK3566 使用 DWMAC4 DMA ops。对照 `dwmac4_dma_reset()`：
 ### 32.7 下一步
 
 主流程没有发现可解释“6.12 DMA 正常运行但外部收不到帧”的顺序变化。下一轮先静态核对 Panther DWMAC4 实际选择的 DMA ops、硬件 feature capability、FPE enable 条件，以及 6.1/6.12 `stmmac_core_init()` 与 `stmmac_dma_operation_mode()` 对 GMAC TE/RE、MTL TX queue enable/priority/flow-control 的最终写入差异。优先排除“DMA TX 已运行，但 MAC/MTL TX queue 被配置成不发包”的软件路径；不重复实机 DMA/descriptor/counter 测试。
+
+
+## 33. MTL TX queue / FIFO / FPE static comparison (2026-11-18)
+
+本轮继续第 32 节预定的 MAC/MTL 配置审计。对照 `unifreq/linux-6.1.y@5eb841b...` 与 `ophub/linux-6.12.y-rockchip@661b2d8...` 的 `stmmac_mtl_configuration()`、`stmmac_dma_operation_mode()`、`dwmac4_core_init()`、RK3568 glue 与平台 DT parser。纯源码审计，无设备操作。
+
+### 33.1 Panther 的 MTL queue 数量按当前 DT/驱动解析规则为 1 RX + 1 TX
+
+两版 `stmmac_parse_hw_config()` / `stmmac_mtl_configuration()` 都在未提供 `snps,mtl-rx-config` / `snps,mtl-tx-config` 时回退到 `rx_queues_to_use=1`、`tx_queues_to_use=1`，queue 0 默认设为 `MTL_QUEUE_DCB`。Panther 现有 DTS 记录未见 MTL 多队列 phandle 配置，且归档 TX path 已确认普通 queue 0。因此以下多队列算法、权重、CBS、队列优先级和 RSS 路径都不会因 Panther 单队列配置执行。
+
+### 33.2 MTL 初始化函数两版逐字相同
+
+`stmmac_mtl_configuration()` 两版完全相同：
+- 只有 TX queue 数量 >1 才设置 TX queue weight、TX scheduling algorithm、CBS、TX priority；
+- 总是执行 RX queue-to-DMA mapping 和 MAC RX queue enable；
+- RX/TX queue 数量 >1 才执行相应优先级/路由/RSS配置。
+
+在单队列 Panther 配置下，唯一无条件执行的 RX MTL 操作相同。没有发现 6.12 把 TX queue 0 禁用或改变 TX scheduling 的差异。
+
+### 33.3 DMA FIFO sizing 的源码变化不会改变 Panther 结果
+
+6.1 无条件将 FIFO size 除以 RX/TX queue 数量；6.12 仅在 `has_gmac4 || has_xgmac` 时做该除法，注释说明是 DW QoS Eth / DW XGMAC 的共享 Tx/Rx FIFO memory split。RK3568 Panther 的 DWMAC4 兼容配置使 `has_gmac4` 为真；队列数量又是 1，所以两版最终 FIFO size 相同，不会造成 queue0 FIFO 变小或变成 0。
+
+### 33.4 `dwmac4_core_init()` 唯一显著差异是 FPE interrupt enable
+
+两版共同设置 `GMAC_CONFIG_TE`（当 `hw->ps` 有效）和 speed bits、写 MAC_CONFIG、配置 one-us counter、启用默认 MAC interrupts。6.1 还读取 `GMAC_HW_FEATURE3.FPESEL`，若硬件报告 FPE capability 则额外设置 `GMAC_INT_FPE_EN`；6.12 删除了这一段显式 FPE interrupt enable。
+
+但 FPE 是 IEEE 802.1Qbu/802.3br Frame Preemption，不是普通以太网帧 TX 的必要条件。两版普通 `stmmac_xmit()`、TX descriptor 提交与 DMA start 不以 FPE 为前提；6.12 仍保留 `dma_cap.fpesel` 检查和 phylink link-up/down FPE state handler，只是 FPE 初始化/中断管理实现演变。当前没有 Panther 启用 FPE 的 DT/config 证据，也没有 FPE handshake failure 记录。故该差异目前不解释普通 DHCP Discover 无法外发，列为低优先级非根因。
+
+### 33.5 当前 MTL 方向结论
+
+- **已确认：** Panther 为 queue 0 单 RX/单 TX；两版 MTL 配置函数完全相同。
+- **已确认：** FIFO sizing 改动在 RK3568 GMAC4 + 单队列条件下数值不变。
+- **已确认：** 未发现 6.12 新增或遗漏了普通 TX queue 0 的启用、映射、权重或 scheduler 操作。
+- **低优先级差异：** FPE interrupt enable 的删除；没有启用 FPE 的证据，不能视作普通 TX 根因。
+- **重要边界：** `stmmac_mtl_configuration()` 主要配置 RX queue 与多队列特性；TX queue0 正常工作仍依赖 MAC link-up callback 设置 speed/duplex/TE、Rockchip `fix_mac_speed()` 更新 MAC speed clock，以及 MAC/PHY RGMII时序。
+
+### 33.6 下一步：转入 link-up 回调的实际执行顺序与状态写入
+
+下一轮静态追踪 `stmmac_mac_config()`、`stmmac_mac_link_up()`、`rk_fix_speed()` 和 phylink 的调用时序，重点确认：
+1. `hw->ps` 在 `stmmac_core_init()` 时是否有效；若当时为 0，MAC TE 何时被打开；
+2. `stmmac_mac_link_up()` 是否在 6.1/6.12 都设置 GMAC_CONFIG_TE、speed、duplex、port select 与 flow control；
+3. RK `fix_mac_speed()` 是否在相同 link-up 阶段设置 `clk_mac_speed`，以及 6.12 新接口/调用时机是否改变；
+4. 是否存在“DMA ST=1、descriptor 已清理，但 MAC TE 或 speed clock 未处于正确状态”的代码路径。
+
+这比继续重复 MTL/DMA ring 检查更接近当前证据边界。仍只读源码和已有日志，不要求重跑设备测试。
