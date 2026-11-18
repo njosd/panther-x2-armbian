@@ -232,3 +232,53 @@ UART 中的 `Trying to boot from MMC2` 是 SPL 的输出，不是 BootROM 自身
 - 将实际值与 Rockchip SD Boot Reference 的定义对照。
 
 不重写 LBA 64，不改 BCB，不改 eMMC 启动区，也不为了验证而改变启动顺序。
+
+
+
+## 11. RK3566 SD Boot 标记机制重新判读（2026-11-18 追加勘误）
+
+重新逐段核对 Rockchip《SD Card Boot Reference V1.2.0》后，修正第 10 节对 IDBLOCK/BCB 机制的概括，避免把“SD Boot Card”和“SD Upgrade Card”混为一谈。
+
+### 11.1 RK3566 不支持旧式 IDBLOCK card-type flag
+
+文档 §4 的平台支持表明确列出：
+- RK3566/RK3568：IDB block flag 栏为空；Android BCB 栏为支持。
+- 传统 LBA64 + 616 bytes 卡类型标记（flag 0/1/2）不是 RK3566 可依赖的机制。
+
+因此，虽然可以只读查看 TF LBA64 + 616 bytes 的原始字节，但不能把该字段是否为 1 当作 RK3566 是否会优先从 TF 启动的判据。之前将其列为本机关键判据的建议不够准确，现予修正。
+
+### 11.2 BCB 机制的文档语义是 SD 升级/恢复，不等同于普通 SD Boot 选择
+
+同一文档明确说明，Android BCB 中的 `recovery\n--rk_fwupdate\n` 是 SD upgrade flag，用于进入 recovery/固件升级路径。它不能直接等同于“让 BootROM 跳过 eMMC、从 TF 执行 SPL”的普通启动优先级开关。
+
+Rockchip 文档的 SD Boot Card、SD Upgrade Card、SD Repair Card 是不同用途。不能把 BCB 的升级标记泛化为 RK3566 的普通 SD Boot Card 启动选择标志。
+
+### 11.3 与当前 Panther X2 TF 分区布局的关系
+
+既有 2026-11-17 设备记录显示 TF（/dev/mmcblk0）为 GPT，仅有：
+- p1：BOOT
+- p2：ROOTFS
+
+没有记录到 misc 分区。因此当前 Armbian TF 布局没有可供上述标准 Rockchip Android BCB 流程读取的 misc 分区。除非另有未记录的保留区/厂商实现，否则不能假设当前 TF 上存在 `recovery\n--rk_fwupdate\n` 标记。
+
+### 11.4 当前最合理的启动链解释
+
+现有直接证据仍然是：
+- 实机 SPL 输出为 2023-04-23，DDR V1.13；
+- eMMC LBA64 的原版 SPL 哈希与该版本指纹吻合；
+- TF LBA64 和 LBA16384 的 JP 文件写入后回读哈希均曾与目标文件一致；
+- 实机随后运行 2023-11-12 JP U-Boot proper；
+- RK3566 Hardware Design Guide 给出的常规 BootROM 启动顺序中 eMMC 排在 SDMMC 之前。
+
+因此，“BootROM 本次从 eMMC 选中原版 SPL，随后原版 SPL 从 TF 加载 JP U-Boot proper”仍是高度吻合的解释。当前没有证据表明 Panther X2 将启动阶段永久写死为只能从 eMMC 启动；也没有证据表明旧式 LBA64+616 flag 是本机可用的切换方法。
+
+### 11.5 下一步研究方向修订
+
+暂不要求用户在当前 U-Boot 暂停状态执行任何命令，也不要求断电重启。
+
+下一步优先在离线源码侧核对：
+1. 当前 eMMC 原版 SPL（2023-04-23）对应的 Rockchip SPL 源码/配置，确认它如何枚举 MMC 控制器、为何日志显示 MMC2，以及它从哪个设备/偏移加载 U-Boot proper。
+2. 当前 JP idbloader 的 SPL 构建配置与板级 FDT，确认它是否具备在 Panther X2 上初始化 DDR、探测 TF 并接管启动的能力。
+3. RK3566 BootROM 对 eMMC/SDMMC 的选择条件及板级启动绑带/ROM 参数；不通过改写 eMMC 或改变启动顺序来试错。
+
+不把 LBA64 + 616 bytes 的传统 flag 作为 RK3566 决定性检查项；不写 TF/eMMC，不改 BCB，不改启动配置。
