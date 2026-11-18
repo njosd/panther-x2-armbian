@@ -1,0 +1,199 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Panther X2 Research <research@example.invalid>
+Date: Wed, 18 Nov 2026 15:00:00 +0800
+Subject: [PATCH] stmmac: add opt-in Panther X2 RTL8211F and DMA experiments
+
+Target source:
+  ophub/linux-6.12.y-rockchip
+  661b2d8bf1284556f8876d5ed5fb80c64b22f94c
+
+This is an isolated experiment patch, not a production fix.
+
+Both experiments are disabled by default. They are additionally gated to
+the Panther X2 ethernet0 DT alias. The PHY experiment checks PHY ID
+0x001cc916 at MDIO address 0 before writing PHYCR2 page 0x0a43/register
+0x19. Mode 2 additionally requests a BMCR soft reset and polls completion.
+
+The DMA delay is restricted to the same Panther X2 ethernet0 device and
+accepts only 0 or 1500 ms.
+
+Signed-off-by: Panther X2 Research <research@example.invalid>
+---
+ drivers/net/ethernet/stmicro/stmmac/stmmac_main.c | 31 ++++++++++++++
+ drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c | 91 +++++++++++++++++++++++
+ 2 files changed, 122 insertions(+)
+
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+index 000000000000..111111111111 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+@@ -10,6 +10,8 @@
+ #include <linux/gpio/consumer.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
++#include <linux/moduleparam.h>
++#include <linux/of.h>
+ #include <linux/mii.h>
+ #include <linux/of_mdio.h>
+ #include <linux/pm_runtime.h>
+@@ -344,6 +346,89 @@ void stmmac_pcs_clean(struct net_device *ndev)
+ 	priv->hw->xpcs = NULL;
+ }
+ 
++#define STMMAC_TEST_RTL8211F_ID		0x001cc916
++#define STMMAC_TEST_RTL8211F_PAGE	0x0a43
++#define STMMAC_TEST_RTL8211F_PHYCR2	0x19
++#define STMMAC_TEST_RTL8211F_VALUE	0x1801
++
++static int phycr2_test;
++module_param_named(phycr2_test, phycr2_test, int, 0444);
++MODULE_PARM_DESC(phycr2_test,
++		 "Panther X2 RTL8211F test: 0=off, 1=write/read, 2=write/read/reset");
++
++static bool stmmac_is_panther_x2_gmac1(struct device *dev)
++{
++	if (!dev->of_node || !of_machine_is_compatible("panther,x2"))
++		return false;
++
++	/* Panther X2 DTS maps ethernet0 to its single enabled GMAC1. */
++	return of_alias_get_id(dev->of_node, "ethernet") == 0;
++}
++
++static void stmmac_rtl8211f_test(struct device *dev, struct mii_bus *bus)
++{
++	struct phy_device *phydev;
++	int ret, readback, bmcr = 0;
++
++	if (!phycr2_test)
++		return;
++
++	if (!stmmac_is_panther_x2_gmac1(dev)) {
++		dev_info(dev, "RTL8211F test skipped: not Panther X2 ethernet0\n");
++		return;
++	}
++
++	if (phycr2_test < 0 || phycr2_test > 2) {
++		dev_warn(dev, "RTL8211F test: invalid mode %d, skipped\n",
++			 phycr2_test);
++		return;
++	}
++
++	phydev = mdiobus_get_phy(bus, 0);
++	if (!phydev) {
++		dev_warn(dev, "RTL8211F test: PHY address 0 not found\n");
++		return;
++	}
++
++	if (phydev->phy_id != STMMAC_TEST_RTL8211F_ID) {
++		dev_warn(dev, "RTL8211F test: PHY ID mismatch at address 0: %08x\n",
++			 phydev->phy_id);
++		return;
++	}
++
++	dev_info(dev, "RTL8211F test: mode=%d PHY ID=%08x address=0\n",
++		 phycr2_test, phydev->phy_id);
++
++	ret = phy_write_paged(phydev, STMMAC_TEST_RTL8211F_PAGE,
++			      STMMAC_TEST_RTL8211F_PHYCR2,
++			      STMMAC_TEST_RTL8211F_VALUE);
++	if (ret < 0) {
++		dev_err(dev, "RTL8211F test: PHYCR2 write failed: %d\n", ret);
++		return;
++	}
++
++	readback = phy_read_paged(phydev, STMMAC_TEST_RTL8211F_PAGE,
++				  STMMAC_TEST_RTL8211F_PHYCR2);
++	if (readback < 0) {
++		dev_err(dev, "RTL8211F test: PHYCR2 readback failed: %d\n",
++			readback);
++		return;
++	}
++
++	dev_info(dev, "RTL8211F test: PHYCR2 write_ret=%d immediate_readback=0x%04x\n",
++		 ret, readback);
++
++	if (phycr2_test == 1)
++		return;
++
++	ret = phy_write(phydev, MII_BMCR, BMCR_RESET);
++	if (ret < 0) {
++		dev_err(dev, "RTL8211F test: BMCR reset write failed: %d\n", ret);
++		return;
++	}
++
++	ret = phy_read_poll_timeout(phydev, MII_BMCR, bmcr,
++				    !(bmcr & BMCR_RESET),
++				    50000, 600000, true);
++	if (ret)
++		dev_err(dev, "RTL8211F test: BMCR reset poll failed: %d, last BMCR=0x%04x\n",
++			ret, bmcr);
++	else
++		dev_info(dev, "RTL8211F test: BMCR reset completed, BMCR=0x%04x\n",
++			 bmcr);
++
++	readback = phy_read_paged(phydev, STMMAC_TEST_RTL8211F_PAGE,
++				  STMMAC_TEST_RTL8211F_PHYCR2);
++	if (readback < 0)
++		dev_err(dev, "RTL8211F test: PHYCR2 post-reset read failed: %d\n",
++			readback);
++	else
++		dev_info(dev, "RTL8211F test: PHYCR2 post-reset readback=0x%04x\n",
++			 readback);
++}
++
+ /**
+  * stmmac_mdio_register
+  * @ndev: net device structure
+@@ -431,6 +516,9 @@ int stmmac_mdio_register(struct net_device *ndev)
+ 		goto bus_register_fail;
+ 	}
+ 
++	if (!priv->plat->has_xgmac)
++		stmmac_rtl8211f_test(dev, new_bus);
++
+ 	/* Looks like we need a dummy read for XGMAC only and C45 PHYs */
+ 	if (priv->plat->has_xgmac)
+ 		stmmac_xgmac2_mdio_read_c45(new_bus, 0, 0, 0);
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+index 222222222222..333333333333 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+@@ -10,6 +10,8 @@
+ #include <linux/clk.h>
++#include <linux/delay.h>
+ #include <linux/kernel.h>
++#include <linux/moduleparam.h>
+ #include <linux/interrupt.h>
+@@ -74,6 +76,10 @@ static int watchdog = TX_TIMEO;
+ module_param(watchdog, int, 0644);
+ MODULE_PARM_DESC(watchdog, "Transmit timeout in milliseconds (default 5s)");
+ 
++static int dma_delay_ms;
++module_param_named(dma_delay_ms, dma_delay_ms, int, 0444);
++MODULE_PARM_DESC(dma_delay_ms, "Panther X2 ethernet0 DMA reset delay: 0 or 1500 ms");
++
+ static int debug = -1;
+ module_param(debug, int, 0644);
+ MODULE_PARM_DESC(debug, "Message Level (-1: default, 0: no output, 16: all)");
+@@ -1168,6 +1174,21 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
+ 		priv->plat->dma_cfg->atds = 1;
+ 
++	if (dma_delay_ms && priv->device->of_node &&
++	    of_machine_is_compatible("panther,x2") &&
++	    of_alias_get_id(priv->device->of_node, "ethernet") == 0) {
++		if (dma_delay_ms == 1500) {
++			dev_info(priv->device,
++				 "Experimental DMA reset delay: 1500 ms\n");
++			msleep(1500);
++		} else {
++			dev_warn(priv->device,
++				 "Invalid experimental DMA delay %d ms; ignored\n",
++				 dma_delay_ms);
++		}
++	}
++
+ 	ret = stmmac_reset(priv, priv->ioaddr);
+ 	if (ret) {
+ 		dev_err(priv->device, "Failed to reset the dma\n");
+-- 
+2.43.0
