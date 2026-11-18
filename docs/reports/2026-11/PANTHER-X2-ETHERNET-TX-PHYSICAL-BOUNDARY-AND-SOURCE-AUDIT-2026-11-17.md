@@ -1405,3 +1405,64 @@ RTL8211F datasheet 将 page `0x0a43`、register `0x19`（十进制 25）定义�
 2. 核对 6.1.116 的实际构建产物/构建工作流能否证明该补丁确实进入运行内核；若无法证明，降低该分支的权重。
 3. 对照 Panther 的 GMAC `clock_in_out = "input"`、pinctrl `clkinout` 和时钟树记录，判断 PHY CLKOUT 是否连接到 RK3566 的 GMAC clock input。不得重复读取已完成的 clock_summary / GRF / pinctrl 实机项目；使用已归档数据。
 4. 在没有解决“旧内核正常通信”这一反证前，不建议在 6.12 上直接补回这四条 MDIO 写，也不建议修改 PHYCR2。任何实机 MDIO 写操作都必须另行获得用户明确授权。
+
+
+## 30. JL2xx1 workaround provenance and RTL8211F broadcast-address caveat (2026-11-18)
+
+本轮继续第 29 节的历史来源核查；只读取 Git 历史、驱动源码、既有运行时 DT 记录和公开 RTL8211F datasheet，没有对设备执行 MDIO 操作。
+
+### 30.1 补丁来源已经明确：它紧跟 JLSEMI JL2xx1 驱动加入
+
+在 `unifreq/linux-6.1.y` 的 Git 历史中，三个提交构成连续演变：
+
+1. `22e67a04d5f9912c7eaeb4603894ea2a4c3ffe36`，2022-12-24 16:07:18 UTC：`drv: net: phy: Add JLSEMI JL2xx1 driver`。加入 JLSemi JL2xx1 PHY driver，驱动 ID 定义为 `0x937c4030`（mask `0xfffffff0`），并声明适配 JL2xx1/JL2101。
+2. `49b5f340f346cc9a5b777499fce46150b691b70e`，2022-12-24 16:08:26 UTC：`drv: net: ethernet: stmmac fix for jl2xx1 phy`。在刚加入 JL2xx1 driver 的下一分钟，向通用 STMMAC MDIO 注册和 DMA 初始化加入第 29 节所述四次 MDIO 写与 1.5 s delay。
+3. `79065ed12cb4e253b532028a551fdba2963d2d65`，2023-07-25 03:22:23 UTC：`drv: net: phy: remove jl2xx1`。删除 JLSEMI PHY driver 的 Kconfig、Makefile 和三个源文件，但**没有删除或回滚** `stmmac_main.c` 的 1.5 s delay，也没有删除 `stmmac_mdio.c` 的四条硬编码写。
+
+因此在 6.1.116 对照 commit `5eb841b...` 中，这段 STMMAC workaround 已成为一个失去原 PHY driver 配套的遗留补丁。其原始目标可高置信度认定为 JLSEMI JL2xx1/JL2101 系列，而不是 Realtek RTL8211F。
+
+参考：
+- [JLSEMI driver added](https://github.com/unifreq/linux-6.1.y/commit/22e67a04d5f9912c7eaeb4603894ea2a4c3ffe36)
+- [STMMAC JL2xx1 workaround added](https://github.com/unifreq/linux-6.1.y/commit/49b5f340f346cc9a5b777499fce46150b691b70e)
+- [JL2xx1 driver removed, STMMAC workaround retained](https://github.com/unifreq/linux-6.1.y/commit/79065ed12cb4e253b532028a551fdba2963d2d65)
+
+### 30.2 修正第 29 节关于 PHY address 0 的描述：这是 MDIO broadcast address
+
+此前第 29.2 节写成“这组写会命中 address 0 的 RTL8211F”，需要更精确地表述：RTL8211F datasheet 说明 PHYAD 物理地址范围为 1–7；MDIO address 0 是 broadcast command，所有允许响应 broadcast 的 PHY 都会响应。datasheet 同时说明 RTL8211F 可通过 page 0xa43、reg 0x18（十进制 24）bit 13 控制是否禁用 address-0 broadcast 响应，并可在 PHYAD=000 时记住第一个非零地址。
+
+因此，`stmmac_mdio_write(new_bus, 0, ...)` 不是针对某颗 PHY 的唯一寻址，而是发往 MDIO broadcast address。Panther 目前只有一颗已识别 PHY 的运行时记录（RTL8211F，ID `0x001cc916`，DT `reg=0`），所以它可能作用于该 PHY，但是否响应取决于该芯片当前 broadcast-enable/PHYAD 状态。没有历史 MDIO trace 或寄存器读回，不能写成“已证明成功写入 RTL8211F”。
+
+RTL8211F datasheet Rev 1.7 对 PHYCR2（page 0xa43, reg 0x19）定义：bit 0 CLKOUT enable、bit 1 RXC enable、bit 5 PHY-mode EEE enable、bit 11 CLKOUT 125/25 MHz 选择、bit 13:12 CLKOUT SSC capability。整字写 `0x1801` 会置 bit 12、11、0，并清 bit 1、5、7、3 等可写位；但 bit 13:12 的 `01` 组合在 datasheet 中标为保留/非标准配置，不能把它描述成一个有明确预期功能的 SSC 选择。
+
+资料：
+- [RTL8211F(D)(I)-CG Datasheet Rev 1.7](https://static.chipdip.ru/lib/595/DOC042595102.pdf)
+- [RTL8211F PHYCR2 register summary](https://xonstorage.z8.web.core.windows.net/pdf/realtek_rtl8211ficg_apr22_xonlink.pdf)
+- [RTL8211F PHY address / broadcast behavior](https://datasheet.lcsc.com/datasheet/pdf/7023c5bb6713a670a415e3c449e0d974.pdf?productCode=C187932)
+
+### 30.3 这使它成为“旧内核遗留的错误通用化 workaround”，但仍不是当前 TX 根因
+
+源码证据现在支持：
+- workaround 的提交目标是 JLSEMI JL2xx1，而 Panther PHY ID 是 Realtek `0x001cc916`，型号不同；
+- 它没有任何 PHY ID / compatible 检查，却被放进通用 STMMAC MDIO 注册路径；
+- JL2xx1 driver 后来被移除，STMMAC workaround 却残留；
+- Panther 的 `clock_in_out="input"`、RGMII、PHY address 0 等运行时记录与旧 workaround 并非同一目标硬件组合。
+
+但仍有两个重要限制：
+1. 6.1.116 对照源码 SHA `5eb841b...` 是基于版本与 workflow 线索重建的高置信度来源，不是当前已取得的设备上运行 Image 二进制哈希；
+2. 6.1.116 实机确实正常双向通信，与“这组写入成功清除了 RXC enable”推断冲突。broadcast address 0 的响应条件、PHY strap / broadcast-enable 状态、旧内核真实二进制是否含该块，均未实证。
+
+因此，**不能把这段 workaround 当成 6.1.116 正常的原因，也不能简单说 6.12 删除它导致 TX 故障**。它更像一项应该从通用 STMMAC 路径移除的历史遗留风险；而且其关键寄存器改动更直接涉及 RXC/PHY EEE，不足以解释目前已定位在 TX 外部不可见的现象。
+
+### 30.4 当前对 1.5 s delay 的独立判断
+
+1.5 s delay 与 PHY 专用 MDIO 写来自同一 `49b5f340` 提交，故其来源同样是 JL2xx1 workaround。它位于每次 netdev open 的 DMA reset 前，不是 SoC probe 上电后的一次性全局延时。6.12 没有该等待，但 Panther 在 6.12 可以完成 PHY link-up，且该等待并未被证明是 RK3566 GMAC 必需的稳定时间。现阶段它是历史补丁差异，不是强根因候选。
+
+### 30.5 本轮结论及后续
+
+- **已确认：** 这段 patch 原始目标为 JLSEMI JL2xx1/JL2101；后来 PHY driver 被移除，STMMAC 两处遗留代码仍留在 6.1 分支。
+- **已确认：** RTL8211F 的 MDIO address 0 是 broadcast 地址语义，旧代码并非对 RTL8211F 的唯一寻址；是否响应需看 PHY broadcast 状态。
+- **已确认：** `0x1801` 会清除 PHYCR2 RXC enable 与 PHY-mode EEE enable 位，并写入保留的 CLKOUT SSC capability 编码；若有效作用于 RTL8211F，属于不应随意施加的 PHY 配置。
+- **未验证：** 6.1.116 安装的实际 Image 是否包含这段旧 patch，以及 Panther PHY 当时是否响应 MDIO broadcast 写入。
+- **结论：** 旧 workaround 与 Panther 型号不匹配，不可移植；但它并不能解释 6.12 的 TX 故障，尤其不能忽略 6.1 正常通信这一反证。
+
+下一步继续审计 6.1.116 的构建身份与运行时日志证据，优先寻找可确认实际内核源码/二进制的历史 build metadata；不要求用户重跑 PHY 检查，也不执行 MDIO 写入。若仍无法获得 6.1 二进制来源，应该把这段遗留 patch 从“6.1.116 实际执行”降级为“高置信度候选源码包含”，避免把推断写成事实。
