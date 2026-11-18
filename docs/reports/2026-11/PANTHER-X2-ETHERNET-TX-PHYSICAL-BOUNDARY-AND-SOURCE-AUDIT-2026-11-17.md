@@ -1753,3 +1753,63 @@ Panther 是外接 PHY + RGMII，未配置内部 PCS，因此 `hw->ps` 通常保�
 **当前证据支持的最窄结论：** TX 帧已进入驱动/DMA处理并由 MAC/DMA 统计回收，但尚未证明它到达 GMAC RGMII TX 引脚或 PHY 介质侧。当前故障边界在“GMAC内部 TX 统计/descriptor completion”与“外部接收端未见帧”之间；现有静态代码证据不足以断言是 MAC core、RGMII pinmux/波形、PHY 或板级信号完整性中的哪一层。
 
 下一步不再重复常规 stmmac 主路径。应先继续静态核对 6.12.81 发布构建的补丁/配置来源，以及 `dwmac-rk.c` 中平台 reset/clock/pinctrl 的完整 probe→runtime PM→open 时序是否存在与已测正常 6.1.116 不同的、且当前实机记录尚未排除的状态切换。只有当静态证据无法再缩小范围时，才提出一个最小、非破坏性的新增验证，并先征求用户授权。
+
+
+## 36. Rockchip GMAC probe / runtime-PM / open lifecycle audit (2026-11-18)
+
+本轮按第 35.7 节检查 Rockchip GMAC 从 probe 到 netdev open 的时钟、电源、reset 和 runtime-PM 生命周期。只读比较 6.1.116 与 6.12.81 候选源码并检索已归档日志；未执行设备命令、未重跑环回/抓包、未改配置。
+
+### 36.1 STMMAC runtime-PM 时钟回调两版完全相同
+
+`stmmac_runtime_suspend()` / `stmmac_runtime_resume()` 两版函数体一致，均分别调用 `stmmac_bus_clks_config(priv, false/true)`。`stmmac_bus_clks_config()` 两版也逐字相同：runtime resume 依次 enable `stmmac_clk`、`pclk` 和可选 `plat->clks_config`，逐项检查返回值并在失败时回滚；runtime suspend 则 disable 两个 core clocks，再调用可选平台 callback。
+
+Rockchip `rk_gmac_pm_ops` 的 suspend/resume 仍走 `stmmac_suspend()` / `stmmac_resume()`；6.12 的 platform wrapper 改为 `stmmac_pltfr_exit()` / `stmmac_pltfr_init()` helper，并增加 init 错误传播，但实际回调仍调用同一个 `plat->exit/init`。该差异属于 system sleep resume 错误处理，不是普通 netdev UP 期间的 TX 路径。
+
+### 36.2 probe 与 open 的 runtime-PM 引用顺序没有变化
+
+两版 `rk_gmac_powerup()` 都先启用 Rockchip glue clocks、配置 RGMII、启用 PHY regulator，再执行 `pm_runtime_get_sync(dev)`；`rk_gmac_powerdown()` 都先 `pm_runtime_put_sync()`，再关闭 PHY regulator 和 glue clocks。
+
+两版 `stmmac_dvr_probe()` 都执行 `pm_runtime_get_noresume()` → `pm_runtime_set_active()` → `pm_runtime_enable()`；netdev 注册后都 `pm_runtime_put()`，允许 core clocks runtime suspend。两版 `__stmmac_open()` 都先 `pm_runtime_resume_and_get()`，再连接 PHY、执行 `stmmac_hw_setup()`、启动 phylink、申请 IRQ、启动队列；失败路径均 `pm_runtime_put()`。没有发现 6.12 把普通 open 的 PM resume 放到硬件初始化之后，或提前关闭 core clocks 的调用顺序变化。
+
+### 36.3 MAC/AHB reset 与硬件初始化入口相同
+
+两版 `stmmac_dvr_probe()` 的 reset 顺序一致：
+1. 对可选 `stmmac_rst` assert/deassert；
+2. deassert `stmmac_ahb_rst`；
+3. `udelay(10)`；
+4. `stmmac_hw_init()`。
+
+两版 `stmmac_hw_init()` 均先 `stmmac_hwif_init()`，再读取 DMA hardware feature register。6.12 新增 unicast-filter capability correction、按 DMA capability 限制队列数/FIFO size 等，但 Panther 单 TX/RX queue 的普通发送不受这些新分支影响；unicast-filter correction 只涉及接收过滤。6.12 `stmmac_hw_setup()` 新增 PCS pre-init 已在第 26 节确认 Panther RGMII 无 PCS，不会命中。
+
+### 36.4 6.12 的 integrated-PHY power callback 不会作用于外置 RTL8211F
+
+6.12 `stmmac_release()` / PHY attach 生命周期增加 `integrated_phy_power()` callback；Rockchip callback 检查 `bsp_priv->integrated_phy` 和 RK3568 ops 对应成员。Panther 的 `integrated_phy? (no)` 已有启动日志，RK3568 ops 也没有 integrated PHY power callback，因此此项是 no-op。不会在普通 open 或 close 时切断 RTL8211F 电源。
+
+### 36.5 仍然存在的真正差异：6.1 使用 upstream clock rework，6.12 RK35xx BSP 保留旧式逐项 enable
+
+本轮追溯了这项差异的来源，而不是只重复记录 5ms 与 100–200µs：
+
+- 6.1.116 工作基线使用 `devm_clk_bulk_get_optional()` + `clk_bulk_prepare_enable()`；bulk enable 返回值和 `clk_phy` enable 返回值均检查，失败会返回错误，不会把 `clk_enabled` 置 true。该实现来自 Linux upstream commit [`ea449f7fa0bf`](https://github.com/torvalds/linux/commit/ea449f7fa0bf3fcd02e04a770b9ff707bf5e8f96)（2023-04-07，`dwmac-rk: rework optional clock handling`），commit message 明确目标是可选时钟管理及正确处理 `-EPROBE_DEFER`。
+- 6.12.81 RK35xx 候选来自 Rockchip vendor tree `rockchip-linux/kernel@f34ce119daa3`（2026-04-27 导入快照），`gmac_clk_enable()` 仍逐项调用 `clk_prepare_enable()`，不检查各项返回值，随后无条件将 `clk_enabled=true`；并使用 `usleep_range(100, 200)`，而 6.1 路径为 `mdelay(5)`。
+- 因此这是 Rockchip 6.12 vendor BSP 与 6.1 upstream-reworked glue 的实际实现差异，不应简单表述为“Linux 6.12 通用内核改变了等待时间”。
+
+**对 Panther 的适用性评估：**
+- 已有运行时 clock-names 记录包含 `mac_clk_tx`、`aclk_mac`、`pclk_mac`、`clk_mac_speed`；已归档 clk_summary 显示 GMAC1 相关 125MHz clock tree 最终处于 enabled 状态。这降低了“某个必需 clock 一直未启用”的可能性。
+- 但 clk_summary 是运行后的稳态快照，不等同于 `clk_prepare_enable()` 当时每个调用均成功，也不能还原启动瞬态。6.12 的忽略返回值确实使单项 enable 失败可能被静默吞掉；这是一项真实错误处理弱化。
+- 5ms→100–200µs 是真实等待差异，但 upstream commit 的说明重点是 clock acquisition/error handling，并没有证明 5ms 是针对 Panther RGMII 必需的 PHY 稳定时间。当前 `clock_in_out=input` 且最终 link 1Gbps Full，不能仅凭等待时间认定根因。
+- 已有归档的 6.1.116 启动日志有 `clock input from PHY`、`init for RGMII`，但当前仓库尚未找到一份足以逐项核对 6.12.81 probe 时所有 `cannot get clock` / enable failure 的完整原始日志。此点标记为“未验证”，不要求用户重复读取 clock_summary。
+
+### 36.6 本轮结论与优先级更新
+
+- **已关闭：** STMMAC runtime-PM callback、PM 引用顺序、probe/open PM 次序、MAC/AHB reset 顺序没有发现 6.1→6.12 的有效差异。
+- **已关闭：** 新增 integrated-PHY callback 对 Panther 外置 RTL8211F 不生效。
+- **保留为当前最高优先级软件候选：** 6.12 Rockchip vendor `gmac_clk_enable()` 对逐项 clock enable 返回值不检查，且只等待 100–200µs；6.1 upstream rework 检查错误并等待 5ms。该差异能解释“若某项启动时钟 enable 失败或时钟源尚未稳定，后续流程仍继续”的代码风险，但目前没有实证证明 Panther 本次启动发生了该故障。
+- **没有发现：** probe/open/runtime-PM 中发生了错误的时钟关闭、PHY 电源切断或 reset 次序倒置。
+
+### 36.7 下一步（只读，不重复测试）
+
+下一轮不再检查 runtime PM、clock_summary、PHY reset 或 pinctrl 的已完成项目。优先做两件静态工作：
+1. 追踪 `ea449f7` 之前 Rockchip driver 旧实现及 5ms 等待的历史意图，厘清 100–200µs 与 5ms 是否针对同一 clock-stabilization requirement；
+2. 继续核对 6.12.81 发布包的 Rockchip glue 实际源码是否与 `rockchip-linux/kernel@f34ce119` / Ophub 候选一致，特别是编译时是否存在额外补丁改变 clock lookup、clock enable 或 regulator/reset 顺序。
+
+只有找到能将差异与当前 Panther 运行时事实直接关联的证据后，才提出新的最小只读验证；未经明确授权不修改设备、不重启、不写寄存器。
