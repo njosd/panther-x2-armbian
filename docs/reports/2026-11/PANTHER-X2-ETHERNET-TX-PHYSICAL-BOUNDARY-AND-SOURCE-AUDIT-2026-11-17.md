@@ -1279,3 +1279,59 @@ Panther 运行时 PHY 节点没有 `realtek,clkout-disable` 属性，两版都�
 ### 27.8 下一步
 
 不再泛查 Realtek PHY 的 LED/电源管理代码。转向审计 6.1.116 generic 与 6.12.81 RK35xx 的 PHY attach / phylink connection 和 EEE capability 初始化差异，但先判断 Panther 的 `phy-handle` 实际连接分支是否经过相关代码。重点关注 6.12 `stmmac_init_phy()` 新增 `phy_support_eee()` 的调用条件、phylink attach flags、PHY `config_init` 的触发时机及 soft reset 前后次序。已完成的 PHY ID、reset GPIO、EEE 运行时状态、RGMII delay 实机检查不再重复；只做源码与已归档日志分析。
+
+
+## 28. PHY attach, EEE initialization and phylink link-up comparison (2026-11-18)
+
+本轮按第 27.8 节继续源码审计。没有执行 Panther 实机测试、没有更改设备配置，也没有重复旧的 PHY/EEE 运行时检查。
+
+### 28.1 Panther 使用 firmware phy-handle 路径，不会命中 6.12 新增的 phy_support_eee() fallback
+
+6.12 `stmmac_init_phy()` 的连接流程：
+- 从 `priv->plat->port_node`（不存在时回退 `dev_fwnode()`）取得 MAC port firmware node；
+- `fwnode_get_phy_node()` 查找关联 PHY；
+- 若找不到 PHY node，才使用 `priv->plat->phy_addr` 手工从 MDIO bus 取 PHY；
+- 只有这个手工 fallback 分支且 `priv->dma_cap.eee` 为真时，才调用 `phy_support_eee(phydev)`；
+- 若找到 PHY node，则调用 `phylink_fwnode_phy_connect()`，不调用 `phy_support_eee()`。
+
+6.1 `stmmac_init_phy()` 也有相同的 firmware PHY node / 手工 fallback 两条连接路径，但没有 `phy_support_eee()` 调用。
+
+仓库保存的 Panther 运行时设备树记录明确包含 `/ethernet@fe010000/mdio/ethernet-phy@0`，`reg = 0`，MAC 的 PHY 连接通过 firmware `phy-handle` 指向该节点。因此 Panther 应走 `phylink_fwnode_phy_connect()` 分支，而不是 6.12 新增 `phy_support_eee()` 的手工地址 fallback。
+
+**结论：** 6.12 新增的 `phy_support_eee()` 对 Panther 当前设备树连接路径不执行，不能解释当前 TX 故障。该结论以归档运行时 DT 的 phy-handle 关系为依据；不是仅凭 PHY 节点存在就推断。
+
+### 28.2 PHY attach 的其他差异
+
+6.12 在 `stmmac_init_phy()` 中加入 `integrated_phy_power(true)`，但第 25.3 节已确认 RK3568 ops 对外置 RTL8211F 返回 no-op。PHY node 查找从旧版 `plat->phylink_node` 转为新版 `plat->port_node`，最终仍通过 firmware node 连接同一个外置 PHY。
+
+6.12 的 `stmmac_phy_setup()` 新增 `mac_requires_rxc = true`，其 attach flag 影响已在第 26 节分析；候选 RTL8211F 驱动不消费 `PHY_F_RXC_ALWAYS_ON`。
+
+### 28.3 phylink MAC capability 初始化确有架构变化，但不符合当前故障表象
+
+6.1 `stmmac_phy_setup()` 在创建 phylink 前，按 `max_speed`、GMAC/XGMAC 类型和 TX queue 数量直接构造 `phylink_config.mac_capabilities`，包括 10/100/1000 及 pause/duplex 能力。
+
+6.12 改为 `mac_get_caps()`：调用 MAC core 的 `update_caps` 回调刷新 `priv->hw->link.caps`，再把它作为 phylink MAC capabilities，并按 `plat->max_speed` 限速。DWMAC4 的 `dwmac4_update_caps()` 主要按 TX queue 数量调整 half-duplex capability 位。
+
+这是 phylink capability 的初始化架构变化，但不是 TX descriptor 或 MAC TX enable 路径。现有故障系统有 1000Mbps Full link-up 的运行记录，说明至少千兆全双工能力协商成功；因此它不能解释“PHY link 已建立但普通 TX 帧无法到达外部”的现象。保留一点：尚未对 6.12.81 构建实际 MAC capability 位做二进制级核实，但当前不值得安排实机重复采集。
+
+### 28.4 mac_link_up / EEE 初始化路径对照
+
+两版 `stmmac_mac_link_up()` 在普通 RGMII speed selection、MAC speed/duplex 位更新、flow-control 设置、`stmmac_mac_set(..., true)` 及 EEE 初始化主流程上相同。
+
+6.12 增加的 SerDes 延迟 powerup 条件已在第 25.2 节证明 Panther Rockchip glue 未注册该回调，因此是空操作。
+
+6.1 调用 `fix_mac_speed(bsp_priv, speed)`；6.12 新接口调用 `fix_mac_speed(bsp_priv, speed, mode)`。Rockchip `rk_fix_speed()` 在 6.12 增加 `mode` 形参，但函数体仍按 `bsp_priv->phy_iface` 分支，并未读取新增 `mode` 参数；RGMII 分支仍调用相同 `set_rgmii_speed(bsp_priv, speed)`。故接口签名变化对 Panther RGMII 的实际速率回调没有改变。
+
+两版 EEE link-up 主流程均在 `phy && priv->dma_cap.eee` 条件下调用 `phy_init_eee()`，然后执行 `stmmac_eee_init()`、设置 TX LPI enable 并调用 `stmmac_set_eee_pls()`。参数字段从旧版 `plat->rx_clk_runs_in_lpi` 转为新版 `STMMAC_FLAG_RX_CLK_RUNS_IN_LPI`，需要确认 Panther 的 platform flag 映射，但此前运行时 EEE 状态已检查，不重复设备测试。该参数影响 `phy_init_eee()` 对 RX clock in LPI 的要求，不改变普通帧 TX 的 DMA 描述符提交逻辑；当前没有证据显示它造成持续普通帧发送失败。
+
+### 28.5 本轮结论
+
+- **已确认：** Panther 有有效 firmware PHY node / phy-handle，6.12 新增 `phy_support_eee()` 只在没有 PHY node 的手工 MDIO fallback 分支执行，因此 Panther 不会命中。
+- **已确认：** 两版 `stmmac_mac_link_up()` 的普通 RGMII speed/duplex/MAC enable/EEE 主流程相同；6.12 新增 `mode` 形参在 Rockchip `rk_fix_speed()` 中未被读取。
+- **已确认：** 6.1 的静态 phylink capabilities 改为 6.12 MAC core 动态 capabilities，但已有 1000Mbps Full link-up 事实不支持把它作为当前 TX 故障解释。
+- **未关闭但低优先级：** `rx_clk_runs_in_lpi` 到 `STMMAC_FLAG_RX_CLK_RUNS_IN_LPI` 的平台标志映射，及 6.12.81 构建中的实际 EEE flag 值；不安排重复 EEE 实机测试，只有源码映射发现不同才继续。
+- **根因状态：** PHY attach / EEE / phylink link-up 这一组新增逻辑目前没有发现能解释 Panther 普通 TX 失败的活动差异。
+
+### 28.6 下一步
+
+回到更接近故障边界的 MAC 初始化和 TX/RX DMA bring-up：审计 6.1.116 与 6.12.81 在 `stmmac_hw_setup()` 中 MAC reset、DMA reset、DMA channel init、RX ring refill/start 与 MAC RX/TX enable 的严格调用顺序和失败返回处理。优先静态比较函数调用图与 RK3568 实际 ops；已有 TX descriptor、DMA channel state、ST/Tail pointer、IRQ/NAPI、TX cleanup 及统计核对不重跑。若找到实际顺序差异，再决定是否需要一项新的、能区分 RX/TX 边界的定向验证。
