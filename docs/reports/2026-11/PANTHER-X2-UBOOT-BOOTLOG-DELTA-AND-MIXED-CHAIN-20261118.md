@@ -282,3 +282,84 @@ Rockchip 文档的 SD Boot Card、SD Upgrade Card、SD Repair Card 是不同用�
 3. RK3566 BootROM 对 eMMC/SDMMC 的选择条件及板级启动绑带/ROM 参数；不通过改写 eMMC 或改变启动顺序来试错。
 
 不把 LBA64 + 616 bytes 的传统 flag 作为 RK3566 决定性检查项；不写 TF/eMMC，不改 BCB，不改启动配置。
+
+
+## 12. SPL MMC2 与 U-Boot proper ATAGS 编号闭环（2026-11-18 追加）
+
+本节基于原始 UART 日志中此前未充分利用的 MMC 枚举行，以及 Rockchip U-Boot SPL/ATAGS 源码，修正“MMC2 可能对应 Linux mmc2/SDIO”的歧义。
+
+### 12.1 实机 U-Boot proper 明确枚举 SD 为 mmc 1
+
+原始日志实际包含：
+
+```
+no mmc device at slot 1
+dwmmc@fe2b0000: 1 (SD), dwmmc@fe2c0000: 2, sdhci@fe310000: 0
+Bootdev(atags): mmc 1
+...
+mmc1 is current device
+Scanning mmc 1:1...
+Found U-Boot script /boot.scr
+```
+
+直接含义：
+- U-Boot proper 把 `dwmmc@fe2b0000` 枚举为 `mmc 1 (SD)`；
+- `sdhci@fe310000` 枚举为 `mmc 0`，对应 eMMC；
+- U-Boot proper 随后确实从 `mmc1:1` 读取 TF 卡的 `/boot.scr`。
+
+所以本次 U-Boot proper 的 mmc1=TF/SD、mmc0=eMMC，已由本机日志直接确认，不需要再用 Linux DTS aliases 推断。
+
+### 12.2 Rockchip SPL 的 MMC2 与 proper 的 mmc1 是不同编号体系
+
+在 Rockchip U-Boot 源码（rockchip-linux/u-boot，commit `1c535d65b8509f388d09e49fb6961f49fda35a1d`）中：
+- `arch/arm/mach-rockchip/rk_atags.c` 的 `spl_bootdev_map[]` 将 SPL 的 `BOOT_DEVICE_MMC2` 映射为 `BOOT_TYPE_SD0`；
+- `BOOT_DEVICE_MMC1` 映射为 `BOOT_TYPE_EMMC`；
+- `spl_perform_fixups()` 调用 `atags_set_bootdev_by_spl_bootdevice(spl_image->boot_device)`；
+- `arch/arm/mach-rockchip/param.c` 的 `param_parse_atags_bootdev()` 再将 `BOOT_TYPE_SD0/SD1` 转换成 U-Boot proper 的 `mmc 1`，将 `BOOT_TYPE_EMMC` 转换成 `mmc 0`。
+
+这与本机日志的：
+- SPL：`Trying to boot from MMC2`
+- U-Boot proper：`Bootdev(atags): mmc 1`
+- U-Boot proper：`dwmmc@fe2b0000: 1 (SD)`
+完全吻合。
+
+Rockchip U-Boot 开发指南也说明 SPL 使用 `u-boot,spl-boot-order` 选择下一阶段存储介质，并通过 ATAGS 向 U-Boot proper 传递启动设备信息；SPL 默认可优先探测 SD，随后再探测其他介质。
+
+### 12.3 这条 ATAGS 不能证明 BootROM 最初从哪张卡加载 SPL
+
+源码路径很关键：`spl_perform_fixups()` 传给 ATAGS 的是 `spl_image->boot_device`，即当前 SPL 加载后续镜像所使用的设备类型；不是 `get_bootdev_by_brom_bootsource()` 读取的 BootROM 启动来源寄存器。
+
+因此：
+- `Bootdev(atags): mmc 1` 证明当前 SPL 将后续 U-Boot proper 从 SD/TF 加载；
+- 它**不证明**当前 SPL 自身是由 BootROM 从 TF 加载；
+- 也**不证明**当前 SPL 自身是由 BootROM 从 eMMC 加载。
+
+这避免把“谁加载了 SPL”与“SPL 从哪里加载 U-Boot proper”混为一谈。
+
+### 12.4 当前启动链证据等级修订
+
+| 环节 | 当前证据 | 结论 |
+|---|---|---|
+| BootROM → SPL | SPL banner 为 2023-04-23 / DDR V1.13；eMMC LBA64 保存的原版 SPL 指纹与之吻合；RK3566 普通 ROM 启动优先级 eMMC 高于 SD | eMMC 来源仍高度吻合，但未直接读取 BootROM source tag/寄存器 |
+| SPL → U-Boot proper | SPL 打印 MMC2；proper ATAGS 映射为 mmc1；proper 明确枚举 mmc1 为 SD，并从 mmc1 读取 TF 上文件 | **已闭环：SPL 从 TF/SD 加载 U-Boot proper** |
+| U-Boot proper → Linux 启动文件 | mmc1:1 扫描并读取 /boot.scr、kernel、initrd、Panther X2 DTB | **已验证：从 TF 启动 Linux** |
+
+最符合现有证据的整条路径仍是：
+`BootROM → eMMC 上的旧 SPL/DDR V1.13 → TF 上的 JP U-Boot proper → TF 上的 Panther X2 Linux 文件`。
+
+其中第一段仍属于高度吻合推断；第二、三段已由 SPL 日志、ATAGS、MMC 映射和文件读取日志互相印证。
+
+### 12.5 当前现场不需要执行命令
+
+上述闭环完全来自已有 UART 原始记录和源码，不需要用户离开当前 U-Boot 暂停状态，不需要断电、reset、boot 或重新测试。
+
+下一步应把研究重点转向：
+1. 找到旧 SPL 所用精确构建源/配置中的 Rockchip boot source 逻辑；
+2. 检查 eMMC LBA64 中的原版 SPL 与 TF 上 JP idbloader 的差异，解释 BootROM 为何执行旧 SPL；
+3. 若要直接确认 BootROM 来源，优先寻找该 SPL 是否打印或保留 BROM bootsource 信息；不通过写入启动区或盲目改变启动顺序来验证。
+
+参考：
+- Rockchip U-Boot 源码 `rk_atags.c`：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/rk_atags.c
+- Rockchip U-Boot 源码 `spl.c`：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/spl.c
+- Rockchip U-Boot 源码 `param.c`：https://github.com/rockchip-linux/u-boot/blob/1c535d65b8509f388d09e49fb6961f49fda35a1d/arch/arm/mach-rockchip/param.c
+- Rockchip U-Boot v2017(next-dev) 开发指南 §10.3.3–10.3.4：https://download.t-firefly.com/product/Board/RK356X/Document/Developer/Rockchip_Developer_Guide_UBoot_Nextdev_CN.pdf
