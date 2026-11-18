@@ -2252,3 +2252,73 @@ Databook 还把 jabber timeout、no carrier/loss of carrier、late collision、f
 - **关闭本支线：** 不再要求用户重复 grep `rk_get_eth_addr` 日志，不访问/修改 Vendor Storage，不调整 MAC。TF U-Boot 到运行时 FDT 的 MAC 传递链已是更直接的解释。
 - **故障关联：** 即使运行时 MAC 与 eMMC 板载记录不同，广播帧仍应使用有效 source MAC 发出；MAC 来源差异不能单独解释 hEX/iMac 均看不到广播/单播测试帧。
 
+
+
+## 46. 6.1 正常基线与 6.12 故障环境的实际运行时 FDT：PHY reset GPIO 差异（2026-11-18）
+
+本轮重新逐项对照了 6.1.116 原始运行时 FDT 采集、6.1 源码 DTS、6.1.192 release DTS，以及 6.12.81 运行时 FDT 记录。此项是新的软件配置证据，不涉及硬件拆检、寄存器访问或设备改动。
+
+### 46.1 6.1.116 实机运行时 FDT 没有 PHY reset GPIO 属性
+
+原始归档 `evidence/network/panther-eth-baseline-redacted.txt` 中，节点 `/sys/firmware/devicetree/base/ethernet@fe010000` 明确列出：
+- `resets`；
+- `reset-names = "stmmaceth"`；
+- 未列出 `snps,reset-gpio`；
+- 未列出 `snps,reset-active-low`；
+- 未列出 `snps,reset-delays-us`。
+
+这里的 `resets/reset-names=stmmaceth` 是 GMAC 控制器 reset-controller 项，不能等同于给 RTL8211F PHY 的 GPIO reset。
+
+### 46.2 源码 DTS 与 6.1.116 实机 FDT 存在不一致
+
+对照以下三个源码版本：
+- 6.1.116 release 候选：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`；
+- 6.1.192 release commit：`unifreq/linux-6.1.y@42631d180c433d25a1f20ab79740f9f97efa0cd0`；
+- 6.12.81 源码：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c)。
+
+三者的 Panther X2 `&gmac1` DTS 都包含：
+- `snps,reset-gpio = <&gpio3 RK_PA1 GPIO_ACTIVE_LOW>`；
+- `snps,reset-active-low`；
+- `snps,reset-delays-us = <0 20000 100000>`。
+
+因此，6.1.116 实机运行时 FDT 中缺少上述属性，并不能用“6.1.116 源码 DTS 没有写”解释。已知 rootfs 的 dpkg 元数据显示 `linux-dtb-rockchip64-ophub 6.1.192-1-ophub`，但包版本字段本身不能证明 U-Boot 本次实际加载的 DTB 文件就是该包中的同一文件。
+
+6.1.116 归档 boot script：
+- `overlays=` 为空；
+- `user_overlays=` 为空；
+- 但 boot script 在这两组 overlay 之后，仍会在文件存在时加载并执行 `dtb/rockchip/overlay/rk3566-fixup.scr`，以及可选的 `/boot/fixup.scr`。
+当前归档没有保存这两个 fixup script 的存在性、内容和哈希，也没有保存本次 U-Boot 实际读取的 DTB 文件哈希。因此，实际加载文件与 rootfs `/boot/dtb` 文件是否相同、fixup 是否改写了节点，仍未闭环。
+
+### 46.3 6.12.81 运行时 FDT 含有 PHY reset GPIO
+
+6.12.81 归档运行时 FDT 的 GMAC1 节点记录：
+- `snps,reset-gpio = <0x81 0x01 0x01>`；
+- `snps,reset-active-low`；
+- `snps,reset-delays-us = <0x00 0x4e20 0x186a0>`，即 0 / 20000 / 100000 µs。
+
+按已归档 phandle/provider 解码，该 GPIO 对应 GPIO3 line 1（GPIO97），低有效。该属性与 6.12 源码 DTS 相符。
+
+### 46.4 这项 FDT 差异会改变 Linux 的 PHY reset 行为
+
+6.1 与 6.12 的 `stmmac_mdio_reset()` 都使用：
+`devm_gpiod_get_optional(priv->device, "snps,reset", GPIOD_OUT_LOW)`
+并读取 `snps,reset-delays-us`。
+
+6.12 另对 NULL descriptor 作显式处理（`IS_ERR_OR_NULL`），并在复位序列后调用 `devm_gpiod_put()`；6.1 对错误指针的处理写法不同。两版的有效 GPIO 复位脉冲主体相同。
+
+Panther 的 MDIO firmware node 存在；`stmmac_mdio_setup()` 对存在 `mdio_node` 的配置分配 `mdio_bus_data` 并设置 `needs_reset=true`，MDIO 注册时因此会挂接 `stmmac_mdio_reset()`。所以：
+- 若运行时 FDT 没有 `snps,reset-gpio`，optional GPIO 不会取得有效 reset descriptor，Linux 不会通过该属性对 PHY 做 GPIO reset；
+- 若运行时 FDT 含有该 GPIO，MDIO reset callback 会执行低有效 reset 序列：先保持逻辑 deassert，随后拉低物理 reset 约 20 ms，再释放并等待约 100 ms。
+
+因此，当前两套实机环境存在一个值得认真对待的差异：**6.1.116 已知正常运行时 FDT 没有 PHY reset GPIO；6.12.81 故障环境的运行时 FDT 则包含它。** 这会改变 Linux 对 RTL8211F 的启动 reset 行为，属于软件控制硬件的差异，而不是板级硬件审计。
+
+### 46.5 证据边界与下一步
+
+- **已验证：** 6.1.116 运行时 FDT 采集未列出 PHY reset GPIO；6.12.81 运行时 FDT 记录包含 GPIO3 line 1、低有效及 20ms/100ms delay。
+- **已验证：** 6.1.116、6.1.192 和 6.12.81 三个候选源码 DTS 均包含相同的 PHY reset GPIO 属性；因此源码 DTS 不能直接代表 6.1.116 当时实际交给 Linux 的 FDT。
+- **源码确认：** 该属性会使 STMMAC MDIO bus reset callback 对 PHY 执行 GPIO reset；缺少该属性则不会取得有效 GPIO descriptor。
+- **未验证：** 6.1.116 实际启动时所加载 DTB 的文件哈希/来源；是否由 `rk3566-fixup.scr` 或 `fixup.scr` 改写；6.1 rootfs 的 `/boot/dtb` 是否就是 U-Boot 实际加载文件；6.12.81 reset GPIO 在实机上是否确实被请求和切换（当前只由源码与运行时 FDT 推断）。
+- **不作根因结论：** PHY reset 是正常初始化行为，6.12 仍然能 Link Up；目前没有证据证明该 reset 脉冲导致 TX 外发失败。不能直接删除该属性或更改 reset timing。
+
+下一项最有价值的最小只读取证不是重跑网络测试，而是核对 6.1.116 实际启动文件链：`findmnt` 确认 boot media 与 `/boot` 的关系，取得 `/sys/firmware/fdt` 和当前 `/boot/dtb/rockchip/rk3566-panther-x2.dtb` 的哈希，并检查上述两个可选 fixup script 的存在性/内容。该采集不修改配置、不触发 PHY reset、不重启接口；取得结果后再判断 6.1 运行时 FDT 为何缺少源码中存在的 reset GPIO 属性。
+
