@@ -1466,3 +1466,59 @@ RTL8211F datasheet Rev 1.7 对 PHYCR2（page 0xa43, reg 0x19）定义：bit 0 CL
 - **结论：** 旧 workaround 与 Panther 型号不匹配，不可移植；但它并不能解释 6.12 的 TX 故障，尤其不能忽略 6.1 正常通信这一反证。
 
 下一步继续审计 6.1.116 的构建身份与运行时日志证据，优先寻找可确认实际内核源码/二进制的历史 build metadata；不要求用户重跑 PHY 检查，也不执行 MDIO 写入。若仍无法获得 6.1 二进制来源，应该把这段遗留 patch 从“6.1.116 实际执行”降级为“高置信度候选源码包含”，避免把推断写成事实。
+
+
+## 31. 6.1.116 source identity strengthened by exact upstream release commit and boot-image hash (2026-11-18)
+
+本轮继续核对 6.1.116 的实际构建身份与 Actions 记录。只读取 GitHub 历史、仓库现有归档；没有设备操作。
+
+### 31.1 6.1.116 对照源码 commit 不再只是按日期猜测
+
+通过 GitHub REST 对 `unifreq/linux-6.1.y` 的 `drivers/net/ethernet/stmicro/stmmac/stmmac_main.c` 历史按 `until=2024-11-10T14:00:00Z` 查询，确认：
+- commit `5eb841b59d6ead6e264163785a634e78f0253c8e`
+- commit message 明确为 `up to 6.1.116`
+- author/committer 时间：2024-11-09 08:06:23 UTC
+- `Makefile` 将 `SUBLEVEL` 从 115 更新为 116
+- Panther 归档中的运行内核 `uname -a` / `proc/version` 为 `6.1.116-ophub #1 SMP Sun Nov 10 08:21:17 EST 2024`，即 2024-11-10 13:21:17 UTC。
+
+该源码 commit 是 6.1.116 版本更新提交，时间比运行内核编译时间早约 29 小时；并且正好是本轮所用 `stmmac_main.c` 版本。故 6.1.116 源码对照 commit 从“按版本与日期重建的高置信度候选”升级为“与运行版本号、源码 SUBLEVEL 和编译时间高度吻合的精确 release commit 候选”。
+
+### 31.2 现有 Image 文件身份已保存 SHA256，但还没有可对照的构建产物
+
+`panther-eth-supplement-redacted.txt` 已保存：
+- `/boot/Image` 与 `/boot/vmlinuz-6.1.116-ophub` 是同一文件，SHA256：`bbc2ffc6e728f3a793151c225efef0ccac6b9ebb0cfed6907cd93062fd3a31d6`；
+- `/boot/Image` symlink 指向 `vmlinuz-6.1.116-ophub`；
+- `/boot/uInitrd` 指向 `uInitrd-6.1.116-ophub`；
+- `uname` 与 `/proc/version` 报告运行 `6.1.116-ophub`，编译时间为 2024-11-10 08:21:17 EST；
+- `/boot/config-6.1.116-ophub` 和 `/boot/System.map-6.1.116-ophub` 存在；另有独立的 6.1.192 文件。
+
+### 31.3 6.1.192 包版本是环境元数据不一致，不代表运行的是 6.1.192
+
+同一归档的 `dpkg-query` 显示 `linux-image-ophub` 与 `linux-dtb-rockchip64-ophub` 安装包版本为 `6.1.192-1-ophub`；但实际运行内核、`/boot/Image`、`/boot/uInitrd` 均明确指向 6.1.116。`/boot` 同时存在 6.1.116 与 6.1.192 的 kernel/initrd/System.map/config 文件。
+
+因此本轮只确认“包管理器安装版本字段与正在运行/默认启动的 kernel 文件版本不一致”；不能把包版本 6.1.192 当成当前运行内核，也不能用它否定 `6.1.116` 的 uname 与 Image 证据。形成这一状态的升级/回滚过程在现有材料中没有完整记录。
+
+### 31.4 Actions run 核对：之前引用的 43543451274 与 6.1.116 无关
+
+GitHub Actions API 返回：
+- run `43543451274` 的名称是 `Inspect Ophub 6.18.63 kernel package`，不是 6.1.116 构建；此前仅凭用户提供的链接不能将其当成 6.1.116 build evidence。
+- 本仓库与 6.1.116 相关的 run `43722925635` 名为 `Audit Panther X2 6.1.116 reference DTB`，工作流 `.github/workflows/audit-reference-dtb.yml` 只从 `audit/6.1.116-reference-dtb` 分支读取已上传 DTB ZIP，验证 DTB SHA256 与结构；不构建 Linux kernel Image。
+- 当前可见的本仓库 Actions runs 列表没有 6.1.116 kernel Image build run。
+
+所以，Actions 层面尚未找到 6.1.116 Image 的 build log / artifact / artifact SHA256 关联。不能把 DTB audit run 当成 kernel build。
+
+### 31.5 对 JL2xx1 workaround 的证据等级更新
+
+由于 `5eb841b...` 是明确的 `up to 6.1.116` release commit，且构建时间与源码 release 时间吻合，6.1.116 候选源码确实包含 `49b5f340` JL2xx1 workaround 的判断进一步增强。
+
+但当前仍缺 `/boot/vmlinuz-6.1.116-ophub` 对应的原始 build artifact 或可复现的二进制构建链；因此严格表述仍是：
+- **高度吻合：** 6.1.116 实际运行 Image 很可能由 `unifreq/linux-6.1.y@5eb841b...` 构建；
+- **未做到二进制证明：** 没有 upstream build artifact hash / build log 将 `bbc2ffc6...` 与该 commit 绑定；
+- **代码存在性已确认：** 该 commit 的 `stmmac_mdio.c` 包含 2022 年 JL2xx1 专用遗留 workaround；
+- **实际执行结果未确认：** Panther 的 RTL8211F 是否响应地址 0 的 MDIO broadcast 写仍无历史 trace/寄存器前后值。
+
+### 31.6 本轮结论与下一步
+
+6.1.116 源码身份已经从“日期推测”提升到“release commit 与构建版本/时间吻合”；但当前 repo Actions 没有对应 Image 构建，不能把它提升为二进制级证明。包版本 6.1.192 是已安装包元数据，不是实际运行版本。
+
+下一步不再重复查同一 Actions 列表。继续做纯静态的 binary/source provenance：查找 `bbc2ffc6...` Image hash、构建时间 `2024-11-10 08:21:17 EST`、`root@<REDACTED_BUILD_HOST>` 对应的公开 Ophub release/build records；如果无公开可验证 artifact，明确记录 provenance 的证据上限，并把 JL2xx1 workaround 保留为“release 源码中存在、实机是否执行未知”的历史差异，不把它当 TX 根因。
