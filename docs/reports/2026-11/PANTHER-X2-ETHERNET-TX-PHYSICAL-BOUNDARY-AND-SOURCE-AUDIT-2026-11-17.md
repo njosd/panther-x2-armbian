@@ -1522,3 +1522,65 @@ GitHub Actions API 返回：
 6.1.116 源码身份已经从“日期推测”提升到“release commit 与构建版本/时间吻合”；但当前 repo Actions 没有对应 Image 构建，不能把它提升为二进制级证明。包版本 6.1.192 是已安装包元数据，不是实际运行版本。
 
 下一步不再重复查同一 Actions 列表。继续做纯静态的 binary/source provenance：查找 `bbc2ffc6...` Image hash、构建时间 `2024-11-10 08:21:17 EST`、`root@<REDACTED_BUILD_HOST>` 对应的公开 Ophub release/build records；如果无公开可验证 artifact，明确记录 provenance 的证据上限，并把 JL2xx1 workaround 保留为“release 源码中存在、实机是否执行未知”的历史差异，不把它当 TX 根因。
+
+
+## 32. MAC/DMA bring-up call order and RX ring preparation comparison (2026-11-18)
+
+本轮完成 `stmmac_open → __stmmac_open → stmmac_hw_setup → stmmac_init_dma_engine → stmmac_start_all_dma` 的静态调用顺序对照，并下钻至 DWMAC4 DMA reset/start ops。未执行实机测试或寄存器访问。
+
+### 32.1 主初始化顺序：6.1 与 6.12 基本一致
+
+两版共同顺序：
+1. `stmmac_open()` 先调用 `stmmac_setup_dma_desc()`，分配 DMA descriptor rings 并初始化 TX/RX ring；
+2. `__stmmac_open()` 调用 `pm_runtime_resume_and_get()`；
+3. `stmmac_init_phy()` attach PHY；
+4. 执行平台 SerDes powerup（6.12 增加 `STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP` 条件，但 Panther RK3568 glue 未注册 SerDes powerup callback）；
+5. `stmmac_hw_setup()`；
+6. `stmmac_init_dma_engine()` 做 DMA SW reset、DMA config、channel config、RX/TX base/tail pointer；
+7. `stmmac_core_init()`、MTL 配置、`stmmac_mac_set(..., true)`；
+8. 配置 DMA operation mode、ring length 等；
+9. `stmmac_start_all_dma()` 先启动所有 RX channel，再启动所有 TX channel；
+10. 返回 `__stmmac_open()` 后才 `phylink_start()`、request IRQ、enable queues、enable DMA IRQ、start netdev TX queues。
+
+对 Panther RGMII，6.12 在 `stmmac_hw_setup()` 最前增加的 `phylink_pcs_pre_init()` 只有 `priv->hw->phylink_pcs` 非空才执行；RK3566 Panther RGMII 路径没有 PCS，因此该新增步骤不命中。
+
+### 32.2 RX buffer/ring 初始化函数相同
+
+两版 `stmmac_init_rx_buffers()` 函数逐字相同：从 page_pool 分配 RX page，设置 DMA address，配置 secondary buffer（若启用 SPH），并写 descriptor buffer address。Panther glue 在 6.12 设置 `STMMAC_FLAG_SPH_DISABLE`，因此 SPH 不应启用；这与已有代码基线一致。
+
+两版 `stmmac_start_all_dma()`、`stmmac_start_rx_dma()`、`stmmac_start_tx_dma()` 逐字相同：RX channel 先于 TX channel启动。
+
+### 32.3 `stmmac_setup_dma_desc()` 的差异被 Panther DT 排除
+
+6.12 在 ring size 选择上增加 `plat->dma_tx_size` / `plat->dma_rx_size` 覆盖：若设备树设置 `tx-dma-size` / `rx-dma-size`，优先使用 DT 指定值；否则仍使用 `DMA_DEFAULT_TX_SIZE` / `DMA_DEFAULT_RX_SIZE`。
+
+6.1 版本直接使用默认 ring size（或已有 `priv->dma_conf` size）。本轮读取 6.12 候选 Panther DTS `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`，`&gmac1` 节点没有 `tx-dma-size` 或 `rx-dma-size` 属性，因此新增 DT override 对 Panther 不生效，默认 ring size 路径相同。此项不是当前故障差异。
+
+### 32.4 DMA SW reset polling cadence 有变化，但总超时相同
+
+RK3566 使用 DWMAC4 DMA ops。对照 `dwmac4_dma_reset()`：
+- 6.1：`readl_poll_timeout(..., 10000, 1000000)`，每 10,000 µs 轮询，最大 1,000,000 µs；
+- 6.12：`readl_poll_timeout(..., 500, 1000000)`，每 500 µs 轮询，最大同样 1,000,000 µs。
+
+因此 6.12 改为更频繁地检查 SW reset bit，但没有缩短最大等待上限；不是 reset timeout 被缩短。结合已有 6.12 DMA channel 已运行、ST/Tail pointer推进、无 fatal DMA error 的实机记录，当前没有证据指向 reset polling cadence 是 TX 外发失败原因。
+
+### 32.5 DWMAC4 RX/TX start 的寄存器动作相同
+
+两版 DWMAC4 `start_rx` / `start_tx` 的操作语义相同：
+- RX：read channel RX_CONTROL → set `DMA_CONTROL_SR` → write back；再 read `GMAC_CONFIG` → set `GMAC_CONFIG_RE` → write back。
+- TX：read channel TX_CONTROL → set `DMA_CONTROL_ST` → write back；再 read `GMAC_CONFIG` → set `GMAC_CONFIG_TE` → write back。
+
+6.12 为适配 `dwmac4_addrs` 增加寄存器地址偏移结构参数，但没有改变 SR/ST/RE/TE 位的设置顺序和动作。此前运行时 TX ST=1、tail pointer推进、TX cleanup/MMC计数等记录也与软件已发起 DMA 相吻合。
+
+### 32.6 本轮确认与剩余差异
+
+- **已确认：** 初始化调用顺序、RX-before-TX 启动顺序、RX buffer init、RX/TX start helpers 在两版相同。
+- **已确认：** 新增 DT ring-size override 不会命中 Panther 当前 DTS（无 `tx-dma-size` / `rx-dma-size`）。
+- **已确认：** DWMAC4 reset polling cadence 从 10ms 改为 0.5ms，但最大 1s timeout 相同。
+- **已确认：** 6.12 `phylink_pcs_pre_init()` 不命中 Panther RGMII；SerDes powerup conditional 对 Panther无实际作用。
+- **仍存在的主差异：** 6.1 的 `stmmac_init_dma_engine()` 在 DMA reset 前等待 1500ms；6.12 没有。第 30 节已追到该等待与 JL2xx1 专用 workaround 同一提交，目标不是 Panther RTL8211F，因此不能直接移植/认定根因。
+- **另一个差异：** 6.1 `stmmac_hw_setup()` 在 `stmmac_start_all_dma()` 后可启动 FPE workqueue/handshake（当 `dma_cap.fpesel`）；6.12 对照代码不再有该段。当前 Panther FPE 是否实际报告可用、DT 是否启用 FPE、FPE 是否可能改变 TX path 尚未证明；若无 FPE 配置，该差异不参与普通 TX。需静态确认 RK3568 feature register/capability与 Panther platform configuration 后再决定是否追踪，不做实机测试。
+
+### 32.7 下一步
+
+主流程没有发现可解释“6.12 DMA 正常运行但外部收不到帧”的顺序变化。下一轮先静态核对 Panther DWMAC4 实际选择的 DMA ops、硬件 feature capability、FPE enable 条件，以及 6.1/6.12 `stmmac_core_init()` 与 `stmmac_dma_operation_mode()` 对 GMAC TE/RE、MTL TX queue enable/priority/flow-control 的最终写入差异。优先排除“DMA TX 已运行，但 MAC/MTL TX queue 被配置成不发包”的软件路径；不重复实机 DMA/descriptor/counter 测试。
