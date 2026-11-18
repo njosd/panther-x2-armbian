@@ -2041,3 +2041,96 @@ Ophub 6.1 stable reference config（版本 6.1.191，不是 6.1.116 实际二进
 2. 严格解释 MMC `tx_framecount_gb` 的计数边界：它是否只在 MAC 已完成发送帧后增加，还是可能在 RGMII TX 输出之前增加。不能把 MMC 计数与外部线路发帧画等号。
 
 如果两项也没有 6.1→6.12 的实质差异，静态软件审计可收束为“DMA/MAC内部完成，但外部边界未证实”，下一步再讨论一个最小且安全的物理边界验证，不重复旧测试。
+
+
+## 41. DWMAC4.20a capability selection and custom register-offset API audit (2026-11-18)
+
+本轮完成第 40.7 节第一项：核对 DWMAC4.20a hardware ops selection、DMA ops table、hardware feature decode，以及 6.12 新增 `dwmac4_addrs` 可定制寄存器偏移 API 是否改变 Panther 的 DMA register addresses。只读源码，无设备操作。
+
+### 41.1 DWMAC4.20a 仍选择同一套 DWMAC4.10+ ops
+
+两版 `hwif.c` 的 `DWMAC_CORE_4_10` entry 都绑定：
+- `.desc = &dwmac4_desc_ops`
+- `.dma = &dwmac410_dma_ops`
+- `.mac = &dwmac410_ops`
+- `.mode = STMMAC_RING_MODE`
+
+Panther runtime compatible 已记录为 `snps,dwmac-4.20a`，故两版均匹配该 entry。6.12 没有让 Panther 改走旧 DWMAC4 ops 或另一种 descriptor format。
+
+### 41.2 `dwmac410_dma_ops` 的功能表相同
+
+两版 `dwmac410_dma_ops` 绑定的关键回调一致：reset/init/init_chan、init_rx_chan/init_tx_chan、enable/disable IRQ、start/stop TX/RX、DMA interrupt、get_hw_feature、ring length/tail pointer、TSO 等。6.12 主要把部分 callback 参数增加 `struct stmmac_priv *`，用于取得平台寄存器偏移；不是改变 TX channel 功能选择。
+
+`dwmac4_dma_init()` 旧版的 `atds` 参数在函数体内未使用，6.12 删除该无效参数，没有行为变化。
+
+### 41.3 新增 `dwmac4_addrs` 对 Panther 使用默认寄存器布局
+
+6.12 新增 `struct dwmac4_addrs` 允许平台覆盖 DMA/MTL channel register base/offset。Panther RK3568 glue (`dwmac-rk.c`) 没有给 `plat->dwmac4_addrs` 赋值；`stmmac_probe_config_dt()` 通过 `devm_kzalloc()` 分配 platform data，所以该指针默认 NULL。
+
+6.12 的 `dma_chanx_base_addr()` / `mtl_chanx_base_addr()` 在 `addrs == NULL` 时回退到默认常量：
+- DMA channel base `0x1100`，channel offset `0x80`；
+- MTL channel base `0x0d00`，channel offset `0x40`。
+
+这些默认常量与 6.1 直接使用的 `DMA_CHANX_BASE_ADDR(x)` / `MTL_CHANX_BASE_ADDR(x)` 完全一致。因此新 API 不会改变 Panther DMA channel0 或 MTL queue0 的寄存器偏移。
+
+### 41.4 Hardware feature decode 的 TX 能力位没有变化
+
+两版 `dwmac4_get_hw_feature()` 对以下 TX 相关字段的解码相同：`tx_coe`、`tsoen`、TX channel count、TX queue count、TX FIFO size、PBL 相关硬件能力。6.12 只额外解码 MAC address filter additional 32/64 address fields；不改变 TX COE、TSO 或 TX channel/queue capability。
+
+### 41.5 本轮结论
+
+- **已确认：** DWMAC4.20a 两版都选择 DWMAC4.10+ MAC/DMA ops 和 ring descriptor format。
+- **已确认：** 6.12 新 `dwmac4_addrs` 对 Panther 是 NULL fallback，DMA/MTL 默认寄存器偏移与 6.1 相同。
+- **已确认：** TX COE、TSO、channel/queue 等硬件能力解码没有影响当前 TX 路径的版本差异。
+- **结论：** 没有发现 6.12 在 DWMAC4.20a ops 选择、DMA register offset 或 TX capability selection 上改变 Panther 普通 TX 行为的证据。
+
+## 42. MMC good-only counters and the actual MAC TX completion boundary (2026-11-18)
+
+本轮重新读取已归档原始采集 `evidence/network/panther-eth-baseline-redacted.txt`，并对照两版 `mmc_core.c` 和 Synopsys DWC Ethernet MAC Universal databook 的 MMC register definitions。未执行新设备测试。
+
+### 42.1 原始记录中的 good-only 计数被此前报告低估
+
+原始 `ethtool -S eth0` 输出同一快照：
+- `mmc_tx_framecount_gb = 1557`
+- `mmc_tx_framecount_g = 1557`
+- `mmc_tx_octetcount_gb = 156359`
+- `mmc_tx_octetcount_g = 156359`
+- `mmc_tx_underflow_error = 0`
+- `mmc_tx_carrier_error = 0`
+- 驱动扩展统计 `tx_underflow = 0`、`tx_carrier = 0`、`tx_losscarrier = 0`。
+
+此前分析重点引用 `_GB`，没有充分强调同一快照中的 `_G`。这次需要提升证据权重：在该累计快照里，MAC good-only frame/octet counters 与 good+bad counters 完全相等，MAC 没有把已计数帧归类为 bad TX frame。
+
+### 42.2 MMC register semantics
+
+Synopsys databook 的 MMC register map 定义：
+- `txframecount_gb`：good and bad frames transmitted；
+- `txframecount_g`：good frames transmitted；
+- `txoctetcount_gb`：good and bad frames 的 octets；
+- `txoctetcount_g`：good frames 的 octets；
+- `txcarriererror`：因 carrier sense error（no carrier/loss of carrier）而 abort 的帧；
+- `txunderflowerror`：因 frame underflow abort 的帧。
+
+Databook 还把 jabber timeout、no carrier/loss of carrier、late collision、frame underflow 列为 bad transmitted frame 的条件。Linux 6.1/6.12 `mmc_core.c` 均分别读取 `MMC_TX_FRAMECOUNT_GB` 与 `MMC_TX_FRAMECOUNT_G`，累计到不同的 `mmc_tx_framecount_gb` / `mmc_tx_framecount_g` 字段；不是同一个寄存器被重复命名。
+
+### 42.3 对故障边界的修正
+
+- **比 DMA completion 更强：** `mmc_tx_framecount_g` 增长说明 GMAC MMC 将帧计入 good transmitted frames，而不是只看到 skb 已提交或 descriptor 已回收。
+- **排除了部分 MAC 内部 abort 条件：** 同一快照 good 与 good+bad 相等，且 underflow/carrier/late-collision counters 为 0；当前证据不支持“MAC 明确因 underflow/no-carrier 将这些帧 abort”。
+- **仍不是远端物理接收证明：** MMC 是 MAC 内部统计单元；它不能证明 PHY 已正确编码/发送，也不能证明 RGMII TXD/TXC 引脚的波形符合电气/时序规范，更不能证明 iMac/hEX 收到了帧。
+- **分类计数器异常不作反向推断：** 同一原始输出中 `mmc_tx_unicast_gb`、`mmc_tx_broadcast_gb`、`mmc_tx_64_octets_gb` 等分类计数为 0，但总 good frame/octet counters 正常增长。该现象可能涉及该 IP 配置下未实现/不工作的分类计数器，不能据此推翻总计数，也不能推断实际没有单播/广播帧。
+
+### 42.4 更新后的证据链
+
+当前证据链应表述为：
+1. skb 进入 `stmmac_xmit()` 并返回 `NETDEV_TX_OK`；
+2. TX descriptor 被 DMA/驱动完成路径回收；
+3. Linux TX packet/byte 统计增长；
+4. GMAC MMC 的 good-only TX frame/octet counters 增长，且与 good+bad counters 相等；
+5. Panther 本机 outgoing capture 可见，但 hEX 与持续监听的 iMac 均未捕获相应外发帧。
+
+因此故障边界比此前进一步收窄：**GMAC MAC core 的内部统计已经将帧计为 good transmission；外部接收端仍完全看不到。** 当前更值得区分的是 MAC core 到 RGMII TXD/TXC 引脚的实际信号输出，以及 RTL8211F PHY 的接收/编码/线侧发射路径。不能再把“DMA 只是回收了 descriptor，MAC 可能明确 abort”作为主要解释。
+
+### 42.5 下一步
+
+静态软件审计的剩余项已很少。下一步不再重复 DMA/descriptor/clock/PHY ID/loopback/scan。应先检查现有报告中是否已经保存 `mmc_tx_framecount_g` 的逐次增量与自定义 60-byte 帧测试时间点；若没有，就把它标为“累计快照支持、单帧关联未独立证明”，不要求用户重跑。随后汇总目前证据，设计一个新的、最小、只读且不访问危险寄存器的 MAC→RGMII→PHY 边界验证，实施前先向用户说明并征求授权。
