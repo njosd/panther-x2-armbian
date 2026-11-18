@@ -1209,3 +1209,73 @@ RK3568 ops 未提供 integrated PHY power 实现；Panther 使用外置 RTL8211F
 ### 26.6 下一步
 
 继续检查 6.12.81 实际构建与候选源码的映射，以及 6.1→6.12 中与 RTL8211F 外置 PHY 配置相关的真实驱动差异，尤其 PHY 初始化时序、ALDPS/EEE 配置及 RGMII interface handling。此前已经完成的 PHY ID、PHY reset、EEE 运行时状态、RGMII delay 和 GMAC 时钟实机检查不得重复；本阶段只做源码差异审计，先确定存在有意义的差异再决定是否需要新的验证。
+
+
+## 27. RTL8211F PHY driver 6.1.116 vs 6.12.81 comparison (2026-11-18)
+
+本轮按第 19 节已锁定的真实工作基线比较，而非比较两个 RK35xx 专用分支：
+- 正常 6.1.116：unifreq/linux-6.1.y @ 5eb841b59d6ead6e264163785a634e78f0253c8e；realtek.c blob `3d29f78108e746b7a2f99772dabb8374fd78f278`。
+- 故障 6.12.81：ophub/linux-6.12.y-rockchip @ 661b2d8bf1284556f8876d5ed5fb80c64b22f94c；realtek.c blob `ff15239ee63d137be5b4c9ba8538c3b02e414aa5`。
+
+6.12.81 source commit 与构建任务的对应关系已在第 16 节锁定；6.1.116 source commit 是基于 2024-11-10 workflow 时间戳和版本元数据重建的高置信度基线，尚缺原始 Actions run / 安装包 SHA256，故仍非二进制级确认。
+
+### 27.1 RGMII 内部 TX/RX delay 设置没有版本回归
+
+两版 `rtl8211f_config_init()` 对 `phydev->interface == PHY_INTERFACE_MODE_RGMII` 均设置：
+- `val_txdly = 0`
+- `val_rxdly = 0`
+
+随后均通过 page `0xd08` 的寄存器 `0x11` / `0x15` 对应位清除 PHY 内部 TX/RX delay。对于 Panther 运行时 DT 的 `phy-mode = "rgmii"`，两版都要求 PHY 侧不插入内部 RGMII delay；TX/RX delay 由 RK3566 GMAC 侧配置（当前运行时 DT 缓存值 0x30/0x10）。
+
+两版都使用 `phy_modify_paged_changed()` 修改相同 page/register/mask，并对错误返回进行检查。未发现 6.12 改变 RGMII mode 分支、delay 位选择或写入目标。
+
+### 27.2 ALDPS 配置逻辑保持一致
+
+两版 `rtl821x_probe()` 都读取 page `0xa43` 的 `RTL8211F_PHYCR1`，缓存现有 `ALDPS_PLL_OFF | ALDPS_ENABLE | ALDPS_XTAL_OFF` 位；只有设备树存在 `realtek,aldps-enable` 时才强制置位。两版 `rtl8211f_config_init()` 都将缓存值写回相同寄存器位。
+
+仓库保存的 Panther 运行时 PHY 节点 `/ethernet@fe010000/mdio/ethernet-phy@0` 只有 `compatible`、`status`、`reg`，没有 `realtek,aldps-enable`。因此当前 DT 没有要求驱动强制开启 ALDPS；两版均保留 PHY 原有 ALDPS 位状态。未发现 ALDPS 配置策略的 6.1→6.12 变化。
+
+### 27.3 PHYCR2 / CLKOUT 配置与 soft reset 的核心行为一致
+
+两版均在 `rtl821x_probe()` 中读取 PHYCR2 的 `RTL8211F_CLKOUT_EN` 位，并缓存其原状态；只有存在 `realtek,clkout-disable` 属性时才清除该位。两版 `rtl8211f_config_init()` 在 `has_phycr2` 条件下都修改相同 PHYCR2 位并执行 `genphy_soft_reset()`。
+
+6.12 将 LED restore 放到 soft reset 之后；6.1 的 `realtek,led-data` 写入则发生在 PHYCR2 soft reset 之前。这个顺序差异影响 LED 配置在复位后的恢复，不改变 PHYCR2 CLKOUT 位的目标值，也没有证据表明它改变 RGMII TX/RX 数据通道。
+
+Panther 运行时 PHY 节点没有 `realtek,clkout-disable` 属性，两版都保留 probe 时读取到的 CLKOUT_EN 状态。
+
+### 27.4 6.12 新增可选 PHY clock 管理，但 Panther DT 未提供 PHY clock
+
+6.12 的 `rtl821x_probe()` 新增 `devm_clk_get_optional_enabled(dev, NULL)`；6.12 的 `rtl821x_suspend()` 在 PHY suspend 后关闭该可选 clock，`rtl821x_resume()` 在恢复前重新开启。6.1 的 suspend callback 直接使用 `genphy_suspend()`，resume callback 执行 `genphy_resume()` 后等待 20 ms。
+
+对照仓库中保存的 Panther 运行时 PHY 节点：
+- 节点为 `/ethernet@fe010000/mdio/ethernet-phy@0`；
+- 节点属性仅记录 `compatible = ethernet-phy-ieee802.3-c22`、`status = okay`、`reg = 0`；
+- 没有 `clocks` 或 `clock-names` 属性。
+
+因此 `devm_clk_get_optional_enabled()` 在 Panther 当前 PHY 节点下应得到 NULL，不会管理额外 PHY clock；`clk_disable_unprepare(NULL)` / `clk_prepare_enable(NULL)` 对该 optional clock 不形成实际时钟切换。两版在普通 PHY suspend/resume 的核心动作仍是 BMCR power-down / clear power-down，并保留约 20 ms resume 等待。该新增 clock 管理对当前 Panther 组合不构成可见的活动路径。
+
+### 27.5 PHY_ALWAYS_CALL_SUSPEND 是条件式 suspend/WOL 变化，不是在线 TX 路径变化
+
+6.12 的 RTL8211F driver table 将 `.suspend` 从 `genphy_suspend` 改为 `rtl821x_suspend`，并新增 `PHY_ALWAYS_CALL_SUSPEND`；6.1 没有该 flag。
+
+6.12 PHY core 的 `phy_suspend()` 逻辑显示，该 flag 主要改变 WOL 已启用时是否允许继续调用 PHY suspend callback。普通无 WOL 情况下，两版都会执行 PHY suspend；有 WOL 时，6.12 允许执行 suspend，而 6.1 返回 `-EBUSY`。这是设备关闭/电源管理语义，不是网卡处于 UP、PHY link-up 时的普通 TX descriptor/发送路径。
+
+当前资料没有证明 Panther 在故障测试时启用了 WOL。即使启用，该差异也只会在 PHY suspend 生命周期发生时相关；不能据此解释接口正常 UP 且 link-up 后普通 DHCP/raw frame 不到达外部接收端。
+
+### 27.6 RTL8211F LED 配置是主要剩余代码差异
+
+6.1 的 `rtl8211f_config_init()` 在检测到 `realtek,led-data` 时，直接写 page `0xd04` 的 LED control register 和 EEE LED control register；之后恢复 page 0。6.12 改用 LED framework：probe 时解析 LED 子节点，config_init 时调用 `rtl8211f_restore_leds()`，并在部分 early-return / PHYCR2 soft-reset 路径后恢复 LED 配置。
+
+这是 LED 指示配置/复位后恢复机制的变化。没有证据显示它修改 GMAC、RGMII TXC/TXD、PHY TX analog 或普通帧发送控制寄存器。它目前不构成有力的 TX 故障解释。
+
+### 27.7 本轮结论
+
+- **已确认（候选源码）：** 两版 RTL8211F 对 RGMII mode 的内部 TX/RX delay 都设置为 0；ALDPS 和 PHYCR2 CLKOUT 位的读取、缓存及回写策略一致。
+- **已确认（运行时 DT 记录）：** Panther PHY 节点没有 `realtek,aldps-enable`、`realtek,clkout-disable`、`clocks` 或 `clock-names` 属性；6.12 的可选 PHY clock 管理在当前 DT 下应为空操作。
+- **已确认（源码）：** 6.12 新增的 `PHY_ALWAYS_CALL_SUSPEND` 影响 WOL 与 suspend 行为，不在普通 UP/link-up TX 数据路径中。
+- **已确认（源码）：** 6.1→6.12 的 RTL8211F 主要差异集中在 LED 配置恢复和可选 clock / suspend 管理；未发现可解释当前普通 TX 故障的 RGMII 数据通道改动。
+- **根因状态：** 本轮未定位根因；RTL8211F driver 这条支线的优先级可降低。
+
+### 27.8 下一步
+
+不再泛查 Realtek PHY 的 LED/电源管理代码。转向审计 6.1.116 generic 与 6.12.81 RK35xx 的 PHY attach / phylink connection 和 EEE capability 初始化差异，但先判断 Panther 的 `phy-handle` 实际连接分支是否经过相关代码。重点关注 6.12 `stmmac_init_phy()` 新增 `phy_support_eee()` 的调用条件、phylink attach flags、PHY `config_init` 的触发时机及 soft reset 前后次序。已完成的 PHY ID、reset GPIO、EEE 运行时状态、RGMII delay 实机检查不再重复；只做源码与已归档日志分析。
