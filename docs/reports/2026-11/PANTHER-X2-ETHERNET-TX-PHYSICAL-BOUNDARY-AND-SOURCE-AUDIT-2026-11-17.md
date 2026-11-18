@@ -1037,3 +1037,85 @@ Ophub 2026 RK35xx config：
 该结果只用于关闭/确认 MAC identity 支线，不会改变 DHCP TX 主线边界。不要调用 vendor read/write 接口，不做任何 MAC 写入或配置修改。
 
 **当前软件审计结论：** 已发现 clock enable 错误处理和 MAC address fallback 两个真实版本差异；尚未找到能直接解释 TX Discover 在本机 outgoing 之后消失的已证实根因。下一步先确认 MAC callback 是否执行，再继续审计尚未完成的 GMAC open/link-up/PHY path。硬件物理审计仍排最后。
+
+
+## 24. Software-first audit: phylink link-up and netdev open sequence (2026-11-18)
+
+本节是对第 23 节“继续审计 GMAC open/link-up/PHY path”的静态源码补充。仅读取并比较以下候选源码，不执行 Panther 设备命令，不重跑 loopback，不修改设备或系统：
+
+- 6.1 候选：`unifreq/linux-6.1.y`，commit `5eb841b59d6ead6e264163785a634e78f0253c8e`
+- 6.12 候选：`ophub/linux-6.12.y-rockchip`，commit `661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- 对照文件：`stmmac_main.c`、`stmmac_platform.c`、`dwmac-rk.c`
+
+注意：这些是源码候选分支的对照；6.12.81 发布二进制与候选 commit 的精确构建映射仍未完成，不能将源码差异直接等同于实机已加载行为。
+
+### 24.1 phylink link-up 到 Rockchip speed callback
+
+两版的 `stmmac_phylink_mac_ops` 均将 `.mac_link_up` 绑定到 `stmmac_mac_link_up()`。对 Panther 的 RGMII/1000Mbps 路径，两版函数均按以下顺序执行：
+
+1. 读取 MAC control；
+2. 根据协商速率设置 MAC speed 字段；
+3. 更新 `priv->speed`；
+4. 调用平台 `fix_mac_speed`；
+5. 更新 duplex 与 flow control；
+6. 写回 MAC control（如有变化）；
+7. 调用 `stmmac_mac_set(..., true)`。
+
+6.12 在该函数前部新增了条件式 `serdes_powerup`（仅 `STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP` 标志和回调均存在时执行），并在末尾增加 HWTSTAMP latency correction。6.12 的 `fix_mac_speed` 回调新增 `mode` 参数；Rockchip `rk_fix_speed()` 对 Panther RGMII 分支仍只调用 `set_rgmii_speed(bsp_priv, speed)`，没有使用新参数。6.1/6.12 的 RGMII speed 配置核心逻辑相同。
+
+当前未发现上述 link-up 顺序差异能解释普通 RGMII TX 帧不出线。Panther 的 Rockchip glue 是否注册 SerDes powerup callback/相关 flag 尚未在本节逐一追完；但当前平台配置是外置 RTL8211F 的 RGMII，不应把新增的 XPCS/SerDes 分支当作已命中路径。
+
+### 24.2 `phylink_node` → `port_node` 是同一设备树节点的表示迁移
+
+6.1 的 `stmmac_probe_config_dt()` 将 `plat->phylink_node = np`；6.12 改为 `plat->port_node = of_fwnode_handle(np)`。6.1 的 `stmmac_init_phy()` 通过 `of_fwnode_handle(plat->phylink_node)` 取得 fwnode；6.12 直接使用 `plat->port_node`。两版最终均以 GMAC 节点作为 phylink/fwnode 起点，再由 `phy-handle` 解析 PHY 节点。
+
+因此这不是把 PHY 从一个节点改接到另一个节点的证据。现有运行时 DT 已确认 GMAC 节点的 PHY child 为 MDIO address 0；当前没有证据显示此迁移造成错误 PHY attach。
+
+### 24.3 `__stmmac_open()` 的关键顺序对照
+
+两版均在 netdev open 时先恢复 runtime PM，再执行 PHY attach/init，随后配置 DMA queue 参数、执行硬件初始化、启动 phylink、申请 IRQ、启用队列并启动 TX queue。
+
+可见差异：
+- 6.1 对 TBI/RTBI PCS 有额外的 PHY init 跳过条件；6.12 改为按 XPCS C73 模式判断。Panther 当前为 RGMII 外置 PHY，不属于 TBI/RTBI，也没有证据表明使用 XPCS C73，因此两版都会进入 `stmmac_init_phy()`。
+- 6.1 若平台提供 `serdes_powerup`，在硬件初始化前调用；6.12 仅在未设置 `STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP` 时提前调用，否则延迟到 link-up。该分支是否注册对 Panther 生效的 callback 尚未确认；当前 RGMII 外置 PHY 配置没有命中证据。
+- 6.12 在复制 DMA config 前增加对 TBS 状态的保留处理；未发现这改变普通 AF_PACKET 小帧的队列选择或 TX descriptor 路径。
+- 6.12 移除了旧版 open 阶段对整个 `xstats` 的 memset；这是统计生命周期差异，不是硬件 TX 启动差异。
+
+目前未发现 `__stmmac_open()` 的通用顺序变化可以解释 Panther 的普通 queue 0 TX 故障。
+
+### 24.4 `stmmac_hw_setup()` 的初始化顺序
+
+两版共有的核心顺序为：
+
+1. `stmmac_init_dma_engine()`（含 DMA 初始化/SW reset）；
+2. 写入 MAC address；
+3. `stmmac_core_init()`；
+4. MTL 配置与 RX checksum 配置；
+5. 使能 MAC RX/TX；
+6. 设置 DMA operation mode；
+7. MMC/PTP 等初始化；
+8. 配置 ring length、TSO/SPH/VLAN/TBS；
+9. `stmmac_start_all_dma()` 启动 RX/TX DMA channel。
+
+6.12 在 DMA 初始化之前增加：
+`if (priv->hw->phylink_pcs) phylink_pcs_pre_init(...)`
+注释说明用于确保 RX clock 已启用。此分支只有在运行时确实存在 `hw->phylink_pcs` 时才执行。Panther 当前是 RK3566 + RGMII + 外置 RTL8211F；现有资料没有显示其使用 XPCS/外部 phylink PCS，因此该新增分支目前不应被认定为 Panther 已命中。具体运行时指针值未直接读取，标为未验证。
+
+6.1 在 `stmmac_start_all_dma()` 后还有 FPE workqueue/handshake 初始化；6.12 将相关 FPE 状态管理改为新机制。这与当前普通 RGMII TX 路径没有直接关联证据。
+
+### 24.5 phylink 配置变化及其边界
+
+6.12 的 `stmmac_phy_setup()` 新增 `phylink_config.mac_requires_rxc = true`，并调整 MAC capabilities 获取方式；6.1 使用静态 `mac_capabilities` 字段。该配置可能影响 phylink 等待 RX clock 的链路状态处理，但 Panther 在 6.12 已报告 1Gbps Full Link Up，说明链路协商路径至少达到 link-up。当前没有证据表明此属性会阻止 TX descriptor 提交或造成已 link-up 后的普通帧不出线。
+
+### 24.6 本轮结论
+
+- **已确认：** phylink link-up 的主要 MAC 配置顺序在两个候选版本中一致；Rockchip RGMII speed callback 的实质行为一致。
+- **已确认：** `phylink_node` → `port_node` 是节点表示方式迁移，最终解析起点仍是同一个 GMAC DT 节点。
+- **已确认：** `__stmmac_open()` 和 `stmmac_hw_setup()` 的普通 RGMII 核心启动顺序没有发现能直接解释 TX 故障的差异。
+- **新增但尚未证明命中 Panther：** 6.12 的 `mac_requires_rxc` 与 `phylink_pcs_pre_init()`；后者取决于 `hw->phylink_pcs` 是否非空。
+- **尚未完成：** Panther 实际 6.12.81 构建的源码/patch/config 精确映射；Rockchip glue 的 SerDes callback/flag 是否在 Panther 实际初始化时注册；`hw->phylink_pcs` 的实机指针/路径。
+- **根因状态：** 本节未定位根因。现有证据仍只把故障边界限定在本机 outgoing 软件抓包之后、外部接收端观察之前；不能据此把故障精确归因于 MAC、RGMII 或 PHY。
+
+### 24.7 下一步
+
+继续静态核对 Rockchip glue 对 `serdes_powerup`、`integrated_phy_power`、`fix_mac_speed` 的 callback 注册条件，以及 6.12.81 实际构建补丁/配置映射。若这些分支均未命中，再集中审计 6.12 新增/改写的 RX-clock/phylink PCS 逻辑是否影响 Panther RGMII 初始化。不得重跑 `mac_lb`、`phy_lb`、`phy_lb_scan`，不得重复 TX descriptor/MTL 审计，不进行设备侧改动。
