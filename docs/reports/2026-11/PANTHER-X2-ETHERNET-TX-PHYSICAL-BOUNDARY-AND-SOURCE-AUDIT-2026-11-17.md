@@ -1988,3 +1988,56 @@ Ophub 6.1 stable reference config（版本 6.1.191，不是 6.1.116 实际二进
 3. 只比较之前未完整覆盖的差异，不重跑抓包、不重复 descriptor/OWN/tail-pointer 检查。
 
 若这段代码也没有能解释外部无帧的差异，静态软件路径就基本闭合；届时应把剩余不确定性明确留在 MAC/RGMII 物理输出边界，而不是无限扩大源码搜索范围。
+
+
+## 40. Ordinary short-frame TX checksum / descriptor feature-path audit (2026-11-18)
+
+本轮按第 39.5 节只核对普通小帧和 DHCP Discover 可能经过的 checksum/feature 分支。对照 6.1.116 与 6.12.81 候选源码、Panther 现有 DTS；未重跑抓包、未重新检查 OWN/tail pointer、未执行设备操作。
+
+### 40.1 6.12 新增的 checksum fallback 分支适用条件
+
+6.12 `stmmac_xmit()` 新增逻辑：当 `skb->ip_summed == CHECKSUM_PARTIAL`，且 TX queue 标记 `coe_unsupported` 或帧不是 IP/IPv6 EtherType 时，先执行 `skb_checksum_help()` 软件计算，再关闭 descriptor checksum insertion。
+
+该逻辑不会对 `CHECKSUM_NONE` 帧触发；也不会对支持 TX COE 的 queue 上未封装 VLAN 的普通 IPv4/IPv6 帧触发。
+
+### 40.2 Panther queue0 不会命中 coe_unsupported
+
+6.12 `stmmac_platform.c` 仅在 queue DT 子节点含 `snps,coe-unsupported` 时才将 `tx_queues_cfg[queue].coe_unsupported` 置 true。Panther 当前 GMAC1 DTS 的 `snps,mtl-tx-config` 只有 `queue0 {}`，没有该属性；该 bool 结构由零初始化，故 queue0 的 `coe_unsupported=false`。
+
+因此对普通未打 VLAN 的 DHCP IPv4 Discover，`stmmac_has_ip_ethertype()` 会识别 IPv4 EtherType，新增 fallback 条件不成立；6.12 与 6.1 一样使用 TX descriptor checksum insertion。若 DHCP skb 实际是 `CHECKSUM_NONE`，则两版都不会请求硬件 checksum insertion。
+
+### 40.3 自定义 0x88B5 原始短帧不受新 fallback 影响
+
+用户此前的 60-byte AF_PACKET EtherType `0x88B5` 自定义帧属于非 IP raw frame。其正常 AF_PACKET 发送 skb 为 `CHECKSUM_NONE`，故 `csum_insertion=false`，新增 fallback 的外层条件为 false。即使某个非 IP skb 带 `CHECKSUM_PARTIAL`，6.12 也只是先 software checksum help 后按无硬件 checksum insertion 提交，不会因此直接阻止普通 TX；但该特殊组合并非本次 raw-frame 测试的已知状态。
+
+因此 6.12 新增的 checksum fallback 不能解释“无 checksum offload 的 0x88B5 短帧也进入 DMA completion/MAC MMC 统计、但 iMac/hEX 外部均未见帧”的现象。
+
+### 40.4 DWMAC4 descriptor flag 编码没有变化
+
+6.1 与 6.12 `dwmac4_rd_prepare_tx_desc()` 函数体逐字相同：
+- 按 `csum_flag` 设置/清除 `TX_CIC_FULL`；
+- 设置/清除 `FIRST_DESCRIPTOR`、`LAST_DESCRIPTOR`；
+- 按调用参数设置 OWN；
+- 首描述符 OWN 前执行 `dma_wmb()`。
+
+`dwmac4_rd_prepare_tso_tx_desc()` 也逐字相同。对非-GSO 小帧，`stmmac_xmit()` 仍走普通 descriptor path；没有发现 6.12 改变 checksum insertion、FD/LD 或 OWN 位编码。
+
+### 40.5 EST max-SDU 新检查不符合 Panther 当前配置
+
+6.12 在 `stmmac_xmit()` 前段增加 EST max-SDU drop 条件，但只有 `priv->est` 存在、`priv->est->enable=true` 且 queue max_sdu 非零时才执行。Panther GMAC DTS 没有 EST/TAPRIO schedule 配置，现有资料也没有 EST enabled 证据；因此不能把它当成当前小帧发送的解释。该项保留为配置依赖分支，不要求重复测试。
+
+### 40.6 本轮结论
+
+- **已确认：** 6.12 新 checksum fallback 对 Panther queue0 普通 DHCP IPv4 路径不会触发（无 `snps,coe-unsupported`、IP EtherType）。
+- **已确认：** 对普通 `CHECKSUM_NONE` 的 0x88B5 raw frame，新 fallback 不会触发。
+- **已确认：** DWMAC4 普通 TX descriptor 的 checksum/FD/LD/OWN 编码函数两版逐字相同。
+- **降级：** checksum fallback 和 EST max-SDU 不是当前“raw 短帧也外部不可见”的根因候选。
+- **结论：** 本轮没有找到 6.12 在普通非-GSO短帧提交时改变 descriptor 关键控制位的证据。
+
+### 40.7 下一步
+
+普通 TX checksum/descriptor feature path 已基本闭合。下一步只剩两个值得做的静态核查：
+1. 对照 `stmmac_hwif.c` / `dwmac4_dma.c` 的 DMA/MAC capability selection，确认 6.12 在 DWMAC4.20a 上没有选择不同的 DMA descriptor format 或异常的 TX COE capability；
+2. 严格解释 MMC `tx_framecount_gb` 的计数边界：它是否只在 MAC 已完成发送帧后增加，还是可能在 RGMII TX 输出之前增加。不能把 MMC 计数与外部线路发帧画等号。
+
+如果两项也没有 6.1→6.12 的实质差异，静态软件审计可收束为“DMA/MAC内部完成，但外部边界未证实”，下一步再讨论一个最小且安全的物理边界验证，不重复旧测试。
