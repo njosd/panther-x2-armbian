@@ -1164,3 +1164,48 @@ RK3568 ops 未提供 integrated PHY power 实现；Panther 使用外置 RTL8211F
 ### 25.6 下一步
 
 继续追踪 6.12 stmmac_hw_setup() 中新增的 hw->phylink_pcs / phylink_pcs_pre_init() 路径：先静态确定 RK3568 + RGMII + 外置 RTL8211F 是否可能建立该 PCS 指针，以及它是否会改变 GMAC RX clock / DMA 初始化时序。若该指针在此组合中必为空，则可直接排除此支线，不需要 Panther 实机重复采集。随后再审计 6.12 新增的 MAC capability / mac_requires_rxc 逻辑。
+
+
+## 26. Software-first audit: PCS selection, pre-init and mac_requires_rxc (2026-11-18)
+
+本轮继续第 25.6 节，只做源码静态追踪，不执行 Panther 设备命令、不重跑测试、不修改设备。
+
+源码候选：
+- 6.1：unifreq/linux-6.1.y，commit 5eb841b59d6ead6e264163785a634e78f0253c8e
+- 6.12：ophub/linux-6.12.y-rockchip，commit 661b2d8bf1284556f8876d5ed5fb80c64b22f94c
+
+### 26.1 RK3568 glue 不提供 select_pcs
+
+在 6.12 Rockchip dwmac-rk.c 中，rk_gmac_probe() 设置 fix_mac_speed、integrated_phy_power 等平台回调，但没有设置 plat_dat->select_pcs；rk3568_ops 也没有 PCS 选择回调。6.1 对照版本同样没有该回调。
+
+6.12 stmmac_main.c 的 stmmac_mac_select_pcs() 逻辑为：只有 priv->plat->select_pcs 非空时才调用平台选择；否则返回 NULL。phylink 的 mac_select_pcs API 文档明确规定 NULL 表示该接口不需要 PCS。因此，对 Panther 当前 RK3566 compatible rockchip,rk3568-gmac + phy-mode=rgmii + 外置 RTL8211F 组合，phylink 不会选中 XPCS/PCS。
+
+### 26.2 phylink_pcs_pre_init() 分支的适用性
+
+6.12 stmmac_hw_setup() 新增：只有 priv->hw->phylink_pcs 非空时才调用 phylink_pcs_pre_init()。该调用不是所有 RGMII 设备都会执行的无条件步骤，而是针对有 PCS 实例的路径。
+
+在本次检查的 stmmac_main.c、stmmac_platform.c 和 Rockchip dwmac-rk.c 中，没有发现 Panther 平台为 hw->phylink_pcs 提供赋值/选择的路径；Rockchip glue 也没有 select_pcs。故现有静态证据强烈支持 Panther 的该指针为空，新增 PCS pre-init 对当前 RGMII 外置 PHY 路径不生效。严格说明：本轮没有逐一审计整个内核树所有可能写入 mac_device_info.phylink_pcs 的第三方平台文件，也没有读取实机指针值；因此把“本平台路径未提供 PCS”列为已确认，把“运行时指针绝对为 NULL”列为源码推断而非实机验证。
+
+### 26.3 mac_requires_rxc 的真实作用
+
+6.12 stmmac_phy_setup() 设置 phylink_config.mac_requires_rxc = true。phylink 在连接 PHY 时将 PHY_F_RXC_ALWAYS_ON 作为 attach flags 传入 phy_attach_direct()，phy_attach_direct() 将 flags 合并到 phydev->dev_flags。
+
+这项变化与 PCS pre-init 是两条不同路径：即使没有 PCS，mac_requires_rxc 仍会在 PHY attach 时设置该 PHY 标志。但标志是否影响具体 PHY，取决于 PHY 驱动是否读取它。
+
+### 26.4 RTL8211F 驱动是否消费该标志
+
+在 6.12 drivers/net/phy/realtek.c 中，RTL8211F config_init、suspend/resume 及驱动定义没有读取 dev_flags 或 PHY_F_RXC_ALWAYS_ON 的代码；对该文件检索 dev_flags 与 PHY_F_RXC_ALWAYS_ON 均为 0 处命中。因此在当前使用的上游 Realtek RTL8211F 驱动实现中，phylink 设置该标志不会改变 RTL8211F 的配置、电源管理或时钟行为。
+
+注意：这只证明当前候选 realtek.c 中没有消费该标志；6.12.81 实际构建是否对 Realtek 驱动打过额外补丁仍受构建映射未完成这一限制。
+
+### 26.5 本轮结论
+
+- **已确认：** RK3568 Rockchip glue 未设置 plat_dat->select_pcs；stmmac_mac_select_pcs() 在该配置下返回 NULL；phylink 的 NULL 语义为不需要 PCS。
+- **源码推断：** Panther 当前 RGMII 外置 RTL8211F 路径不会选择 PCS，因而 6.12 stmmac_hw_setup() 新增的 phylink_pcs_pre_init() 分支应被跳过。尚未以实机指针值直接验证。
+- **已确认（候选源码）：** mac_requires_rxc 设置 PHY_F_RXC_ALWAYS_ON attach flag；候选 RTL8211F 驱动不读取该标志，因此没有发现它改变 RTL8211F 行为的路径。
+- **结论：** 6.12 新增 PCS pre-init 与 mac_requires_rxc 目前均不构成解释 Panther 普通 TX 失败的有效嫌疑。RX clock / PCS 这条支线可以从当前优先级中关闭，但保留实际 6.12.81 构建补丁映射未完成的限制。
+- **根因状态：** 仍未定位 TX 故障根因。
+
+### 26.6 下一步
+
+继续检查 6.12.81 实际构建与候选源码的映射，以及 6.1→6.12 中与 RTL8211F 外置 PHY 配置相关的真实驱动差异，尤其 PHY 初始化时序、ALDPS/EEE 配置及 RGMII interface handling。此前已经完成的 PHY ID、PHY reset、EEE 运行时状态、RGMII delay 和 GMAC 时钟实机检查不得重复；本阶段只做源码差异审计，先确定存在有意义的差异再决定是否需要新的验证。
