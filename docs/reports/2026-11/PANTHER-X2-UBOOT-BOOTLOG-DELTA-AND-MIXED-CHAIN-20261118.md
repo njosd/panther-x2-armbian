@@ -832,3 +832,82 @@ fdcc0010: 00000002 00000040 c08dfd97 5ef93ffc    ....@........?.^
 | BL31 是否覆盖/恢复 SRAM 来源字段 | 已确认 BL31 代码存在覆盖该地址的备份/恢复范围；本次运行后读数仍为正确的 eMMC 来源值。没有必要再为此重启或重复读取。 |
 
 本轮实验到此结束。没有写入 TF/eMMC，没有修改启动配置，也没有继续启动 Linux。
+
+
+## 17. JP 完整 idbloader 的 DDR V1.10 与 Panther X2 构建先例核验（2026-11-18 追加）
+
+本节专门核对“是否可以只把 JP-TvBox 的 idbloader.img 写入 eMMC LBA64，让 JP SPL 再从 TF/SD 加载已有 u-boot.itb”，不执行任何设备写入。
+
+### 17.1 Panther X2 本身已有使用 DDR V1.10 的构建先例
+
+公开 NixOS U-Boot 构建配方：
+- 使用专用 `panther-x2-rk3566_defconfig`；
+- `ROCKCHIP_TPL` 明确指定 `rk3566_ddr_1056MHz_v1.10.bin`；
+- 同一配方还指定 BL31 `rk3568_bl31_v1.29.elf`。
+
+来源：
+https://github.com/5aaee9/nixos-aarch64/blob/02b7d0d450b906834157132fe58f11acd00e8124/packages/panther-x2-uboot/default.nix
+
+这不是“其他 RK3566 板卡也用 V1.10”的泛化类比，而是 Panther X2 专用 defconfig 的实际构建依赖。它显著降低了 JP idbloader 所用 DDR V1.10 不适配 Panther X2 的疑虑。
+
+### 17.2 JP idbloader 内嵌 DDR 与公开 rkbin V1.10 二进制比较
+
+对照文件：
+- JP-TvBox：Ophub U-Boot 仓库 `u-boot/rockchip/jp-tvbox/idbloader.img`，commit `8bb67df906cdc8c4e33a30e5e4d562c5cb0e32a6`，文件长度 309,248 bytes。
+  https://github.com/ophub/u-boot/blob/8bb67df906cdc8c4e33a30e5e4d562c5cb0e32a6/u-boot/rockchip/jp-tvbox/idbloader.img
+- 独立 DDR blob：Armbian rkbin 仓库 `rk35/rk3566_ddr_1056MHz_v1.10.bin`，commit `c5bd0dac0c9030291550aedbb3f3d7d9413ff159`，文件长度 59,392 bytes。
+  https://github.com/armbian/rkbin/blob/c5bd0dac0c9030291550aedbb3f3d7d9413ff159/rk35/rk3566_ddr_1056MHz_v1.10.bin
+
+离线二进制比较结果：
+- JP idbloader 偏移 2048 处开始，与独立 DDR blob 比较；
+- 59,392 bytes 中有 59,388 bytes 完全相同；
+- 仅前 4 bytes 不同：JP 容器内为 ASCII `RKNS`，独立 blob 开头为 `01 00 00 14`；
+- 两者 DDR 版本字符串均为 `DDR Version V1.10 20210810`。
+
+因此可以确认：JP idbloader 内嵌的是与 Panther X2 专用构建配方指定的同一 V1.10 DDR 代码主体；仅存在 4-byte 容器/封装头差异。此结果不是仅凭版本字符串判断。
+
+### 17.3 JP SPL 的后续介质选择与现有启动链
+
+已闭环的 Rockchip SPL 编号映射（见本报告 §12）：
+- SPL `BOOT_DEVICE_MMC2` 映射为 `BOOT_TYPE_SD0`；
+- U-Boot proper 将 SD/TF 枚举为 `mmc 1`；
+- 本机实机日志已证明当前 SPL 从 MMC2/SD-TF 加载后续 U-Boot proper。
+
+JP idbloader 静态字符串中也包含 `Trying to boot from MMC2`。这与 JP SPL 使用 MMC2/SD-TF 作为后续启动介质的路径相符。JP SPL 在 Panther X2 上实际执行后的介质选择仍须由下一次串口日志确认，不能把静态字符串代替实机验证。
+
+### 17.4 目标替换方案与范围
+
+建议候选实验为：
+1. 只将 JP-TvBox `idbloader.img` 写入 eMMC 用户区 LBA 64；
+2. 不改 TF 卡；
+3. JP SPL 从 TF/SD（MMC2）加载 TF 上现有的 JP `u-boot.itb`；
+4. eMMC LBA 16384 的原版 `u-boot.itb`、GPT、分区、Linux 数据均不主动修改。
+
+文件长度与扇区范围：
+- JP idbloader：309,248 bytes = 604 个 512-byte sectors；
+- 写入起点 LBA 64，覆盖 LBA 64–667（共 604 sectors）；
+- eMMC 原版 idbloader：305,152 bytes = 596 sectors；
+- eMMC 原版 u-boot.itb 起点 LBA 16384，远离本次写入范围，不会与 JP idbloader 文件长度重叠。
+
+**写入前仍需核实原始 eMMC 备份中 LBA 660–667 这额外 8 个扇区的原始内容**，因为 JP 文件比原版长 8 sectors。不能仅凭两文件都远小于 LBA 16384 就忽略对原始间隙数据的覆盖。若该范围并非空闲/可覆盖，需先设计精确恢复办法或调整候选文件。
+
+### 17.5 回滚与测试边界
+
+- 双 USB-A 公头进入 Rockchip Loader、识别 eMMC、读取 eMMC：此前已实机验证。
+- Loader 定点写入和写后回读尚未在本机实测；正式替换前需准备写入、回读校验和恢复步骤。
+- 原版 eMMC 启动区备份及哈希记录已存在；回滚应以原始备份字节为准，不仅凭文件名或长度。
+- 本节只完成离线源码/二进制核对；没有执行 eMMC 写入、重启、擦除或系统配置修改。
+
+### 17.6 结论与状态
+
+| 项目 | 状态 |
+|---|---|
+| Panther X2 专用 U-Boot 构建使用 DDR V1.10 | **已由公开构建配方确认** |
+| JP idbloader 内 DDR V1.10 与该公开 blob 的代码主体一致 | **已完成离线逐字节比较，59,388/59,392 bytes 相同** |
+| JP idbloader 文件长度及 LBA64 写入范围 | **已确认：604 sectors，LBA64–667** |
+| JP SPL 后续从 TF/SD 启动 | **源码映射和静态字符串支持；需本机实机日志最终确认** |
+| JP 完整 idbloader 在 Panther X2 上实际初始化 DDR 并进入 SPL | **尚未实测** |
+| Loader 定点写入与回滚 | **尚未实测** |
+| LBA660–667 原始 eMMC 数据是否可覆盖 | **待核对原始 eMMC 备份** |
+
+**本节修订 §9 的旧建议：不再把 DDR V1.10 作为必须先做 SPL/DDR 混合的阻碍。首选实验改为完整 JP idbloader 替换；仅在写入范围审计和回滚准备完成后执行。**
