@@ -1813,3 +1813,65 @@ Rockchip `rk_gmac_pm_ops` 的 suspend/resume 仍走 `stmmac_suspend()` / `stmmac
 2. 继续核对 6.12.81 发布包的 Rockchip glue 实际源码是否与 `rockchip-linux/kernel@f34ce119` / Ophub 候选一致，特别是编译时是否存在额外补丁改变 clock lookup、clock enable 或 regulator/reset 顺序。
 
 只有找到能将差异与当前 Panther 运行时事实直接关联的证据后，才提出新的最小只读验证；未经明确授权不修改设备、不重启、不写寄存器。
+
+
+## 37. Clock-delay history, CSU applicability, and 6.12.81 release-source provenance (2026-11-18)
+
+本轮继续第 36.7 节，只读追踪上游提交历史、官方 6.12.81 发布构建记录和 Panther DTB 对 Rockchip CSU 的适用性；没有运行 Panther 命令、没有重跑任何环回/抓包测试、没有修改设备。
+
+### 37.1 5ms 不是 2023 upstream 重构新增的稳定等待
+
+检查 upstream `dwmac-rk: rework optional clock handling`（`rockchip-linux/kernel@c649bf43a28ee085b105c5f1f726398cc70d5ae6`，对应 upstream `ea449f7fa0bf3fcd02e04a770b9ff707bf5e8f96`）的完整 diff：
+- 原先逐个 `devm_clk_get()` 改成 `devm_clk_bulk_get_optional()`；
+- `gmac_clk_enable()` 改用 `clk_bulk_prepare_enable()`，并检查 bulk 和 `clk_phy` enable 返回值；
+- `mdelay(5)` 在 diff 中原样保留，没有新增、缩短或改变位置；
+- commit message 明确说明动机是减少重复 clock request 代码、正确处理 optional clocks 和 `-EPROBE_DEFER`。
+
+因此：5ms 在这次 upstream 重构前就已存在。该提交没有说明 5ms 是 RK3566/RGMII 的硬件稳定时间。6.12 vendor 源码的 `usleep_range(100, 200)` 与 6.1 的 `mdelay(5)` 是 vendor 分支之间的行为差异，但现阶段没有可靠资料证明这两个等待值对应同一个明确的硬件时序要求。**等待时间差异本身不作为根因结论。**
+
+### 37.2 CSU 是 6.12 新增代码，但 Panther 的设备树不会启用它
+
+6.12 `dwmac-rk.c` 新增 `rk_gmac_csu_init()`，尝试取得名为 `aclk` / `pclk` 的 CSU handle；`gmac_clk_enable()` 随后调用 `rockchip_csu_disable()`，关机时调用 `rockchip_csu_enable()`。
+
+核对 6.12 Panther X2 DTS 与 RK356x 公共 DTS：
+- `gmac1` 节点没有 `rockchip,csu` 或 `rockchip,csu-names` 属性；
+- `rk_gmac_csu_init()` 对获取失败的 handle 赋 NULL；
+- `rockchip_csu` helper 对 NULL handle 直接返回 0。
+
+所以虽然这段代码存在于 6.12 BSP，**在 Panther X2 当前 DTS 下 CSU 操作是 no-op**，不能解释当前 TX 故障。此项关闭。
+
+### 37.3 Panther 的 RK3568 ops 没有 set_clock_selection callback
+
+对照两版 `rk3568_ops`：都没有注册 `.set_clock_selection`。因此 Panther DTS 的 `clock_in_out = "input"` 不会通过该 callback 在 `gmac_clk_enable()` 中触发 GRF clock-selection 写入。两版在这一点相同，不构成 6.1→6.12 差异。
+
+### 37.4 XPCS clocks 是 6.12 额外启用项，但当前不构成优先根因
+
+6.12 RK356x DTSI 为 GMAC1 提供 `pclk_xpcs` 和 `clk_xpcs_eee`；vendor `gmac_clk_enable()` 在 clock handle 有效时会启用它们，即使 Panther 使用 RGMII。它们属于 XPCS/SGMII 相关时钟，不是 RGMII TXC 的直接输出时钟。该差异值得保留记录，但当前没有证据表明它们会阻断 GMAC1 RGMII TX；不提升为根因。
+
+### 37.5 6.12.81 官方包与源码候选的关联度已提高
+
+核对 `ophub/kernel` 官方 `kernel_rk35xx` release、workflow 和源码仓库：
+- 官方 `6.12.81.tar.gz` asset SHA256 为 `72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b`，与本项目 `config/versions.env` 记录一致；asset 创建时间为 2026-11-13 11:14:36Z。
+- `ophub/kernel` workflow run `43405957386` 在 2026-11-13 10:01:57Z 启动，任务为 `Compile rockchip rk35xx kernel`，编译输入显示 `6.12.y`，在 11:15:04Z 成功结束；与 `6.12.81.tar.gz` asset 上传时间吻合。
+- 该 workflow 的 `Get kernel source commit hash` 步骤会读取所选 kernel source 仓库 `main` 分支 HEAD；workflow 允许选择 `ophub/linux-6.12.y-rockchip` 或 `unifreq/linux-6.12.y-rockchip`。
+- 两个仓库的 `main` 在当前均指向同一 SHA：`661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；该 commit 是 2026-11-01 导入/维护的 6.12 BSP 源快照。该快照中 `dwmac-rk.c` 的代码与本轮分析的 6.12 候选一致。
+
+**证据等级：强关联、非完整直接证明。** GitHub 公共 workflow-run API 没有暴露当次 `workflow_dispatch` 的全部 inputs 和 source-hash step 输出，因此尚不能把该 run 的源仓库选择和 source SHA 标为直接验证。但由于该 run 编译 6.12.y、asset 同时段发布，且两种 6.12 source 选择当时指向相同候选 SHA，`661b2d8...` 是当前最可信的 6.12.81 源码对照基线。实际运行内核 `6.12.81-rk35xx-ophub` 的后缀也与非 Flippy 官方 asset 对应；不能拿 `6.12.81-rk35xx-flippy-2611b` 的配置误当成当前内核配置。
+
+### 37.6 当前剩余候选与结论
+
+经过本轮，以下差异降级/关闭：
+- 5ms 等待的“已知硬件稳定要求”解释：没有上游证据；
+- CSU disable/enable：Panther DTS 无 CSU phandle，运行时 no-op；
+- `set_clock_selection`：RK3568 ops 两版均未注册；
+- XPCS clocks：新增但非 RGMII TXC 直接时钟，缺少故障关联证据。
+
+**仍保留的最高优先级代码风险：** 6.12 `gmac_clk_enable()` 对 `clk_prepare_enable()` 的各项返回值全部忽略，随后无条件设置 `clk_enabled=true`；6.1 upstream-reworked 实现使用 bulk enable 并检查返回值。若 6.12 启动时 `mac_clk_tx` 或其他必需 clock enable 失败，后续 PHY link 和 MAC/DMA 内部计数仍可能正常，但 RGMII TX 侧时钟/信号可能不完整。该因果链与“内部 TX 完成计数增加、外部抓包收不到”相容，但**尚无本次启动发生 clock enable failure 的直接证据**，仍是可证伪候选而非根因定论。
+
+### 37.7 下一步
+
+不再重复审计 delay、CSU、runtime PM 或 clock_summary。下一步从代码层面精确区分：
+1. 6.12 里 `mac_clk_tx` 与 `clk_mac_speed` 分别对应的 RK3566 CRU 输出/门控路径；
+2. clock provider 的 `clk_prepare_enable()` 对这些时钟可能返回的错误条件，以及其父时钟/assigned-clock 配置是否会导致“稳态显示 enabled，但本次 enable 调用失败或 TX 输出时钟未建立”。
+
+优先用 RK3566 CRU 源码、DTS 和已有 clock tree 记录完成静态推演。若仍需要设备证据，只提出一个只读、低风险、无需寄存器直读/重启的定向验证，并先征求授权。
