@@ -4,6 +4,9 @@
 
 ## Panther X2 网络与启动链
 
+- [6.1.174-rk35xx Actions 构建与源码提交关联核验（2026-11-19）](./PANTHER-X2-6.1.174-RK35XX-ACTIONS-RUN-AND-SOURCE-PROVENANCE-CORRELATION-20261119.md)：将 6.1.174 自动 release asset 精确关联 Actions run #296 的编译/上传时间；run workflow 默认源码为 ophub/linux-6.1.y-rockchip，构建时 main 最新提交为 c2f148d。实际 workflow_dispatch inputs/source_hash 未直接取得，故 c2f148d 定为高置信度源码候选，不宣称逐字节证明。
+- [P3：RK35xx GMAC clock enable、CCF callback 与 settle 时序（2026-11-19）](./PANTHER-X2-P3-RK35XX-GMAC-CLOCK-ENABLE-CALLBACK-AND-SETTLE-ANALYSIS-20261119.md)：将 c2f148d Panther RGMII 实际 clocks 映射到 DTS/CRU，重新评估忽略 enable 返回值的实际失败可能性；确认 PCLK_USB critical parent chain 在 CRU 注册阶段建立，PLL callback 不在 GMAC probe 首次触发；100–200µs settle 保留为未证实差异。全程只读。
+
 - [P3：RK3568 GMAC bus clock 与 PLL CCF 差异（2026-11-19）](./PANTHER-X2-P3-RK3568-GMAC-BUS-CLOCK-AND-PLL-CCF-DIFF-20261119.md)：区分外部 RGMII MAC clock 与 GMAC ACLK/PCLK bus clock；确认 RK3568 GMAC1 ACLK/PCLK 经 USB clock domain，RK35xx BSP PLL provider 的 enable/disable 增加 normal/slow mux 切换，而通用 CCF 与 GMAC1 mux/gate 定义相同。运行时 GPLL parent 未知，尚非根因；全程只读。
 
 - [P3：6.1.174-rk35xx 源码来源与 GMAC 时钟路径差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md)：纠正普通 stable 6.1.174 与实际 RK35xx BSP 的源码族混淆；追踪 RK35xx workflow、release asset、vendor 源码沿革，并确认 BSP 逐项 clock enable / 100–200µs 与正常 general 6.1.116 bulk enable / 5ms 的差异。根因尚未证明；全程只读。
