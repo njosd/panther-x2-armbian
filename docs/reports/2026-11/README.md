@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P3：RK3568 GMAC bus clock 与 PLL CCF 差异（2026-11-19）](./PANTHER-X2-P3-RK3568-GMAC-BUS-CLOCK-AND-PLL-CCF-DIFF-20261119.md)：区分外部 RGMII MAC clock 与 GMAC ACLK/PCLK bus clock；确认 RK3568 GMAC1 ACLK/PCLK 经 USB clock domain，RK35xx BSP PLL provider 的 enable/disable 增加 normal/slow mux 切换，而通用 CCF 与 GMAC1 mux/gate 定义相同。运行时 GPLL parent 未知，尚非根因；全程只读。
+
 - [P3：6.1.174-rk35xx 源码来源与 GMAC 时钟路径差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md)：纠正普通 stable 6.1.174 与实际 RK35xx BSP 的源码族混淆；追踪 RK35xx workflow、release asset、vendor 源码沿革，并确认 BSP 逐项 clock enable / 100–200µs 与正常 general 6.1.116 bulk enable / 5ms 的差异。根因尚未证明；全程只读。
 
 - [RGMII TX delay 三版本源码对照（2026-11-19）](./PANTHER-X2-RGMII-TX-DELAY-THREE-KERNEL-COMPARISON-20261119.md)：6.1.116/6.1.174/6.12.81 的 Panther DTS、RTL8211F 内部 TX delay 和 RK3568 GRF delay 最终设置一致；仅 GRF CON0/CON1 写入顺序不同，当前不构成持续 TX 故障解释。下一步聚焦 GMAC TX clock source/enable 路径。
