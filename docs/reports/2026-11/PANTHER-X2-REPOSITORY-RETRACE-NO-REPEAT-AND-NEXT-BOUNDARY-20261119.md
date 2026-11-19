@@ -235,3 +235,65 @@ DDR 频率问题已经从“为什么训练降频”收敛为“为什么 JP idb
 1. 在已有 JP idbloader、原版 idbloader 备份中识别 DDR blob 边界和可验证文件指纹；
 2. 查明 V1.10 DDR binary 对应的构建来源/板级配置，确认它是否就是 1056MHz-only 的配置变体；
 3. 若无法映射到可读参数表，则以“JP 固件提供的 FSP 上限为 1056MHz”结案，不做反汇编猜测或频率强行提升。
+
+## 11. Rockchip rkbin 构建配置交叉核对：找到两个 FSP profile 的官方来源
+
+继续查阅 Rockchip rkbin 历史提交，发现 DDR V1.10 / V1.13 不只是版本 banner；对应的 SoC profile 配置文件明确选择了不同的 DDR binary：
+
+### 11.1 RK3566 profile：V1.10 DDR binary 的最高频点是 1056MHz
+
+Rockchip rkbin commit：
+- `664922185a089ac5348ce869461ce303fe80f971`
+- 日期：2021-08-10
+- 提交标题：`rk3566: ddr: update ddr bin to v1.10`
+
+该 commit 的 `RKBOOT/RK3566MINIALL.ini` 明确将：
+- CODE471 / FlashData 指向 `bin/rk35/rk3566_ddr_1056MHz_v1.10.bin`
+- SPL 指向 `bin/rk35/rk356x_spl_v1.11.bin`
+
+源码配置：https://github.com/rockchip-linux/rkbin/blob/664922185a089ac5348ce869461ce303fe80f971/RKBOOT/RK3566MINIALL.ini
+
+这与本机 JP SPL 日志中 V1.10、FSP 列表最高 1056MHz 完全吻合。
+
+### 11.2 RK3568 profile：V1.13 DDR binary 的最高频点是 1560MHz
+
+Rockchip rkbin commit：
+- `ddf03c1d80b33dac72a33c4f732fc5849b47ff99`
+- 日期：2022-02-18
+- 提交标题：`rk3568: ddr: update ddr bin to v1.13`
+
+该 commit 的 `RKBOOT/RK3568MINIALL.ini` 明确将：
+- CODE471 / FlashData 指向 `bin/rk35/rk3568_ddr_1560MHz_v1.13.bin`
+- SPL 指向 `bin/rk35/rk356x_spl_v1.12.bin`
+
+源码配置：https://github.com/rockchip-linux/rkbin/blob/ddf03c1d80b33dac72a33c4f732fc5849b47ff99/RKBOOT/RK3568MINIALL.ini
+
+这与本机原版 E25 SPL 日志中 V1.13、FSP 列表最高 1560MHz 吻合。
+
+### 11.3 当前最强解释
+
+把三层证据放在一起：
+1. 本机原版 E25 SPL 日志：V1.13，FSP[0]=1560MHz；
+2. 本机 JP SPL 日志：V1.10，FSP[0]=1056MHz；
+3. Rockchip 官方 rkbin 的 RK3568 / RK3566 MINIALL 配置分别选择 `rk3568_ddr_1560MHz_v1.13.bin` 和 `rk3566_ddr_1056MHz_v1.10.bin`。
+
+**目前最强的解释是：原版 E25 启动链携带 RK3568 1560MHz DDR profile，而 JP-TvBox 启动链携带 RK3566 1056MHz DDR profile；频率差异来自 SPL 所集成的 DDR profile/FSP 表不同，而不是同一 DDR training 在 1560MHz 失败后退回 1056MHz。**
+
+证据等级：强关联/高置信度推断，尚未达到 binary-level 直接证明。因为当前仓库尚未对 eMMC 原始 idbloader 与 JP idbloader 内部 DDR payload 做独立提取并与上述 rkbin 文件逐字节 hash 对照；同样的版本 banner 不能单独证明 payload 文件名。
+
+### 11.4 这是否意味着原版 1560MHz 一定更好？
+
+不能这样下结论：
+- RK3566 Hardware Design Guide 指出 DDR 最高频率高度依赖 PCB layout，官方大多数模板最高约 1056MHz；
+- 原版 E25 的 1560MHz profile 在 Panther 上曾成功初始化并运行，是历史事实，但不等于已完成 DDR 长期稳定性/裕量认证；
+- JP 的 1056MHz profile 是 RK3566 官方配置方向，更保守；但目前没有证据表明它造成 DHCP 故障。
+- 不建议为了追求 1560MHz 把 RK3568 DDR profile 直接移植到 RK3566，也不建议在未授权情况下更换 DDR blob。
+
+### 11.5 DDR 研究结论
+
+DDR 降频问题已基本定位到**启动固件选择了不同的 DDR profile/FSP 集合**。后续仅需对两份现存 idbloader 中的 DDR payload 做静态提取和 hash 对照，确认其是否分别对应上述官方文件。若无法取得原始 JP payload 或旧备份文件，则保留“高置信度推断”，不继续反汇编猜测，也不做频率修改。
+
+参考：
+- RK3566 V1.10 commit：https://github.com/rockchip-linux/rkbin/commit/664922185a089ac5348ce869461ce303fe80f971
+- RK3568 V1.13 commit：https://github.com/rockchip-linux/rkbin/commit/ddf03c1d80b33dac72a33c4f732fc5849b47ff99
+- RK3566 hardware guide frequency/layout note：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_CN.pdf
