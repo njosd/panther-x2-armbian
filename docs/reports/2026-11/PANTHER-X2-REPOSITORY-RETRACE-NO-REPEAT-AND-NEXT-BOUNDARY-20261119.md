@@ -125,3 +125,59 @@ DDR 研究收口：若继续，只做两份现有 idbloader/DDR binary 的静态
 - PANTHER-X2-RTL8211F-CLKOUT-WORKAROUND-REGRESSION-20261119.md
 - PANTHER-X2-JL2XX1-WORKAROUND-RTL8211F-REGISTER-SEMANTICS-20261119.md
 - PANTHER-X2-ARM64-DMA-COHERENCY-116-VS-61281-20261119.md
+
+## 9. DDR 频率研究的新增关键交叉证据（公开 Panther X2 日志）
+
+进一步检索公开 Panther X2 启动记录后，发现一个重要反例，修正“DDR V1.10 本身只支持/只选择 1056MHz”这种可能的误解：
+
+### 9.1 同一 DDR V1.13 banner，在另一台 Panther X2 上最终为 1056MHz
+
+公开文章《rk3566-panther-x2 黑豹X2 刷飞牛oec包挂逼救砖记》（2026-01-15）记录：
+- DDR banner：`DDR Version V1.13 20220218`；
+- `ddrconfig:0`；
+- `LPDDR4X`；
+- 4096MB，CS0 Row=17，单 rank；
+- 最终频率：1056MHz；
+- 同一日志显示 BL31 fsp_param[0] 为 1056MHz，另有 324/528/780MHz FSP。
+来源：https://godsun.pro/blog/panther-x2-oec.html
+
+这说明同一个 V1.13 banner 并不意味着一定训练到 1560MHz。公开样本与本机旧日志的区别至少包括 DRAM type（LPDDR4X vs 本机日志记录的 LPDDR4）和 rank topology（单 rank vs 本机报告记录的 CS0/CS1）。所以不能只用 V1.13 版本号推断最终频率。
+
+### 9.2 DDR V1.10 也并非固定只能到 1056MHz
+
+公开的 RK3566 4GB LPDDR4 日志样本显示：
+- DDR banner：`DDR Version V1.10 20210810`；
+- LPDDR4，4096MB，CS0/CS1 双 rank；
+- 训练过程包含 324/528/780/1560MHz，最终 1560MHz。
+来源：https://laval.csdn.net/6569cf5b9820e81a16d95862.html
+
+另一个公开 RK3566 4GB LPDDR4 样本也记录 V1.10 最终 1056MHz（具体板卡不同），说明 V1.10 banner 同样不唯一决定最终频率：
+https://github.com/tanshihaj/1e6f6a66196f0d5f4574508c71423aa9
+
+上述样本不是本机实测，板级/颗粒和 DDR config 未必相同，只能用作反例，不能代替本机证据。
+
+### 9.3 由此修正 DDR 降频问题的当前解释
+
+当前本机实测：
+- 旧 SPL：V1.13，LPDDR4，4GB，CS0/CS1，最终 1560MHz；
+- JP SPL：V1.10，LPDDR4，4GB，CS0/CS1，最终 1056MHz。
+
+但公开样本证明：
+- V1.13 可在 Panther X2 LPDDR4X 4GB 单 rank 样本上最终 1056MHz；
+- V1.10 可在其他 RK3566 4GB LPDDR4 双 rank样本上最终 1560MHz。
+
+因此，**不能将本机 1560→1056 的变化直接归因于 DDR blob 版本号或固定频率上限。** 更合理的待查项是两份实际 DDR 初始化固件所采用的参数/能力表、DRAM 识别结果、FSP 参数集合及 training 结果/选择策略。尤其需要把以下字段逐项对照：
+- DRAM type / MR14；
+- ddrconfig；
+- BW / Col / Bank / Row / CS / Die BW；
+- 初始 TDQSS；
+- 每个频点 PHY drive、ODT、Vref、clock skew；
+- read/write/CA training window；
+- BL31 输出的 FSP frequency 列表及其顺序。
+
+不能仅凭训练输出最终频率较低就断言 DDR 降频是失败或降级；它可能是该固件针对识别出的 DRAM/参数组合所选择的可用 FSP。也不能据此认定 1056MHz 与 DHCP 故障存在因果关系。
+
+### 9.4 下一步收窄为现有日志字段差分
+
+不做新设备测试，先从仓库现有的两份完整 UART 日志提取上述字段，形成逐项差异表；随后仅查公开 DDR bin release notes/配置表是否能解释这些差异。如果现有日志缺少 DDR颗粒完整型号、bin 内参数表或 training selection 细节，则明确标记无法从公开信息证明，不继续猜测式反汇编。
+
