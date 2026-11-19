@@ -89,7 +89,7 @@ DHCP 日志明确显示第一次 DHCPv4 transaction 超时，NetworkManager 随�
 - U-Boot proper 版本、构建时间、板型字符串保持相同。
 - U-Boot proper 仍枚举同一个 GMAC1：`Net: eth1: ethernet@fe010000`。
 - 本轮新增完整 Linux 启动及 GMAC/PHY/link 证据。
-- 本轮明确再次出现 IPv4 DHCP no lease。
+- 需要补充区分：11 月 18 日报告已记载过一次 JP U-Boot proper 启动 Linux 后 PHY/千兆链路正常、DHCP/IP 未恢复的实机结果；11 月 18 日那份单独的暂停现场 UART 日志本身则停在 U-Boot prompt，没有 Linux/DHCP 记录。本轮是首次确认 JP idbloader / DDR V1.10 也实际执行后，DHCP 仍未恢复。
 
 这次差分证明：更换 eMMC idbloader 后，JP SPL/DDR V1.10 被实机执行并成功进入原有后续链；但 DHCP 故障并未随 SPL/DDR 替换消失。
 
@@ -110,6 +110,7 @@ DHCP 日志明确显示第一次 DHCPv4 transaction 超时，NetworkManager 随�
 
 - 本轮 eth0 运行时 MAC 与此前实机记录的 E6 前缀运行时地址相同（本报告脱敏）。
 - 新 SPL/DDR V1.10 并未让运行时 MAC 回到 eMMC Vendor Storage 中的板载 86 前缀地址。
+- 既往 11 月 17 日记录和本轮都观察到 E6 前缀运行时 MAC；但因旧报告只保留前缀，不能断言完整 MAC 相同。
 - DHCP 仍无 IPv4 lease。
 - 本轮没有新的 Panther/hEX 同步抓包，也没有本轮 DHCP Discover 的线上帧源 MAC 证据。
 
@@ -125,7 +126,7 @@ DHCP 日志明确显示第一次 DHCPv4 transaction 超时，NetworkManager 随�
 4. U-Boot proper 成功执行 TF 上启动脚本，Linux 6.12.81 成功启动。
 5. U-Boot proper 仍枚举 GMAC1；Linux RTL8211F PHY 初始化和 1Gbps Full 链路正常。
 6. 本轮 IPv4 DHCP 仍无租约；IPv6 已获得全球单播地址。
-7. 本轮运行时 MAC 与既往 E6 前缀地址一致（公开记录脱敏）。
+7. 本轮运行时 MAC 为 E6 前缀；既往报告也记录 E6 前缀，但历史完整地址未保留，不能确认完整 MAC 一致。
 
 ### 未验证 / 不能推出
 
