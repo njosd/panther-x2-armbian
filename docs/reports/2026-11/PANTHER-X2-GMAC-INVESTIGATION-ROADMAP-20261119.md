@@ -54,7 +54,14 @@
 
 报告：`PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md`。
 
-**下一步唯一子项：** 继续只读映射上述时钟 handle 获取与 enable 顺序到 Panther 的实际 DTS clock names、clock_in_out=input 和 parent chain；核实每个差异是否命中 Panther RGMII 路径。已完成的 RGMII delay 数值、CSU NULL/no-op、PHY reset GPIO 不重查。随后再核对 6.12.81 中哪些差异持续存在。不得做实机操作、写 PHY、重启接口或制作补丁。
+**第二个子项已完成：** 将 Panther GMAC1 MAC clock 与 ACLK/PCLK bus clock 分开映射，并比较 RK3568 CRU/PLL provider。
+- GMAC1 的 `SCLK_GMAC1` 由外部 `gmac1_clkin` 输入；但 ACLK/PCLK 仍经 `ACLK_GMAC1 -> aclk_usb`、`PCLK_GMAC1 -> pclk_usb -> aclk_usb`，而 `aclk_usb` parent 可选 GPLL 派生时钟。
+- RK3568 GMAC1 mux/gate 定义、通用 CCF `clk_core_prepare/enable/disable`、`clk_gate_enable/disable` 与 general 6.1.116 相同。
+- Rockchip PLL provider 不同：general 6.1.116 PLL enable 为 power-up→wait lock；RK35xx BSP 增加 wait lock 后切 normal parent，disable 时先切 slow parent 再 powerdown。RK3568 GPLL 使用该 `pll_rk3328` 注册路径，6.12.81 延续该实现。
+- 尚不知道 Panther 运行时 `aclk_usb` 选择哪个 parent，也没有证据证明相关 PLL callback 在故障启动时被调用或造成 TX 失败。
+- 报告：`PANTHER-X2-P3-RK3568-GMAC-BUS-CLOCK-AND-PLL-CCF-DIFF-20261119.md`。
+
+**下一步唯一子项：** 继续只读追踪 RK3568 GPLL 派生 clock 的注册、parent index 与模式寄存器语义，并核对 U-Boot/Linux clock init 是否设置或保留 `aclk_usb` parent。重点回答：PLL enable/disable callback 是否可能在 Panther GMAC probe 时触发，以及它的调用前提是什么。若运行时 parent 仍无法由源码证明，提出最小只读 clock-summary 取证方案，但不执行实机操作。不得重做已完成的 RGMII delay、CSU NULL/no-op、PHY reset GPIO 和通用 CCF enable 审计。
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
