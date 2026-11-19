@@ -56,7 +56,15 @@
 - `PCLK_USB` 标记为 `CLK_IS_CRITICAL`，在 CRU clock registration 阶段即准备/使能 parent chain。GPLL callback 若执行，发生在 CRU 初始化阶段，不是 GMAC probe 首次启用；PLL callback 差异降级，不再追运行时 parent、不安排 clock-summary 读取。
 - 报告：`PANTHER-X2-P3-RK35XX-GMAC-CLOCK-ENABLE-CALLBACK-AND-SETTLE-ANALYSIS-20261119.md`。
 
-**下一步唯一子项：** 在 c2f148d 与 6.12.81 RK35xx 源码中，只审查尚未覆盖且会命中 Panther 外接 RGMII 的 `rk_gmac_probe()` / setup / STMMAC handoff 差异，重点看 PHY supply、runtime-PM、probe flags 和资源/电源状态交接。与 6.1.116 对照，只保留 6.1.174 和 6.12.81 共有、且会在最早异常 6.1.174 生效的差异。已经完成的 DMA descriptor、MDIO/PHY attach 顺序、RGMII delay、CSU、CRU provider、PLL callback 不重做。全程只读，不操作 Panther、不写寄存器、不制作补丁。
+**第三个子项已完成：** 比较 c2f148d / 6.12.81 / 6.1.116 的 RK35xx GMAC probe、setup、powerup、powerdown、suspend/resume。
+- SPH disable 只影响 RX split-header/GRO，不进入普通 TX 提交路径。
+- Vendor MAC callback 已有专项测试/审计；integrated PHY/BGS OTP 不命中外接 RTL8211F；Panther DTS 显式提供 TX/RX delay；PHP-GRF 差异不命中 RK3568 ops。
+- PHY regulator 错误不传播、pm_runtime_get_sync 返回值不检查是三个版本共有弱点，不是本次回归新引入。
+- 其余 probe flags、CSU no-op、loopback sysfs 未发现可解释普通 TX 故障的机制。
+- 报告：`PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md`。
+
+**下一步唯一子项：** 由于此前 TX core 审计有部分使用普通 stable 6.1.174，而不是当前高置信度的 c2f148d，针对源码归属纠正，定点复核 c2f148d 的 STMMAC core（stmmac_xmit/TSO、TX reclaim、DMA engine init/channel start、open/hw_setup/link-up handoff）。只比较正常 6.1.116 与 c2f148d，并用已有 6.12.81 结果做第三端交叉核对；只寻找 6.1.174-rk35xx 与 6.12.81-rk35xx 共有、但正常 6.1.116 不存在的有效 TX 路径变化。不要重做普通 descriptor OWN/tail pointer/barrier、DMA register helper、queue parser 和物理 TX 边界审计；若无差异则明确关闭。全程只读，不操作 Panther、不写寄存器、不发包、不抓包、不制作补丁。
+
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
