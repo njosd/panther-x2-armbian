@@ -19,13 +19,14 @@
 ### P1：JL2xx1 workaround 的 PHY MDIO 写入组（已收口，证据不足）
 
 - 1500ms DMA reset 前延时：已查明原始目的是 JL2XX1/JL2101 快速启动时序；后续代码只对对应 PHY ID 启用；RTL8211F 对照设备不需要。**已降级，不作为 Panther 主线。**
-- MDIO addr 0 四次写入：来源追溯到 JLSemi 厂商代码；原 PR 作者后续称 injection 并非必需。**仍需独立审查，不与延时混为一谈。**
+- MDIO addr 0 四次写入：来源追溯到 JLSemi 厂商代码；原 PR 作者后续称 injection 并非必需。
 - 已完成：来源追溯、RTL8211F-CG PHYCR2 逐位解码、地址 0 广播语义、BMCR reset 影响边界审查。
 - 结论：PHYCR2 Reg25=0x1801 含 Reserved bits 13:12=01，且会清除 RXC/EEE 相关位；地址 0 是广播写入；PHY reset 符合 PHYCR2 配置后的复位要求，但 JLSemi 原始意图与保留位行为无可靠厂商证据。P1 已正式结束，不再猜测。
 
 相关报告：
 - `docs/reports/2026-11/PANTHER-X2-JL2XX1-WORKAROUND-RTL8211F-REGISTER-SEMANTICS-20261119.md`
 - `docs/reports/2026-11/PANTHER-X2-JL2XX1-WORKAROUND-ORIGIN-AND-SCOPE-20261119.md`
+- `docs/reports/2026-11/PANTHER-X2-P1-MDIO-WRITES-CLOSEOUT-20261119.md`
 
 ## 后续顺序（不得跳步）
 
@@ -36,7 +37,15 @@
 - P2 未找到已证实可解释最早回归的启动交接根因，正式收口。报告：`PANTHER-X2-P2-UBOOT-LINUX-GMAC-CLOCK-HANDOFF-20261119.md`。
 
 ### P3：6.1.174 与 6.12 尚未解释的 GMAC 初始化差异（当前唯一工作项）
-只读对照 6.1.116 正常、6.1.174 最早异常、6.12.81 持续异常版本。重点追踪初始化先后、时钟获取/父时钟/引用计数、MDIO 注册、PHY attach 与 reset 时机；先排除已审计项。禁止重复普通 TX DMA、RGMII delay、MAC、PHY reset GPIO、RX/NAPI 等已完成支线。
+
+**P3 第一步已完成：** 6.1.116→6.1.174 stable 源码端点的 GMAC probe、power-up、STMMAC DMA setup、MDIO 注册、PHY attach 调用链静态比较。
+- `rk_gmac_probe()`、`rk_gmac_clk_init()`、`rk_gmac_powerup()`、`stmmac_hw_setup()`、`stmmac_init_dma_engine()`、`stmmac_init_phy()`、`stmmac_phy_setup()` 的关键流程相同。
+- MDIO DT parser 有重构，但 Panther ethernet0 alias、phy-handle、snps,dwmac-mdio 子节点使新旧逻辑最终等价。
+- 6.1.116 与 6.1.174 的 `stmmac_mdio.c` 和 `realtek.c` 文件完全相同；四次 MDIO 写入两版都存在，位置和顺序相同。
+- 新增 SerDes powerup 条件不适用于 Panther 外接 RTL8211F 的 RGMII。
+- 报告：`PANTHER-X2-P3-INIT-CALLCHAIN-MDIO-PHY-ORDER-20261119.md`。
+
+**下一步唯一子项：** 核实 6.1.174 实际镜像相对于 stable 源码是否存在额外构建补丁、cherry-pick、vendor overlay 或 DTS fixup。先闭环实际构建输入，再继续检查 stable 源码未显示的差异。不得重复已经确认一致的调用链和 MDIO/PHY 文件。
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
