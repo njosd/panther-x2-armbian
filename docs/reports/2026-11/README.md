@@ -4,6 +4,7 @@
 
 ## Panther X2 网络与启动链
 
+- [RGMII TX pinctrl 静态差分与验证方案（2026-11-19）](./PANTHER-X2-RGMII-TX-PINCTRL-STATIC-AUDIT-AND-VALIDATION-PLAN-20261119.md)：核对 6.1/6.12 Panther GMAC pin groups、RK3568 IOMUX 和 pinctrl 写入路径；发现 6.12 通用 pmx_set 首 pin 错误可能被吞，但未有现场失败证据，列为低至中优先级。设计仅只读 pinctrl ownership 核查，不授权实施；TXC/TXD 电气观测继续暂停。
 - [运行时 TX 故障变量测试覆盖交叉核对（2026-11-19）](./PANTHER-X2-DHCP-THIRD-PARTY-TX-EVIDENCE-AND-INVESTIGATION-PRIORITY-20261119.md)：补记用户已完成的全部 offload、强制 100M、MAC 更换/克隆、DHCP 客户端、broadcast flag 与电源管理对照；区分此前已做 EEE 测试及本轮补齐项目，后续不重复。
 - [DHCP 第三方接收测试与 TX 故障边界更新（2026-11-19）](./PANTHER-X2-DHCP-THIRD-PARTY-TX-EVIDENCE-AND-INVESTIGATION-PRIORITY-20261119.md)：归档用户新增的同二层有线第三方监听、正常版本阳性对照、故障版零接收、反向广播接收及 IPv6 NDP 证据。将 RX/NAPI 降级，主线转向 GMAC TX、RGMII TX clock 与 PHY TX 方向；不安排新实机测试。
 - [TRACE 缓冲区空状态确认（2026-11-19）](./PANTHER-X2-TRACE-BUFFER-EMPTY-BASELINE-20261119.md)：确认 tracer=nop、entries-in-buffer/entries-written=0/0；当前 trace buffer 无需保留的历史记录，尚未创建探针。
