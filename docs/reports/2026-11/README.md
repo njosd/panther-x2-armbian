@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P3：6.1.174-rk35xx 源码来源与 GMAC 时钟路径差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md)：纠正普通 stable 6.1.174 与实际 RK35xx BSP 的源码族混淆；追踪 RK35xx workflow、release asset、vendor 源码沿革，并确认 BSP 逐项 clock enable / 100–200µs 与正常 general 6.1.116 bulk enable / 5ms 的差异。根因尚未证明；全程只读。
+
 - [RGMII TX delay 三版本源码对照（2026-11-19）](./PANTHER-X2-RGMII-TX-DELAY-THREE-KERNEL-COMPARISON-20261119.md)：6.1.116/6.1.174/6.12.81 的 Panther DTS、RTL8211F 内部 TX delay 和 RK3568 GRF delay 最终设置一致；仅 GRF CON0/CON1 写入顺序不同，当前不构成持续 TX 故障解释。下一步聚焦 GMAC TX clock source/enable 路径。
 - [RTL8211F 原始 PHYID2 型号解码与 U-Boot MDIO 写入审计（2026-11-19）](./PANTHER-X2-RTL8211F-PHY-ID-MODEL-DECODE-AND-UBOOT-MDIO-AUDIT-20261119.md)：从已存 PHY ID 0x001cc916 直接解出 PHYID2=0xc916、Model=0x11，支持普通 CG 而非 VD-CG；检查已知 Radxa U-Boot realtek.c 未写 PHYCR2 Reg19。当前 JP/Ophub U-Boot 只有二进制资产，源码行为仍未验证；不安排 PHY 读取或设备操作。
 - [RGMII TX pinctrl 静态差分与验证方案（2026-11-19）](./PANTHER-X2-RGMII-TX-PINCTRL-STATIC-AUDIT-AND-VALIDATION-PLAN-20261119.md)：核对 6.1/6.12 Panther GMAC pin groups、RK3568 IOMUX 和 pinctrl 写入路径；发现 6.12 通用 pmx_set 首 pin 错误可能被吞，但未有现场失败证据，列为低至中优先级。设计仅只读 pinctrl ownership 核查，不授权实施；TXC/TXD 电气观测继续暂停。
