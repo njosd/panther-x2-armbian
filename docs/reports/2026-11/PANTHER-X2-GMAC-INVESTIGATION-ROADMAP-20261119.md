@@ -36,16 +36,25 @@
 - JP proper 的精确源码、FIT control FDT、实际 clock_in_out 与 PHY 初始化行为无法从现有可审计资产确认；不得用 JP SPL FDT 或较新的 Radxa U-Boot 源码替代。
 - P2 未找到已证实可解释最早回归的启动交接根因，正式收口。报告：`PANTHER-X2-P2-UBOOT-LINUX-GMAC-CLOCK-HANDOFF-20261119.md`。
 
-### P3：6.1.174 与 6.12 尚未解释的 GMAC 初始化差异（当前唯一工作项）
+### P3：实际 kernel family 的 GMAC 初始化差异（当前唯一工作项）
 
-**P3 第一步已完成：** 6.1.116→6.1.174 stable 源码端点的 GMAC probe、power-up、STMMAC DMA setup、MDIO 注册、PHY attach 调用链静态比较。
-- `rk_gmac_probe()`、`rk_gmac_clk_init()`、`rk_gmac_powerup()`、`stmmac_hw_setup()`、`stmmac_init_dma_engine()`、`stmmac_init_phy()`、`stmmac_phy_setup()` 的关键流程相同。
-- MDIO DT parser 有重构，但 Panther ethernet0 alias、phy-handle、snps,dwmac-mdio 子节点使新旧逻辑最终等价。
-- 6.1.116 与 6.1.174 的 `stmmac_mdio.c` 和 `realtek.c` 文件完全相同；四次 MDIO 写入两版都存在，位置和顺序相同。
-- 新增 SerDes powerup 条件不适用于 Panther 外接 RTL8211F 的 RGMII。
-- 报告：`PANTHER-X2-P3-INIT-CALLCHAIN-MDIO-PHY-ORDER-20261119.md`。
+**重要基线纠正（2026-11-19）：** 正常 6.1.116 是 Ophub general kernel；异常 6.1.174-rk35xx 是 Ophub RK35xx vendor BSP。不能继续把普通 `unifreq/linux-6.1.y@3f06ed3` 当作实际 6.1.174-rk35xx 镜像源码。
 
-**下一步唯一子项：** 核实 6.1.174 实际镜像相对于 stable 源码是否存在额外构建补丁、cherry-pick、vendor overlay 或 DTS fixup。先闭环实际构建输入，再继续检查 stable 源码未显示的差异。不得重复已经确认一致的调用链和 MDIO/PHY 文件。
+- 6.1.116 正常：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`，general config family。
+- 6.1.174-rk35xx 异常：高置信度候选 `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`；官方 RK35xx workflow 默认 source、kernel suffix 和 release asset 时间吻合，但尚缺该 asset 的 Actions run inputs/source_hash/build log，不能称精确构建 commit 已闭环。
+- 6.12.81-rk35xx 异常：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`。
+
+**已完成的普通 stable 比较仅作为参考，不代表实际 RK35xx 镜像。** 报告：`PANTHER-X2-P3-INIT-CALLCHAIN-MDIO-PHY-ORDER-20261119.md`。
+
+**新增已验证发现：**
+- RK35xx 6.1.174 候选的 `gmac_clk_enable()` 与正常 general 6.1.116 不同：逐项 `clk_prepare_enable()`、未检查返回值、`usleep_range(100, 200)`；general 6.1.116 使用 bulk enable、检查错误并等待 `mdelay(5)`。
+- 该 RK35xx 实现自 2025-04 Armbian vendor source 初始导入即存在，并非 6.1.174 version bump 新增。
+- RK35xx 6.1.174 与 6.12.81 的关键 `gmac_clk_enable()`、`rk_gmac_clk_init()`、`rk_gmac_powerup()`、`rk_gmac_phy_power_on()` 函数体一致。
+- 以上只是 BSP family 差异，尚未证明任何 clock enable 在 Panther 失败，也未证明 100–200µs 导致 TX 不出线；禁止据此制作补丁。
+
+报告：`PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md`。
+
+**下一步唯一子项：** 继续只读映射上述时钟 handle 获取与 enable 顺序到 Panther 的实际 DTS clock names、clock_in_out=input 和 parent chain；核实每个差异是否命中 Panther RGMII 路径。已完成的 RGMII delay 数值、CSU NULL/no-op、PHY reset GPIO 不重查。随后再核对 6.12.81 中哪些差异持续存在。不得做实机操作、写 PHY、重启接口或制作补丁。
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
