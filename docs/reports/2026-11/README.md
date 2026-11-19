@@ -4,6 +4,7 @@
 
 ## Panther X2 网络与启动链
 
+- [TRACEFS 双路径实例与缓冲区核验（2026-11-19）](./PANTHER-X2-TRACEFS-MOUNT-IDENTITY-AND-BUFFER-20261119.md)：确认两个路径为同一 tracefs 实例；trace 文件为 515 bytes，内容尚未读取，保留现有 tracing 状态。
 - [TRACEFS 当前状态核验（2026-11-19）](./PANTHER-X2-TRACEFS-CURRENT-STATE-20261119.md)：记录 tracing_on=1、current_tracer=nop、无已注册 kprobe/启用事件；保留 tracing 状态与缓冲区，下一步只读确认双挂载实例关系。
 - [6.12.81 实机 KPROBE / TRACEFS 只读能力检查（2026-11-19）](./PANTHER-X2-6.12-KPROBE-TRACEFS-READONLY-CAPABILITY-20261119.md)：确认实机 tracefs、KPROBES/KPROBE_EVENTS、目标函数 kallsyms 符号及现有 kmem/page_pool/NAPI/SKB tracepoint；下一步先只读检查 tracing 现状，尚未创建探针。
 - [6.1.116 实际内核配置闭环与 STMMAC RX 差分（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md)：从原始硬件审计归档提取真实 kernel.config，与官方模板 7,677 个符号全量比较（差异 0）；对 6.1.116/6.12.81 候选 STMMAC RX 主函数进行定点差分。
