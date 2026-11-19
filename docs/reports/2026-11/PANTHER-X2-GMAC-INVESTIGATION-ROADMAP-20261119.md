@@ -16,12 +16,12 @@
 
 ## 当前唯一工作项
 
-### P1：JL2xx1 workaround 的 PHY MDIO 写入组（继续中）
+### P1：JL2xx1 workaround 的 PHY MDIO 写入组（已收口，证据不足）
 
 - 1500ms DMA reset 前延时：已查明原始目的是 JL2XX1/JL2101 快速启动时序；后续代码只对对应 PHY ID 启用；RTL8211F 对照设备不需要。**已降级，不作为 Panther 主线。**
 - MDIO addr 0 四次写入：来源追溯到 JLSemi 厂商代码；原 PR 作者后续称 injection 并非必需。**仍需独立审查，不与延时混为一谈。**
-- 当前下一步：继续找 JLSemi 原始驱动/补丁、FAE 可读寄存器说明及 RTL8211F-CG 对这组写入的真实语义；特别审查 reset 前后寄存器状态、broadcast 作用范围及写入错误处理。
-- 结束条件：能说明该写入组与 Panther PHY 的关系及其因果可能性；若不能，则明确记录证据不足并结束该支线，不做无休止猜测。
+- 已完成：来源追溯、RTL8211F-CG PHYCR2 逐位解码、地址 0 广播语义、BMCR reset 影响边界审查。
+- 结论：PHYCR2 Reg25=0x1801 含 Reserved bits 13:12=01，且会清除 RXC/EEE 相关位；地址 0 是广播写入；PHY reset 符合 PHYCR2 配置后的复位要求，但 JLSemi 原始意图与保留位行为无可靠厂商证据。P1 已正式结束，不再猜测。
 
 相关报告：
 - `docs/reports/2026-11/PANTHER-X2-JL2XX1-WORKAROUND-RTL8211F-REGISTER-SEMANTICS-20261119.md`
@@ -29,11 +29,14 @@
 
 ## 后续顺序（不得跳步）
 
-### P2：RTL8211F PHY 时钟输入链与 U-Boot/Linux 初始化交接
-仅在 P1 完成后进入。聚焦 PHY→MAC 参考时钟责任边界和已知启动阶段差异；不重复已确认的 MAC 来源、GMAC DTS、RGMII delay 数值、PHY reset GPIO 审计。
+### P2：RTL8211F PHY 时钟输入链与 U-Boot/Linux 初始化交接（已收口，JP proper 证据不足）
+- 已确认 Linux 按 Panther X2 runtime FDT 采用 clock_in_out=input，并重新配置 GMAC clock parent 与 PHY 初始化。
+- 已确认 6.1.174 / 6.12 与 6.1.116 的 GMAC1 CRU parent mux / 外部 fixed-clock 描述没有已知差异。
+- JP proper 的精确源码、FIT control FDT、实际 clock_in_out 与 PHY 初始化行为无法从现有可审计资产确认；不得用 JP SPL FDT 或较新的 Radxa U-Boot 源码替代。
+- P2 未找到已证实可解释最早回归的启动交接根因，正式收口。报告：`PANTHER-X2-P2-UBOOT-LINUX-GMAC-CLOCK-HANDOFF-20261119.md`。
 
-### P3：6.1.174 与 6.12 尚未解释的 GMAC 初始化差异
-仅在 P2 无法解释后进入。重点是尚未查清的初始化先后、时钟获取/父时钟/引用计数、MDIO 注册/PHY attach/reset 时机；先排除已审计项。
+### P3：6.1.174 与 6.12 尚未解释的 GMAC 初始化差异（当前唯一工作项）
+只读对照 6.1.116 正常、6.1.174 最早异常、6.12.81 持续异常版本。重点追踪初始化先后、时钟获取/父时钟/引用计数、MDIO 注册、PHY attach 与 reset 时机；先排除已审计项。禁止重复普通 TX DMA、RGMII delay、MAC、PHY reset GPIO、RX/NAPI 等已完成支线。
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
