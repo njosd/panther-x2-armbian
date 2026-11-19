@@ -143,18 +143,12 @@ DDR 研究收口：若继续，只做两份现有 idbloader/DDR binary 的静态
 
 这说明同一个 V1.13 banner 并不意味着一定训练到 1560MHz。公开样本与本机旧日志的区别至少包括 DRAM type（LPDDR4X vs 本机日志记录的 LPDDR4）和 rank topology（单 rank vs 本机报告记录的 CS0/CS1）。所以不能只用 V1.13 版本号推断最终频率。
 
-### 9.2 DDR V1.10 也并非固定只能到 1056MHz
+### 9.2 V1.10 公开样本的适用性限制
 
-公开的 RK3566 4GB LPDDR4 日志样本显示：
-- DDR banner：`DDR Version V1.10 20210810`；
-- LPDDR4，4096MB，CS0/CS1 双 rank；
-- 训练过程包含 324/528/780/1560MHz，最终 1560MHz。
-来源：https://laval.csdn.net/6569cf5b9820e81a16d95862.html
-
-另一个公开 RK3566 4GB LPDDR4 样本也记录 V1.10 最终 1056MHz（具体板卡不同），说明 V1.10 banner 同样不唯一决定最终频率：
+此前检索到一份 V1.10 / 1560MHz 的公开日志，但来源为 RK3568 开发板而非 Panther X2/RK3566，不能用它证明 RK3566 V1.10 固件在本机配置下可达到 1560MHz。另一个 RK3566 4GB LPDDR4 样本记录 V1.10 最终 1056MHz：
 https://github.com/tanshihaj/1e6f6a66196f0d5f4574508c71423aa9
 
-上述样本不是本机实测，板级/颗粒和 DDR config 未必相同，只能用作反例，不能代替本机证据。
+这些公开样本不替代本机两份日志。关于本机 JP V1.10 为什么最高只有 1056MHz，应以第 10 节的 FSP 参数表对照为准。
 
 ### 9.3 由此修正 DDR 降频问题的当前解释
 
