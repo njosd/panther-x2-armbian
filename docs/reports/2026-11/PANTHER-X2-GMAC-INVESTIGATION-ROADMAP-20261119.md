@@ -36,32 +36,27 @@
 - JP proper 的精确源码、FIT control FDT、实际 clock_in_out 与 PHY 初始化行为无法从现有可审计资产确认；不得用 JP SPL FDT 或较新的 Radxa U-Boot 源码替代。
 - P2 未找到已证实可解释最早回归的启动交接根因，正式收口。报告：`PANTHER-X2-P2-UBOOT-LINUX-GMAC-CLOCK-HANDOFF-20261119.md`。
 
-### P3：实际 kernel family 的 GMAC 初始化差异（当前唯一工作项）
+### P3：实际 RK35xx BSP 与正常 general kernel 的 GMAC 初始化差异（当前唯一工作项）
 
-**重要基线纠正（2026-11-19）：** 正常 6.1.116 是 Ophub general kernel；异常 6.1.174-rk35xx 是 Ophub RK35xx vendor BSP。不能继续把普通 `unifreq/linux-6.1.y@3f06ed3` 当作实际 6.1.174-rk35xx 镜像源码。
+**源码基线与证据等级：**
+- 正常 6.1.116：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`。
+- 最早异常 6.1.174-rk35xx：`ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`，目前为高置信度源码候选。
+- 持续异常 6.12.81-rk35xx：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`。
+- 6.1.174 自动资产 `6.1.174.tar.gz` 与 Ophub Actions run #296（ID `42812333074`）上传 step 时间精确吻合；run head workflow 默认 source 为 `ophub/linux-6.1.y-rockchip`，step 5 会读取 main HEAD；该时刻 main 最新提交为 c2f148d。
+- 尚未取得 workflow_dispatch 实际 inputs 和 step 5 的 source_hash 输出，因此 c2f148d 是高置信度候选，不是逐字节构建证明。
+- 普通 stable `unifreq/linux-6.1.y@3f06ed3` 只作 upstream 对照，不代表实机 6.1.174-rk35xx 构建。
 
-- 6.1.116 正常：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`，general config family。
-- 6.1.174-rk35xx 异常：高置信度候选 `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`；官方 RK35xx workflow 默认 source、kernel suffix 和 release asset 时间吻合，但尚缺该 asset 的 Actions run inputs/source_hash/build log，不能称精确构建 commit 已闭环。
-- 6.12.81-rk35xx 异常：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`。
+来源报告：`PANTHER-X2-6.1.174-RK35XX-ACTIONS-RUN-AND-SOURCE-PROVENANCE-CORRELATION-20261119.md`。
 
-**已完成的普通 stable 比较仅作为参考，不代表实际 RK35xx 镜像。** 报告：`PANTHER-X2-P3-INIT-CALLCHAIN-MDIO-PHY-ORDER-20261119.md`。
+**已完成的时钟子项：**
+- c2f148d 的 Panther RGMII 实际启用集合已映射：`aclk_mac`、`pclk_mac`、`mac_clk_tx`、`clk_mac_speed`；RMII、XPCS、PHY external clock 分支不命中。
+- `mac_clk_tx` 与 `clk_mac_speed` 指向同一 CCF core，双 enable/disable 是平衡引用计数，不是两次独立 mux 操作。
+- BSP 的单项 `clk_prepare_enable()` 返回值确实被忽略，但 Panther 当前 gate/mux/fixed-clock provider 组合没有发现一个可预期的必然失败 callback；该错误处理退化降为低/中优先级风险。
+- 100–200µs settle 位于 MAC/bus clocks enable 后、RGMII GRF 配置与 PHY regulator enable 前；它不是 PHY 上电后的 PLL lock delay。其硬件充分性没有厂商证据，暂留为待解释差异，不做补丁。
+- `PCLK_USB` 标记为 `CLK_IS_CRITICAL`，在 CRU clock registration 阶段即准备/使能 parent chain。GPLL callback 若执行，发生在 CRU 初始化阶段，不是 GMAC probe 首次启用；PLL callback 差异降级，不再追运行时 parent、不安排 clock-summary 读取。
+- 报告：`PANTHER-X2-P3-RK35XX-GMAC-CLOCK-ENABLE-CALLBACK-AND-SETTLE-ANALYSIS-20261119.md`。
 
-**新增已验证发现：**
-- RK35xx 6.1.174 候选的 `gmac_clk_enable()` 与正常 general 6.1.116 不同：逐项 `clk_prepare_enable()`、未检查返回值、`usleep_range(100, 200)`；general 6.1.116 使用 bulk enable、检查错误并等待 `mdelay(5)`。
-- 该 RK35xx 实现自 2025-04 Armbian vendor source 初始导入即存在，并非 6.1.174 version bump 新增。
-- RK35xx 6.1.174 与 6.12.81 的关键 `gmac_clk_enable()`、`rk_gmac_clk_init()`、`rk_gmac_powerup()`、`rk_gmac_phy_power_on()` 函数体一致。
-- 以上只是 BSP family 差异，尚未证明任何 clock enable 在 Panther 失败，也未证明 100–200µs 导致 TX 不出线；禁止据此制作补丁。
-
-报告：`PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md`。
-
-**第二个子项已完成：** 将 Panther GMAC1 MAC clock 与 ACLK/PCLK bus clock 分开映射，并比较 RK3568 CRU/PLL provider。
-- GMAC1 的 `SCLK_GMAC1` 由外部 `gmac1_clkin` 输入；但 ACLK/PCLK 仍经 `ACLK_GMAC1 -> aclk_usb`、`PCLK_GMAC1 -> pclk_usb -> aclk_usb`，而 `aclk_usb` parent 可选 GPLL 派生时钟。
-- RK3568 GMAC1 mux/gate 定义、通用 CCF `clk_core_prepare/enable/disable`、`clk_gate_enable/disable` 与 general 6.1.116 相同。
-- Rockchip PLL provider 不同：general 6.1.116 PLL enable 为 power-up→wait lock；RK35xx BSP 增加 wait lock 后切 normal parent，disable 时先切 slow parent 再 powerdown。RK3568 GPLL 使用该 `pll_rk3328` 注册路径，6.12.81 延续该实现。
-- 尚不知道 Panther 运行时 `aclk_usb` 选择哪个 parent，也没有证据证明相关 PLL callback 在故障启动时被调用或造成 TX 失败。
-- 报告：`PANTHER-X2-P3-RK3568-GMAC-BUS-CLOCK-AND-PLL-CCF-DIFF-20261119.md`。
-
-**下一步唯一子项：** 继续只读追踪 RK3568 GPLL 派生 clock 的注册、parent index 与模式寄存器语义，并核对 U-Boot/Linux clock init 是否设置或保留 `aclk_usb` parent。重点回答：PLL enable/disable callback 是否可能在 Panther GMAC probe 时触发，以及它的调用前提是什么。若运行时 parent 仍无法由源码证明，提出最小只读 clock-summary 取证方案，但不执行实机操作。不得重做已完成的 RGMII delay、CSU NULL/no-op、PHY reset GPIO 和通用 CCF enable 审计。
+**下一步唯一子项：** 在 c2f148d 与 6.12.81 RK35xx 源码中，只审查尚未覆盖且会命中 Panther 外接 RGMII 的 `rk_gmac_probe()` / setup / STMMAC handoff 差异，重点看 PHY supply、runtime-PM、probe flags 和资源/电源状态交接。与 6.1.116 对照，只保留 6.1.174 和 6.12.81 共有、且会在最早异常 6.1.174 生效的差异。已经完成的 DMA descriptor、MDIO/PHY attach 顺序、RGMII delay、CSU、CRU provider、PLL callback 不重做。全程只读，不操作 Panther、不写寄存器、不制作补丁。
 
 ### P4：pinctrl 首 pin 错误处理差异
 只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
