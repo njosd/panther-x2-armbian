@@ -181,3 +181,63 @@ https://github.com/tanshihaj/1e6f6a66196f0d5f4574508c71423aa9
 
 不做新设备测试，先从仓库现有的两份完整 UART 日志提取上述字段，形成逐项差异表；随后仅查公开 DDR bin release notes/配置表是否能解释这些差异。如果现有日志缺少 DDR颗粒完整型号、bin 内参数表或 training selection 细节，则明确标记无法从公开信息证明，不继续猜测式反汇编。
 
+
+## 10. 本机两份完整 UART 日志的 DDR FSP 差异：已定位“1056MHz 从何而来”
+
+本轮直接重新读取仓库两份现存完整启动日志（不是要求用户重跑）：
+- JP SPL/V1.10：`evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart.log`
+- 原版 SPL/V1.13：`evidence/uart/panther-jp-tvbox-u-boot-boot-20261117.txt`
+
+### 10.1 两份日志识别到的是同一类 DRAM 配置
+
+两份日志的以下字段相同：
+- `ddrconfig:7`
+- `LPDDR4`
+- `BW=32 Col=10 Bk=8`
+- `CS0 Row=16 CS1 Row=16 CS=2 Die BW=16 Size=4096MB`
+- CS0 TDQSS：434/361/385/289 ps
+- CS1 TDQSS：458/361/385/289 ps
+
+因此本次 1560→1056 差异不能简单归因于两次启动识别出了不同 DRAM 类型、容量、rank topology 或不同的初始 TDQSS 测量值。这里是两份历史 UART 输出对照，不是颗粒 BOM/PCB 级身份鉴定。
+
+### 10.2 决定性差异在 BL31 输出的 FSP 参数列表
+
+| 来源 | DDR banner | 最终频率 | FSP 列表 |
+|---|---|---:|---|
+| 原版 E25 SPL | V1.13 20220218 | 1560MHz | [1560, 324, 528, 780]MHz |
+| JP SPL | V1.10 20210810 | 1056MHz | [1056, 324, 528, 780]MHz |
+
+两份 BL31 日志分别明确输出：
+- 原版：`fsp_param[0].freq_mhz=1560MHz`，其余 324/528/780；
+- JP：`fsp_param[0].freq_mhz=1056MHz`，其余 324/528/780。
+
+**这意味着 JP SPL/DDR V1.10 本轮并不是“尝试 1560MHz 后训练失败，自动退回 1056MHz”的已知情形。它传递给 BL31 的 FSP 集合本身就以 1056MHz 为最高频点；日志没有 1560MHz FSP，也没有 1560MHz training attempt。** 因而 1056MHz 是这套 JP DDR 固件配置提供的最高 FSP，而不是本轮 1560MHz training failure 的证据。
+
+### 10.3 训练参数也存在系统性差异
+
+相同的 528/780MHz 频点：
+- 原版 V1.13：PHY ODT=0，Vref inner/out=41%；
+- JP V1.10：PHY ODT=60，Vref inner=16%，Vref out=41%。
+
+两者在 1056MHz 最终档位都使用 PHY ODT=60、Vref inner=16%、Vref out=29%、DRAM ODT=80、Vref_CA=0x68；但 clock skew 记录分别为原版 0x2 / JP 0x2c（按对应日志原文）。这进一步说明 DDR blob 的参数表/训练策略有差异，而不只是打印版本号不同。
+
+### 10.4 结论更新
+
+- **已确认：** 本机两份日志识别出的 DRAM 几何配置、ddrconfig 和 TDQSS 起始测量一致。
+- **已确认：** 两套启动固件提供给 BL31 的 FSP 列表不同：原版含 1560MHz，JP 仅含 1056MHz。
+- **已确认：** 本轮 JP 固件没有 1560MHz 训练失败的记录，因为它没有 1560MHz FSP/训练阶段。
+- **当前最直接解释：** 1056MHz 上限来自 JP SPL 所携带/传递的 DDR FSP 配置，而不是 Linux、BL31 后续初始化或 DHCP 网络栈。
+- **仍未确认：** V1.10 为什么只提供 1056MHz FSP——是该二进制面向特定板级/颗粒的保守参数集、固件构建选择，还是可通过不同 DDR blob 变体提供更高频点。仅凭版本 banner 和日志不能进一步区分。
+- **网络因果：** 没有证据把 1056MHz FSP 与 DHCP 故障建立因果关系；JP SPL 更换后 DHCP 仍失败也说明它不是 DHCP 故障的单一解释。
+
+### 10.5 对外部公开样本的证据限制修订
+
+公开 Panther X2 文章中 V1.13 最终 1056MHz 的样本使用 LPDDR4X、单 rank，与本机日志的 LPDDR4、双 rank 配置不同；它只能证明同一版本 banner 不唯一决定频率，不能用于推断本机具体 FSP 选择原因。
+公开 RK3568 的 V1.10/1560MHz 日志不是 Panther X2/RK3566 的同板证据，本报告不再用它支持“RK3566 V1.10 也能达到 1560MHz”的判断。后续仅以本机两份日志和可确认的 RK3566 DDR blob 资料为准。
+
+### 10.6 下一步
+
+DDR 频率问题已经从“为什么训练降频”收敛为“为什么 JP idbloader 内 DDR 配置只给出 1056MHz FSP”。下一步只需要：
+1. 在已有 JP idbloader、原版 idbloader 备份中识别 DDR blob 边界和可验证文件指纹；
+2. 查明 V1.10 DDR binary 对应的构建来源/板级配置，确认它是否就是 1056MHz-only 的配置变体；
+3. 若无法映射到可读参数表，则以“JP 固件提供的 FSP 上限为 1056MHz”结案，不做反汇编猜测或频率强行提升。
