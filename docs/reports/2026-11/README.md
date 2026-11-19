@@ -14,6 +14,7 @@
 - [6.12.81 实际运行内核配置核验（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-RUNTIME-VERIFICATION-20261119.md)：记录 Panther 实机 6.12.81 运行配置与已锁定构建模板的关键符号核验结果。
 - [内核配置来源与只读取证计划（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-PROVENANCE-AND-READONLY-CAPTURE-20261119.md)：记录两版内核正确构建来源、模板差异和配置提取边界。
 
+- [6.1.174 BSP GMAC 时钟使能与 RGMII 初始化顺序差分（2026-11-19）](./PANTHER-X2-6.1.174-BSP-GMAC-CLOCK-ENABLE-AND-RGMII-ORDER-DIFF-20261119.md)：直接比较 6.1.116 正常源码与 6.1.174 BSP 候选，并映射 6.12.81；发现后两者 clock enable 错误忽略、100–200µs 等待及 RGMII delay 写入顺序一致。尚无实机 clock enable 失败证据。仅静态审查。
 - [Linux stable 6.1.116→6.1.174 Rockchip GMAC glue 与队列初始化差分（2026-11-19）](./PANTHER-X2-STABLE-116-174-ROCKCHIP-GLUE-AND-QUEUE-INIT-DIFF-20261119.md)：核对 RK3568 RGMII GRF/speed/power-up、clock disable 顺序、MTL queue parser 与 DMA channel 初始化；唯一 clock callback 顺序变化不适用于 Panther RK3568，队列和 TX channel 初始化关键函数一致。仅源码审计，未做设备操作。
 - [Linux stable 6.1.116→6.1.174 MAC / DMA / MTL TX 使能路径差分（2026-11-19）](./PANTHER-X2-STABLE-116-174-MAC-DMA-MTL-TX-ENABLE-DIFF-20261119.md)：对照 MAC TE、DMA TX ST、tail pointer、MTL TXQEN/TQS 和 phylink SerDes 回调；Panther 走默认寄存器映射，未发现相关 upstream 行为回归。仅源码审计，未做设备操作。
 - [Linux stable 6.1.116→6.1.174 STMMAC TX 核心路径差分（2026-11-19）](./PANTHER-X2-STABLE-116-174-STMMAC-TX-CORE-DIFF-20261119.md)：直接对照 stable tag 的普通 TX 提交、descriptor reclaim、TX error recovery、DWMAC4 地址映射重构；未发现普通 TX 核心流程变化，Panther 使用新增地址映射的 NULL 默认偏移回退。仅源码审计，未做设备操作。
