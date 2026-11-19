@@ -7,6 +7,7 @@
 - [TRACE 缓冲区空状态确认（2026-11-19）](./PANTHER-X2-TRACE-BUFFER-EMPTY-BASELINE-20261119.md)：确认 tracer=nop、entries-in-buffer/entries-written=0/0；当前 trace buffer 无需保留的历史记录，尚未创建探针。
 - [TRACEFS 双路径实例与缓冲区核验（2026-11-19）](./PANTHER-X2-TRACEFS-MOUNT-IDENTITY-AND-BUFFER-20261119.md)：确认两个路径为同一 tracefs 实例；trace 文件为 515 bytes，内容尚未读取，保留现有 tracing 状态。
 - [TRACEFS 当前状态核验（2026-11-19）](./PANTHER-X2-TRACEFS-CURRENT-STATE-20261119.md)：记录 tracing_on=1、current_tracer=nop、无已注册 kprobe/启用事件；保留 tracing 状态与缓冲区，下一步只读确认双挂载实例关系。
+- [napi_alloc_skb() 返回值短时探针结果（2026-11-19）](./PANTHER-X2-NAPI-ALLOCATOR-RETURN-PROBE-RESULT-20261119.md)：30 秒探针命中 62 次、missed 0、NULL 返回事件 0；临时探针已删除且原 tracing 状态保持不变。该结果只降低分配失败嫌疑，不证明整个 RX 路径正常。
 - [6.12.81 实机 KPROBE / TRACEFS 只读能力检查（2026-11-19）](./PANTHER-X2-6.12-KPROBE-TRACEFS-READONLY-CAPABILITY-20261119.md)：确认实机 tracefs、KPROBES/KPROBE_EVENTS、目标函数 kallsyms 符号及现有 kmem/page_pool/NAPI/SKB tracepoint；下一步先只读检查 tracing 现状，尚未创建探针。
 - [6.1.116 实际内核配置闭环与 STMMAC RX 差分（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md)：从原始硬件审计归档提取真实 kernel.config，与官方模板 7,677 个符号全量比较（差异 0）；对 6.1.116/6.12.81 候选 STMMAC RX 主函数进行定点差分。
 - [NAPI skb 分配器差分与只读取证方案（2026-11-19）](./PANTHER-X2-NAPI-SKB-ALLOCATOR-DIFF-AND-READONLY-TRACE-CHECK-20261119.md)：比较两版 napi_alloc_skb 实现，记录 6.12 tracing/kprobe 构建能力及不改变运行状态的只读检查方案。
