@@ -66,3 +66,35 @@
 - 6.1.116 direct DMA allocator：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/kernel/dma/direct.c
 - 6.12.81 direct DMA allocator：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/kernel/dma/direct.c
 - 既有 TX physical boundary / DMA report：`PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md`
+
+## 9. 后续补充：DMA_DIRECT_REMAP 路径已由架构 Kconfig 确认
+
+继续检查两个源码端点的 `arch/arm64/Kconfig`：两版均由 ARM64 架构 `select DMA_DIRECT_REMAP`。Panther GMAC1 的 SoC DTS 节点没有 `dma-coherent`，故按 OF DMA coherency 规则作为 non-coherent device 配置；GMAC1 也没有 `iommus`，所以不走 Rockchip IOMMU DMA mapping。
+
+结合 `kernel/dma/direct.c`：
+1. STMMAC 通过 `dma_alloc_coherent()` 分配 TX/RX descriptor ring；
+2. 对 non-coherent device，ARM64 的 `DMA_DIRECT_REMAP=y` 使 direct allocator 选择 remap coherent allocation 路径（普通 GFP_KERNEL 分配不属于 atomic pool 分支）；
+3. 该 remap 路径明确调用 `arch_dma_prep_coherent(page, size)`，随后建立 coherent/non-cacheable remap。
+
+因此，前文所列 `arch_dma_prep_coherent()` clean+invalidate → clean 的差异，不再只是一个“可能执行”的函数差异：按两版架构 Kconfig、GMAC1 DTS 和 STMMAC descriptor allocation 调用链，它确实位于该 descriptor ring 分配路径上。此处是源码/Kconfig 推导，尚未取得运行中函数调用 trace。
+
+## 10. 对该差异的技术定性：真实变化，但不是当前优先根因
+
+ARM64 上游补丁说明（Will Deacon，2022-08-23）指出，`arch_dma_prep_coherent()` 的目的，是把此前通过 cacheable mapping 产生的 dirty cache lines clean 到 PoC，使 non-coherent device 能看到内存内容。补丁解释认为 clean 已满足 DMA API；额外 invalidate 在仍存在 cacheable linear-map alias 的情况下作用有限，因为 CPU 可能在 invalidate 后再次 speculative fetch 该 cache line。
+
+因此：
+- `dcache_clean_inval_poc()` 和 `dcache_clean_poc()` 确实不同：前者 clean+invalidate，后者只 clean；
+- ARM64 上游设计明确认为 coherent allocation preparation 只需 clean 到 PoC，invalidate 并非必要条件；
+- 该差异本身不构成 6.12 DMA descriptor 数据不可见的证据；不能仅凭“6.1 正常、6.12 异常”就把它判为回归根因。
+
+结论：将此项从“待验证的较高优先级候选”下调为“已确认调用路径上的实现差异，但按 ARM64 DMA 设计理由不太可能单独导致故障”。不建议为此单独修改内核或恢复 invalidate。只有后续获得 descriptor stale/alias 访问的直接证据，才重新打开。
+
+## 11. 本项结案与下一步
+
+ARM64 DMA coherency 源码路径本身暂时结案：普通 skb payload DMA_TO_DEVICE clean 相同；coherent descriptor ring prep 的差异真实但有上游明确理由，暂不足以解释 TX 失败。下一步应回到已有报告中尚未闭环的证据边界：6.12.81 当前启动周期的 MMC good/bad TX 计数与实际 MAC 发送结果、以及实际发布二进制与公开候选源码/补丁的精确对应。不要再重复 DMA mapping、descriptor OWN、tail pointer、MDIO、clock 或 PHY reset 检查。
+
+### 参考资料
+
+- ARM64 DMA patch：Drop cache invalidation from arch_dma_prep_coherent()（2022-08-23）：https://lists.infradead.org/pipermail/linux-arm-kernel/2022-August/768719.html
+- ARM64 patch review discussion（2022-08-24）：https://lists.infradead.org/pipermail/linux-arm-kernel/2022-August/768952.html
+- 当前 Linux ARM64 cache operation 定义：https://github.com/torvalds/linux/blob/master/arch/arm64/mm/cache.S
