@@ -381,3 +381,66 @@ Panther 使用外置 RTL8211F + RGMII，未配置 SERDES 路径；EEE/HWTSTAMP l
 - 6.12.81 dwmac-rk.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
 - 6.1.116 stmmac_main.c：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
 - 6.12.81 stmmac_main.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+
+## 14. TX fast path 6.1.116 / 6.12.81 再核对：descriptor 发布与 DMA kick 语义
+
+本轮根据第 18 节保留的 TX 主线，只核对精确源码中普通 skb 的 `stmmac_xmit()`、`stmmac_flush_tx_descriptors()`、DWMAC4 descriptor helper、`dwmac4_dma_start_tx()`。不重新做设备寄存器测试，也不重复 ring/chain、DMA mapping 或 TX completion 的既有审计。
+
+### 14.1 普通 DHCP skb 的主要发送顺序
+
+两版普通 skb 路径均完成：
+1. 选取 TX queue 和当前 descriptor；
+2. DMA map skb data；
+3. 写入 descriptor buffer address / length / FS / LS / checksum flags；
+4. 设置 first descriptor OWN；
+5. `netdev_tx_sent_queue()`；
+6. 启动 TX DMA；
+7. `stmmac_flush_tx_descriptors()` 写 TX tail pointer。
+
+两版 `stmmac_flush_tx_descriptors()` 内容一致：计算 descriptor size；执行 `wmb()`；更新 `tx_tail_addr = dma_tx_phy + cur_tx * desc_size`；调用 `stmmac_set_tx_tail_ptr()`。未发现 6.12 删除发布前 barrier 或改变 tail pointer 计算方式。
+
+DWMAC4 descriptor helper 中，first descriptor OWN 的发布仍有 `dma_wmb()` 保护此前同一 frame 的其他 descriptors；本轮读取的 6.1.116 / 6.12.81 `dwmac4_rd_prepare_tx_desc()` 关键语义一致。不能把 6.12 的该段视为已发现的 OWN 顺序回归。
+
+### 14.2 DMA start 与寄存器偏移
+
+6.1.116 的 `dwmac4_dma_start_tx(ioaddr, chan)`：
+- 对 `DMA_CHAN_TX_CONTROL(chan)` 设置 `DMA_CONTROL_ST`；
+- 对 `GMAC_CONFIG` 设置 `GMAC_CONFIG_TE`。
+
+6.12.81 增加 `priv` 参数，并从 `priv->plat->dwmac4_addrs` 取得可选寄存器布局，再设置相同的 ST / TE 位。6.12 的寄存器宏在 `dwmac4_addrs == NULL` 时回退到与 6.1 相同的默认 DMA channel base/offset（0x1100 / 0x80）。Rockchip `dwmac-rk.c` 的 Panther RK3566 compatible 路径没有设置 `dwmac4_addrs`，平台数据为零初始化；因此按当前源码，Panther 默认使用同一寄存器偏移。此处仍是源码配置推断，最终以实际运行 DT/平台数据为准。
+
+普通发送路径的调用由 6.1 `stmmac_enable_dma_transmission(priv, ioaddr)` 变为 6.12 `stmmac_enable_dma_transmission(priv, ioaddr, queue)`。Panther 既有运行配置为单 TX queue，queue=0；故 channel 选择仍是 channel 0。没有发现该 API 变化本身会将 Panther 的 TX DMA kick 到错误 channel。
+
+### 14.3 6.12 新增 checksum fallback 的适用性
+
+6.12 在 `stmmac_xmit()` 增加判断：若当前 TX queue 的 `coe_unsupported` 为 true，或 skb EtherType 不是 IPv4/IPv6，则对 `CHECKSUM_PARTIAL` skb 调用 `skb_checksum_help()`，回退到软件校验和。
+
+DHCP Discover 是 IPv4/UDP Ethernet frame；`stmmac_has_ip_ethertype()` 对正常未标记/普通 VLAN IPv4 skb 返回 true。因此“非 IP EtherType”分支不适用于 DHCP Discover。若实际 TX queue 标记 `coe_unsupported`，仍可能走软件 checksum fallback，但这属于校验和计算路径，不是 descriptor 发布或 DMA kick 的直接差异；当前没有证据表明本机 DHCP skb 在该分支失败。不可仅凭代码新增就将其定为根因。
+
+### 14.4 其他发送时序差异
+
+普通 skb 路径中 `skb_tx_timestamp()` 相对 `stmmac_enable_dma_transmission()` 的调用位置在两版本略有调整；它是软件 TX timestamp bookkeeping，不改变 descriptor 地址、OWN、tail pointer 或 DMA channel。当前无证据将其与 DHCP 帧不出线关联。
+
+### 14.5 本轮结论
+
+- **已核对且等价：** descriptor buffer/length 编程的主路径、first descriptor OWN 发布屏障、flush 的 `wmb()`、tail pointer 算法。
+- **已核对且对 Panther 等价：** DWMAC4 TX start 的 ST/TE 位语义；6.12 新增可选 `dwmac4_addrs` 在 Panther RK3566 路径未设置时回退到 6.1 默认寄存器布局；单 queue 下 queue 参数为 0。
+- **存在但未证明相关：** 6.12 的 checksum fallback 和 timestamp 调用位置调整。
+- **没有发现：** 能直接解释“Linux outgoing capture 可见 DHCP Discover，但 hEX 未观察到该帧”的确定 TX fast-path 软件回归点。
+
+### 14.6 证据边界和下一步
+
+仓库历史证据需要按启动周期严格区分：
+- 2026-11-16/17 的历史报告记载曾在 Panther outgoing capture 看到 DHCP Discover，而同期 hEX 未观察到；这构成已有的跨端现象证据，但并非同一帧的同步逐包关联。
+- 2026-11-19 JP idbloader 启动周期的 DHCP 状态文件没有 tcpdump 输出，不能声称该启动周期也捕获到了 Discover。
+- 当前报告不能把旧启动周期的 outgoing capture 移植成 11 月 19 日证据。
+
+下一步不再重复普通 TX descriptor / barrier / tail pointer 源码核对。若继续需要新增信息，应使用同一测试窗口内现存的 outgoing DHCP capture（若尚保留原始 pcap）与 hEX ingress pcap 做时间/transaction-id/Ethernet source MAC 关联；若旧 pcap 不存在，则需另行授权一次只读同步抓包。抓包本身不证明 PHY MDI 线侧波形，必要时才继续下探交换机端口/PHY 物理边界。
+
+源码：
+- 6.1.116 stmmac_main.c：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+- 6.12.81 stmmac_main.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+- 6.1.116 dwmac4_lib.c：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/dwmac4_lib.c
+- 6.12.81 dwmac4_lib.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/dwmac4_lib.c
+
+**状态：** 本轮是纯静态源码与仓库证据核对；无设备操作、无 DHCP renew、无接口重启、无配置/驱动/介质修改。
