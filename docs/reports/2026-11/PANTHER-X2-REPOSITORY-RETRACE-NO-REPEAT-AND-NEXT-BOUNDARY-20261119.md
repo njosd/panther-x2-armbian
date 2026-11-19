@@ -1,0 +1,127 @@
+# Panther X2：仓库回溯、已完成项目去重与下一步边界（2026-11-19）
+
+## 1. 本轮目的
+
+按用户要求回溯 2026-11-17 至 2026-11-19 的仓库报告和证据，确定下一步研究入口，避免重复既有测试或静态审计。本轮仅读取 GitHub 仓库和公开资料；未操作设备、未写入启动介质、未修改系统或驱动。
+
+## 2. 已完成、不得重复的工作
+
+### 2.1 启动介质与 SPL
+
+- JP idbloader 实验已完成；实机执行 JP SPL/DDR V1.10，识别 4GB LPDDR4 并成功进入 ATF、U-Boot proper 和 Linux 6.12.81。
+- 该启动周期中 U-Boot proper 枚举 GMAC1，Linux RTL8211F PHY 识别成功，链路为 1000Mbps Full；IPv4 DHCP 仍失败。
+- 原版 eMMC 116 idbloader 已恢复，LBA64–667 回读 SHA256 与备份源一致。不得重做恢复/覆盖实验。
+- 启动链阶段已梳理；不要再次把 SPL 从 TF 加载 proper 与 BootROM 从 eMMC 加载 SPL 混为一谈。
+
+关联报告：JP-IDBLOADER-BOOT-AND-DHCP-DIFF、UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN、BOOT-MEDIA-AND-SOFTWARE-INVENTORY。
+
+### 2.2 BL31 反汇编
+
+- 已检查 0x55700–0x557a0、0x5c238–0x5c280、0x5c400–0x5c7d4 及相关 BL 调用引用。
+- 目前只能确认存在参数表搬运和固定地址写入；没有符号、寄存器映射或可靠源码关联，不能将相关地址认定为 DDR/GMAC 初始化。
+- DDR training 在 SPL 阶段完成，早于 BL31；该 BL31 代码不能直接解释 SPL 最终训练频率。
+- 原报告已明确要求停止无目标扩展反汇编。
+
+本项结案：不再索要相邻反汇编窗口。只有找到该 ELF 的确切 TF-A 平台构建来源、符号/链接映射或对应源码，才重新打开。
+
+### 2.3 Linux STMMAC / DMA / GMAC
+
+以下已在仓库中审计，不重复：
+- 普通 skb TX DMA mapping、descriptor 地址、OWN、barrier、tail pointer；
+- DWMAC4 TX/RX channel 初始化、DMA reset polling、SR/ST/RE/TE start；
+- queue 0 到 DMA channel 0 映射；
+- RK3566 实际使用 rk3568_ops；
+- Panther RGMII 的 PCS / SerDes / integrated PHY 新增路径适用性；
+- GMAC1 DTS AXI、IOMMU 绑定、pinctrl 和基础 RGMII delay；
+- RK3568 CRU GMAC1 gate/mux 父链；
+- PHY reset GPIO、PHY link、PHY ID、MAC 来源；
+- 已完成的 MAC loopback、TX/RX 相关测试。
+
+### 2.4 需要采用后续修订的旧结论
+
+部分早期报告把 6.1 的 5ms 与 6.12 的 100–200us settle delay 直接作为主要回归线索。后续 RTL8211F-CLKOUT-WORKAROUND 报告已指出：
+- 5ms 在 generic upstream gmac_clk_enable() 历史中早已存在；
+- 6.12 vendor 分支的 100–200us 是后续 vendor 分支差异；
+- Panther GMAC DTS 没有 rockchip,csu / rockchip,csu-names，CSU handle 失败后置 NULL，helper 对 NULL no-op。
+因此不能将 CSU disable 或等待时间差异说成已证实的硬件时序根因。GMAC1-CRU-GATE 报告也已把忽略 clk_prepare_enable() 返回值从强根因线索降级。
+
+## 3. DDR 频率差异：可确认范围
+
+既有实机日志：
+- 旧 E25 SPL / DDR V1.13（2022-02-18）：最终 1560MHz；
+- JP SPL / DDR V1.10（2021-08-10）：训练经过 324、528、780、1056MHz，最终 1056MHz。
+
+当前可以确认：
+1. 两套 SPL/DDR 初始化固件及其训练行为不同；
+2. 频率差异在 SPL 阶段形成；
+3. 不能把 BL31 反汇编作为该频率差异的直接原因；
+4. 目前没有两份 DDR binary 对应源码/参数表的完整映射，尚不能解释 V1.13 为什么选择 1560MHz、V1.10 为什么止于 1056MHz。
+
+补充公开资料：Rockchip《RK3566 Hardware Design Guide V1.1》2.1.9.7 写明，RK3566 DDR 最高频率受 PCB layout 影响较大，官方提供的大多数模板最高工作频率可到 1056MHz，并建议优先采用官方 DDR 模板。该说明不等于 Panther 板只能跑 1056MHz，也不证明 1560MHz 必然不稳定；但不能把 1560MHz 当作默认应追求的目标，更不能据此直接修改 DDR 参数。
+- 文档：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_CN.pdf
+- 段落：2.1.9.7，PDF 第 20 页。
+- Armbian rkbin release notes 记录后续 DDR v1.20/v1.21 对 LPDDR4 兼容性、低频 ODT 和 CA training 的修正，说明 DDR blob 版本差异可能包含训练算法/兼容性变化，不只是目标频率数字：https://github.com/armbian/rkbin/blob/master/patch-notes/RK3566_EN.md
+
+DDR 研究收口：若继续，只做两份现有 idbloader/DDR binary 的静态指纹、版本字符串、可提取参数和构建来源对照；不做 DDR 压力测试，不尝试把 1056 拉到 1560，不改 SPL/DDR 参数。若无匹配源码/参数表，则将频率选择原因标记为无法从现有材料证明。
+
+## 4. 当前网络故障的证据边界
+
+仓库现有证据将故障边界限定为：
+- Linux 本机 outgoing capture 曾看到 DHCP Discover；
+- 驱动 TX 路径返回成功、descriptor 被清理；
+- 同一启动周期 TX 统计增长；
+- 6.12.81 的 MMC good-only 与 good+bad 累计计数曾相等，错误计数为零；
+- hEX 和持续监听的 iMac 未观察到对应外发帧。
+
+这些事实仍不能证明帧已越过 GMAC RGMII TXD/TXC 引脚，也不能证明 PHY 已从 MDI 侧发出。MAC MMC good 计数是 MAC 内部统计，不是线侧确认。
+
+既有报告已指出，最有区分度的下一项不是重跑 ping、DHCP 或 loopback，而是同一 DHCP Discover 的两端关联：Panther 侧记录报文时间、ID 和源 MAC；同一时间窗口在 hEX 入口确认是否收到同一报文。Linux outgoing capture 单独不能替代 PHY 线侧证据。
+
+## 5. 当前候选与状态
+
+| 方向 | 已知结论 | 当前处理 |
+|---|---|---|
+| 116 的 JL2xx1 workaround | 116 有地址 0 MDIO 广播写 PHYCR2=0x1801 和额外 PHY soft reset；174/6.12 无；实物最终寄存器状态未知 | 保留为历史差异；不得直接移植 |
+| RTL8211F PHYCR2 / CLKOUT | Panther clock input from PHY；0x1801 涉及 PHYCR2，但不同 datasheet revision 对 bit1 定义不同；默认 CLKOUT bit0/11 也为 1 | 仅凭源码无法定因；需要现存回读或经授权只读 MDIO |
+| GMAC clock settle / CSU | 源码差异存在；CSU 当前 DT 路径为 NULL/no-op；无证据 100–200us 不足 | 降级，不继续扩大全 SoC 时钟审计 |
+| ARM64 DMA coherent prep | descriptor ring 调用路径存在 clean+invalidate → clean 差异；上游解释 clean 已满足 DMA API | 暂结案，不改内核 |
+| BL31 early init | 无法把地址/表项可靠映射到子系统 | 停止扩展反汇编 |
+| DDR V1.13 1560 vs V1.10 1056 | SPL 阶段差异已确认；原因未闭环 | 只允许静态 blob/参数来源对照 |
+| 物理 TX 边界 | MAC good 统计与远端不可见并存；RGMII/MDI 线侧仍未确认 | 需要一次同步双端报文关联，不重复已有测试 |
+
+## 6. 有限的下一步计划
+
+### A. 不需要设备操作的静态收尾
+1. 只读核对仓库现有启动日志是否已包含 DMA reset failure、MAC TX enable 错误、clock provider 错误；已有筛选结果不能把不完整日志写成“绝对没有”。
+2. 对照 116 / JP 的 SPL DDR blob 可用字符串、文件长度、哈希、版本标记和公开 rkbin release notes；若 blob 没有源码/参数解码器，则停止，不进行猜测式反汇编。
+3. 维护一份“已做/未做/不再做”的主索引，后续新报告先更新索引，避免同一主题反复开新报告。
+
+### B. 唯一有明确区分度的后续现场验证（需单独确认）
+在不改配置、不写寄存器、不重启网卡的前提下，对同一 DHCP Discover 做 Panther 与 hEX 两端同步被动观察。必须先明确采集点、命令和报文关联字段；若没有自然产生的 Discover，是否主动触发需另行确认。
+
+判读：
+- hEX 看到同一帧：证明帧已穿过 Panther 物理链路到达 LAN，后续转查 DHCP server/relay/filter；
+- Panther outgoing capture 有、hEX 入口没有：故障仍在本机 MAC/RGMII/PHY 线侧或中间物理链路，不能再靠普通源码猜测定因；
+- Panther outgoing capture 本身没有：才回到 Linux packet path / 驱动调用条件。
+
+不运行 loopback scan、不写 PHY、不改 MAC、不改内核、不改 DTS、不改 U-Boot、不写 eMMC/TF。
+
+## 7. 当前阶段结论
+
+目前没有足够证据宣布 DHCP 故障已定位到某个源代码函数。继续无目标源码/反汇编扩展，收益低且容易重复劳动。最合理策略：
+- 保留已恢复的 116 eMMC 启动基线；
+- 结束 BL31 泛化反汇编；
+- DDR 只做静态 blob 来源对照；
+- 网络主线转向一次同一报文的双端被动关联；
+- 在线侧边界证据出现前，不提出未经验证的驱动补丁或启动链写入实验。
+
+## 8. 关联仓库报告
+
+- PANTHER-X2-BL31-EARLY-INIT-DISASSEMBLY-AND-TEST-STOP-20261119.md
+- PANTHER-X2-JP-IDBLOADER-BOOT-AND-DHCP-DIFF-20261119.md
+- PANTHER-X2-UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN-20261118.md
+- PANTHER-X2-UBOOT-CANDIDATE-RESEARCH-20261117.md
+- PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md
+- PANTHER-X2-RTL8211F-CLKOUT-WORKAROUND-REGRESSION-20261119.md
+- PANTHER-X2-JL2XX1-WORKAROUND-RTL8211F-REGISTER-SEMANTICS-20261119.md
+- PANTHER-X2-ARM64-DMA-COHERENCY-116-VS-61281-20261119.md
