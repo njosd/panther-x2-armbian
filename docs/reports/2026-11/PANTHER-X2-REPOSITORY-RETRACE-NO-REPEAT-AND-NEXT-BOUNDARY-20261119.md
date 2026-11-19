@@ -339,3 +339,45 @@ JP 采用官方 RK3566 1056MHz profile 后，Linux 6.12.81 仍然无法 DHCP，�
 - Rockchip rkbin 工具说明（历史 commit）：https://github.com/rockchip-linux/rkbin/blob/664922185a089ac5348ce869461ce303fe80f971/tools/ddrbin_tool_user_guide.txt
 - RK3566 loader profile：https://github.com/rockchip-linux/rkbin/blob/664922185a089ac5348ce869461ce303fe80f971/RKBOOT/RK3566MINIALL.ini
 - RK3566 硬件指南 2.1.9.7：https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
+
+## 13. 6.1.116 / 6.12.81 link-up 与 speed callback 的再次核对
+
+为避免遗漏，按仓库记录的精确构建 commit 直接读取两版 `dwmac-rk.c` 和 `stmmac_main.c`。本轮只做源码静态对照，不进行设备操作。
+
+### 13.1 RK3568 1Gbps speed callback
+
+两版 `rk_fix_speed()` 对 Panther 的 RGMII 路径都执行 `ops->set_rgmii_speed(bsp_priv, speed)`。6.12 新增的 `mode` 参数在该函数体中未使用。
+两版 `rk3568_set_gmac_speed()` 对 10/100/1000Mbps 都设置 2.5/25/125MHz；6.1 从 clock array 取 `RK_CLK_MAC_SPEED`，6.12 改为独立 `clk_mac_speed` handle。DTS clock ID 对应关系已由既有 RGMII/clock parent 报告确认相同。
+因此 1Gbps 目标频率仍为 125MHz，未发现 link-up callback 的速率选择回归。
+
+### 13.2 STMMAC MAC link-up
+
+两版 `stmmac_mac_link_up()` 的关键顺序一致：
+1. 读取 MAC_CTRL；
+2. 按 link speed 更新 speed bits；
+3. 调用 Rockchip `fix_mac_speed`；
+4. 更新 duplex / flow control；
+5. 写回 MAC_CTRL（若变化）；
+6. 调用 `stmmac_mac_set(..., true)` 启用 MAC。
+
+6.12 增加的差异：
+- 只有设置 `STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP` 且提供 `serdes_powerup` callback 时，才在 link-up 开始阶段执行 SERDES power-up；
+- EEE 对 `rx_clk_runs_in_lpi` 的判断改用 flag；
+- 增加 HWTSTAMP latency correction。
+Panther 使用外置 RTL8211F + RGMII，未配置 SERDES 路径；EEE/HWTSTAMP latency correction 也没有证据与当前 DHCP Discover 不出线相关。因此这些新增分支不适用于当前 Panther 路径。
+
+### 13.3 DMA operation mode 与 channel start
+
+两版 `stmmac_start_all_dma()` 都先按 RX channel 数启动 RX，再按 TX channel 数启动 TX；`stmmac_enable_all_queues()` 对普通 NAPI queue 的启用顺序一致。
+6.12 `stmmac_dma_operation_mode()` 增加对 GMAC4/XGMAC 共享 FIFO 的按 channel 数拆分；6.1 对所有设备无条件除以 RX/TX channel 数。Panther 是 GMAC4，且既有设备树/运行配置使用单 RX/TX queue，因此除以 1 后结果相同，不构成该设备的差异。
+
+### 13.4 当前结论
+
+本轮没有发现 6.12 在 Panther 的 1Gbps link-up callback、MAC TX enable、普通 queue enable 或 TX DMA channel start 上存在新的可直接解释故障的差异。该路径与既有 TX descriptor / ring-mode 审计结论一致，不再重复扩展。
+唯一保留的真实版本差异仍是已归档的 RK3568 RGMII delay 寄存器写入顺序及 GMAC clock enable 等待时间；它们已有专门报告，不在本轮重复分析。
+
+源码：
+- 6.1.116 dwmac-rk.c：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
+- 6.12.81 dwmac-rk.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
+- 6.1.116 stmmac_main.c：https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
+- 6.12.81 stmmac_main.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c
