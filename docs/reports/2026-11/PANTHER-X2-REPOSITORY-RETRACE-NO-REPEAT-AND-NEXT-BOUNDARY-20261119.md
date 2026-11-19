@@ -297,3 +297,45 @@ DDR 降频问题已基本定位到**启动固件选择了不同的 DDR profile/F
 - RK3566 V1.10 commit：https://github.com/rockchip-linux/rkbin/commit/664922185a089ac5348ce869461ce303fe80f971
 - RK3568 V1.13 commit：https://github.com/rockchip-linux/rkbin/commit/ddf03c1d80b33dac72a33c4f732fc5849b47ff99
 - RK3566 hardware guide frequency/layout note：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_CN.pdf
+
+## 12. DDR 官方支持频率范围核对：修正上一节的解释边界
+
+进一步直接读取 Rockchip rkbin 历史版本中的 `tools/ddrbin_tool_user_guide.txt`（commit `664922185a089ac5348ce869461ce303fe80f971`），而非只依据当前网页摘要。该工具文档对 SoC 的频率支持范围明确区分：
+
+- RK3566：324、396、528、630、780、920、1056MHz；
+- RK3568 的 DDR4/LPDDR4/LPDDR4X：324、396、528、630、780、920、1056、1184、1332、1560MHz。
+
+这使得本机日志中的差异更有解释力：
+- JP 日志最高 FSP=1056MHz，符合 RK3566 官方频点表；
+- 原版 E25 日志最高 FSP=1560MHz，属于 RK3568 的 LPDDR4 频点范围，不属于 RK3566 的官方频点范围。
+
+并且在 RK3566 V1.10 的官方 `RK3566MINIALL.ini` 中，CODE471 / FlashData 指向 `rk3566_ddr_1056MHz_v1.10.bin`，SPL 指向 `rk356x_spl_v1.11.bin`。原版 E25 的 V1.13/1560MHz 日志与 RK3568 1560MHz profile 相符。
+
+### 12.1 重要修正
+
+此前把原版 1560MHz 描述为“原版 E25 携带 RK3568 1560MHz DDR profile”是高置信度推断；结合官方 SoC 频率支持表，现在可以更明确地说：
+
+**原版 E25 的 DDR 初始化配置选择了 RK3568 级别的 1560MHz FSP，而 JP 选择了 RK3566 级别的 1056MHz FSP。对 RK3566 芯片而言，JP 1056MHz profile 与官方支持频率表一致；原版 1560MHz 虽然历史上成功启动，但不属于 RK3566 官方列出的 LPDDR4 支持频率。**
+
+这里的“成功启动”只证明当时样机能完成该次初始化和启动，不证明 1560MHz 满足长期稳定性、温度/电压/老化裕量或官方设计约束。不能因为 116 原版能启动，就将 1560MHz 当成应恢复的目标频率。
+
+官方文件也指出 RK3566 DDR 最高工作频率受 PCB layout 影响很大，多数官方模板最高到 1056MHz；这进一步支持采用 RK3566 profile 的保守策略，但不单独证明 Panther X2 的 PCB 极限。
+
+### 12.2 对 DHCP 故障的影响
+
+JP 采用官方 RK3566 1056MHz profile 后，Linux 6.12.81 仍然无法 DHCP，故：
+- DDR 1560→1056MHz 不是 DHCP 故障的充分解释；
+- 当前没有证据表明 1056MHz 本身造成 GMAC RX/TX 故障；
+- 不应为了网络排障把 DDR 频率升回 1560MHz；
+- DDR 频率差异作为启动固件配置差异归档，不再作为 DHCP 主线排查项。
+
+### 12.3 payload 文件级证明的限制
+
+本仓库当前 Git tree 中有完整 JP UART 日志、旧 eMMC UART 日志及 idbloader 实验报告，但没有将原版和 JP 的 DDR payload 作为独立二进制文件存档。因此目前无法在 GitHub 文件层直接做 SHA256/字节比较，也不能声称已完成 payload binary match。
+
+本项静态研究到此收口：保留“日志 FSP + 官方 rkbin profile + 官方支持频率表”的交叉证据；若未来重新取得两个原始 loader 文件，再做纯离线 payload 提取/hash 对照。当前不需要用户重跑或再次写介质。
+
+直接依据：
+- Rockchip rkbin 工具说明（历史 commit）：https://github.com/rockchip-linux/rkbin/blob/664922185a089ac5348ce869461ce303fe80f971/tools/ddrbin_tool_user_guide.txt
+- RK3566 loader profile：https://github.com/rockchip-linux/rkbin/blob/664922185a089ac5348ce869461ce303fe80f971/RKBOOT/RK3566MINIALL.ini
+- RK3566 硬件指南 2.1.9.7：https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
