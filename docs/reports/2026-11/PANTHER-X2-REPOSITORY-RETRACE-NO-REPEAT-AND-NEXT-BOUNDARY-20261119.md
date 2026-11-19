@@ -444,3 +444,68 @@ DHCP Discover 是 IPv4/UDP Ethernet frame；`stmmac_has_ip_ethertype()` 对正�
 - 6.12.81 dwmac4_lib.c：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/dwmac4_lib.c
 
 **状态：** 本轮是纯静态源码与仓库证据核对；无设备操作、无 DHCP renew、无接口重启、无配置/驱动/介质修改。
+
+## 15. 实际 6.12 RK35xx kernel config / GMAC 编译分支核对
+
+本轮重新核对仓库配置、官方 workflow 和两条源码路径，澄清上一轮提出的 `CONFIG_CPU_RK3568=y` 是否意味着把 RK3566 误编译成 RK3568。
+
+### 15.1 6.12 配置文件内容（可直接验证）
+
+在 `ophub/kernel` 配置仓库 commit `c23196e10d7702ee2906de4a05421d8971fb2717` 中，`kernel-config/release/rk35xx/config-6.12` 的 blob SHA 为 `dee127c6c644f38426eeb28000d73536084d34a3`，共 10,333 行。关键值：
+- `CONFIG_ARCH_ROCKCHIP=y`
+- `CONFIG_CPU_RK3568=y`
+- `CONFIG_STMMAC_ETH=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_DMA_DIRECT_REMAP=y`
+- `CONFIG_ROCKCHIP_IOMMU=y`
+- `CONFIG_IOMMU_DEFAULT_DMA_STRICT=y`
+- `CONFIG_ARCH_DMA_ADDR_T_64BIT=y`
+- 未设置 `CONFIG_DMA_GLOBAL_POOL`；该 config 中没有 `CONFIG_ARCH_HAS_DMA_ALLOC` 或 `CONFIG_DMA_API_DEBUG` 项。
+
+同一配置仓库 commit 的 `kernel-config/release/rk35xx/config-6.1` 也启用 `CONFIG_CPU_RK3568=y`、STMMAC、Rockchip glue、DMA_DIRECT_REMAP 和 ROCKCHIP_IOMMU。故 RK35xx 6.1→6.12 配置模板没有发生“从 RK3566 切成 RK3568”的新变化；两版都使用同一 RK35xx 平台配置思路。
+
+### 15.2 为什么 RK3566 设备会启用 CONFIG_CPU_RK3568
+
+6.12.81 候选源码 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 Panther DTS 将 GMAC1 compatible 写为 `rockchip,rk3568-gmac`，Rockchip glue 通过 `CONFIG_CPU_RK3568` 编译并注册 `rk3568_ops`，该 ops 的寄存器表含 GMAC1 `0xfe010000`。这是该 BSP 对 RK3566/RK3568 共用 GMAC IP/驱动 glue 的编译选择，不代表设备树把 SoC 型号改成 RK3568。
+
+官方 `ophub/kernel` README 将 `kernel_rk35xx` 定义为 RK3528/RK3566/RK3568 共用的专用 BSP kernel；workflow `.github/workflows/compile-rockchip-rk35xx-kernel.yml` 的默认 `kernel_config` 为 `kernel-config/release/rk35xx`。因此该配置项在本项目场景中是预期行为，不是已发现的 SoC 识别错误。
+
+### 15.3 workflow 对 build provenance 的证明范围
+
+已读取官方 workflow commit `2031189e54e85793b281c07bbf538f4e28aaf704`：
+- 默认 source 为 `ophub/linux-6.1.y-rockchip`，可选 `ophub/linux-6.12.y-rockchip`；
+- 默认 `kernel_config=kernel-config/release/rk35xx`；
+- workflow 的 source hash 步骤在运行时读取所选 kernel source 的 main HEAD；
+- compile action 接收 source、version、config path 等输入；
+- 发布资产被上传至 `kernel_rk35xx`，说明中注明非 Flippy 文件为自动编译产物。
+
+这证明了该 workflow 的默认配置路径和构建机制，但**不能证明 2026-11-13 产生 6.12.81.tar.gz 的具体 workflow run 实际选择了哪个 source commit、哪个 config commit、哪些输入参数**。当前未取得该 run 的完整 job log/input snapshot；因此仍不能把 `661b2d8...` 和 `c23196e...` 两个候选端点写成已证实的 build lock。
+
+### 15.4 与已验证正常的 6.1.116 基线之间的配置比较限制
+
+6.1.116 基线记录明确为 `6.1.116-ophub`，而本次故障内核为 `6.12.81-rk35xx-ophub`。前者属于通用 mainline kernel 命名，后者明确属于 RK35xx 专用 BSP。Ophub README 区分 `kernel_stable` 通用主线与 `kernel_rk35xx` 专用 BSP；两者不可仅按内核版本号当成同一构建系列。
+
+6.1.116 现场归档 `panther-usb-audit-...-complete-with-boot-config.tar.gz` 明确包含当时运行内核的真实 `kernel.config`，但该归档是二进制 tar.gz；当前 GitHub connector 无法以 UTF-8 文本读取该二进制归档（返回 UTF-8 decode error）。因此本轮不能直接取得归档内的 6.1.116 `.config`，也不能拿 `rk35xx/config-6.1` 模板代替 6.1.116 实际运行配置。
+
+当前可比较的配置证据：
+- 6.12 RK35xx config template：已直接读取，CPU_RK3568=y；
+- 6.1 RK35xx config template：已直接读取，CPU_RK3568=y；
+- 6.1.116 实际运行 kernel.config：归档存在但本轮未能从二进制包提取；
+- 6.12.81 实际运行 `.config`：现场原始文件是否单独存档/是否与上述模板完全相同，尚未证实。
+
+### 15.5 结论与研究决策
+
+- **已排除一个误判方向：** `CONFIG_CPU_RK3568=y` 不是本次 6.12 新引入的 RK3566/RK3568 错配；RK35xx 6.1 与 6.12 模板都采用该选择，且 Panther GMAC compatible 本来就是 `rockchip,rk3568-gmac`。
+- **已确认配置模板路径：** RK35xx workflow 默认使用 `kernel-config/release/rk35xx`。
+- **仍未闭环：** 6.12.81 发布资产的具体构建 run 输入，以及 6.1.116/6.12.81 两个正在运行内核的真实 `.config` 逐项差异。
+- **下一步不重跑设备测试：** 优先取得 6.1.116 归档内 `kernel.config` 与 6.12.81 现场实际 `.config` 的文本内容，再与相应源码 commit 对齐；重点只比较 STMMAC/DWMAC、DMA API、IOMMU、ARM64 cache、NAPI/XDP 相关项。若真实 config 与模板一致，便关闭“配置错配”支线。
+- 不再继续扩大一般性 GMAC 源码比较；下一阶段重点转向真实运行 config/build provenance 和已有 RX dropped / skb allocation 路径证据。
+
+### 来源
+
+- Ophub kernel README（kernel_rk35xx 支持 RK3528/RK3566/RK3568，且与通用 stable 分支区分）：https://github.com/ophub/kernel
+- RK35xx workflow：https://github.com/ophub/kernel/blob/2031189e54e85793b281c07bbf538f4e28aaf704/.github/workflows/compile-rockchip-rk35xx-kernel.yml
+- 6.12 RK35xx config：https://github.com/ophub/kernel/blob/c23196e10d7702ee2906de4a05421d8971fb2717/kernel-config/release/rk35xx/config-6.12
+- 6.1 RK35xx config：https://github.com/ophub/kernel/blob/c23196e10d7702ee2906de4a05421d8971fb2717/kernel-config/release/rk35xx/config-6.1
+- 6.12 Panther DTS：https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
+- Ophub README search evidence：https://github.com/ophub/kernel
