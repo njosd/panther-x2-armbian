@@ -71,3 +71,24 @@ P3 回到唯一有效比较对象：6.1.116 正常源码候选 `5eb841b` 与 6.1
 - 6.1.116：https://github.com/unifreq/linux-6.1.y/tree/5eb841b59d6ead6e264163785a634e78f0253c8e
 - 6.1.174 源码候选：https://github.com/unifreq/linux-6.1.y/tree/3f06ed3e4b0f82e59c7b68d5dc36d698a377e2c7
 - 后期 BSP 对照：https://github.com/ophub/linux-6.1.y-rockchip/tree/c2f148dece4b67ebd30aefad1bdd1990f41e5633
+
+
+## 8. 后续证据更新：本报告的源码排除结论已被取代（2026-11-19）
+
+本报告第 2、5、6 节曾因未找到 6.1.174 对应 Actions run，而将 c2f148d 视为不属于实机 6.1.174 的后期快照，并据此排除它解释最早回归。该判断已被新的构建来源证据更新：
+
+- Ophub 自动资产 6.1.174.tar.gz 创建于 2026-11-10 13:09:30Z；
+- Actions run #296（ID 42812333074）在 13:09:27–13:09:40Z 执行上传 step，编译 step 明确为 6.1.y；
+- run head SHA 对应 workflow 默认 kernel_source 为 ophub/linux-6.1.y-rockchip；
+- run 的 source-hash step 在 12:04:15Z 执行；该时间点源仓库 main 的最新提交是 c2f148dece4b67ebd30aefad1bdd1990f41e5633。
+
+由于 REST API 未公开该次 workflow_dispatch 的实际 inputs，且 step 5 输出日志不可取得，c2f148d 仍为高置信度候选而非逐字节证明。但它应恢复为 P3 实际 6.1.174 的主要源码候选；本报告关于“c2f148d 不属于 6.1.174、不能解释最早回归”的判断不再适用。
+
+后续 PLL callback 进一步审计也已确认：PCLK_USB critical clock 在 CRU provider 注册阶段建立 parent chain，GPLL callback 若执行，发生在 GMAC probe 之前；PLL 分支退出当前 P3 工作项。100–200µs settle 仍作为待解释时间差异保留，但无充分厂商依据或因果证明。
+
+请以以下两份新报告和唯一路线图为准：
+- PANTHER-X2-6.1.174-RK35XX-ACTIONS-RUN-AND-SOURCE-PROVENANCE-CORRELATION-20261119.md
+- PANTHER-X2-P3-RK35XX-GMAC-CLOCK-ENABLE-CALLBACK-AND-SETTLE-ANALYSIS-20261119.md
+- PANTHER-X2-GMAC-INVESTIGATION-ROADMAP-20261119.md
+
+本报告保留历史审计轨迹，不删除。
