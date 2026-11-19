@@ -152,3 +152,22 @@ Panther 两版 DTS 核对结果：
 - 6.1.116 Panther DTS: https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
 - 6.1.174 Panther DTS: https://github.com/unifreq/linux-6.1.y/blob/3f06ed3e4b0f82e59c7b68d5dc36d698a377e2c7/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
 - 6.12.81 stmmac_mdio.c: https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+
+
+## 8. 2026-11-19 重要基线纠正：本报告不是实际 6.1.174-rk35xx 的完整源码比较
+
+本报告第 1–7 节比较的是普通 stable 源码端点 `unifreq/linux-6.1.y@3f06ed3`，而实机异常版本标识是 `6.1.174-rk35xx-ophub`。后者属于 Ophub RK35xx vendor BSP kernel family，不能把普通 stable 端点当作该故障镜像的源码证明。
+
+本次新报告确认：
+- 正常 6.1.116 属于 Ophub general kernel，源码候选为 `unifreq/linux-6.1.y@5eb841b...`；
+- 6.1.174-rk35xx 的高置信度源码候选为 `ophub/linux-6.1.y-rockchip@c2f148d...`，但缺该自动 release asset 对应的 Actions run inputs/source_hash/build log，故仍非最终构建 commit 闭环；
+- 实际 RK35xx BSP 候选的 `dwmac-rk.c` 时钟初始化与 general 6.1.116 明显不同：逐项 enable、不检查各项 enable 返回值、100–200µs settle；general 6.1.116 使用 bulk enable、检查错误、5ms settle；
+- 该 BSP 时钟实现从 2025-04 的 Armbian vendor source 初始导入即存在，不是 6.1.174 version bump 引入；
+- RK35xx 6.1.174 与 6.12.81 的关键 GMAC clock/powerup 函数体相同。
+
+因此，第 2–5 节中“6.1.116 与 6.1.174 stable 端点函数相同”的结论仅适用于普通 stable 源码比较，**不能据此排除实际 6.1.174-rk35xx 的 Rockchip GMAC glue 差异**。本报告仍保留为 stable upstream 对照记录，不再作为 P3 主线的实际故障镜像基线。
+
+详见：
+`PANTHER-X2-P3-RK35XX-6.1.174-SOURCE-PROVENANCE-AND-GMAC-CLOCK-DIFF-20261119.md`
+
+未进行实机操作。
