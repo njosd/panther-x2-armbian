@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P3：RK35xx GMAC probe/setup/PHY 电源交接差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md)：按 c2f148d 实际源码候选审查 probe flags、SPH、Vendor MAC、integrated PHY、regulator、runtime-PM 与外接 RGMII 分支；未发现能解释 Panther 普通 TX 故障的新增有效机制。下一步转为 c2f148d STMMAC core TX 路径复核。
+
 - [6.1.174-rk35xx Actions 构建与源码提交关联核验（2026-11-19）](./PANTHER-X2-6.1.174-RK35XX-ACTIONS-RUN-AND-SOURCE-PROVENANCE-CORRELATION-20261119.md)：将 6.1.174 自动 release asset 精确关联 Actions run #296 的编译/上传时间；run workflow 默认源码为 ophub/linux-6.1.y-rockchip，构建时 main 最新提交为 c2f148d。实际 workflow_dispatch inputs/source_hash 未直接取得，故 c2f148d 定为高置信度源码候选，不宣称逐字节证明。
 - [P3：RK35xx GMAC clock enable、CCF callback 与 settle 时序（2026-11-19）](./PANTHER-X2-P3-RK35XX-GMAC-CLOCK-ENABLE-CALLBACK-AND-SETTLE-ANALYSIS-20261119.md)：将 c2f148d Panther RGMII 实际 clocks 映射到 DTS/CRU，重新评估忽略 enable 返回值的实际失败可能性；确认 PCLK_USB critical parent chain 在 CRU 注册阶段建立，PLL callback 不在 GMAC probe 首次触发；100–200µs settle 保留为未证实差异。全程只读。
 
