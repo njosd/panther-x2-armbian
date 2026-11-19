@@ -1,179 +1,117 @@
-# Panther X2：6.1.174 BSP 候选源码中的 GMAC 时钟使能与 RGMII 初始化差分（2026-11-19）
+# Panther X2：6.1.174 实际源码基线的 GMAC 时钟路径复核与前报告更正（2026-11-19）
 
-## 1. 本轮比较对象与证据等级
+> **更正说明：** 本报告修正同日早前版本的一项关键源码归属错误。此前把 `ophub/linux-6.1.y-rockchip@c2f148d` 的时钟代码误当作 6.1.174 实际构建候选；该提交实际日期为 2026-11-10，远晚于 6.1.174 源码快照 `unifreq/linux-6.1.y@3f06ed3`（2026-05-23）。目前没有证据证明 c2f148d 被 cherry-pick 进 6.1.174 实际镜像。故 100–200µs 等待和忽略 clock-enable 返回值不得归因于 6.1.174。
 
-本轮不再使用 upstream stable tag 代替实际 BSP 构建源码，而是直接比较：
+## 1. 本轮实际比较对象
 
-- **6.1.116 正常源码基线：** `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`
-- **6.1.174 BSP 高置信度源码候选：** `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`
-- **6.12.81 BSP 源码：** `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- 6.1.116 正常源码：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`，提交信息 `up to 6.1.116`，2024-11-09。
+- 6.1.174 源码：`unifreq/linux-6.1.y@3f06ed3e4b0f82e59c7b68d5dc36d698a377e2c7`，提交信息 `up to 6.1.174`，2026-05-23。
+- 另一个较新的 Rockchip BSP 源码快照：`ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`，提交信息 `arm64: dts: rockchip: dshanpi a1 overlay support fspi-nor or amp`，2026-11-10。它仅作为独立分支样本，不作为 6.1.174 构建源。
 
-6.1.174 的 `c2f148...` 是此前仓库通过 Ophub RK35xx 构建工作流和源码树时间点锁定的高置信度候选；由于没有取得该次 Actions job 的完整日志，不能把它说成已由构建日志绝对证明的 binary provenance。
+本轮只读取 GitHub 源码和仓库记录，没有连接设备、发帧、抓包、读取寄存器或修改配置。
 
-本轮只读取 GitHub 源码与仓库报告，没有连接设备、发帧、抓包、读取寄存器或修改系统配置。
+## 2. 关键更正：6.1.174 实际源码仍使用 5ms 和错误检查
 
-## 2. 关键发现：6.1.174 BSP 已经具有与 6.12.81 相同的 GMAC clock enable 逻辑
+对 `unifreq/linux-6.1.y@5eb841b` 与 `@3f06ed3` 的 `drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c:gmac_clk_enable()` 做函数级比较：
 
-文件：`drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c`
+两版 enable 路径完全相同：
+1. `clk_bulk_prepare_enable(num_clks, clks)`；
+2. 检查返回值，失败立即返回；
+3. `clk_prepare_enable(clk_phy)`；
+4. 检查返回值，失败立即返回；
+5. 如有 callback，执行 clock selection；
+6. `mdelay(5)`；
+7. 设置 `clk_enabled = true`。
 
-对三个版本的 `gmac_clk_enable()` 做函数级比较：
+6.1.174 相对 6.1.116 只改变了 disable 分支的 clock-selection callback 与 bulk clock disable 的先后顺序；不改变 cold power-up 的 enable 顺序、错误检查或 5ms 等待。
 
-- 6.1.174 BSP 候选与 6.12.81 BSP 的函数内容**完全一致**。
-- 两者与 6.1.116 正常基线存在明确语义差异。
+因此：
+- **6.1.116→6.1.174：没有 5ms→100–200µs 回归。**
+- **6.1.116→6.1.174：没有忽略 bulk clock-enable 返回值的回归。**
+- 早前报告把上述两项错误归到 6.1.174，现予撤回。
 
-### 2.1 6.1.116 正常基线
+## 3. c2f148d 中的 100–200µs 代码属于另一份后期 BSP 快照
 
-`rk_gmac_clk_init()`：
-- 通过 `devm_clk_bulk_get_optional()` 获取 bulk clocks；
-- 获取失败会返回错误；
-- 单独取得 `stmmaceth` clock，错误会返回；
-- 对集成 PHY 的 clock 获取错误会返回。
+`ophub/linux-6.1.y-rockchip@c2f148d` 的 `gmac_clk_enable()` 确实：
+- 将 bulk clock 获取/使能改成逐项 `devm_clk_get()` / `clk_prepare_enable()`；
+- 没有检查这些 `clk_prepare_enable()` 返回值；
+- 使用 `usleep_range(100, 200)`；
+- 最后仍设置 `clk_enabled = true`。
 
-`gmac_clk_enable()`：
-- 使用 `clk_bulk_prepare_enable()`；
-- 检查返回值，失败立即返回；
-- 对 `clk_phy` 的 `clk_prepare_enable()` 也检查返回值；
-- 设置 clock selection 后等待 `mdelay(5)`，即 5 ms；
-- 最后才设置 `clk_enabled = true`。
+但 c2f148d 的提交日期是 2026-11-10，且提交主题是 DshanPi overlay 支持；它不是 2026-05-23 的 6.1.174 tag commit。除非未来找到构建日志或明确 cherry-pick 链证明这段代码进入了某个 6.1.174 镜像，否则不能把它当成该镜像的源码证据。
 
-因此，正常的 bulk clock enable 失败不会被静默当作成功继续。
+这份代码可以作为后期 Ophub Rockchip BSP 的独立实现风险归档，不能用于解释 6.1.174 最早出现的故障。
 
-### 2.2 6.1.174 BSP 候选
+## 4. 6.1.116 与 6.1.174 的 RK3568 CRU provider：相关实现文件完全一致
 
-`rk_gmac_clk_init()` 改为分别调用 `devm_clk_get()`：
-- 对多个 clock handle 获取失败只打印错误；
-- 除集成 PHY clock 的特殊条件外，不将多数获取失败作为初始化失败返回；
-- 外部 PHY 场景下 `clk_phy` 是可选项。
+在两个实际源码端点之间，以下文件逐字节相同（GitHub 返回的文件内容完全相等）：
 
-`gmac_clk_enable()`：
-- 对每个 clock handle 仅判断是否为 `ERR_PTR`；
-- 调用 `clk_prepare_enable()` 时不检查返回值；
-- 即使某个 clock 的 prepare/enable 返回错误，仍继续处理其他 clock；
-- 最后仍执行 `usleep_range(100, 200)`，并设置 `clk_enabled = true`；
-- 整个函数最后返回 0。
+- `drivers/clk/rockchip/clk-rk3568.c`：78,544 bytes；
+- `drivers/clk/clk-mux.c`：6,588 bytes；
+- `drivers/clk/clk-gate.c`：5,824 bytes；
+- `drivers/clk/clk-fixed-rate.c`：5,861 bytes；
+- `drivers/clk/clk-composite.c`：13,467 bytes；
+- `drivers/clk/rockchip/clk-pll.c`：28,795 bytes。
 
-因此存在一条确定的条件性静默失败路径：
+另外，`drivers/clk/clk.c` 中的 `clk_core_prepare()` 与 `clk_core_enable()` 函数体在两个端点完全相同。没有发现 6.1.174 改变 CCF clock prepare/enable 错误传播语义。
 
+## 5. Panther GMAC1 的 TX/RX clock parent chain 与 provider ops
+
+Panther 两个板级 DTS 端点都定义：
+- `gmac1_clkin` 为 125MHz fixed-clock；
+- `SCLK_GMAC1` parent 指向 `gmac1_clkin`；
+- `SCLK_GMAC1_RGMII_SPEED` parent 指向 `SCLK_GMAC1`；
+- `SCLK_GMAC1_RX_TX` parent 指向 `SCLK_GMAC1_RGMII_SPEED`；
+- `mac_clk_tx` 与 `clk_mac_speed` 都引用 `SCLK_GMAC1_RX_TX`；
+- `stmmaceth` 引用 `SCLK_GMAC1`。
+
+因此 Panther RGMII clock chain 为：
 ```
-clk handle 有效
-  -> clk_prepare_enable(clock) 返回错误
-  -> 错误被忽略
-  -> 继续初始化
-  -> clk_enabled = true
-  -> rk_gmac_powerup() 认为时钟启动成功
+gmac1_clkin (125MHz fixed-clock)
+  -> SCLK_GMAC1 / clk_gmac1
+  -> SCLK_GMAC1_RGMII_SPEED / clk_gmac1_rgmii_speed
+  -> SCLK_GMAC1_RX_TX / clk_gmac1_rx_tx
 ```
 
-注意：`!IS_ERR(clock)` 只证明 handle 不是错误指针，并不证明 `clk_prepare_enable()` 成功。
+provider ops 语义：
+- `clk_mux_ops` 只有 `get_parent`、`set_parent`、`determine_rate`，没有 prepare/enable callback；
+- `clk_fixed_rate_ops` 只有 rate/accuracy 回调，没有 prepare/enable callback；
+- `clk_gate_enable()` 写 gate 后固定返回 0；
+- 这些 ops 文件在 6.1.116 与 6.1.174 端点完全一致。
 
-### 2.3 6.12.81 BSP
+所以，Panther TX/RX 使用的外部 fixed-clock → mux 链本身没有一个会返回 enable 错误的 mux/fixed-clock provider callback。它仍受 CCF parent reference-count 和时钟树初始化状态约束，但没有发现 6.1.174 新增的 provider 失败路径。
 
-`gmac_clk_enable()` 与 6.1.174 BSP 候选逐字一致：
-- 同样逐个 `devm_clk_get`；
-- 同样忽略 `clk_prepare_enable` 返回值；
-- 同样等待 100–200 µs；
-- 同样无条件设置 `clk_enabled = true`。
+### ACLK/PCLK branch
 
-这意味着该行为不是 6.12 才出现的新变化，而是 **6.1.174 BSP 候选中已经存在、并延续到 6.12.81 的共同代码路径**。
+RK3568 CRU 对 GMAC1 的定义为：
+- `ACLK_GMAC1`：gate，parent `aclk_usb`；
+- `PCLK_GMAC1`：gate，parent `pclk_usb`；
+- gate provider 使用通用 `clk_gate_enable()`，该函数写入 gate 后返回 0；
+- `aclk_usb` / `pclk_usb` 的 composite parent 结构在两个实际端点的 `clk-rk3568.c` 中完全相同。
 
-## 3. Panther 的 RGMII 路径确实使用这些时钟
+PLL provider 文件也完全相同；RK3328/RK3036 PLL enable callback 写入 power-up、等待 lock、切换到 normal parent，最后返回 0。没有发现 6.1.174 新增一个会导致 Panther GMAC ACLK/PCLK enable 失败的 provider 实现变化。
 
-Panther 的运行时 FDT / 已归档 DTS 基线：
-- compatible：`rockchip,rk3568-gmac`；
-- MAC：GMAC1；
-- `phy-mode = "rgmii"`；
-- `clock_in_out = "input"`；
-- 外接 RTL8211F，不是 integrated PHY。
+这不是对任何一次实机 clock 状态的证明，只是排除了本轮源码端点中可见的 provider 行为回归。
 
-在 6.1.174 BSP 候选 `rk_gmac_clk_init()` 中：
-- RGMII 取得的关键 clocks 包括 `aclk_mac`、`pclk_mac`、`mac_clk_tx`、`clk_mac_speed`；
-- `mac_clk_rx`、`clk_mac_ref`、`clk_mac_refout` 仅 RMII 分支取得/启用；
-- `pclk_xpcs`、`clk_xpcs_eee` 仅 SGMII/QSGMII 分支取得/启用；
-- `clk_phy` 对外接 PHY 为可选，不应将它与上述 GMAC 必需时钟混为一谈；
-- `stmmaceth` 由 STMMAC core 自身管理，Rockchip glue 中对应 enable 调用仍是注释状态。
+## 6. 本轮结论
 
-因此当前最值得关注的是 ACLK、PCLK、MAC TX 和 GMAC speed clock 的实际 prepare/enable 结果，而不是 RMII/XPCS 专用时钟。
-
-## 4. 同一 BSP 变化还改变了 RK3568 RGMII delay 写入顺序
-
-文件：`dwmac-rk.c`，函数 `rk3568_set_to_rgmii()`。
-
-6.1.116：
-1. 先向 GMAC1 CON0 写入 TX/RX delay 数值；
-2. 再向 GMAC1 CON1 写入 RGMII interface select 与 TX/RX delay enable。
-
-6.1.174 BSP 候选：
-1. 先向 GMAC1 CON1 写入 RGMII interface select 与 delay enable；
-2. 再向 GMAC1 CON0 写入 TX/RX delay 数值。
-
-6.1.174 的宏还允许以负值表示某一方向 delay 不由 SoC 配置；但 Panther 的 `phy-mode=rgmii` 会传入实际 TX/RX delay 数值，因此两个方向都会进入 enable/value 配置。
-
-6.12.81 的该函数与 6.1.174 BSP 候选保持同一顺序。这是已有报告曾在 6.1.116→6.12 比较中发现的变化；本轮新确认的是它同样存在于 6.1.174 BSP 候选源码。
-
-两版最终写入的 delay 数值与 enable 状态可以相同，但写入顺序不同。当前没有证据证明这段初始化顺序本身导致运行时 TX 不输出，因此保留为次级候选，不把它定为根因。
-
-## 5. 与已有实机证据的交叉约束
-
-### 已有 6.12.81 运行时证据
-
-仓库既有 clock_summary 采集显示：
-- `clk_gmac1` / GMAC 主时钟：125 MHz，enable/prepare 计数非零；
-- `mac_clk_rx`、`mac_clk_tx` 对应 GMAC RX/TX clock：125 MHz，计数非零；
-- `clk_mac_speed`：125 MHz，计数非零；
-- `aclk_mac`：297 MHz，计数非零；
-- `pclk_mac`：99 MHz，计数非零；
-- `ptp_ref`：62.5 MHz。
-
-这降低了“6.12.81 当前采样时刻关键 clocks 完全没有开启”的可能性。
-
-但 clock_summary 是后续运行时快照：
-- 不能还原 probe 时每一次 `clk_prepare_enable()` 的返回值；
-- 不能证明启动时序的 100–200 µs 一定足够；
-- 不能证明 clock 在 MAC/DMA 第一次初始化前已经稳定；
-- 也不能证明 6.1.174 历史异常启动时的 clock enable 结果。
-
-### 已有 link-up 证据
-
-6.1.174 与 6.12.81 均有 RTL8211F PHY ID、1000 Mbps Full Link 相关证据。Link Up 表明 PHY/链路协商路径工作，但不能证明 MAC TX 所需的每个内部时钟均按要求成功 enable、稳定并持续工作。
-
-## 6. 当前判断
-
-### 已确认（源码层面）
-1. 6.1.116 与 6.1.174 BSP 候选的 GMAC clock init / enable 逻辑有实质变化。
-2. 6.1.174 BSP 候选忽略多个 `clk_prepare_enable()` 的返回值，仍可能继续初始化并设置 `clk_enabled = true`。
-3. 6.1.174 BSP 候选将时钟稳定等待从 5 ms 缩短到 100–200 µs。
-4. 6.1.174 BSP 候选和 6.12.81 BSP 的 `gmac_clk_enable()` 完全一致。
-5. Panther 当前 RGMII 路径使用 ACLK、PCLK、MAC TX 和 GMAC speed clock；该代码不是不适用的 SGMII/RMII 分支。
-6. RK3568 RGMII delay 写入顺序在 6.1.174 BSP 候选中也已改变，并延续到 6.12.81。
+### 已确认
+1. 6.1.174 的实际源码快照 `3f06ed3` 中，GMAC clock enable 仍为 5ms settle，并检查 bulk enable 返回值。
+2. 6.1.116 与 6.1.174 的 RK3568 CRU provider 及通用 mux/gate/fixed-rate/composite/PLL 实现文件完全一致。
+3. CCF `clk_core_prepare/enable` 关键函数未改变。
+4. Panther TX/RX clock parent chain 以外部 125MHz fixed-clock 为根；mux/fixed-rate ops 没有可返回错误的 enable callback。
+5. c2f148d 中的 100–200µs 与忽略错误实现属于另一份 2026-11-10 后期源码快照，目前没有证据能归入 6.1.174 镜像。
 
 ### 尚未证明
-1. 6.1.174 或 6.12.81 实机启动时是否有任一关键 `clk_prepare_enable()` 实际返回错误。
-2. 是否有 clock provider 的 prepare/enable callback 在 Panther 的特定启动时序下失败。
-3. 100–200 µs 是否不足以满足 Panther RK3566 GMAC / PHY clock 稳定要求。
-4. RGMII delay enable-before-value 顺序是否会导致本机故障。
-5. 该候选是否足以解释 DHCP Discover 未从 Panther 物理网口输出。
+- 6.1.174 镜像的全部厂商补丁/构建输入是否与 `3f06ed3` 完全一致，仍需原始 Actions 构建日志或 binary provenance 闭环。
+- 任何静态 clock provider 比较都不能证明运行时 RGMII TX 波形存在，也不能证明 DHCP Discover 已越过 MAC/RGMII 边界。
+- 本轮没有获得帧从 Panther 物理网口输出的证据。
 
-### 当前优先级
-这是目前最值得保留的 **6.1.116 正常 → 6.1.174 首个明确异常 → 6.12.81 持续异常** 的共同 BSP 候选之一。
+### 阶段判断
+本轮没有发现 6.1.116→6.1.174 的 GMAC CRU clock provider 回归。此前以 100–200µs 等待和忽略 clock-enable 返回值解释 6.1.174 故障的说法不成立，除非出现新的构建来源证据。
 
-其中：
-- “忽略 clock enable 错误”是明确的代码缺陷风险，但尚无实机失败记录；
-- “5 ms 缩短至 100–200 µs”是明确的时序变化，但尚无资料证明该等待时间不足；
-- 两者同时存在于 6.1.174 与 6.12.81，使它们比仅出现在 6.12 的变化更值得优先研究。
+## 7. 下一步
 
-本报告不建议直接修改驱动或移植 5 ms，也不建议通过现场试错验证。
+停止把 clock enable settle/error handling 作为 6.1.174 故障主线。继续从已锁定的 6.1.116→6.1.174 实际源码增量中寻找未审查且直接影响 TX 的差异；优先回到 Rockchip GMAC glue 与 MAC/PHY interface bring-up 的其他变化，而不是重复 CRU provider、clock_summary、parent mux 或任何实机测试。
 
-## 7. 下一步（继续静态研究）
-
-下一步只做一项：追踪 RK3566 GMAC1 的四个关键 clock provider 和对应 `clk_ops`：
-1. `aclk_gmac1`
-2. `pclk_gmac1`
-3. `clk_gmac1_rx_tx` / `mac_clk_tx`
-4. `clk_gmac1_rgmii_speed` / `clk_mac_speed`
-
-检查：
-- 6.1.116 与 6.1.174 BSP 对应 CRU clock provider 是否有变化；
-- prepare/enable callback 是否有可返回错误的条件；
-- rate / parent / gate 选择是否发生改变；
-- 已有日志或 clock_summary 是否能排除其中某些失败路径。
-
-不重复已完成的 clock_summary、CRU mux、clock tree 实机采集；不读取寄存器、不运行 devmem、不发帧、不抓包、不改设备配置。若纯静态资料无法证明某次 enable 成败，就明确保留为未验证，不要求用户重复测试。
+所有外部发帧、抓包、PHY 计数和物理边界测试继续暂停。只有找到能够证明帧越过 MAC/RGMII 边界的可靠证据后，才讨论是否恢复外部测试。
