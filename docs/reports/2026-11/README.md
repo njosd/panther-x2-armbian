@@ -4,6 +4,7 @@
 
 ## Panther X2 网络与启动链
 
+- [6.12.81 实机 KPROBE / TRACEFS 只读能力检查（2026-11-19）](./PANTHER-X2-6.12-KPROBE-TRACEFS-READONLY-CAPABILITY-20261119.md)：确认实机 tracefs、KPROBES/KPROBE_EVENTS、目标函数 kallsyms 符号及现有 kmem/page_pool/NAPI/SKB tracepoint；下一步先只读检查 tracing 现状，尚未创建探针。
 - [6.1.116 实际内核配置闭环与 STMMAC RX 差分（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md)：从原始硬件审计归档提取真实 kernel.config，与官方模板 7,677 个符号全量比较（差异 0）；对 6.1.116/6.12.81 候选 STMMAC RX 主函数进行定点差分。
 - [NAPI skb 分配器差分与只读取证方案（2026-11-19）](./PANTHER-X2-NAPI-SKB-ALLOCATOR-DIFF-AND-READONLY-TRACE-CHECK-20261119.md)：比较两版 napi_alloc_skb 实现，记录 6.12 tracing/kprobe 构建能力及不改变运行状态的只读检查方案。
 - [6.12.81 实际运行内核配置核验（2026-11-19）](./PANTHER-X2-KERNEL-CONFIG-RUNTIME-VERIFICATION-20261119.md)：记录 Panther 实机 6.12.81 运行配置与已锁定构建模板的关键符号核验结果。
