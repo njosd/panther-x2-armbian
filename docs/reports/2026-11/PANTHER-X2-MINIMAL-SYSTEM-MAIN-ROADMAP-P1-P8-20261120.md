@@ -43,25 +43,28 @@ P1 已确认的 eMMC SPL + TF JP-TvBox proper 仅是当前设备的**临时诊�
 
 ## 0.2 用户最新确认：优先争取 TF/eMMC 各自完整启动，受硬件限制时回退原设计（2026-11-20）
 
-本节修正此前将“TF 自包含启动不再作为目标”的错误表述。
+用户首选目标：
+- TF 卡启动：尽可能让完整 BootROM→SPL/DDR 初始化→U-Boot proper 链全部来自 TF；
+- eMMC 启动：尽可能让完整启动链全部来自 eMMC；
+- 避免 SPL 与 U-Boot proper 跨介质混合读取，降低版本耦合和维护风险。
 
-用户的首选目标：
-- TF 卡启动：尽可能让完整 U-Boot 启动链及必要固件全部来自 TF；
-- eMMC 启动：尽可能让完整 U-Boot 启动链及必要固件全部来自 eMMC；
-- 避免 SPL 与 U-Boot proper 跨介质混合读取，以减少版本耦合和维护风险。
+可行性服从 RK3566 BootROM 和 Panther X2 原厂板级硬件限制。当前已完成的静态结论：
+- RK3566 普通 BootROM 顺序为 eMMC 优先于 SDMMC；Panther X2 2026-11-18 实机 source tag 为 eMMC ID 2，eMMC user-area LBA64 有有效 IDB。
+- `SDMMC0_DET` 仅切换 SDMMC/JTAG 引脚复用，不是启动源选择脚。
+- Rockchip SD boot pre-loader 流程可由已启动的 pre-loader 从 SD 加载 U-Boot proper，但不证明 BootROM 会从 TF 加载 SPL。
+- RK3566 不支持旧式 SD IDB card-type flag；Android BCB 的 `recovery\\n--rk_fwupdate\\n` 是 SD 升级/recovery 标记，不是普通 TF SPL 选择开关。
+- 现有 eMMC SPL→TF proper 混合链已有完整证据，不能重复做介质映射调查。
 
-可行性必须服从 RK3566 BootROM 与 Panther X2 原厂板级硬件限制。若确认在保留 eMMC 正常启动内容的条件下，BootROM/板级电路不允许 TF 成为独立普通冷启动介质，则不强行实现，保留原有可行启动逻辑，并明确记录混合链的来源、版本关系、更新顺序和恢复方法。
+**当前唯一值得继续的可行性核查：** Panther X2 原厂板级是否存在上电前 eMMC 电源/复位/数据线隔离或 BootROM 启动源选择机制。公开资料尚未提供原理图/PCB 证据，因此不能先验断言有或没有。
+
+若原厂硬件有可用且不破坏 eMMC 数据的隔离/选择机制，再评估 TF 完整启动；若没有，则在保留有效 eMMC IDB 的条件下，当前没有已知可靠的 TF 独立 BootROM→SPL 路径，应保留原有启动逻辑，并把混合链来源、版本绑定、更新顺序和恢复方式显式管理。
 
 工作要求：
-- 原有 Bootloader 软件包、职责划分、组件和既有恢复机制仍作为基线；优先复用，不主动重构。
-- 当前跨介质启动路径及其成因已经调查完成，不重复 MMC/ATAGS 映射、启动日志或介质来源根因调查；当前要评估的是硬件可行性边界和候选方案。
-- 已知官方资料记载 eMMC 优先于 SDMMC，但不能仅凭顺序表就断言 TF 自包含启动绝对不可能；需只读核实 BootROM 对 IDB 有效性、失败回退和介质选择的具体条件，以及 Panther X2 板级电路是否提供可用选择机制。
-- USB 双公头恢复流程是必须保留的既有资产；Loader/MaskROM 恢复模式不能与 TF 普通冷启动混为一谈。
-- Vendor 数据始终以 eMMC 权威区域为来源，保持只读，并沿既有 U-Boot 环境变量/FDT fixup 路径传递。
-- 最小系统仅在有明确诊断收益时引入，不是最终系统强制组成。
-- 未经明确授权，不编译、不写 TF/eMMC、不修改启动配置、不启动实验固件。
-
-P2 当前执行顺序：先完成只读 BootROM/板级启动选择可行性评估；可行则设计双介质完整启动，不可行则形成原设计回退方案；Vendor 数据路径单独按既有接口做局部方案评估。
+- 原有 Bootloader 软件包、职责划分、组件及 USB 双公头恢复机制作为基线，不主动重构。
+- 不重复已完成的 BootROM 顺序、source ID、MMC/ATAGS 映射、eMMC IDB 位置、SDMMC0_DET 定义及 SD Boot Card/BCB 兼容性调查。
+- 最小系统仅在有明确诊断收益时作为临时工具，不是最终系统强制组成。
+- 未经明确授权，不清除/禁用 eMMC IDB、不改 eMMC boot area/EXT_CSD、不短接、不编译、不写 TF/eMMC、不启动实验固件。
+- Vendor 数据始终只读来自 eMMC 权威区域，并沿既有 U-Boot 环境变量/FDT fixup 路径传递。
 
 ## 1. 不可变执行原则
 
