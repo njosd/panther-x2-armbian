@@ -245,3 +245,115 @@ RKNS / FDT-FIT / U-Boot / Rockchip / DDR / SPL / ATF: 均未发现
 - [ ] 结合 RK3566 BootROM 启动介质机制和已有 SRAM/UART 证据，核实 BootROM 从 eMMC user area 读取 IDB 的具体规则。
 
 本阶段没有访问实际 eMMC 进行新的读取，没有写入或修改任何分区，也没有重新生成备份或哈希清单。
+
+
+## 10. RK3566 BootROM 启动介质与 eMMC IDB 定位机制（2026-11-20，离线证据 + 公开资料核对）
+
+本节将 11 月 18 日现场 SRAM 读数、11 月 19 日 eMMC idbloader 替换及实机 UART、11 月 20 日完整 eMMC 备份，与 RK3566 文档和 Rockchip 存储实现交叉核对。没有进行新的设备读取或启动试验。
+
+### 10.1 BootROM 启动介质：现场证据已经存在
+
+2026-11-18 U-Boot proper 暂停现场执行过一次只读命令：
+
+```text
+=> md.l 0xfdcc0010 4
+fdcc0010: 00000002 00000040 c08dfd97 5ef93ffc
+```
+
+原始命令和输出已保存在：
+`docs/reports/2026-11/PANTHER-X2-UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN-20261118.md` 第 16 节。
+
+Rockchip U-Boot 源码定义：
+- `BROM_BOOTSOURCE_ID_ADDR = CONFIG_ROCKCHIP_IRAM_START_ADDR + 0x10`；
+- eMMC source ID = 2，SD = 5，SPI NOR = 3，SPI NAND = 4；
+- SPL 的 `board_spl_was_booted_from()` 从该 SRAM 地址读取来源字段。
+
+本机该次运行时地址为 `0xFDCC0010`，读数第一个 word 为 `0x00000002`。**这是本机 U-Boot proper 阶段的实际 SRAM 只读读数，不是仅从源码枚举值推断。** 该读数指向 BootROM 启动来源 eMMC。BL31 执行之后仍读到该值，亦已在第 16.3 节记录。
+
+### 10.2 RK3566 BootROM 启动顺序
+
+Rockchip《RK3566 Hardware Design Guide V1.1.0》§2.1.5 给出的顺序为：
+1. SPI NOR
+2. SPI NAND
+3. NAND
+4. eMMC
+5. SDMMC
+
+PINE64 Quartz64（同为 RK3566）启动文档也列出 SPI NOR、SPI NAND、eMMC、microSD 的顺序，并说明 BootROM 在支持介质上搜索有效 ID BLOCK。该资料属于板卡社区文档，不是 Rockchip 官方 BootROM 源码；此处用作与官方硬件指南及 Panther 实测相互印证，不把它提升为 ROM 源码级证明。
+
+### 10.3 eMMC 的 IDB 位于 user area LBA64，而非 boot0/boot1
+
+现有 Panther X2 实测：
+- EXT_CSD `PARTITION_CONFIG=0x00`：BOOT_PARTITION_ENABLE=0，PARTITION_ACCESS=0（user area）。
+- boot0 完整 4 MiB 全零；boot1 与 boot0 完整逐字节相同，因此 boot1 完整 4 MiB 也全零。
+- eMMC user area LBA64（byte offset 32768）有 `RKNS` IDB header。
+- eMMC user area LBA64 对应的完整数据已与 JP-TvBox `idbloader.img` SHA-256 匹配。
+- eMMC user area LBA16384 有 FIT/FDT header，完整数据此前与 U-Boot FIT 镜像匹配。
+
+外部交叉证据：
+- PINE64 Quartz64 RK3566 文档给出的 eMMC 安装方式为 `dd if=idblock.bin ... seek=64`，即 user-area sector 64。
+- Rockchip Linux `sdmmc_vendor_storage.c` 定义 `EMMC_IDB_PART_OFFSET 64`、`EMMC_BOOT_PART_SIZE 1024`；其 IDB 更新路径以 64 为基址，并按 1024-sector 间隔处理最多五份 IDB 副本。这是 Rockchip BSP 存储布局实现证据，不等同于直接看到 BootROM 内部代码。
+- PINE64 对 Rockchip BROM 的存储协议说明指出，eMMC/SD BootROM 通过常规 MMC 初始化访问介质，并且不使用标准 eMMC boot partition 启动选项；这与本机 boot0/boot1 全零、EXT_CSD 未启用 boot partition、user area LBA64 存在 IDB 的组合证据一致。该细节属于社区逆向文档，证据等级低于官方芯片指南。
+
+因此，当前可以作出高置信度判断：**Panther X2 的 RK3566 BootROM 从 eMMC 启动时，使用的是 eMMC user area 中的 Rockchip IDB（本机已确认位于 LBA64），而不是 eMMC boot0/boot1。**
+
+### 10.4 11 月 18 日至 11 月 20 日启动链时间线
+
+| 时间 | 介质状态 / 实测 | 可得结论 |
+|---|---|---|
+| 11 月 18 日 | U-Boot proper 现场读取 SRAM `0xFDCC0010=0x02`；当时 eMMC LBA64 为旧 E25 idbloader | 该次启动的 BootROM 来源记录指向 eMMC |
+| 11 月 19 日写入前 | 确认目标为 eMMC user area；将 JP-TvBox idbloader 写入 LBA64–667，回读与源文件逐字节一致 | eMMC user area 的 IDB 被替换为 JP SPL/DDR V1.10 |
+| 11 月 19 日启动 | UART 显示 JP SPL 2023-11-12、DDR V1.10；SPL 输出 `Trying to boot from MMC2`；随后运行 JP U-Boot proper | 已验证 JP SPL 实际执行，并从 MMC2/TF 加载下一阶段 |
+| 11 月 20 日备份 | eMMC user area LBA64 的 RKNS 头及完整数据身份与 JP idbloader 匹配；boot0/boot1 全零 | 当前归档状态与 11 月 19 日 eMMC 替换记录一致 |
+
+注意：11 月 18 日 SRAM 来源值是那次启动的直接现场读数；现有记录没有显示 11 月 19 日启动时再次读取该 SRAM 字段。11 月 19 日的“BootROM 读取已替换后的 eMMC LBA64 并运行 JP SPL”由写入回读、后续 SPL 构建指纹及启动时间线强烈支持，但不应伪称 11 月 19 日又做过一次 SRAM 读数。
+
+### 10.5 SPL → U-Boot proper：MMC 编号体系已闭环
+
+11 月 19 日 SPL 输出 `Trying to boot from MMC2`。既有 Rockchip SPL/ATAGS 源码映射及 proper 实机日志表明：
+- SPL 的 MMC2 对应 SD/TF；
+- U-Boot proper 将 SD/TF 枚举为 `mmc 1`；
+- proper 的 `Bootdev(atags): mmc 1`，并扫描 `mmc 1:1` 找到 TF 上的 `/boot.scr`；
+- 后续内核、initrd、Panther X2 DTB 和 Linux rootfs 均来自 TF。
+
+所以本次混合链为：
+
+```text
+RK3566 BootROM
+  └─ eMMC user area LBA64：JP idbloader / SPL + DDR V1.10
+       └─ SPL 从 MMC2（SD/TF）加载
+            └─ TF 上 JP U-Boot proper（FIT 位于 TF LBA16384）
+                 └─ TF /boot.scr、kernel、initrd、Panther X2 DTB
+                      └─ TF Linux rootfs
+```
+
+eMMC user area LBA16384 的 FIT 是已确认存在的镜像，但在这条已观察到的启动链中，SPL 后续加载设备为 TF；因此不能把 eMMC LBA16384 的 FIT 误标为本次实际执行的 U-Boot proper。
+
+### 10.6 证据等级与剩余边界
+
+**已验证：**
+- 11 月 18 日 U-Boot proper 对 `0xFDCC0010` 的实机只读结果为 `0x00000002`，对应 eMMC BootROM source ID。
+- RK3566 官方硬件指南将 eMMC 排在 SDMMC 之前。
+- Panther X2 eMMC boot0/boot1 完整镜像均全零。
+- Panther X2 eMMC user area LBA64 有 RKNS IDB，且完整数据与 JP idbloader 匹配。
+- 11 月 19 日实际运行 JP SPL/DDR V1.10，并由其从 TF/SD 加载下一阶段。
+
+**高置信度综合判断：**
+- BootROM 从 eMMC user area LBA64 加载 IDB；11 月 19 日替换后，实际执行的是 JP idbloader。
+- eMMC boot0/boot1 不承载本机当前这条启动链的 SPL。
+
+**仍未直接观测：**
+- 没有 BootROM 总线级 CMD/数据轨迹，也没有 BootROM 内部反汇编，因此不能把具体 MMC 命令序列、重试次数、IDB 副本扫描策略全部写成 Panther X2 实机已测事实。
+- 11 月 19 日没有第二次 SRAM source-tag 现场读取；该次 eMMC 来源判断依靠 11 月 18 日实测、11 月 19 日介质替换及启动日志的时间关联。
+- Rockchip BROM 在 eMMC LBA64 之外是否以及如何扫描冗余 IDB 副本，尚未针对 RK3566 BootROM 本体完成源码级验证。
+
+### 10.7 参考资料
+
+- Rockchip《RK3566 Hardware Design Guide V1.1.0》§2.1.5（BootROM 介质优先级）：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- PINE64 Quartz64 RK3566 BootROM 顺序及 LBA64 安装说明：https://pine64.org/documentation/Quartz64/_full/
+- PINE64 Rockchip BROM eMMC/SD、ID block 搜索与启动阶段说明（社区逆向资料，非 RK3566 官方 ROM 源码）：https://pine64.org/documentation/General/_full/
+- Rockchip Linux `sdmmc_vendor_storage.c`（IDB sector 64 基址及 1024-sector 副本布局）：https://github.com/rockchip-linux/kernel/blob/develop-6.1/drivers/soc/rockchip/sdmmc_vendor_storage.c
+- 本仓库 11 月 18 日现场 SRAM 读数及启动链报告：`docs/reports/2026-11/PANTHER-X2-UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN-20261118.md`
+- 本仓库 11 月 19 日 JP idbloader 实机启动报告：`docs/reports/2026-11/PANTHER-X2-JP-IDBLOADER-BOOT-AND-DHCP-DIFF-20261119.md`
+
+本节全部分析基于既有镜像、日志和源码/文档；没有对设备执行新的命令，没有改动 eMMC、TF、EXT_CSD 或启动配置。
