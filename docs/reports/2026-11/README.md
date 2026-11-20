@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P3：STMMAC link-up / probe handoff 收尾（2026-11-20，P3 正式关闭）](./PANTHER-X2-P3-STMMAC-LINKUP-PROBE-CLOSEOUT-20261120.md)：精确比较 link-up 与 probe，确认 SerDes 分支不命中 Panther RGMII；发现 6.1.174-rk35xx 编译启用的 RTL8211F LED fixup，但它只写 LED 扩展页且不属于 6.12 共同差异。未发现可解释普通 TX 故障的有效共同软件差异。下一步转 P4 pinctrl 首 pin 错误处理只读审计。
+
 - [P3：实际 RK35xx BSP 的 STMMAC core TX 路径复核（2026-11-20）](./PANTHER-X2-P3-RK35XX-STMMAC-CORE-TX-PATH-REVIEW-20261120.md)：以高置信度 c2f148d 纠正普通 stable 源码端点，复核普通 TX 提交/回收、TSO、DMA init、open 与 hw_setup；普通 TX 主路径未发现有效新增差异，link-up/probe handoff 仍待精确比较。全程只读。
 
 - [P3：RK35xx GMAC probe/setup/PHY 电源交接差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md)：按 c2f148d 实际源码候选审查 probe flags、SPH、Vendor MAC、integrated PHY、regulator、runtime-PM 与外接 RGMII 分支；未发现能解释 Panther 普通 TX 故障的新增有效机制。下一步转为 c2f148d STMMAC core TX 路径复核。
