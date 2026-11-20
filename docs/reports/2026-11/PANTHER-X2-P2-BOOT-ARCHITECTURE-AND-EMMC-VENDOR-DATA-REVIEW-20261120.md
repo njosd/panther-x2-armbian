@@ -734,3 +734,68 @@ Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Arm
 - TF/uSD 上运行 Linux：第三方公开项目/安装指南记录；非本项目实机复验。
 - U-Boot 2024.01 是否完全从 TF 启动：未证明。
 - Panther X2 是否有 eMMC 硬件隔离/启动选择电路：未验证。
+
+
+## 18. 第三方 yjdwbj Panther X2 v1.0 U-Boot 截图的逐行静态核对（2026-11-20）
+
+本节基于 v1.0 标签中的原始 PNG（`images/panther-x2-rk3566-uboot.png`，156,082 bytes）逐行辨读，并与同标签 README 中的 Linux 启动日志交叉核对。没有下载或运行第三方固件。
+
+### 18.1 U-Boot 截图直接显示的启动路径
+
+截图中的关键内容：
+- `U-Boot SPL 2024.01-040842-g31b5240876-dirty (May 30 2024)`
+- `Trying to boot from MMC1`
+- SPL 随后对 FIT 中 config、ATF、U-Boot、多个 FDT 和 BL32 image 执行 SHA256 hash 检查，均显示 OK。
+- U-Boot proper 显示 `U-Boot 2024.01-040842-g31b5240876-dirty`。
+- proper 的 MMC 控制器映射：
+  - `mmc@fe2b0000: 0`
+  - `mmc@fe2c0000: 1`
+  - `mmc@fe310000: 2`
+- 随后明确显示：
+  `Booting bootflow 'mmc@fe2b0000.bootdev.part_1' with extlinux`
+- 读取 `/boot/extlinux/extlinux.conf`、`/Image`、`/dtbs/rockchip/rk3566-panther-x2.dtb`，并加载 `/rootfs.cpio.gz` initramfs。
+- proper 的 Model 字符串显示 `Radxa ROCK 3 Model C`，但后续实际加载 Panther X2 专用 DTB；这是第三方 U-Boot 构建配置的一个待解释细节，不应误认为它使用了 Radxa 实物板。
+
+### 18.2 与同标签 Linux 日志交叉核对
+
+同标签 README 的 uSD Linux 启动日志明确显示：
+- `mmcblk0` 是 116 GiB SDXC，分区为 p1/p2；
+- `mmcblk1` 是 32 GB eMMC，并枚举 `mmcblk1boot0`、`mmcblk1boot1` 和 RPMB；
+- kernel command line 的 root UUID 为 `248cdb28-ac33-4448-adbc-2972f265f0ff`；
+- `EXT4-fs (mmcblk0p2)` 挂载该 UUID，确认根文件系统在 TF/uSD 的 p2。
+
+结合该版本日志中 MMC 控制器地址和设备映射，`fe2b0000` 对应 SD/TF 控制器；U-Boot proper 从该控制器分区 1 读取 extlinux、Kernel、DTB 和 initramfs。SPL 的 `Trying to boot from MMC1` 则指向其 SPL 启动设备为 MMC1；按 Rockchip RK3566 启动源编号与本项目已验证的 MMC1/eMMC、MMC2/SD 对照，证据高度支持其为 eMMC 前级加载 TF 后级。
+
+### 18.3 证据结论与边界
+
+- **已由截图直接证明：** SPL 2024.01 执行；proper 2024.01 执行；proper 从 `fe2b0000` 的 TF/SD 控制器分区 1 读取 extlinux、Kernel、DTB、initramfs。
+- **已由 Linux 日志直接证明：** 系统 rootfs 位于 TF/uSD 的 `mmcblk0p2`，同时 eMMC 仍被识别为 `mmcblk1`。
+- **高置信度判断：** 这是 eMMC/MMC1 前级 + TF/SD 后级的混合启动案例，与本项目现有实机路径相同类别；它不是 TF SPL + TF proper 自包含启动的证据。
+- **尚未直接看到：** BootROM source tag 的独立 UART 行、SPL 镜像的原始 LBA/介质校验，以及 eMMC IDB 与该第三方 SPL 的 hash 对照。因此不要把第三方 SPL 的物理存放位置表述成 100% 直接实证；准确标记为“根据 MMC1 启动提示及 RK3566 介质映射，高置信度推断来自 eMMC”。
+- `Trying to boot from MMC1` 是 SPL 阶段的启动设备提示，不是 U-Boot proper 的 MMC 设备枚举；两者编号体系不能混为一谈。
+
+### 18.4 v1.0 下载包实际内容核对
+
+- v1.0 Git tree 只有 `README.md` 和 `images/` 目录（内含三张 PNG）；没有 `idbloader.img`、`u-boot.itb`、`trust.img`、整卡镜像、分区表文件或 U-Boot 源码。
+- README 所谓 U-Boot “Pre-built” 链接实际指向 GitHub 的 `archive/refs/tags/v1.0.tar.gz` 仓库标签源码归档，不是独立 U-Boot 固件发布包。
+- 因而目前无法对第三方 v1.0 固件做二进制头部、FIT 内容、SPL hash、扇区布局的离线取证；但其启动截图已经足以识别其 proper 从 TF 加载启动文件的路径。
+
+### 18.5 第三方项目当前 main 分支的后续演进
+
+当前 main 分支已经不是 v1.0 的 TF 启动布局：
+- README 声明当前版本为 Buildroot 2026.08 + Linux 6.12.69 + Rockchip U-Boot `next-dev`，使用 FIT `boot.img` 并通过 RKFW/Rockchip tools 刷写。
+- 当前 GPT 分区说明明确列出 `uboot` 4 MB（U-Boot FIT）、`boot` 64 MB（Kernel+DTB FIT）、`rootfs` 16 GB 等。
+- 当前 `dmesg.log` kernel command line 明确有 `storagemedia=emmc`、`androidboot.storagemedia=emmc`，root PARTUUID 对应 `mmcblk1p4`，且日志确认 eMMC 是 `mmcblk1`。
+- 版本字符串记录 DDR v1.26、SPL v1.14、BL31 v1.46、BL32 v2.18 和 U-Boot commit/time。
+
+这说明第三方后来转向一套在 eMMC 上布局和运行的系统，不能把当前 main 分支的 eMMC 部署说明倒推成 v1.0 的 TF 自包含启动证明。当前 main 的分区表和 dmesg 可用于参考 Rockchip FIT/RKFW 方案，但不是本项目 TF 独立启动可行性的证据。
+
+### 18.6 对本项目的决策影响
+
+第三方 v1.0 的价值不在于证明 TF 完整启动，而在于它提供了一个与 Panther X2 实机一致的独立交叉案例：
+- eMMC 前级提供 SPL；
+- U-Boot proper 从 TF 读取 extlinux 和系统启动文件；
+- Kernel/rootfs 运行于 TF；
+- eMMC 仍保留在设备内。
+
+因此它强化了“Panther X2 从 TF 运行完整 Linux，并不代表 TF 自带完整 U-Boot”的区分，也进一步说明当前混合链是可工作的原厂/第三方兼容路径。若最终硬件无法实现 TF 独立 SPL 启动，这种路径可作为有证据支撑的回退模式，但需显式固定 SPL 与 proper 的版本关系和更新流程。
