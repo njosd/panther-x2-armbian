@@ -444,3 +444,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 该属性证明板级 SPL 可配置双介质 loader 搜索顺序，但只控制 SPL 加载 proper 的介质，不能改变 BootROM 最初从何处加载 SPL，也不保证 TF/eMMC 启动链自包含。若 BootROM 从 eMMC 加载 SPL 而 SPL 优先从 TF 取 proper，反而会形成混合链。
 - Radxa DTS 的 `&pinctrl` 标记为 `u-boot,dm-pre-reloc`，而官方 v1.14 提交 `05891810f6d` 改为 `u-boot,dm-spl`；值得核对 SPL DTB 过滤和父节点保留规则，不能仅凭静态标签断言 pinctrl 失效。
 - 详见 P2 报告 §25。下一步锁定 Panther X2 实际 SPL 的 `/chosen/u-boot,spl-boot-order`、board_boot_order 与最终 SPL DTB；不重复检查 Linux DTS，不构建、不写卡。
+
+
+## P2 补充：Panther X2 专用 U-Boot 构建配方核查（2026-11-20）
+
+- 已找到固定 NixOS Panther X2 专用配方 `5aaee9/nixos-aarch64@02b7d0d450b906834157132fe58f11acd00e8124`：defconfig `panther-x2-rk3566_defconfig`，DDR `rk3566_ddr_1056MHz_v1.10.bin`，BL31 `rk3568_bl31_v1.29.elf`，产出 SPL/idbloader/u-boot.itb。
+- 其 defconfig 启用 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y`、SPL MMC/OF/FIT/ATF；但 `CONFIG_DEFAULT_DEVICE_TREE` 与 `CONFIG_TARGET` 仍指向 RK3568 EVB1 V10。补丁仅新增 defconfig 与 trust.ini，没有 Panther X2 专用 board C、`board_boot_order()` 或 SPL DTS。
+- 因此它是 Panther X2 命名的构建配方及 DDR/BL31 配套证据，但尚不能证明 TF/eMMC 各自自包含启动。`BACK_TO_BROM` 必须结合确切 U-Boot source 版本追踪，不能凭选项名推断行为。
+- Radxa ROCK 3C 家族 DTS 的 `u-boot,spl-boot-order` 只能作为通用 SPL proper loader 顺序参考；不能与 NixOS 专用 defconfig 混为一套板级固件，也不能改变 BootROM 首阶段选源。
+- 详见 P2 报告 §26。下一步固定 Nix 配方真正使用的 U-Boot source revision，静态追踪 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM` 与最终 SPL DTB。
