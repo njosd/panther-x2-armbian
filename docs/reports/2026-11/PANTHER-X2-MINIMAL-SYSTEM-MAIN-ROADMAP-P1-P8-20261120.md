@@ -426,3 +426,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 官方 DDR v1.26 有 ultra、普通多频率、单通道 LPDDR4/LPDDR4X 等不同变体；必须依据实际 DRAM 颗粒、通道/Rank/CS、PCB template、频率及 BL31 配套关系筛选。当前 4GB LPDDR4 的完整拓扑未闭环，不推荐直接替换。
 - rkbin 官方要求二进制提交可追溯到 source commit；后续优先选择有 Build commit 和明确更新说明的候选。
 - 详见 P2 报告 §23。下一步只静态检查 SPL v1.14 对应源码变更与 Panther X2 DRAM 拓扑证据；不构建、不刷写。
+
+
+## P2 补充：SPL v1.14 源码提交逐项差分（2026-11-20）
+
+- 已找到 rkbin 发布提交 `1961bbd229b1f1698ce1b5ff1df9aaae07922e66`，其 `rk356x_spl_v1.14.bin` 明确 Build from U-Boot commit `606f72bd97a`，包含 14 项相关变更。
+- 关键变更包括 SPL pinctrl 从 `u-boot,dm-pre-reloc` 改为 `u-boot,dm-spl`（RK3566 EVB LP4X V10 测试）、MMC 默认 sample phase、SPL 数据读取超时余量 10→50ms（针对特定 KOWIN eMMC）、数据错误后 reset 延时、HS200 tuning 失败后 STOP 命令等。
+- 逐项差分未发现 `spl_boot_device`、`board_boot_order`、成功 loader ATAGS、proper bootdev 优先级或 Vendor eMMC 来源变化；v1.14 改善 MMC/pinctrl 可靠性，不改变双介质启动源选择规则。
+- 修正 DDR 资料状态：现有 Panther X2 两份实机日志已记录 LPDDR4 4GB、ddrconfig 7、BW32、CS0/CS1 双 rank、CS=2、Die BW16；并非拓扑完全未知。v1.26 单通道新增支持与本机双 rank配置不构成匹配证据；颗粒料号、PCB template、DQ mapping 仍待证。
+- 详见 P2 报告 §24。下一步静态核对 Panther X2 当前 SPL FDT pinctrl、MMC phase/card-detect/HS200 配置；不构建、不刷写、不重跑设备测试。
