@@ -799,3 +799,55 @@ Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Arm
 - eMMC 仍保留在设备内。
 
 因此它强化了“Panther X2 从 TF 运行完整 Linux，并不代表 TF 自带完整 U-Boot”的区分，也进一步说明当前混合链是可工作的原厂/第三方兼容路径。若最终硬件无法实现 TF 独立 SPL 启动，这种路径可作为有证据支撑的回退模式，但需显式固定 SPL 与 proper 的版本关系和更新流程。
+
+## 19. H1GW V04 板级照片/FCC 档案复核与 eMMC 上电隔离可行性边界（2026-11-20）
+
+### 19.1 可确认的板型与公开照片
+
+- Lorenzo Gangemi 2026-06-14 的 Panther X2 拆机记录明确标注板型为 BROWAN H1GW V04，并展示 PCB 顶面照片；照片可见 RK3566 散热片、TF 插槽、USB、Ethernet、DC 输入及若干电源器件。
+- 该照片没有背面走线、原理图网络名、器件完整料号/BOM，也无法从顶面确认 eMMC VCC/VCCQ 是否由独立负载开关控制。
+- FCC ID 2A3OG-PANTHER-X2 的 2022-04-18 Internal Photos 档案（Document ID 5825812）公开，4 页、772,563 bytes；FCC 页面同时列出 2021-11-17 的另一组 Internal Photos（Document ID 5542190）。这些是内部照片而不是原理图。当前可公开检索到的资料仍未提供可核验的 H1GW V04 原理图/netlist/BOM。
+- FCC 档案的申请主体为 E-sun Electronics Limited；与 BROWAN H1GW V04 的板型关系需以照片丝印/实物为准，不能把 FCC 文件自动视为所有硬件修订完全相同。
+
+### 19.2 RK3566 eMMC 电源控制对启动选择的约束
+
+依据 RK3566 Hardware Design Guide V1.1.0 §2.1.5：
+- BootROM 普通启动顺序中 eMMC 优先于 SDMMC。
+- BootROM 在 SPL 执行之前就进行介质探测和 IDB 读取。
+
+同指南 eMMC 电源章节说明：
+- RK3566 eMMC 控制器位于 VCCIO2，SoC 侧 IO 电源本身没有独立的 eMMC 启动门控时序要求；
+- eMMC 颗粒 VCC/VCCQ 必须在 RK3566 发出 CMD 命令前上电并稳定；
+- eMMC 进入 sleep 后，RK3566 可关断其 VCC 以降低功耗；这是运行期电源管理描述，不代表上电启动前存在可供 BootROM 使用的 eMMC-disable 功能。
+
+因此，要让 BootROM 在保留 eMMC 原始 IDB 数据的情况下跳过 eMMC，必须存在 BootROM 开始介质探测前就生效的板级硬件行为（例如 eMMC 电源未上电/被隔离，或其他经 Rockchip 认可的硬件隔离机制）。Linux DTS 的 regulator 描述、U-Boot GPIO 控制或启动后关断 eMMC 均不能满足这个时序条件。
+
+### 19.3 当前硬件证据状态
+
+| 项目 | 状态 |
+|---|---|
+| H1GW V04 顶面照片/板型丝印 | 已找到 |
+| Panther X2 FCC 内部照片档案 | 已找到（2021、2022 两组） |
+| H1GW V04 背面高分辨率、可追踪电源网络的照片 | 尚未找到可核验版本 |
+| eMMC VCC/VCCQ 独立负载开关及 EN 网络 | 未验证 |
+| eMMC RESETn 是否可在 BootROM 探测前被硬件保持有效 | 未验证 |
+| SoC GPIO/按键是否能在 BootROM 前控制 eMMC 供电 | 没有证据；不能假定 |
+| 原厂是否提供 TF/eMMC 启动源选择跳线/按键 | 没有证据 |
+
+### 19.4 方案结论更新
+
+当前仍不能确认 Panther X2 具备可在 BootROM 介质探测前隔离 eMMC 的硬件。顶面照片及 FCC 内部照片档案没有提供足以闭环的电源网络证据。
+
+所以：
+1. 不应仅凭照片猜测负载开关或测试焊盘，更不能建议短接；
+2. 不应将 Linux/U-Boot 的运行期 regulator 控制误认为能影响本次 BootROM 选源；
+3. 保留 TF 独立 SPL→TF proper 作为“硬件条件未知、未证明可行”的研究目标；
+4. 在没有原理图/背面走线证据前，维护性更可靠的回退仍是保留原有 BootROM/eMMC SPL 设计，并明确管理其与 TF proper 的版本绑定；
+5. 后续最有价值的板级证据是 H1GW V04 背面高清照片、eMMC 颗粒完整料号与周边电源器件标识，或原厂原理图/BOM。即使取得背面照片，也只做无损静态识别，不据此执行电气操作。
+
+### 19.5 来源
+
+- RK3566 Hardware Design Guide V1.1.0：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- BROWAN H1GW V04 PCB 顶面照片及拆机记录：https://lorenzogangemi.com/blog/repurposing-panther-x2/
+- FCC 2022 Panther X2 Internal Photos #5825812：https://fccid.io/2A3OG-PANTHER-X2/Internal-Photos/Internal-Photos-5825812
+- FCC 2021 Panther X2 Internal Photos #5542190：https://fccid.io/2A3OGPANTHERX2/Internal-Photos/Internal-Photos-5542190
