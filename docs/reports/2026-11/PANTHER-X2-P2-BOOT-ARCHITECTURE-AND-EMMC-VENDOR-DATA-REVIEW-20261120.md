@@ -1224,3 +1224,43 @@ Rockchip rkbin 提交 `1961bbd229b1f1698ce1b5ff1df9aaae07922e66`（2024-05-30）
 - **不建议当前替换：** 还没有 Panther X2 对应的完整 SPL DTS/defconfig/构建产物配套证明；原版当前已能从 MMC2 读 proper，故不能将 v1.14 当作必须升级的修复。
 
 下一步优先核对 Panther X2 当前 SPL FDT 的 pinctrl 节点及 SPL DTS 构建来源，和 `rk3568-u-boot.dtsi` 的 v1.14 变更作静态比较；再核对 eMMC/SD 控制器的 `default-sample-phase`、bus-width、card-detect、HS200/tuning 配置。只读现有仓库材料，不做新实机测试。
+
+
+## 25. Radxa Panther X2 构建所用 U-Boot 分支的 SPL 介质顺序与 pinctrl 对照（2026-11-20）
+
+审查固定 Radxa U-Boot commit `c55987146f4f9b20f7cb2f917ca88300419afe8d`（`stable-4.19-rock3`）的 `arch/arm/dts/rk3568-u-boot.dtsi`。该分支被 Armbian Panther X2 构建配置选用（`rock-3c-rk3566_defconfig`），但这是 ROCK 3C/RK3568 家族参考配置，不是 Panther X2 专用 SPL DTS。
+
+### 25.1 该分支明确配置了 SPL 双介质顺序
+
+其 `/chosen` 有：
+
+`u-boot,spl-boot-order = &sdmmc0, &sdhci, &nandc0, &spi_nand, &spi_nor;`
+
+别名为 `mmc0 = &sdhci`（eMMC）、`mmc1 = &sdmmc0`（TF/SD）、`mmc2 = &sdmmc1`（SDIO）。因此这份板级 U-Boot DTS 明确要求 SPL 先尝试 TF/SD，再尝试 eMMC。它证明 RK3566 Rockchip U-Boot 具备板级配置双介质 loader 尝试顺序的实际路径。
+
+**边界：** `u-boot,spl-boot-order` 只决定已经运行起来的 SPL 接下来从哪些介质尝试加载 U-Boot proper。它不能改变 BootROM 最初从哪种介质加载 SPL，也不能单凭此属性证明 TF 和 eMMC 各自的 SPL 都会被 BootROM 选中。因此它有助于实现“一个 SPL 按顺序找 proper”，但不自动等于“TF 启动必定 TF SPL+TF proper，eMMC 启动必定 eMMC SPL+eMMC proper”。
+
+### 25.2 SPL 对 TF 与 eMMC 节点的配置
+
+同一 DTS 中，`&sdmmc0` 标记 `u-boot,dm-spl` 并启用，其 `sdmmc0_pins`、`sdmmc0_bus4`、`sdmmc0_clk`、`sdmmc0_cmd`、`sdmmc0_det` 也标记 `u-boot,dm-spl`。`&sdhci` 标记 `u-boot,dm-spl`、`bus-width=<8>`、`mmc-hs200-1_8v`，并删除 pinctrl 属性后启用。参考分支同时将 TF 与 eMMC 控制器纳入 SPL 可用设备，并按 TF 优先尝试。
+
+### 25.3 与 v1.14 pinctrl 修复的差异
+
+Radxa `c559871` 的 `rk3568-u-boot.dtsi` 将 `&pinctrl` 标记为 `u-boot,dm-pre-reloc`；官方 v1.14 对应提交 `05891810f6d` 将同一节点标记从 `u-boot,dm-pre-reloc` 改为 `u-boot,dm-spl`。而 Radxa 分支已将 SDMMC0 控制器及 SD pin group 标记为 `u-boot,dm-spl`。
+
+这是明确的静态差分，但不能直接断言 Radxa 分支的 TF pinctrl 必然失效：需核对该分支的 DM SPL 设备树过滤/父节点保留规则、SPL 实际构建使用的 DTS include 和生成的 SPL DTB。
+
+### 25.4 对 Panther X2 的价值与风险
+
+- **有价值：** 证明 SPL 双介质顺序是可配置的板级设计；可作为 TF/eMMC loader 搜索顺序的源码参考。
+- **不能直接照搬：** Radxa DTS 的别名、SD pinmux、card-detect、eMMC HS200 和板级供电配置属于 ROCK 3C/E25 参考设计，必须与 Panther X2 原板连接及现有 SPL FDT 比较。
+- **特别注意：** 该顺序是 TF 优先取 proper、eMMC 次之。如果 BootROM 从 eMMC 加载 SPL 而 TF 插入，可能正好形成跨介质加载；它本身不能保证用户希望的启动介质自包含。
+
+### 25.5 下一步精确核查
+
+1. 在 Panther X2 实际 SPL 所属源码/构建配置中定位 `/chosen/u-boot,spl-boot-order`、`board_boot_order()` 和最终 SPL DTB；不以 Linux DTS 或 proper control FDT 代替。
+2. 对照原版 SPL 与 Radxa `c559871` 的 `/chosen` 顺序，确认原厂是否采用相同策略。
+3. 核对 `05891810f6d` 的父节点阶段标记变化是否已被当前 SPL DTS/二进制包含，以及是否改变 SPL pinctrl probe。
+4. 仅在确认当前 SPL 源码及设备树之后，评估是否吸收 v1.14 pinctrl/MMC 改进；保留原有启动结构，不以 ROCK 3C DTS 替代 Panther X2 板级描述。
+
+当前只读审查；未修改代码、未构建、未写卡、未做新实机测试。
