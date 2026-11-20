@@ -388,3 +388,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - RK3566 eMMC VCC/VCCQ 必须在 BootROM 发 CMD 前稳定；运行期 sleep 后关断 VCC 的能力不能证明启动前存在可用的 eMMC-disable 机制。
 - 当前没有证据证明 H1GW V04 可在 BootROM 介质探测前隔离 eMMC。继续保留该硬件问题为未验证，不猜测测试点、不短接。
 - 详见 P2 报告 §19。
+
+
+## P2 新增进展：原有 U-Boot proper 介质选择与 eMMC 权威 Vendor 数据隔离方案（2026-11-20）
+
+- Rockchip U-Boot 参考提交 `8af2535` 的 `param.c` 已有 ATAGS → `mmc 0/eMMC`、`mmc 1/SD` 映射；`boot_rkimg.c` 的 bootdev 初始化优先级为配置 > ATAGS > scan。原有机制具备 proper 按介质选择的基础，不需重构启动框架。
+- `vendor_storage_init/vendor_ops` 同样依赖 `rockchip_get_bootdev()`，因此 Vendor 数据会跟随 proper 当前启动介质。不可全局强制 `devnum=0`，否则会连带改变其他启动路径。
+- 推荐设计：保留动态 bootdev；为板载 LAN_MAC 增加独立、只读、显式指定 eMMC mmc0 的 Vendor Storage 读取入口；不复用通用 Vendor 全局缓存、不写回、不生成随机 MAC；继续使用原有 env → FDT fixup 传递机制。
+- 当前为静态设计结论。尚需核对拟用 U-Boot 分支的 SPL ATAGS 产生逻辑、proper fallback/配置覆盖及专用 eMMC read-only API 的代码落点；未授权前不写补丁、不构建、不写卡。
+- 详见 P2 报告 §20。
