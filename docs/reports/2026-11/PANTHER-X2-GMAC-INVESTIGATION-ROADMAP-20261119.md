@@ -187,3 +187,45 @@ P1–P4 限定静态源码审计均已结束。尚未定位 TX 故障的 MAC/RGM
 同时修正研究方法：不以 `Radxa E25`、`RK3568`、甚至源码路径中的 SoC 名称单独判断兼容性；应追踪实际执行的二进制、U-Boot 实际控制器资源/时钟/复位/pinctrl，以及 Linux 最终加载的 DTB 和驱动路径。已有 RK3566 驱动使用 `rk3568_ops`、RK3566 启动配方复用 `rk3568_bl31` 的仓库证据，进一步说明代码/组件命名不等于板级身份。
 
 **当前工作项：** 只读识别原始 IMG 第一个分区的文件系统与启动目录，核实 Linux Panther X2 DTB、boot script 和环境是否独立存在；再与 6.1.116 已归档 boot.cmd/boot.scr、fdtfile、磁盘 DTB、running FDT 对照。不得重做基础 FIT 扫描，也不得据名称差异直接定根因或制作补丁。
+
+
+## 2026-11-20 用户提供的 6.1.65 / 6.12.81 镜像对比报告交叉核查
+
+用户提供并归档的报告：`docs/reports/2026-11/网卡DHCP故障分析报告.md`（blob `1fcef7bb72ab71e16fd6e7dea8d42e6b999c19b3`）。该报告比较 6.1.65 正常镜像与 6.12.81 DHCP 异常镜像，补充了 rootfs 网络管理配置差异。
+
+### 1. RGMII delay 方向：不重新打开
+
+仓库既有 `PANTHER-X2-RGMII-TX-DELAY-THREE-KERNEL-COMPARISON-20261119.md` 已对正常 6.1.116、最早异常 6.1.174、异常 6.12.81 三个精确源码端点完成对比：
+- Panther 三版均为 `phy-mode="rgmii"`、TX delay `0x30`、RX delay `0x10`；
+- RTL8211F PHY 内部 TX/RX delay 处理相同；
+- Rockchip GMAC GRF 的最终 delay 数值及 enable 状态相同；
+- 6.1.116 与 6.1.174/6.12 的差异是 CON0/CON1 写入顺序，不能解释稳定运行后持续 TX 丢帧。
+
+用户新报告提及的 2025-03 `DELAY_ENABLE` 上游变更与既有专项报告属于同一项变更，不构成新的未审计方向。该项保持关闭，不重复源码审计或调整 delay。
+
+### 2. NetworkManager / DHCP 方向：报告中的根因推断尚不成立
+
+已核对 NetworkManager 官方配置说明：
+- `[ifupdown] managed=false` 只影响 `/etc/network/interfaces` 中列出的接口；
+- 如果故障镜像确实删除了该文件，不能仅凭此选项推断 eth0 被 NetworkManager 标记为 unmanaged；
+- 移除 `networking.service` 也不等于 NetworkManager 无法独立执行 DHCP。
+
+同时核对项目既有 Armbian build 固定源码快照 `3f3849bf50bfadff94d0d488eb968bdaf970dc72`：
+- NetworkManager 扩展安装 `network-manager`、`netplan.io`；
+- 默认 Netplan 文件 `00-default-use-network-manager.yaml` 仅设置 `renderer: NetworkManager`，其注释明确设计意图为所有设备交由 NetworkManager 管理，检测到 carrier 后通过 DHCP 自动配置；
+- 这条路径不依赖额外独立的 `dhclient` / `dhcpcd` 服务。
+
+**证据边界：** 该 Armbian build 固定源码快照说明预期配置路径，不证明用户所测 6.12.81 镜像 rootfs 一定使用了完全相同文件；Ophub 构建流程曾使用 moving `main`，实际构建 commit 和镜像内文件内容尚未闭环。故仍需实际 rootfs 文件及 NetworkManager 运行状态才能最终排除 DHCP 接管问题。
+
+### 3. 对 GMAC TX 根因定位的影响
+
+NetworkManager 配置只能解释“是否发起 DHCP / 是否取得地址”，不能解释此前已完成的 6.12.81 实机测试中：驱动报告 TX 成功、tcpdump 可见、UDP checksum 正常、tx_errors=0，但第三方同二层监听器收不到广播帧。
+
+因此将 NetworkManager/DHCP 保留为独立的用户态启动配置核查项，不作为 GMAC TX 物理发送故障的根因候选；不因 DHCP 报告而回退到已完成的 delay、普通 TX 或驱动初始化源码审计。
+
+### 4. 后续路线
+
+- 不重复 RGMII delay 三版本审计。
+- 不把 `managed=false` 或移除 `networking.service` 单独当成 DHCP 根因。
+- 如需单独结清 DHCP 支线，应只核对故障镜像实际 Netplan YAML、NetworkManager 配置/插件、eth0 设备状态与 DHCP 日志；不修改系统配置。
+- GMAC TX 的软件静态审计已覆盖 P1–P4；当前仍未定位 MAC/RGMII/PHY/MDI 的实际故障边界。若继续追求物理根因，需要先评估 P5 的最小波形验证方案、仪器/接线、风险与判定标准，再由用户明确授权；未经授权不操作实机。
