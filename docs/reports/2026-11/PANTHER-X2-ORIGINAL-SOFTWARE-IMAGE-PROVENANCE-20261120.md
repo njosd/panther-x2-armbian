@@ -679,3 +679,52 @@ user_overlays=
 - **已验证：** 镜像内 `boot.scr` 是 CRC 正确的 U-Boot legacy script；payload 与 `boot.cmd` 一致；配置路径指向 Panther X2 DTB。
 - **未验证：** 当年实机的 U-Boot 是否从该 BOOT 分区加载并执行此脚本；运行时是否有脚本外的环境变量或启动命令改变设备选择。
 - 因此，本节结论限定为“原始镜像内脚本的配置和内容”，不声称已证明历史实机执行轨迹。
+
+
+## 23. 原始 6.1.65 Panther X2 Linux DTB 的 GMAC0 静态配置首轮解析（2026-11-20）
+
+用户使用 Python 标准库从原始镜像 BOOT/ext4 分区提取 inode 50 对应的 `dtb/rockchip/rk3566-panther-x2.dtb`，解析 FDT 结构。DTB 文件大小及 FDT totalsize 均为 111351 bytes，FDT version 17。
+
+### 23.1 DTB 身份与 GMAC 节点（已验证）
+
+- 根节点 `model = "Panther X2"`。
+- 根节点 `compatible = "panther,x2", "rockchip,rk3566"`。
+- `/ethernet@fe010000` 状态为 `okay`。
+- GMAC compatible 为 `rockchip,rk3568-gmac`、`snps,dwmac-4.20a`。
+- `reg` 为 `0xfe010000`，长度 `0x10000`。
+- `phy-mode = "rgmii"`，`clock_in_out = "input"`。
+- `tx_delay = 0x30`，`rx_delay = 0x10`。
+- `phy-handle` 指向 phandle `0x4f`；`phy-supply` 指向 `0x18`。
+- `snps,reset-gpio` 当前原始单元值为 `0x4e 0x1 0x1`。
+- `pinctrl-0` 引用 phandle `0x48` 至 `0x4d`。
+- 时钟、复位及 GRF 引用已从节点中读出，但尚未展开其 provider 定义。
+
+### 23.2 Pinctrl 名称的初步映射（已验证引用值；尚未核对引脚配置）
+
+DTB 中 `0x48` 至 `0x4d` 对应的节点名称分别为：
+- `gmac1m0-miim`
+- `gmac1m0-tx-bus2`
+- `gmac1m0-rx-bus2`
+- `gmac1m0-rgmii-clk`
+- `gmac1m0-clkinout`
+- `gmac1m0-rgmii-bus`
+
+这仅说明 GMAC 节点引用了这些命名的 pinctrl 子节点；目前尚未展开每个子节点中的 pinmux/pinconf 单元，不能据名称推断实际引脚编号、复用功能或驱动强度。
+
+### 23.3 PHY 节点输出异常，需复核
+
+解析器显示 `/ethernet@fe010000/mdio/ethernet-phy@0` 的 `reg` 属性为空字节串，而正常 PHY 地址属性通常应包含单元值。当前不能据节点名称 `ethernet-phy@0` 直接认定 PHY 地址为 0，也不能排除输出解析器或属性数据读取存在问题。该字段需通过对原始 DTB 的字节偏移/属性长度复核后再定论。
+
+### 23.4 当前结论与证据边界
+
+**已验证：** 原始 6.1.65 镜像中被 Linux 启动配置选中的 Panther X2 DTB，启用了 `fe010000` GMAC 节点，配置为 RGMII、时钟输入，并具有明确的 TX/RX delay、PHY、reset、clock、GRF 与 pinctrl 引用。
+
+**尚未验证：** phandle provider 的具体内容；pinctrl 对应的实际 pinmux/pinconf；PHY 地址属性的真实值；时钟频率/父时钟/分配速率；reset GPIO 控制器及引脚；该静态 DTB 与历史实机最终运行时 FDT 的关系。
+
+**重要限制：** 本轮没有将 6.1.65 的 compatible 字符串 `rockchip,rk3568-gmac` 视为板型错误，也没有将任何单一 DTB 属性认定为 GMAC TX 故障根因。
+
+### 23.5 下一步
+
+1. 只读展开本 DTB 中 GMAC 使用的 phandle provider：时钟、reset、GRF、GPIO regulator、reset GPIO 及六组 pinctrl 节点。
+2. 复核 PHY 节点 `reg` 的属性长度和值。
+3. 将 6.1.65 GMAC 节点与仓库已归档的 6.1.116 磁盘 DTB、running FDT 做逐项内容对照；不重新采集 6.1.116 实机数据，不重复网络测试。
