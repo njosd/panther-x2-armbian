@@ -190,6 +190,34 @@ Linux `sdmmc_vendor_storage.c` 也逐份检查四份副本的 tag 与 `version2 
 
 在这一步完成前，不把某个副本编号写成“当前有效副本”，也不提供任何写入/修复操作。
 
+### 8.7 已有 eMMC 备份四份副本解析结果（用户实测输出，2026-11-20）
+
+用户在 iMac 上运行 §8.6 只读脚本，输入文件 `eMMC-user-area-20261120.img`，文件大小 `31,268,536,320` bytes，与脚本预期大小一致。解析输出：
+
+| 副本 | tag | version | version2 | next_index | item_num | free_offset | free_size | 结果 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| vendor0 | `0x524b5644` | 2 | 2 | 1 | 1 | 64 | 64440 | 有效 |
+| vendor1 | `0x00000000` | 0 | 0 | 0 | 0 | 0 | 0 | 无效/全零 |
+| vendor2 | `0x00000000` | 0 | 0 | 0 | 0 | 0 | 0 | 无效/全零 |
+| vendor3 | `0x00000000` | 0 | 0 | 0 | 0 | 0 | 0 | 无效/全零 |
+
+vendor0 中 LAN_MAC descriptor：
+- item ID：3（LAN_MAC）
+- offset：0
+- size：12 bytes
+- flags：0
+- bounds check：通过
+- 两个 MAC 的格式检查：均为有效单播地址（非全零、非广播、组播位未置位），且彼此不同；真实地址未输出、未归档。
+
+最高有效版本：2；唯一最高版本副本：vendor0。LAN_MAC payload 存在于该副本中。
+
+**结论（现有备份内容级确认）：** Rockchip 源码所定义的四份副本布局与 Panther X2 当前归档的 eMMC user-area 备份相符；当前备份中只有 vendor0 是有效副本，版本为 2，且包含 LAN_MAC ID 3 的 12-byte 双 MAC 数据。vendor1–vendor3 当前为零数据。此前软件读取到的 LAN_MAC 条目与本次备份解析在结构、ID、长度和地址格式上相互吻合；由于本次脚本刻意不输出地址字节，尚未做 MAC payload 的逐字节明文比对。
+
+**证据边界：** 以上结论只针对该归档备份在备份时刻的内容。它证明备份文件中的副本状态，不额外证明设备当前 eMMC 在备份之后没有变化，也不证明当前 2017.09 U-Boot 二进制的源码版本与参考源码完全一致。没有重新读取实机 eMMC，没有写入或修复 Vendor Storage。
+
+**P2 状态变化：** Vendor Storage 物理布局和备份副本解析这一项已完成。下一项唯一任务转为只读闭环 RK3566 BootROM 对 eMMC/SD 启动源的选择与失败回退条件，以及不修改 eMMC 时 TF 自包含完整启动链是否可行。
+
+
 ### 8.6 已有 eMMC 备份的只读解析脚本
 
 固定备份目录已在此前 eMMC 报告中记录为 `~/Desktop/Panther-X2/08-eMMC-Backup-20261120`，目标文件为 `eMMC-user-area-20261120.img`。下面脚本只读取该镜像文件，不访问块设备、不写文件、不输出真实 MAC 地址。它按固定 U-Boot 结构解析四份副本，并只输出 descriptor 与 MAC 格式检查结果。
