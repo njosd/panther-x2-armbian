@@ -279,21 +279,26 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 ## 4. 当前唯一执行项
 
-**P1 已完成，不重跑。当前只执行 P2 的启动架构只读审计：**
+**P1 已完成，不重跑。P2 已完成本轮公开资料与现有证据的静态架构审计，仍有一个 Panther X2 板级硬件证据缺口。**
 
-1. **当前唯一执行项：** 回读现有 U-Boot SPL/BootROM 日志和 eMMC/TF 原始启动区域证据，结合 RK3566 官方文档及可用源码，明确 BootROM 对 eMMC 有效 IDB 与 SDMMC IDB 的选择/失败回退条件。
-2. 审计 Panther X2 板级启动配置、可用启动按键/strap/恢复信号资料，判断是否存在不改 eMMC 的 SD 优先/强制 SD 启动方式；不将 JTAG 复用脚误当作启动源选择脚。
-3. 形成双介质自包含启动方案与统一 Vendor 数据传递方案，并列出硬件/BootROM 限制及证据缺口。
-4. 完成上述启动架构设计后，再按当前上游维护状态重新评估 BusyBox、iproute2、ethtool 等组件版本；最后设计最小 /init、目录树、串口日志和可复现 CI。全程只读，完成设计后再向用户确认实际构建/写卡授权。
+已完成：
+1. 回读 eMMC/TF 原始启动区域、UART、Vendor Storage 备份和已有报告。
+2. 核对 RK3566 BootROM eMMC/SD 启动顺序、SD Boot/BCB 文档及 SPL/U-Boot 机制边界。
+3. 核对 Panther X2 SARADC0 Loader 按钮、USB OTG、RK809 PWRKEY 软件路径。
+4. 形成 eMMC Vendor Storage 只读解析、校验、FDT 传递和禁止随机 MAC/写回的设计约束。
 
-不得触发构建、写卡或启动实验内核。
+**当前唯一剩余项：** 获取 Panther X2 对应 PCB 版本的原理图/板级资料，确认是否存在安全且不改写 eMMC 的 eMMC-disable / BootROM SD 强制启动条件。若没有可靠证据，TF 独立完整冷启动保持“未证实”，不得清除 eMMC IDB 或照搬 RK3566 EVB2 eMMC_D0 短接方案。
+
+完成该硬件证据闭环后，才冻结双介质启动架构；随后重新评估最新维护中的 BusyBox、iproute2、ethtool 等上游版本，设计最小 /init、目录树、串口日志和独立 CI。实际构建、写卡、启动实验内核仍须另行明确授权。
+
+不得触发构建、写卡、短接或启动实验内核。
 
 ## 5. 主线状态看板
 
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | P1 启动链与 initramfs 只读审计 | 已完成 | 静态可行性验收通过；自制 initramfs 尚未构建/启动 |
-| P2 双介质自包含启动链与最小系统架构设计 | 只读设计中 | 当前只审计 BootROM/SPL 启动选择及 eMMC Vendor 数据只读读取；用户空间组件版本暂不锁定 |
+| P2 双介质自包含启动链与最小系统架构设计 | 静态架构审计阶段性完成 | BootROM/SD Boot、Vendor Storage、Loader 按钮已审计；待 Panther X2 PCB 原理图闭环 eMMC-disable/SD 强制启动条件 |
 | P3 独立 TF 完整启动链 | 待授权 | 必须先确认 SPL/U-Boot proper 均由 TF 提供；eMMC vendor 数据只读传递 |
 | P4 最小系统网络验收 | 待授权 | 需 P3 通过及用户授权 |
 | P5 黄金内核 A/B | 待开始 | P4 后执行 |
