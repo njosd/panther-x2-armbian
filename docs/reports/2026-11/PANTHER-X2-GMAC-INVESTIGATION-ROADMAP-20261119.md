@@ -128,3 +128,17 @@ P1–P4 限定静态源码审计均已结束。尚未定位 TX 故障的 MAC/RGM
 5. 完成一个子项后再切换；同步更新本索引和报告。
 6. 不得把代码差异直接写成根因。
 7. 不得在未经授权时启动故障内核、发包、抓包、写 PHY、重启接口或修改设备配置。
+
+
+## 2026-11-20 P4 触发路径复核更新
+
+在 P4 closeout 后进一步核对 Panther RK3568 正常 pinctrl/regmap 路径：
+- Panther GRF syscon 无 clocks/resets/hwlocks，使用普通 MMIO regmap；
+- 相关 GPIO3 mux=3 合法；
+- RK3568 不命中 RK3506 RMIO 专用分支；
+- 未设置 `rockchip,group-info`，不启用 Trust Firmware group-info SMC 校验；
+- 普通 MMIO regmap read/write callback 正常路径返回 0。
+
+因此 P4 的通用 `if (ret && cnt)` 缺陷仍然存在，但尚未找到 Panther 正常路径中使首 pin `rockchip_set_mux()` 返回 errno 的现实触发源。优先级从低至中降为极低/理论候选；不再追加 P4 测试，不读危险 MMIO/debugfs，不制作补丁。
+
+下一步若继续，重点不再是扩大相同源码审计，而是先评估 P5 物理边界验证的可行性与成本；P5 未经用户明确授权不得执行。
