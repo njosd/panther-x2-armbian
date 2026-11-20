@@ -139,3 +139,64 @@ boot1 与 boot0 已有完整 SHA-256 相同的证据，首轮不必重复 dump b
 - 不为分析而重新刷写 SPL/U-Boot。
 - 优先分析已归档镜像和既有 UART 日志；只有出现明确证据缺口时才安排新的只读采集。
 - 所有后续结论继续区分“已验证”“工作假设”“待验证”。
+
+
+## 8. 已归档镜像首扇区十六进制检查（2026-11-20，用户提供）
+
+用户在 iMac 上对已归档镜像执行只读 `xxd`，本节仅记录实际贴回的输出，不将未读取区域推断为全零。
+
+### 8.1 eMMC boot0 / boot1
+
+- `eMMC-boot0-20261120.img` 起始 512 bytes 全部为 `00`。
+- `eMMC-boot1-20261120.img` 起始 512 bytes 全部为 `00`。
+- 两份 4 MiB 镜像此前已确认 SHA-256 相同。
+
+**结论边界：** 目前只能确认 boot0 和 boot1 的前 512 bytes 为零，不能据此认定两个 4 MiB 分区整体为空。由于两份镜像哈希相同，后续内容扫描优先只分析 boot0 即可，无须重复分析 boot1。
+
+### 8.2 eMMC user area LBA 64（偏移 32768 bytes）
+
+用户贴回的起始 16 bytes：
+
+```text
+52 4b 4e 53 00 00 00 00 80 01 02 00 01 00 00 00
+ R  K  N  S
+```
+
+`52 4b 4e 53` 是 ASCII `RKNS`，对应 Rockchip New IDB 镜像 magic（`NEWIDB_MAGIC_RKNS = 0x534e4b52`，按小端字节显示为 `RKNS`）。公开 Rockchip 镜像工具代码将其作为 IDB 头 magic；Rockchip 启动镜像说明也记录 raw disk image 中 idbloader 位于 sector 64。
+
+因此，**已直接从用户提供的十六进制输出确认：eMMC user area LBA64 处存在 RKNS IDB 头。** 这与此前对 LBA64 整段数据计算出的 JP idbloader 哈希身份相互印证。
+
+本节不尝试解释头部其余数值字段；不同版本的 IDB 头结构及校验字段应以对应工具源码/格式定义逐项核对，不能凭单个 32-bit 数值猜测。
+
+### 8.3 eMMC user area LBA 16384（偏移 8388608 bytes）
+
+用户贴回的前 4 bytes：
+
+```text
+d0 0d fe ed
+```
+
+这是 Flattened Device Tree (FDT) 的标准 magic；后续可见字符串 `FIT Image with ATF/OP-TEE/U-Boot`、`images`、`uboot`、`atf-1`，与 U-Boot FIT 容器内容吻合。
+
+因此，**已直接从用户提供的十六进制输出确认：eMMC user area LBA16384 处是 FIT/FDT 格式的 U-Boot 镜像头部。** 这与此前该区域完整镜像哈希匹配 Ophub Panther X2 `u-boot.itb` 的结果相互印证。
+
+### 8.4 本次十六进制检查更新后的介质布局
+
+| 位置 | 本次可见特征 | 当前结论 |
+|---|---|---|
+| eMMC boot0 offset 0 | 512 bytes 全零 | 仅确认首扇区为零 |
+| eMMC boot1 offset 0 | 512 bytes 全零 | 仅确认首扇区为零 |
+| eMMC user area LBA64 | `RKNS` | Rockchip IDB header |
+| eMMC user area LBA16384 | `d0 0d fe ed` + FIT 描述字符串 | U-Boot FIT header/container |
+
+该布局进一步支持“启动数据放在 eMMC user area 的 Rockchip 标准偏移，而不是 boot0/boot1 起始处”的判断。它与 EXT_CSD `PARTITION_CONFIG=0x00` 一致，但仍不能仅凭静态镜像断言 BootROM 每次上电实际读取了哪一块区域。既有 U-Boot SRAM source 现场读数（来源值 `0x02`，对应 eMMC）是独立的启动来源证据，应与本节镜像结构证据合并判断。
+
+### 8.5 参考格式资料
+
+- Barebox Rockchip IDB 工具头定义及 `NEWIDB_MAGIC`：https://lore.barebox.org/barebox/20211006142254.1751864-1-s.hauer%40pengutronix.de/t/
+- Barebox 对 RKNS magic 的说明及支持代码：https://lists.infradead.org/pipermail/barebox/2025-July/051907.html
+- Rockchip raw disk image 中 idbloader（sector 64）及 U-Boot FIT（sector 16384）布局说明：https://rock-chip.com/tools/firmware
+
+### 8.6 下一步（不重复首扇区读取）
+
+首轮十六进制检查已完成。下一步应直接做一次针对 boot0 全 4 MiB 的只读内容分布/非零区域扫描，并抽取字符串；不再重复读取 boot1。目标是判断 boot0 是“仅首扇区为零、后部另有数据”还是“整个分区均为零”，并识别是否存在可解析的启动/厂商数据。扫描只针对 iMac 上已归档的镜像文件，不接触实际 eMMC。
