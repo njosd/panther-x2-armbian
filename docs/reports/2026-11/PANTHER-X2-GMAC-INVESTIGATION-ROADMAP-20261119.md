@@ -260,3 +260,22 @@ D. 对照两条黄金线与两条故障线的 built-in / module 分布、kernel 
 - 源码差异只能提出候选，最终是否有效必须由用户授权后的实机 A/B 结果决定。
 
 **路线说明：** 本项目当前不安排 P5 波形/硬件测量。旧阶段报告中的 P5 仅作为历史方案记录，不再作为当前执行路线。当前以软件资产闭包、版本差异和受控替换为唯一推进方向。
+
+
+## 2026-11-20：6.1.174 官方包只读审计工作流已建立
+
+用户同意：只要对四版本差异比较有意义即可，要求不得偏离 GMAC TX 根因调查路线。
+
+已新增 `.github/workflows/audit-rk35xx-6.1.174-kernel.yml`，commit `48256669797c4be88d9cf1390fb8165e4980a49a`。
+
+工作流约束与范围：
+- 仅 `workflow_dispatch` 手动触发；`permissions: contents: read`；Ubuntu GitHub runner；不访问 Panther X2、不读取用户本地数据。
+- 固定下载 Ophub `kernel_rk35xx` Release 的 `6.1.174.tar.gz`，asset size 135,267,299 bytes，SHA256 `49e2e81132b249b2b1e55fa18fa1fa002ddf9c91dc433cd672f914ab17af668a`；下载后重新校验 size/hash 和 gzip 完整性。
+- 读取外层发布包清单和 `sha256sums`，枚举全部内层 tar.gz/tgz，逐一核验发布清单中的 SHA256，生成完整成员索引。
+- 从内层包提取/读取内核配置关键项、modules.builtin 中 GMAC/PHY 内建路径、GMAC/PHY 相关模块路径，以及 Image、DTB、modules.dep/modules.order 等关键文件的存在性和摘要。
+- 不安装、不执行、不刷写内核/模块/DTB/initramfs；产物作为 Actions artifact 保存 30 天。
+- 报告必须区分官方发布包内容与历史实机安装来源；本工作流不能证明历史现场确实安装了该包，也不能单独证明源码 commit 到二进制的构建关系。
+
+**状态：工作流文件已提交，尚未运行。** 当前连接的 GitHub 工具没有 workflow_dispatch 写入/触发动作，因此不能声称已经开始或完成审计。需要在 GitHub 仓库 Actions 页面手动运行 `Audit Ophub RK35xx 6.1.174 kernel package`，随后读取 run/artifact 结果继续分析。不得为了触发而把 workflow 改成 push 自动运行。
+
+后续只围绕本轮产物补齐 6.1.174 内核套件闭包，再补齐 6.1.65 原始 IMG rootfs 的 modules/config 索引；不重复 6.12.81 已完成的 built-in 驱动配置审计，不返回已关闭 P1–P4 源码支线。
