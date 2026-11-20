@@ -217,3 +217,33 @@ gzip 完整性通过仅证明 gzip 数据流可完整解压，不证明镜像内
 - 已验证：文件存在；大小、SHA256、LDR 文件头、RK3566 DDR/USB plug 字符串及 DDR V1.09 版本字符串均来自用户本机输出。
 - 用户确认：原始刷机流程要求先刷入此文件。
 - 尚未验证：内部各组件的精确偏移/长度、是否与原始 eMMC IDB 内容一致、是否包含/对应 U-Boot proper、是否与原始 Armbian 6.1.65 镜像内启动组件配套。
+
+
+## 10. U 盘内三份 Rockchip Loader 文件的对比（用户 iMac 输出，2026-11-20）
+
+用户在整个外置 U 盘 `/Volumes/Untitled` 递归查找后，找到三份文件。前两份初始固定目录检查未找到，是因为文件实际位于子目录 `黑豹x2/armbian/bootloader/`。
+
+| 文件 | 路径 | 大小 | SHA256 | DDR 字符串 | Boot1 构建日期字符串 |
+|---|---|---:|---|---|---|
+| `MiniLoaderAll.bin` | `黑豹x2/MiniLoaderAll.bin` | 442 KiB | `ab62386a8868b01516b560451082fbdb6342b16e850a0622577b538dd2b10d39` | `DDR Version V1.09 20210630` | `Jun 18 2021` |
+| `rk356x-MiniLoaderAll.bin` | `黑豹x2/armbian/bootloader/rk356x-MiniLoaderAll.bin` | 444 KiB | `1cdd418032195210f191445ed96e2da5ea83d2cfe880c912ebec635839d76542` | `DDR Version V1.10 20210810` | `Sep 13 2021` |
+| `rk356x_spl_loader_ddr1056_v1.10.111.bin` | `黑豹x2/armbian/bootloader/rk356x_spl_loader_ddr1056_v1.10.111.bin` | 442 KiB | `d7cfd619870cebe5a69e365796709d5ba1fc0294a84ae63357a9d189074dc100` | `DDR Version V1.10 20210810` | `Dec 9 2021` |
+
+三份文件的前四字节均为 ASCII `LDR `，文件头格式相似；字符串扫描均显示 LPDDR2/3/4/4X 支持相关字符串、DDR 配置代码提示和 MMC Boot1 相关字符串。
+
+### 10.1 当前结论
+
+现有证据支持三者属于 Rockchip RK356x Loader/SPL 下载启动组件这一相同大类，承担相近的早期启动初始化职责；它们不是同一文件，版本和构建时间有差异。
+
+特别是后两份文件均出现 `DDR Version V1.10 20210810`，但 Boot1 构建日期分别为 2021-09-13 和 2021-12-09。这表明仅凭 DDR 版本不能认定完整 Loader 内容相同。
+
+### 10.2 尚不能得出的结论
+
+- 不能仅凭文件名断言三个文件可互换或用于同一刷写命令。
+- `strings` 只能提供内部字符串线索，不能完整证明 SPL、USB plug、Boot1 等组件的精确组成、偏移、长度或代码等价性。
+- 不能据此认定其中任意一个就是当前机器运行的 U-Boot proper。
+- 仍需解析 Rockchip LDR 镜像内部组件表，并与历史 eMMC LBA64 备份及已知启动链组件做针对性比对。
+
+### 10.3 下一步建议
+
+只读解析三份 LDR 镜像内部组件布局，记录各组件偏移、长度、校验信息及可识别版本；再对共同组件做逐段哈希/二进制比较。先不执行刷写或设备写入。
