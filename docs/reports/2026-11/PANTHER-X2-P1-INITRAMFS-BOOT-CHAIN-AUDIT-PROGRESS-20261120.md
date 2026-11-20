@@ -197,6 +197,60 @@ name=DF4032
 
 6.1.65 原始镜像 BOOT 分区中存在 uInitrd、Image 和 Panther X2 DTB，但本轮不提前加入测试矩阵；按 P5 规则，只有 6.1.116 对照出现无法解释的结果时再考虑 6.1.65。
 
+
+## 4.1 6.1.116 正常基线资产匹配边界（2026-11-20）
+
+本节只回读既有 6.1.116 实机实物归档与哈希，不要求用户重新采集，也不下载/解包新的大型资产。
+
+### 4.1.1 已确认的配套启动资产
+
+| 资产 | 6.1.116 已有证据 | SHA-256 / 限制 |
+|---|---|---|
+| Kernel Image | 实机 /boot/Image 与 vmlinuz-6.1.116-ophub 为同一文件；运行内核 release 为 6.1.116-ophub | bbc2ffc6e728f3a793151c225efef0ccac6b9ebb0cfed6907cd93062fd3a31d6 |
+| initrd 原始文件 | initrd.img-6.1.116-ophub，约 13 MiB | 6ab5441f725eb111c5b7b60a7bf86d278b899ac4ae87106968628af9c925f2c2 |
+| U-Boot 使用的 initrd 文件 | /boot/uInitrd 符号链接指向 uInitrd-6.1.116-ophub，约 13 MiB | 既有记录未保存该包装文件自身 SHA-256；不能拿 initrd.img 的哈希代替 |
+| Linux DTB | rockchip/rk3566-panther-x2.dtb；归档磁盘 DTB 已保留 | 5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82 |
+| 运行时 FDT | /sys/firmware/fdt 已归档 | f6d95eb21889f57372ace6292bf82b25e1c3fca52da662b60cb1cec832aa9e32；与磁盘 DTB 是不同对象，不以 hash 不同判错 |
+| boot.cmd | 已归档 | 4896dde2b99bebbb34b2ed2f837f30fa1a5b3ad14b80dd2da391effa94d37d0a |
+| boot.scr | 已归档 | 0cda8b456b409213ed2b689838b3b19c9adf40d141feaf251b5161e18e36311a |
+| armbianEnv.txt | 已归档，选择 Panther X2 DTB、ext4 rootfs、ttyS02 1.5M 串口 | 4571b474cc7ee78d6612fa4c364b5d88bf3ec39879a5a512332e2ee1ae940e97 |
+
+6.1.116 专用发布归档也已保留并校验：
+- boot-6.1.116-ophub.tar.gz SHA-256：68e991e78c19ecaf96d766a058b9b1149a57efcef5a729fd971edf47808ed6d2
+- dtb-rockchip-6.1.116-ophub.tar.gz SHA-256：2c60c79d67fee948689fa3ac17cd834e33553f1c65f03bf852529372ae37d5e5
+- modules-6.1.116-ophub.tar.gz SHA-256：d8056b6abe03cdee392e56e4d5cf20ccfd5d1f577d579fbf29923cfba6a1b529
+
+### 4.1.2 与 6.12.81 当前启动路径的共用部分
+
+6.1.116 与 6.12.81 的 boot.cmd、boot.scr 哈希相同。两者脚本均按当前启动设备加载 armbianEnv.txt、uInitrd、Image、对应 DTB，最后执行 booti。
+
+因此，已有脚本逻辑足以作为“同一加载流程”的参考。6.1.116 的 Kernel、DTB、initrd 必须作为一套匹配资产使用；不能只把 6.1.116 Image 与 6.12.81 的 modules 或 DTB 混用。
+
+### 4.1.3 明确的限制：不是历史 U-Boot 完全复刻
+
+6.1.116 备份归档没有包含当年实际执行的 idbloader.img / u-boot.itb 二进制。当前已知的 U-Boot proper 是 JP-TvBox u-boot.itb（TF LBA 16384，SHA-256 a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce），而历史 6.1.116 启动时的 U-Boot 二进制身份没有闭环。
+
+所以后续 6.1.116 A/B 的准确表述应是：**在当前已验证的 eMMC SPL + TF JP-TvBox U-Boot proper 启动固件下，使用 6.1.116 自身匹配的 Kernel + Panther X2 DTB + initramfs，与 6.12.81 做共用启动固件的受控对照。** 不能称为“完整复刻 6.1.116 历史启动链”。
+
+### 4.1.4 对最小 RAM initramfs 的约束
+
+- 6.1.116 的旧 uInitrd 是发行版 initramfs 资产，不应直接作为本项目的最小 initramfs；它的内容和依赖面远大于本轮网络验证所需。
+- 后续应由独立构建流程产生同一份最小 ARM64 gzip cpio initramfs，并使用当前 U-Boot 已验证接受的 legacy uInitrd 包装形式；跨 6.12.81 / 6.1.116 对照时尽量复用同一份 initramfs。
+- 6.1.116 的运行内核配置已从硬件归档抽取，并与 Ophub 官方 general/config-6.1 的 7,677 个符号全量比较，差异为 0。该配置闭环不等同于已在当前 U-Boot 下实测启动“自制最小 initramfs”。
+- 第一轮是否能完全不带外置模块，仍应依据 6.1.116 / 6.12.81 两版内核实际 built-in 配置逐项确认；不从“系统正常运行”或模块包存在与否推断。
+
+### 4.1.5 本项结论
+
+| 核验项 | 状态 |
+|---|---|
+| 6.1.116 Kernel / Panther X2 DTB / initrd 资产存在 | 已验证 |
+| Kernel Image 与运行 release 对应 | 已验证 |
+| 6.1.116 boot 脚本与 6.12.81 相同 | 已验证（SHA-256 相同） |
+| 6.1.116 历史 U-Boot 二进制身份 | 未闭环 |
+| 6.1.116 uInitrd 包装文件自身 SHA-256 | 未记录 |
+| 自制最小 initramfs 在 6.1.116 下启动 | 未验证，留待后续授权阶段 |
+| 自制最小 initramfs 在 6.12.81 下启动 | 未验证，留待后续授权阶段 |
+
 ## 5. 本轮取得的额外审计材料
 
 为复核此前 6.12.81 双资产审计结果，本轮从 GitHub Actions 下载既有 artifact：
