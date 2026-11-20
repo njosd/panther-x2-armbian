@@ -1264,3 +1264,57 @@ Radxa `c559871` 的 `rk3568-u-boot.dtsi` 将 `&pinctrl` 标记为 `u-boot,dm-pre
 4. 仅在确认当前 SPL 源码及设备树之后，评估是否吸收 v1.14 pinctrl/MMC 改进；保留原有启动结构，不以 ROCK 3C DTS 替代 Panther X2 板级描述。
 
 当前只读审查；未修改代码、未构建、未写卡、未做新实机测试。
+
+
+## 26. Panther X2 专用 U-Boot 构建配方：SPL 配置证据与独立启动能力边界（2026-11-20）
+
+本轮继续追查原版 SPL 来源时，重新读取公开 Panther X2 专用 NixOS U-Boot 配方及其完整补丁。该证据比把 ROCK 3C DTS 当作 Panther X2 板级配置更直接，但仍不能替代原厂 2023 二进制的精确构建溯源。
+
+### 26.1 已确认的 Panther X2 专用构建配方
+
+固定配方：`5aaee9/nixos-aarch64@02b7d0d450b906834157132fe58f11acd00e8124/packages/panther-x2-uboot/default.nix`。
+
+其明确指定：
+- `defconfig = panther-x2-rk3566_defconfig`；
+- `ROCKCHIP_TPL = rk3566_ddr_1056MHz_v1.10.bin`；
+- `BL31 = rk3568_bl31_v1.29.elf`；
+- 产物包括 `spl/u-boot-spl.bin`、`idbloader.img`、`u-boot.itb`；
+- 应用 `316-rockchip-rk3566-Add-support-for-panther-x2.patch`。
+
+这证明存在一个明确面向 Panther X2 的可复现 U-Boot 构建方案，且 DDR v1.10/BL31 v1.29 配套不是从 JP-TvBox 类比推断，而是 Panther X2 专用构建配方明示。
+
+### 26.2 专用 defconfig 补丁的关键内容
+
+补丁新增的 `panther-x2-rk3566_defconfig` 关键项：
+- `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y`；
+- `CONFIG_SPL_MMC=y`、`CONFIG_SPL_OF_CONTROL=y`、`CONFIG_SPL_LOAD_FIT=y`；
+- `CONFIG_SPL_ATF=y`；
+- `CONFIG_DEFAULT_DEVICE_TREE="rockchip/rk3568-evb1-v10"`；
+- `CONFIG_TARGET_EVB_RK3568=y`；
+- 同时启用 MMC DW、SDHCI Rockchip、RK8xx PMIC、USB DWC3/XHCI 等驱动。
+
+**重要风险/边界：** 该 defconfig 虽以 Panther X2 命名，但其目标选择和默认设备树仍指向 RK3568 EVB1 V10，而非 `rk3566-panther-x2` 专用 control FDT。补丁本身还含 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y`，这属于需要结合该 U-Boot 分支 `spl_boot_device()` / `board_spl_was_booted_from()` 路径理解的行为开关，不能仅凭配置名推断它会让 TF/eMMC 各自自包含启动。
+
+本轮已取得补丁完整内容；补丁实际仅新增 defconfig（92 行）和 `trust.ini`，未新增 Panther X2 board C 源码、SPL `board_boot_order()` 实现或 Panther X2 专用 U-Boot DTS。故该配方目前只能证明“有 Panther X2 命名的构建目标和 SPL/DDR/BL31 组合”，不能证明其已实现两介质独立启动。
+
+### 26.3 对之前 Radxa 双介质顺序发现的限定
+
+此前 §25 发现 Radxa `rk3568-u-boot.dtsi` 中有 `u-boot,spl-boot-order = &sdmmc0, &sdhci, ...`。该属性是通用/家族 DTS 中的 SPL loader 顺序配置；但 Panther X2 专用 NixOS defconfig 并未采用 Radxa ROCK 3C DTS，而是默认 EVB1 V10 DT。Armbian 的 Panther X2 board config 采用 `rock-3c-rk3566_defconfig` 是另一条构建路线，不能与 NixOS 专用 defconfig 合并成同一套固件。
+
+此外，`u-boot,spl-boot-order` 仅决定已运行 SPL 加载 proper 的候选顺序，不决定 BootROM 从哪种介质加载 SPL。因此 §25 的参考价值仍成立，但不得据此声称 Panther X2 已具备完整 TF/eMMC 自包含启动。
+
+### 26.4 对用户目标的当前判断
+
+- **已验证：** Panther X2 专用 U-Boot 配方存在，且显式产出 SPL、idbloader 和 proper；明确配套 DDR v1.10 与 BL31 v1.29。
+- **已验证：** 该专用 defconfig 启用 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM`，但默认 DT 仍为 RK3568 EVB1 V10；补丁没有自定义 board boot order 或 Panther X2 SPL DTS。
+- **未验证：** 该配方在真实 Panther X2 上是否能从 TF/eMMC 分别启动；`BACK_TO_BROM` 对当前目标的实际影响；原厂 2023 SPL 与此配方之间的源码/配置继承关系。
+- **结论：** 现有公开 Panther X2 专用构建配方不能证明“TF 启动必用 TF SPL、eMMC 启动必用 eMMC SPL”。但它提供了更合适的后续源码起点，优先级高于直接照搬 ROCK 3C DTS。
+
+### 26.5 下一步只读工作
+
+1. 固定该配方所用 U-Boot source 的实际 fetch 来源/版本（检查 buildUBoot 默认源和 Nix flake lock），确定它基于哪个 U-Boot commit，而不是只看 Nix 配方 commit。
+2. 追踪 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM` 在该源版本中对 `spl_boot_device()` 和 BROM source SRAM 的实际影响。
+3. 检查该专用 defconfig 是否通过 `CONFIG_DEFAULT_DEVICE_TREE` 最终使用 EVB DTS，是否有补丁/构建参数在后续覆盖；重点看最终 SPL DTB 中 SD/eMMC 节点和 `/chosen`。
+4. 与原版 2023 SPL 的 E25 FDT、已知 SPL 日志及构建日期作来源差分。若无法精确追溯原二进制，就明确保留“来源未知”，不把候选构建配方冒充原版源码。
+
+不构建、不刷写、不要求用户重跑已完成测试。
