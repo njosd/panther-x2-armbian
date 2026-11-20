@@ -44,7 +44,7 @@
 
 ## 3. 总体分层
 
-### Layer 0 — 只读资产与启动链核验（当前阶段）
+### Layer 0 — 只读资产与启动链核验（已完成）
 
 只检查已有仓库、Actions Artifact 和已归档资产，回答：
 
@@ -55,11 +55,11 @@
 - 6.1.116 正常基线中的 Kernel Image、DTB、boot 文件是否能以相同启动链做对照；不跨版本混用模块。
 - 8GB 卡的分区/文件系统布局需服从已核实的 U-Boot 读取能力。当前不预设 FAT 或 EXT4，不预设写入扇区布局。
 
-本层结束条件：形成资产清单、依赖关系、哈希、已知/未知项和安全写卡方案。未结束前不构建、不写卡。
+本层结束条件已满足：资产清单、依赖关系、哈希、已知/未知项和安全写卡静态候选均已归档于 P1 报告。结论为可复用当前 eMMC SPL + TF JP-TvBox proper，从 SD/TF ext4 第一分区加载 legacy gzip uInitrd、Kernel 和 Panther X2 DTB。P1 不代表自制 initramfs 已构建或启动。
 
-### Layer 1 — 最小 RAM rootfs / initramfs
+### Layer 1 — 最小 RAM rootfs / initramfs（当前只做只读设计；构建待授权）
 
-构建一个 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
+当前先锁定上游组件版本、依赖、许可证、工具链与可复现构建方式；未经用户明确授权，不触发 CI、不下载/编译组件、不生成 initramfs 产物。授权后再构建 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
 
 - `/init` 和必要目录结构；
 - BusyBox（优先静态构建，减少动态库依赖）；
@@ -176,15 +176,17 @@
 | 用户确认独立 8GB TF 卡用于实验 | 已确认 |
 | 现有完整 Armbian workflow 与最小 initramfs 路线区分 | 已完成只读审计 |
 | 6.12.81 与 stable/6.18.y 路线区分 | 已确认 |
-| initramfs 所需内核配置与压缩格式核验 | 待做 |
-| U-Boot 对目标 TF 分区/加载命令核验 | 待做 |
-| 最小 ARM64 rootfs 工具与依赖锁定 | 待做 |
-| 独立 CI workflow 设计/审查 | 待做 |
+| P1：initramfs/gzip 内核能力与 U-Boot ext4/legacy uInitrd 加载能力 | 已完成静态验收；详见 P1 报告 |
+| P1：6.1.116 资产匹配及历史 eMMC 启动边界 | 已完成静态核对；历史 U-Boot 实际执行轨迹仍未闭环但不阻塞当前固件下的受控对照 |
+| 8GB TF 卡 GPT/ext4 静态布局 | 已形成候选；未对实体卡核验或写入 |
+| BusyBox / iproute2 / ethtool 上游版本与依赖锁定 | P2 只读设计待做 |
+| 最小 /init 与目录树设计 | P2 只读设计待做 |
+| 独立 CI workflow 设计/审查 | P2 只读设计待做 |
 | 构建 initramfs | 未授权、未执行 |
 | 写入 8GB TF 卡 | 未授权、未执行 |
 | Panther X2 实机启动与网络测试 | 未授权、未执行 |
 
 ## 8. 下一项唯一工作
 
-继续 Layer 0：只读核对 6.12.81 内核配置中 initramfs 支持、实际 boot 文件布局，以及现有 Panther X2 U-Boot/启动脚本的加载能力。先形成“最小 initramfs 能否直接复用当前启动链”的明确结论，再决定构建方式。
+进入 P2 只读设计：锁定 BusyBox、iproute2、ethtool 与广播/UDP 测试工具的上游来源、稳定版本/commit、依赖和许可证；设计最小 /init、目录树和独立可复现 CI workflow。此阶段不触发构建、不生成产物、不写卡、不启动实验内核。完成设计后再向用户确认是否授权实际 CI 构建。
 
