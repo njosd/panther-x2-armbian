@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P4：Rockchip pinctrl 首 pin 错误处理静态审计收尾（2026-11-20，P4 正式关闭）](./PANTHER-X2-P4-PINCTRL-FIRST-PIN-ERROR-CLOSEOUT-20261120.md)：确认 6.1.174-rk35xx 与 6.12.81-rk35xx 在首 pin mux 写入失败时可能吞掉错误并跳过同组后续 pin；Panther GMAC1 M0 group 顺序使该机制理论上可能影响 TXD/TXCLK。没有现场 regmap 错误证据，不能认定根因。全程只读，未操作设备。P1–P4 静态审计结束，P5 需另行决策和授权。
+
 - [P3：STMMAC link-up / probe handoff 收尾（2026-11-20，P3 正式关闭）](./PANTHER-X2-P3-STMMAC-LINKUP-PROBE-CLOSEOUT-20261120.md)：精确比较 link-up 与 probe，确认 SerDes 分支不命中 Panther RGMII；发现 6.1.174-rk35xx 编译启用的 RTL8211F LED fixup，但它只写 LED 扩展页且不属于 6.12 共同差异。未发现可解释普通 TX 故障的有效共同软件差异。下一步转 P4 pinctrl 首 pin 错误处理只读审计。
 
 - [P3：实际 RK35xx BSP 的 STMMAC core TX 路径复核（2026-11-20）](./PANTHER-X2-P3-RK35XX-STMMAC-CORE-TX-PATH-REVIEW-20261120.md)：以高置信度 c2f148d 纠正普通 stable 源码端点，复核普通 TX 提交/回收、TSO、DMA init、open 与 hw_setup；普通 TX 主路径未发现有效新增差异，link-up/probe handoff 仍待精确比较。全程只读。
