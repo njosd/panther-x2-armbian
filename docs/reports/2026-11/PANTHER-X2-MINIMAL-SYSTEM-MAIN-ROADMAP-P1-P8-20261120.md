@@ -397,3 +397,13 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 推荐设计：保留动态 bootdev；为板载 LAN_MAC 增加独立、只读、显式指定 eMMC mmc0 的 Vendor Storage 读取入口；不复用通用 Vendor 全局缓存、不写回、不生成随机 MAC；继续使用原有 env → FDT fixup 传递机制。
 - 当前为静态设计结论。尚需核对拟用 U-Boot 分支的 SPL ATAGS 产生逻辑、proper fallback/配置覆盖及专用 eMMC read-only API 的代码落点；未授权前不写补丁、不构建、不写卡。
 - 详见 P2 报告 §20。
+
+
+## P2 补充核对：SPL 成功 loader 与 ATAGS 的语义边界（2026-11-20）
+
+- 通用 SPL 在某 loader 成功加载 proper 后，将该 loader 编号写入 `spl_image->boot_device`；Rockchip SPL 再通过 `atags_set_bootdev_by_spl_bootdevice()` 写 ATAGS。MMC1→EMMC、MMC2→SD。因此 ATAGS 在此路径表达 SPL 实际成功加载 proper 的介质，而不是 BootROM 最初加载 SPL 的介质。
+- 两份候选源码默认 `spl_boot_device()` 返回 MMC1；默认 `board_boot_order()` 只尝试 MMC1/eMMC。当前实机已见 MMC2 成功加载 proper，说明实际 SPL 有不同的板级 boot order/loader 路径，需只读核对其现有源码，不重新实机测试。
+- Rockchip 8af2535 proper 选择顺序为编译期 `CONFIG_ROCKCHIP_BOOTDEV` > ATAGS > scan；Radxa c559871 则是 ATAGS > scan（另先处理 SCSI/NVMe），两者不能混为一谈。
+- BROM source tag helper 与 SPL successful-loader ATAGS 是不同语义；本项目要保持 proper 与实际成功 loader 一致，应沿用 successful-loader 语义。
+- Vendor 专用读取不得临时修改全局 devnum 后复用通用 Vendor API；必须独立 eMMC mmc0 descriptor + 独立只读解析上下文，避免全局缓存污染和意外写回。
+- 详见 P2 报告 §21。当前仍未写补丁/构建/写卡。
