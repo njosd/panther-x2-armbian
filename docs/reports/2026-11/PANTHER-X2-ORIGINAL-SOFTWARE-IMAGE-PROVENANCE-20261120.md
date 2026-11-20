@@ -778,3 +778,43 @@ GMAC的 `pinctrl-0` 指向以下六个节点，节点中的 `rockchip,pins` 每�
 **尚未验证：** pin config phandle `0xb0/0xb3/0xb4` 的电气参数；CRU clock ID `0x1c` 对应定义及GMAC时钟分配；reset控制器ID的语义；GPIO line的SoC命名和flags语义。
 
 下一步仅展开上述pin config和clock provider定义，然后再进行6.1.65与已归档6.1.116 DTB/running-FDT的差异对照。
+
+
+## 25. GMAC pin electrical configuration 与 clock-parent 引用（2026-11-20）
+
+### 25.1 Pinctrl 电气配置（已验证 DTB 原始值）
+
+本轮展开 phandle `0xb0`、`0xb3`、`0xb4`：
+- `0xb0` = `pcfg-pull-none`，包含 `bias-disable`。
+- `0xb3` = `pcfg-pull-none-drv-level-2`，包含 `bias-disable`、`drive-strength = 2`。
+- `0xb4` = `pcfg-pull-none-drv-level-1`，包含 `bias-disable`、`drive-strength = 1`。
+
+按 `rockchip,pins` 每组四个 cell（bank,pin,mux,config-phandle）解读，GMAC pinctrl 引用的电气配置为：
+
+| 引脚组 | 引脚 | 配置 |
+|---|---|---|
+| gmac1m0-miim | GPIO3_20、GPIO3_21 | pull-none |
+| gmac1m0-tx-bus2 | GPIO3_13、GPIO3_14 | drive level 2；GPIO3_15 为 pull-none |
+| gmac1m0-rx-bus2 | GPIO3_9、GPIO3_10、GPIO3_11 | pull-none |
+| gmac1m0-rgmii-clk | GPIO3_7 | pull-none；GPIO3_6 | drive level 1 |
+| gmac1m0-clkinout | GPIO3_16 | pull-none |
+| gmac1m0-rgmii-bus | GPIO3_4、GPIO3_5 | pull-none；GPIO3_2、GPIO3_3 | drive level 2 |
+
+以上记录的是DTB的配置引用和值。尚未将 Rockchip drive-strength 数值换算成实际电流，也未结合板级走线、电压域、芯片手册和波形判断配置是否适当。
+
+### 25.2 时钟父节点引用（部分已验证，尚待解析）
+
+- 上游固定时钟节点 `/xin24m` 的 `clock-frequency = 0x016e3600`，即24MHz。
+- `0x1c` 指向 `/clock-controller@fdd00000`，compatible 为 `rockchip,rk3568-pmucru`。
+- `0x0e` 指向 `/clock-controller@fdd20000`，compatible 为 `rockchip,rk3568-cru`。
+- GMAC的 `assigned-clocks` 原始cell序列为 `(0x0e,0x189)、(0x0e,0x187)、(0x0e,0x186)`。
+- GMAC的 `assigned-clock-parents` 原始cell序列为 `0x0e,0x187,0x0e,0x186,0x47`。其中最后的 `0x47` 尚未解析；在确认其provider及 `#clock-cells` 前，不对该属性做最终分组解释。
+- CRU自身另有assigned clock/parent/rate配置，需与GMAC节点的分配分别分析，不能混为一组。
+
+### 25.3 阶段结论
+
+**已验证：** GMAC TX和RGMII部分引脚使用了drive level 1/2，其余指定为pull-none；24MHz输入时钟及PMUCRU/CRU节点身份已确认。
+
+**尚未验证：** drive-strength数值的物理含义与板级适配性；clock parent phandle `0x47`；GMAC相关clock ID在该内核版本中的实际定义、父时钟和运行频率。
+
+**故障归因：** 本轮没有证据足以将上述配置认定为TX故障根因。
