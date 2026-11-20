@@ -728,3 +728,53 @@ DTB 中 `0x48` 至 `0x4d` 对应的节点名称分别为：
 1. 只读展开本 DTB 中 GMAC 使用的 phandle provider：时钟、reset、GRF、GPIO regulator、reset GPIO 及六组 pinctrl 节点。
 2. 复核 PHY 节点 `reg` 的属性长度和值。
 3. 将 6.1.65 GMAC 节点与仓库已归档的 6.1.116 磁盘 DTB、running FDT 做逐项内容对照；不重新采集 6.1.116 实机数据，不重复网络测试。
+
+
+## 24. GMAC phandle provider 与 pinctrl 首轮展开（2026-11-20）
+
+用户对同一原始 6.1.65 Panther X2 Linux DTB 继续解析 phandle provider，得到以下结果。
+
+### 24.1 PHY 地址属性复核（已验证，纠正第23节中的待核实项）
+
+`/ethernet@fe010000/mdio/ethernet-phy@0/reg` 长度为4，原始字节为 `00000000`，即一个值为0的32-bit cell。PHY 地址为0。第23节首轮输出将全零属性格式化成空字符串，是显示函数问题，不是DTB属性缺失。PHY地址疑点关闭。
+
+### 24.2 GPIO reset 引用（已验证引用关系）
+
+- GMAC的 `snps,reset-gpio` 引用 phandle `0x4e`。
+- `0x4e` 对应 `/pinctrl/gpio@fe760000`。
+- 该节点 compatible 为 `rockchip,gpio-bank`，声明 `gpio-controller`，`#gpio-cells=2`。
+- 原始 reset GPIO cells 为 `0x4e 0x1 0x1`，即 GPIO provider phandle、line index 1、flags 1。
+
+当前仅确认 DTB 中的引用和值；GPIO bank 的命名、line index 对应的 SoC GPIO 名称及 flags 的有效电平解释，仍需结合绑定定义和对应内核实现核对。
+
+### 24.3 Pinctrl 引用对应的 bank/pin/mux（已验证原始单元值）
+
+GMAC的 `pinctrl-0` 指向以下六个节点，节点中的 `rockchip,pins` 每组四个 cell，格式按DTB原始顺序记录为 bank、pin、mux、config-phandle：
+
+| pin group | 原始 bank/pin/mux |
+|---|---|
+| gmac1m0-miim | (3,20,3), (3,21,3) |
+| gmac1m0-tx-bus2 | (3,13,3), (3,14,3), (3,15,3) |
+| gmac1m0-rx-bus2 | (3,9,3), (3,10,3), (3,11,3) |
+| gmac1m0-rgmii-clk | (3,7,3), (3,6,3) |
+| gmac1m0-clkinout | (3,16,3) |
+| gmac1m0-rgmii-bus | (3,4,3), (3,5,3), (3,2,3), (3,3,3) |
+
+这些是DTB中实际引用的bank/pin/mux单元值；尚未解释config phandle（`0xb0`、`0xb3`、`0xb4`）对应的电气配置，因此不能据此认定驱动强度、上拉/下拉或电气时序合适。
+
+### 24.4 时钟与GRF provider
+
+- 时钟 phandle `0x0e` 对应 `/clock-controller@fdd20000`，compatible 为 `rockchip,rk3568-cru`。
+- CRU节点声明 `#clock-cells=1`、`#reset-cells=1`，并引用 GRF phandle `0x1d`。
+- GRF phandle `0x1d` 对应 `/syscon@fdc60000`，compatible 包含 `rockchip,rk3568-grf`、`syscon`、`simple-mfd`。
+- GMAC另有 `phy-supply` phandle `0x18`，指向 PMIC regulator `SWITCH_REG1`，其 `regulator-name` 为 `vcc_3v3`。
+
+尚未解析CRU内部的时钟ID、时钟父子关系与速率，也未展开reset ID及GRF具体寄存器字段。
+
+### 24.5 当前证据边界与下一步
+
+**已验证：** PHY地址0；reset GPIO provider引用；六组pinctrl的bank/pin/mux；CRU、GRF及3.3V regulator的phandle目标。
+
+**尚未验证：** pin config phandle `0xb0/0xb3/0xb4` 的电气参数；CRU clock ID `0x1c` 对应定义及GMAC时钟分配；reset控制器ID的语义；GPIO line的SoC命名和flags语义。
+
+下一步仅展开上述pin config和clock provider定义，然后再进行6.1.65与已归档6.1.116 DTB/running-FDT的差异对照。
