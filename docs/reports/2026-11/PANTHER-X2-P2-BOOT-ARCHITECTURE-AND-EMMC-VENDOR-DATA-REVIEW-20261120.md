@@ -46,29 +46,50 @@
 
 **架构要求：** 新 U-Boot 不能直接沿用“Vendor Storage = 当前 bootdev”这一默认行为。需要一个明确指定 eMMC 设备的只读读取路径，先校验 eMMC 身份、读取结果、MAC 合法性和双 MAC 顺序，再写入 U-Boot 环境/FDT。读取路径应禁止写回 eMMC Vendor Storage；失败时明确报错并停止宣称使用了板载 MAC。是否采用 U-Boot 标准 block API + Rockchip Vendor Storage parser，或上游已有的 eMMC vendor 专用 API，须进一步审查，当前不写代码。
 
-## 4. RK3566 BootROM 启动介质顺序：对 TF 自包含启动的关键约束
+## 4. RK3566 BootROM 启动顺序与 TF 独立启动的硬件边界（2026-11-20，结合既有现场证据修订）
 
-Rockchip《RK3566 Hardware Design Guide V1.1.0》§2.1.5 明确列出 BootROM 自动启动优先级：
-
+Rockchip《RK3566 Hardware Design Guide V1.1.0》§2.1.5 给出的普通启动介质优先级为：
 1. Serial NOR Flash（FSPI）
 2. Serial NAND Flash（FSPI）
 3. NAND Flash
 4. eMMC Flash
 5. SDMMC Card
 
-同一文档 §2.1.6 说明 `SDMMC0_DET` 是 SDMMC/JTAG 复用功能选择信号：低电平选择 SDMMC，高电平选择 JTAG/UART。该信号不是文档所述的 eMMC/SD 启动优先级切换开关。
+同一指南 §2.1.6 明确：`SDMMC0_DET` 是 SDMMC/JTAG 复用功能选择信号。低电平使相关引脚复用为 SDMMC，高电平切换为 JTAG/UART；它不是 eMMC/SD 启动优先级选择脚。
 
-项目已有只读证据：
-- eMMC 用户区 LBA64 存在有效 Rockchip IDB / idbloader；
-- eMMC 用户区 LBA16384 存在对应 U-Boot FIT/proper；
-- 现有 UART 启动日志显示旧 SPL/DDR V1.13，随后 `Trying to boot from MMC2`，再进入 TF 上 JP-TvBox U-Boot proper；
-- 当前混合链的 BootROM 具体读介质事件尚未通过硬件轨迹直接捕获，但现有日志、eMMC LBA64 内容指纹和 RK3566 官方启动顺序高度吻合。
+### 4.1 Panther X2 的直接证据
 
-**重要架构风险：** 只要 eMMC 上仍有 BootROM 可识别的有效 IDB，RK3566 官方文档所列顺序意味着 BootROM 会先检查 eMMC，TF 上的完整 idbloader 很可能不会成为首个执行阶段。故“仅把完整 idbloader + U-Boot proper 写到 TF，就能在保留 eMMC 启动内容的情况下直接从 TF 独立启动”目前没有证据支持，且与已知启动优先级存在冲突。
+此前现场证据已完成，不能重复采集：
+- 2026-11-18 U-Boot proper 只读读取 SRAM `0xFDCC0010`，值为 `0x00000002`；Rockchip U-Boot 对照源码定义 eMMC source ID=2、SD=5。这是该次启动 BootROM 来源指示的实机证据。
+- eMMC user-area LBA64 存在有效 RKNS IDB，完整数据与 JP idbloader 镜像匹配；boot0/boot1 全零，EXT_CSD 未启用 boot partition。
+- 2026-11-19 实机运行 JP SPL/DDR V1.10，SPL 随后从 MMC2（TF/SD）加载 U-Boot proper；proper 的 ATAGS/MMC 映射、枚举和 TF 文件读取已闭环。
+- 因此，本机已观察到的混合链为 BootROM/eMMC IDB → eMMC SPL → TF U-Boot proper。BootROM 来源并非仅凭介质优先级推测，2026-11-18 已有现场 source tag 读数。
 
-要实现真正的 TF 自包含完整启动链，至少必须查明是否存在不破坏 eMMC 的硬件启动选择机制/BootROM 条件，能够让 BootROM 越过 eMMC 并选择 SDMMC。不能把 `SDMMC0_DET` 当作该机制。若没有这样的机制，可能需要清除/禁用 eMMC IDB 或修改 eMMC 启动配置；这些做法会触及用户明确保护的 eMMC，当前不允许，也不能默认作为方案。
+### 4.2 Rockchip SD Boot Card 机制不能解决“TF 自带 SPL”问题
 
-在查清之前，TF 自包含启动列为**目标要求、可行性未证实**。当前 eMMC SPL → TF proper 仅作为已有临时诊断路径记录，不得悄悄将其定为最终方案。
+Rockchip《U-Boot v2017(next-dev) 开发指南》§6.5.4 描述的 SD 卡流程是：
+- BootROM 先从可用启动介质中找到并加载一份 pre-loader/miniloader；
+- 已运行的 miniloader 再扫描 SD 卡的 IDB 格式固件及卡型标志；
+- 若满足对应 SD 卡类型条件，miniloader 从 SD 卡读取 U-Boot 固件并启动 proper。
+
+因此，该流程能实现“BootROM 先执行某介质上的 pre-loader，再由它从 SD 卡加载 U-Boot”的跨介质流程；它不能证明 BootROM 会跳过 eMMC、直接执行 TF 上的 TPL/SPL。
+
+此外，Rockchip《SD Card Boot Reference V1.2.0》平台支持表明确列出 RK3566/RK3568 不支持旧式 IDB block card-type flag；表中支持的 Android BCB 标记 `recovery\\n--rk_fwupdate\\n` 属于 SD 固件升级/recovery 流程，不是普通冷启动时选择 TF SPL 的开关。当前 Panther X2 TF GPT 仅记录 BOOT 与 ROOTFS，没有标准 misc 分区；不得把 BCB 升级标记误作 TF 独立启动方案。
+
+### 4.3 当前可作出的判断与证据边界
+
+- **已验证：** 普通 BootROM 介质优先级 eMMC 高于 SDMMC；本机 2026-11-18 BootROM source tag 读数指向 eMMC；本机 eMMC user area LBA64 存在有效 IDB。
+- **已排除的错误方案：** 把 `SDMMC0_DET` 当作 eMMC/SD 启动源切换脚；把 RK3566 不支持的旧式 IDB card flag 或 SD upgrade BCB 标记当作普通 TF 冷启动选择器。
+- **高置信度判断：** 在 eMMC 有效 IDB 保持可被 BootROM 读取的情况下，单纯向 TF 写入完整 idbloader + U-Boot proper，不能让 BootROM 越过 eMMC 而直接从 TF 启动；常规 Rockchip SD boot card 流程仍可能由先启动的 eMMC pre-loader 接管并从 TF 加载后级，不能满足“TF 上完整 SPL + proper”的目标。
+- **尚未验证：** Panther X2 原理图/PCB 是否存在可在上电复位前隔离 eMMC（例如电源、复位或数据线门控）的原厂硬件机制；当前公开资料未找到可证明存在该机制的板级原理图。不能把未知写成不存在。
+- **不允许的试错：** 清除 eMMC LBA64 IDB、改写 eMMC boot area/EXT_CSD、短接 eMMC 信号或改变板级硬件，均不属于当前只读评估范围。
+
+### 4.4 后续真正值得查的唯一硬件问题
+
+继续只读核实 Panther X2 板级是否存在原厂 eMMC 上电隔离/复位控制或 BootROM 采样启动选择输入，并明确其信号来源、上电时序、按键/跳线关联。优先寻找原厂原理图、PCB 文件、板级 BOM/设计资料；不再重复查 BootROM 优先级、source ID、SDMMC0_DET 定义、eMMC IDB 位置或 SD Boot Card 标记兼容表。
+
+若找不到板级 eMMC 隔离/启动选择机制，或原厂设计明确没有该能力，则在保持 eMMC IDB 不动的约束下，TF 独立 BootROM→SPL 路径应判为当前硬件条件下不可实现；正式回退为原有可行启动逻辑，并明确记录 SPL/proper 的介质依赖与版本绑定。若找到可用机制，再进入静态方案比较，不直接动板或写介质。
+
 
 ## 5. 目标启动架构的逻辑草图（非实现承诺）
 
@@ -122,15 +143,20 @@ BootROM selects eMMC:
 
 不得重新做 MMC/ATAGS 映射、重复解析 Vendor Storage 副本或重复 MAC 来源调查。
 
-### 7.3 尚需完成的是“可行性边界评估”，不是重复根因调查
+### 7.3 可行性边界评估的当前结论（已完成大部分 SoC/启动协议核对）
 
-已有 RK3566 Hardware Design Guide 记载 BootROM 自动启动顺序中 eMMC 优先于 SDMMC。这构成重要限制，但仅凭顺序表还不足以最终断言 Panther X2 在所有状态下都无法从 TF 独立启动。需要只读核实：
-1. BootROM 对 eMMC IDB 的有效性判定、失败回退到 SDMMC 的条件，以及是否存在可由软件/启动状态触发的介质选择机制；
-2. Panther X2 已知板级按键、strap、复用脚及 USB Loader/MaskROM 恢复路径中，哪些只是恢复模式，哪些（若有）会改变 BootROM 的普通冷启动介质选择；
-3. 原厂 eMMC 启动内容保持不变时，是否存在不破坏 eMMC、可重复且可维护的 TF 优先启动路径；
-4. 如不存在，明确指出限制来自 BootROM 规则、板级电路还是原厂布局，并保留原有启动逻辑作为正式回退方案。
+已完成且不重复：
+1. RK3566 普通 BootROM 介质优先级：eMMC 高于 SDMMC；
+2. Panther X2 2026-11-18 BootROM source tag 实测为 eMMC source ID 2；
+3. Panther X2 eMMC user-area LBA64 有效 IDB，boot0/boot1 全零；
+4. `SDMMC0_DET` 仅为 SDMMC/JTAG pinmux 选择，不是启动源选择；
+5. Rockchip SD Boot Card / SD Upgrade Card 机制边界：RK3566 不支持旧式 IDB card-type flag；BCB 标记用于升级/recovery，不是 TF SPL 选择器；
+6. 现有 SPL→proper 跨介质路径已经闭环。
 
-不得把 Loader/MaskROM/USB 双公头救援能力误当作 TF 普通冷启动能力；USB 双公头既有恢复方式必须保留。
+由此，高置信度判断：在 eMMC 有效 IDB 保持可被 BootROM 读取的条件下，标准 RK3566 启动流程不能仅靠在 TF 写入一套完整 idbloader + U-Boot proper，就让 BootROM 直接执行 TF SPL。标准 SD boot card 流程至多能由已启动的 pre-loader 从 TF 加载后级，不满足双介质各自完整启动目标。
+
+当前唯一值得继续查的可行性缺口是 Panther X2 板级是否存在原厂 eMMC 上电隔离/复位控制/BootROM 启动源选择机制。公开资料尚未提供 Panther X2 原理图或 PCB 证据，故不能直接断言该机制存在，也不能在没有板级证据时断言绝对不存在。
+
 
 ### 7.4 方案决策门
 
@@ -610,3 +636,40 @@ TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
 - 不得为了“最小化”而破坏原有软件包设计或删除已有功能。
 
 **本节性质：** 用户确认的架构决策与后续工作边界；不是新一轮根因调查，也不表示两个已知问题已经修复。
+
+
+## 16. 双介质独立启动可行性：SoC 机制核对结果（2026-11-20）
+
+本节基于公开 Rockchip 资料与仓库已有 Panther X2 实测证据；没有执行新的设备操作。
+
+### 16.1 公开资料的交叉结论
+
+- RK3566 Hardware Design Guide V1.1.0 §2.1.5：普通 BootROM 介质顺序 eMMC 在 SDMMC 前。
+- 同指南 §2.1.6：`SDMMC0_DET` 只切换 SDMMC/JTAG 引脚复用，不切换启动介质优先级。
+- Rockchip U-Boot v2017(next-dev) 开发指南 §6.5.4：pre-loader/miniloader 先由 BootROM 加载，随后扫描 SD 卡并可从 SD 加载 U-Boot proper。此机制是“前级 pre-loader → SD proper”，不等于 BootROM 直接从 TF 加载 SPL。
+- Rockchip SD Card Boot Reference V1.2.0 的平台表：RK3566/RK3568 不支持旧式 IDB block card-type flag；Android BCB 的 `recovery\\n--rk_fwupdate\\n` 是 SD upgrade/recovery 标记，不是普通 TF SPL 启动选择信号。
+
+### 16.2 Panther X2 既有现场证据的意义
+
+- 2026-11-18 实机 `0xFDCC0010=0x00000002`，对应 eMMC BootROM source ID。
+- eMMC user-area LBA64 的有效 IDB 已确认；boot0/boot1 全零。
+- 2026-11-19 的启动链已确认运行 eMMC 上的 SPL，再从 TF/SD 加载 U-Boot proper。
+
+这组证据说明当前混合链符合 RK3566 的普通 BootROM 顺序和 Rockchip pre-loader 从 SD 加载后级的机制。它不是单纯配置疏忽就能靠改变 U-Boot proper 搜索顺序解决的问题。
+
+### 16.3 候选路线评估
+
+| 路线 | 是否满足 TF SPL + proper 同介质 | 评估 |
+|---|---|---|
+| 仅把完整 idbloader 与 proper 放到 TF，eMMC IDB 保留 | 否，BootROM 优先 eMMC | 不成立为可靠方案 |
+| Rockchip SD Boot Card / SD upgrade BCB | 否，属于 pre-loader 后级加载或升级/recovery | 不满足目标 |
+| 调整 eMMC SPL 的 proper 搜索顺序 | 否，只改变 SPL→proper，不改变 BootROM→SPL | 不能解决第一段跨介质 |
+| 上电前由原厂硬件隔离 eMMC，使 BootROM 可继续探测 SD | 理论上可能，但 Panther X2 是否具备此硬件未验证 | 唯一值得继续核实的硬件方向 |
+| 清除/禁用 eMMC IDB 或改 eMMC 启动配置 | 可能改变启动源，但违反当前保护 eMMC 的研究约束 | 不纳入当前方案，不做试验 |
+| 保留原有混合链并固定版本/来源/更新顺序 | 否，但可维护性可通过显式依赖管理改善 | 若硬件不支持独立 TF 冷启动，则作为回退方案 |
+
+### 16.4 下一步
+
+仅寻找 Panther X2 原厂原理图、PCB、BOM 或板级设计资料，确认 eMMC 是否有独立电源门控、复位门控或上电启动选择电路，并与板上按键/USB 恢复信号做对应。不要重复查芯片启动顺序和 SDMMC0_DET；不要把 Loader/MaskROM 恢复模式当作普通冷启动源选择。
+
+若没有可用板级机制，结论应明确为“在保留当前 eMMC IDB 的前提下，TF 独立 BootROM→SPL 启动不具备已知可行路径”，随后保留原有启动链并明确版本绑定。若有，再设计不触碰 eMMC 数据的受控验证计划，另行等待用户授权。
