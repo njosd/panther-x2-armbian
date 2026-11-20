@@ -1,0 +1,204 @@
+name: Audit Ophub RK35xx 6.1.174 kernel package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-6-1-174:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download and verify the exact official release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/reports work/nested-lists
+          url="https://github.com/ophub/kernel/releases/download/kernel_rk35xx/6.1.174.tar.gz"
+          expected_sha="49e2e81132b249b2b1e55fa18fa1fa002ddf9c91dc433cd672f914ab17af668a"
+          expected_size="135267299"
+          archive="work/6.1.174.tar.gz"
+
+          curl --fail --location --retry 3 --retry-delay 3 "$url" -o "$archive"
+          actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+          actual_size="$(stat -c '%s' "$archive")"
+          printf 'URL: %s\nExpected SHA256: %s\nActual SHA256: %s\nExpected size: %s\nActual size: %s\n' \
+            "$url" "$expected_sha" "$actual_sha" "$expected_size" "$actual_size" | tee work/reports/asset-metadata.txt
+          [[ "$actual_sha" == "$expected_sha" ]] || { echo "::error::Release asset SHA256 mismatch"; exit 1; }
+          [[ "$actual_size" == "$expected_size" ]] || { echo "::error::Release asset size mismatch"; exit 1; }
+          gzip -t "$archive"
+
+      - name: Inspect nested kernel suite without installing or executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import pathlib
+          import re
+          import sys
+          import tarfile
+
+          root = pathlib.Path("work")
+          archive = root / "6.1.174.tar.gz"
+          reports = root / "reports"
+          lists = root / "nested-lists"
+          reports.mkdir(exist_ok=True)
+          lists.mkdir(exist_ok=True)
+
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+
+          with tarfile.open(archive, "r:gz") as outer:
+              outer_members = outer.getmembers()
+              outer_names = [m.name for m in outer_members if m.isfile()]
+              (reports / "outer-archive-members.txt").write_text(
+                  "\n".join(m.name for m in outer_members) + "\n"
+              )
+
+              manifests = [n for n in outer_names if pathlib.PurePosixPath(n).name == "sha256sums"]
+              if len(manifests) != 1:
+                  raise SystemExit(f"Expected one published sha256sums manifest, found {manifests}")
+              mf = outer.extractfile(manifests[0])
+              manifest_text = mf.read().decode("utf-8", "replace")
+              (reports / "published-sha256sums.txt").write_text(manifest_text)
+              expected = {}
+              for line in manifest_text.splitlines():
+                  match = re.match(r"^\s*([0-9a-fA-F]{64})\s+\*?(.+?)\s*$", line)
+                  if match:
+                      expected[pathlib.PurePosixPath(match.group(2)).name] = match.group(1).lower()
+
+              nested = [m for m in outer_members if m.isfile() and m.name.endswith((".tar.gz", ".tgz"))]
+              if not nested:
+                  raise SystemExit("No nested .tar.gz/.tgz package members found")
+
+              checksum_lines = []
+              summary = [
+                  "# Ophub RK35xx 6.1.174 official package audit",
+                  "",
+                  "This is a read-only inventory of the pinned official release asset.",
+                  "No kernel, module, DTB, initramfs, or bootloader was installed or executed.",
+                  "",
+                  "## Nested package checksums",
+              ]
+              selected_findings = []
+              for index, member in enumerate(nested, 1):
+                  name = pathlib.PurePosixPath(member.name).name
+                  payload = outer.extractfile(member).read()
+                  actual = digest(payload)
+                  wanted = expected.get(name)
+                  status = "MATCH" if wanted == actual else ("MISSING_IN_MANIFEST" if wanted is None else "MISMATCH")
+                  checksum_lines.append(f"{name}\t{status}\texpected={wanted or 'N/A'}\tactual={actual}\tbytes={len(payload)}")
+                  if status != "MATCH":
+                      raise SystemExit(f"Nested archive checksum verification failed: {name}: {status}")
+
+                  nested_path = root / "nested" / name
+                  nested_path.parent.mkdir(exist_ok=True)
+                  nested_path.write_bytes(payload)
+                  try:
+                      with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as inner:
+                          members = inner.getmembers()
+                  except Exception as exc:
+                      raise SystemExit(f"Cannot read nested archive {name}: {exc}")
+
+                  listing = "\n".join(m.name for m in members) + "\n"
+                  (lists / f"{index:02d}-{name}.list").write_text(listing)
+                  summary += [
+                      "",
+                      f"### {name}",
+                      f"- Published nested SHA256: MATCH ({actual})",
+                      f"- Entries: {len(members)}",
+                  ]
+
+                  for item in members:
+                      if not item.isfile():
+                          continue
+                      base = pathlib.PurePosixPath(item.name).name
+                      lower = item.name.lower()
+                      relevant = (
+                          base in {"modules.dep", "modules.builtin", "modules.order", "modules.alias",
+                                   "Module.symvers", "System.map", "Image", "Image.gz"} or
+                          base.startswith("config-") or base == ".config" or
+                          base == "kernel.release" or
+                          base == "rk3566-panther-x2.dtb" or
+                          any(token in lower for token in
+                              ("stmmac", "dwmac", "realtek", "mdio", "phy/"))
+                      )
+                      if not relevant:
+                          continue
+                      record = f"- {item.name} ({item.size} bytes)"
+                      data = b""
+                      if item.size <= 64 * 1024 * 1024:
+                          with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as inner:
+                              stream = inner.extractfile(item)
+                              if stream:
+                                  data = stream.read()
+                          record += f"; SHA256 {digest(data)}"
+                      summary.append(record)
+
+                      if base.startswith("config-") or base == ".config":
+                          if data:
+                              text = data.decode("utf-8", "replace")
+                              keys = (
+                                  "CONFIG_ARM64", "CONFIG_MODULES", "CONFIG_MODVERSIONS",
+                                  "CONFIG_STMMAC_ETH", "CONFIG_STMMAC_PLATFORM",
+                                  "CONFIG_DWMAC_ROCKCHIP", "CONFIG_PHYLIB",
+                                  "CONFIG_REALTEK_PHY", "CONFIG_MDIO_BUS", "CONFIG_OF_MDIO",
+                                  "CONFIG_LOCALVERSION"
+                              )
+                              selected_findings.append(f"## {name} :: {item.name}")
+                              for line in text.splitlines():
+                                  if any(line.startswith(k + "=") or line.startswith("# " + k + " is not set")
+                                         for k in keys):
+                                      selected_findings.append(line)
+                      elif base == "modules.builtin" and data:
+                          matches = [line for line in data.decode("utf-8", "replace").splitlines()
+                                     if any(token in line.lower() for token in
+                                            ("stmmac", "dwmac", "realtek", "mdio", "phy"))]
+                          selected_findings.append(f"## {name} :: {item.name}")
+                          selected_findings.extend(matches or ["(no GMAC/PHY-related built-in paths found)"])
+                      elif any(token in lower for token in
+                               ("stmmac", "dwmac", "realtek", "mdio", "phy/")):
+                          selected_findings.append(f"{name} :: {item.name}")
+
+              (reports / "nested-package-checksums.txt").write_text("\n".join(checksum_lines) + "\n")
+              (reports / "kernel-config-and-module-findings.txt").write_text(
+                  "\n".join(selected_findings) + "\n"
+              )
+              summary += [
+                  "",
+                  "## Kernel config and module evidence",
+                  "",
+                  "See kernel-config-and-module-findings.txt for selected config symbols,",
+                  "modules.builtin GMAC/PHY paths, and matching module/archive paths.",
+                  "",
+                  "## Full nested archive indexes",
+                  "",
+                  "See ../nested-lists/ for the complete member list of every nested archive.",
+                  "",
+                  "## Interpretation boundary",
+                  "",
+                  "Package contents prove what the published archive contains, not that this exact",
+                  "archive was installed on the historical Panther X2 test system. Source commit",
+                  "and binary build provenance remain separate questions.",
+              ]
+              (reports / "summary.md").write_text("\n".join(summary) + "\n")
+
+          print("\n".join(checksum_lines))
+          print("\n".join(selected_findings))
+          print(f"Nested archives inspected: {len(nested)}")
+          PY
+
+      - name: Upload read-only audit reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ophub-rk35xx-6.1.174-kernel-asset-audit
+          path: |
+            work/reports/
+            work/nested-lists/
+          if-no-files-found: error
+          retention-days: 30
