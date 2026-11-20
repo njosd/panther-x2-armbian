@@ -182,3 +182,38 @@ gzip 完整性通过仅证明 gzip 数据流可完整解压，不证明镜像内
 ### 8.3 下一步只读分析
 
 下一步从 gzip 流开头读取 MBR/GPT 头、分区起始 LBA 和镜像前部 bootloader 区域元数据；使用管道和内存读取，不生成 2.97 GB 解压文件，不写入 U 盘或任何设备。然后再定位镜像中的 SPL/IDB、U-Boot、DTB、kernel 和 rootfs 版本指纹。
+
+
+## 9. 原始刷机包配套 MiniLoaderAll.bin 核验（用户 iMac 输出，2026-11-20）
+
+用户补充确认：原始刷机流程当时要求先将 U 盘中的 `MiniLoaderAll.bin` 刷入机器。该操作顺序是用户的一手回忆，说明此文件属于原始刷机流程的前置 Loader，不应视为普通附件。
+
+文件路径：`/Volumes/Untitled/黑豹x2/MiniLoaderAll.bin`
+
+### 9.1 文件实测指纹
+
+- 文件大小：约 442 KiB（`ls -lh`）
+- SHA256：`ab62386a8868b01516b560451082fbdb6342b16e850a0622577b538dd2b10d39`
+- `file` 识别为通用 data；不是可由系统 `file` 命令直接识别的普通 ELF。
+- 文件头前四字节 ASCII：`LDR `
+- 文件头含有可见字段/标记：`rk3566_ddr_1056MHz`
+- 另含：`rk356x_usbplug_v1`
+- DDR 字符串：`DDR Version V1.09 20210630`
+
+### 9.2 当前可支持的解释
+
+文件头及内部字符串与 Rockchip Loader 镜像相符，至少表明该文件包含面向 RK3566 的 DDR 初始化配置（1056 MHz 标记）及 USB plug/download 阶段相关组件。结合用户确认的刷机顺序，它应作为原始刷机链中的前置 Loader 组件进行追踪。
+
+但当前字符串扫描不能完整解析镜像内部结构，也不能据此断言它就是当前机器运行的 U-Boot proper。Loader/DDR 初始化、USB plug 阶段、后续 U-Boot proper 是需要区分的启动阶段。
+
+### 9.3 与当前 eMMC 启动链的关系（待验证）
+
+既有实机记录显示，2026-11-19 用户曾将 eMMC user area LBA64 的 IDB 替换为 JP-TvBox 的 idbloader（DDR V1.10，构建日期 2023-11-12）；之后启动日志显示 JP SPL，再从 TF 加载 JP U-Boot proper。因而不能把本文件中的 DDR V1.09 字符串直接当成当前 eMMC LBA64 的版本。
+
+下一步应先解析 `MiniLoaderAll.bin` 内部镜像结构及其组件/版本，再与已保存的 eMMC LBA64 原始备份及当前已知 JP IDB 内容做组件级比较。不得将整个 MiniLoaderAll.bin 与 LBA64 单一区域直接做整文件哈希比较，也不得为此重复备份 eMMC。
+
+### 9.4 状态
+
+- 已验证：文件存在；大小、SHA256、LDR 文件头、RK3566 DDR/USB plug 字符串及 DDR V1.09 版本字符串均来自用户本机输出。
+- 用户确认：原始刷机流程要求先刷入此文件。
+- 尚未验证：内部各组件的精确偏移/长度、是否与原始 eMMC IDB 内容一致、是否包含/对应 U-Boot proper、是否与原始 Armbian 6.1.65 镜像内启动组件配套。
