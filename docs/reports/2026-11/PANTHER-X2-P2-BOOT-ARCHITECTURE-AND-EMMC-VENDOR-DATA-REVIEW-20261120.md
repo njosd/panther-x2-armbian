@@ -143,7 +143,7 @@ BootROM selects eMMC:
 
 不得重新做 MMC/ATAGS 映射、重复解析 Vendor Storage 副本或重复 MAC 来源调查。
 
-### 7.3 可行性边界评估的当前结论（已完成大部分 SoC/启动协议核对）
+### 7.3 可行性边界评估的当前结论（SoC/启动协议已核对，新增 TF 系统启动证据）
 
 已完成且不重复：
 1. RK3566 普通 BootROM 介质优先级：eMMC 高于 SDMMC；
@@ -151,12 +151,12 @@ BootROM selects eMMC:
 3. Panther X2 eMMC user-area LBA64 有效 IDB，boot0/boot1 全零；
 4. `SDMMC0_DET` 仅为 SDMMC/JTAG pinmux 选择，不是启动源选择；
 5. Rockchip SD Boot Card / SD Upgrade Card 机制边界：RK3566 不支持旧式 IDB card-type flag；BCB 标记用于升级/recovery，不是 TF SPL 选择器；
-6. 现有 SPL→proper 跨介质路径已经闭环。
+6. 现有 SPL→proper 跨介质路径已经闭环；
+7. 第三方 Panther X2 项目已公开记录 Linux 从 uSD 启动，PiLoader 也公开提供 TF 卡启动系统且声称不修改 eMMC；但这些资料均未提供完整 U-Boot 阶段日志，不能证明 SPL/proper 都来自 TF。
 
-由此，高置信度判断：在 eMMC 有效 IDB 保持可被 BootROM 读取的条件下，标准 RK3566 启动流程不能仅靠在 TF 写入一套完整 idbloader + U-Boot proper，就让 BootROM 直接执行 TF SPL。标准 SD boot card 流程至多能由已启动的 pre-loader 从 TF 加载后级，不满足双介质各自完整启动目标。
+由此，高置信度判断仍然是：在 eMMC 有效 IDB 保持可被 BootROM 读取的条件下，标准 RK3566 启动流程不能仅靠在 TF 写入一套完整 idbloader + U-Boot proper，就让 BootROM 直接执行 TF SPL。TF 上运行 Linux 是另一回事，现有公开实践很可能利用了 eMMC 前级加载 TF 后级的路径，但尚不能替第三方资料确认具体启动链。
 
-当前唯一值得继续查的可行性缺口是 Panther X2 板级是否存在原厂 eMMC 上电隔离/复位控制/BootROM 启动源选择机制。公开资料尚未提供 Panther X2 原理图或 PCB 证据，故不能直接断言该机制存在，也不能在没有板级证据时断言绝对不存在。
-
+当前唯一值得继续查的可行性缺口是 Panther X2 板级是否存在原厂 eMMC 上电隔离/复位控制/BootROM 启动源选择机制。公开资料已找到 H1GW V04 PCB 顶面照片，但没有可核验原理图、netlist、BOM 或背面走线，故不能断言该机制存在或不存在。
 
 ### 7.4 方案决策门
 
@@ -673,3 +673,63 @@ TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
 仅寻找 Panther X2 原厂原理图、PCB、BOM 或板级设计资料，确认 eMMC 是否有独立电源门控、复位门控或上电启动选择电路，并与板上按键/USB 恢复信号做对应。不要重复查芯片启动顺序和 SDMMC0_DET；不要把 Loader/MaskROM 恢复模式当作普通冷启动源选择。
 
 若没有可用板级机制，结论应明确为“在保留当前 eMMC IDB 的前提下，TF 独立 BootROM→SPL 启动不具备已知可行路径”，随后保留原有启动链并明确版本绑定。若有，再设计不触碰 eMMC 数据的受控验证计划，另行等待用户授权。
+
+
+## 17. 新增公开 Panther X2 TF/uSD 启动资料与板级资料检索结果（2026-11-20）
+
+本节只记录公开资料，不将第三方启动描述扩大解释为已验证的 BootROM/SPL 介质来源。
+
+### 17.1 第三方 uSD 启动系统证据
+
+1. `yjdwbj/panther-x2` 项目 README：
+   - 记录 U-Boot 2024.01、Kernel 6.9.4、Debian 12；
+   - 明确标注 “Boot log (booting from uSD Card)”；
+   - 日志显示 Linux 根文件系统挂载自 `mmcblk0p2`，同时识别到另一块 32GB eMMC（`mmcblk1`，并枚举 boot0/boot1/RPMB）；
+   - 未提供完整 BootROM/SPL/U-Boot UART 日志，也未证明 SPL 与 proper 均由 uSD 提供。
+
+2. PiLoader Panther X2 / MerryIoT 安装指南：
+   - 声称 Panther X2 与 MerryIoT Hotspot Miner V1 使用相同硬件；
+   - 将镜像写入新的 microSD，替换原卡后启动；
+   - 声称不改动设备内部存储，并保留原卡用于恢复原厂软件；
+   - 未说明 BootROM source、SPL/proper 实际介质，也未展示 U-Boot 阶段日志。
+
+两项资料支持的结论是：**Panther X2 存在从 TF/uSD 运行 Linux 系统、同时保留 eMMC 内容的第三方实践。** 它们不证明完整 U-Boot 自包含于 TF。结合本项目已验证的 eMMC SPL→TF proper 路径，合理但尚未由上述第三方日志直接证明的解释是：系统由 eMMC 前级启动，再从 TF 加载 proper/kernel/rootfs；也可能存在其他布局，必须取得完整 UART 启动日志或镜像布局才能确认。
+
+### 17.2 第三方资料之间的表面矛盾
+
+Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Armbian 镜像写入 SD 后，设备仍启动原厂 eMMC 系统；作者据此认为 eMMC bootloader 优先，并未找到按钮/短接强制 SD 启动方法。
+
+这与专用 Panther X2 SD 镜像/PiLoader 可以从 TF 运行 Linux 并不必然矛盾：
+- 普通 Armbian 镜像可能不符合设备现有 pre-loader 对 SD 后级固件布局/格式的要求；
+- 专用镜像可能适配现有 eMMC pre-loader 的 SD 加载路径；
+- 两者都没有证明 BootROM 直接从 TF 加载 SPL。
+
+因此不能再笼统表述“Panther X2 完全不能从 TF 启动”。准确区分：
+- TF 上运行 Linux：有第三方公开实践；
+- eMMC SPL → TF proper：本项目已有实机验证；
+- TF SPL → TF proper（完整 TF 自包含 U-Boot）：尚无证据证明在当前 eMMC 有效 IDB 保留时可行。
+
+### 17.3 板级资料检索
+
+- 找到 Panther X2 PCB 顶面清晰照片，丝印为 `BROWAN H1GW V04`，与本项目板型吻合；照片可用于板型/元件位置参考，但没有电路网络、背面走线或电源控制原理图信息。
+- FCC 的 BROWAN MerryIoT L0001（Panther X2 相关同系列产品）页面公开内部照片；schematics 项仅列为 metadata，页面标注长期保密。不能据此获得可核验的完整原理图。
+- 公开用户手册只列出 RK3566、32GB eMMC、TF 插槽、GPIO 按键和 USB 等规格，没有 eMMC 电源门控/复位隔离或 BootROM 启动选择电路说明。
+- 当前公开检索未找到可核验的 H1GW V04 原理图、PCB netlist、BOM 或背面高清图；这只是公开资料检索结果，不代表 Browan 内部不存在这些设计文件。
+
+### 17.4 当前决策影响
+
+新增资料进一步说明 TF 启动 Linux 本身是可用能力，不能把“BootROM eMMC 优先”误解为“TF 卡完全没有启动用途”。但它不改变完整 U-Boot 自包含的核心门槛：BootROM 必须先执行 TF 上 SPL，或必须有原厂硬件机制使 BootROM 不读取/跳过 eMMC IDB。
+
+当前没有新证据证明 H1GW V04 存在 eMMC 上电隔离/复位门控/启动选择电路。下一步只需继续寻找 H1GW V04 板级背面/原理图/BOM 或 Browan 正式资料；若无法获得，需把“板级硬件机制未知”作为明确证据边界，不能通过推测补齐。
+
+### 17.5 公开来源
+
+- yjdwbj Panther X2 项目（uSD 启动日志、U-Boot 2024.01、Kernel 6.9.4、Debian 12）：https://github.com/yjdwbj/panther-x2
+- PiLoader Panther X2/MerryIoT 指南：https://piloader.com/browanx2-install/browanx2-get-started
+- Panther X2 H1GW V04 PCB 顶面照片及作者对普通 SD 镜像启动的记录：https://lorenzogangemi.com/blog/repurposing-panther-x2/
+- BROWAN MerryIoT L0001 FCC 资料（内部照片及 schematics 元数据）：https://fccid.io/2AAS9-L0001
+
+**证据等级：**
+- TF/uSD 上运行 Linux：第三方公开项目/安装指南记录；非本项目实机复验。
+- U-Boot 2024.01 是否完全从 TF 启动：未证明。
+- Panther X2 是否有 eMMC 硬件隔离/启动选择电路：未验证。
