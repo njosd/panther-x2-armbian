@@ -953,3 +953,86 @@ Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Arm
 - 通用 Vendor API、其他启动路径和 USB 双公头救援机制保持不变。
 
 目前这是设计层面的可行方案，不代表当前二进制已经具备 eMMC 固定只读 Vendor 入口，也不代表 proper 的 eMMC fallback 已经通过源码配置核验。下一步应只做这两处具体源码落点的只读审查，再形成补丁设计；未经用户明确授权不编写/应用补丁、不构建、不写卡。
+
+
+## 21. SPL 实际成功加载介质、ATAGS 来源及 proper 选择优先级的补充核对（2026-11-20）
+
+本节对 §20 中“ATAGS 反映实际启动介质”的成立条件作进一步限定。核对了 Rockchip U-Boot 参考提交 `8af253525b7de5f29f7f97dffd18adb77db6456`，以及 Radxa `stable-4.19-rock3` 固定提交 `c55987146f4f9b20f7cb2f917ca88300419afe8d`。二者不是当前 Panther X2 二进制的源码证明，只用于解释原有机制和候选实现的边界。
+
+### 21.1 ATAGS 记录的是 SPL 成功加载镜像所用的 loader 编号
+
+通用 U-Boot SPL `common/spl/spl.c` 的 `boot_from_devices()` 在某个 loader 成功加载镜像后执行：
+
+`spl_image->boot_device = spl_boot_list[i]`
+
+Rockchip `arch/arm/mach-rockchip/spl.c` 的 `spl_perform_fixups()` 再调用：
+
+`atags_set_bootdev_by_spl_bootdevice(spl_image->boot_device)`
+
+Rockchip `rk_atags.c` 的 `spl_bootdev_map[]` 映射：
+- `BOOT_DEVICE_MMC1` → `BOOT_TYPE_EMMC`
+- `BOOT_DEVICE_MMC2` → `BOOT_TYPE_SD0`
+
+因此，在 ATAGS 功能启用且使用上述通用链路时，ATAGS 表示的是**本次成功加载 U-Boot proper 的 SPL loader 设备**，而不只是 BootROM 最初读取 SPL 的介质。这正是我们希望 proper 选择对应启动文件来源的语义。
+
+### 21.2 必须区分默认 SPL 设备和最终成功 loader
+
+两份候选源码的 `spl_boot_device()` 默认实现均返回 `BOOT_DEVICE_MMC1`；通用 `common/spl/spl.c` 的默认 `board_boot_order()` 只把该设备放入启动列表第一项。因此，**仅使用默认实现时，SPL 默认只尝试 MMC1/eMMC，不会自动尝试 MMC2/TF**。
+
+但 SPL 框架允许板级 `board_boot_order()` 提供多个候选 loader。若列表中先后包含 MMC1、MMC2，`boot_from_devices()` 会把实际成功的那个 loader 写入 `spl_image->boot_device`，随后 ATAGS 就能准确传递 MMC1/eMMC 或 MMC2/TF。当前本机日志中出现 `Trying to boot from MMC2`，说明实际运行的 SPL 路径并非上述“默认只尝试 MMC1”的简单配置；该事实沿用已有实机记录，不在本节重复实机检查。
+
+### 21.3 BROM source tag 是另一条路径，不能与 SPL loader 混淆
+
+同一 `rk_atags.c` 还提供：
+- `get_bootdev_by_brom_bootsource()`：读取 `BROM_BOOTSOURCE_ID_ADDR`；
+- `atags_set_bootdev_by_brom_bootsource()`：把 BootROM 原始启动源写入 ATAGS。
+
+其 `bootdev_map[]` 映射 BootROM source ID（例如 eMMC=2、SD=5）到 Rockchip boot type。
+
+但所审查的通用 `spl_perform_fixups()` 使用的是 `atags_set_bootdev_by_spl_bootdevice(spl_image->boot_device)`，不是 BROM source helper。两条路径语义不同：
+- BROM source：BootROM 最初从哪里加载 pre-loader；
+- SPL loader source：当前 SPL 最终从哪里成功加载 proper。
+
+本项目需要 proper 和系统启动文件与 SPL 实际成功加载 proper 的介质保持一致，因此应优先保留“成功 loader”语义，不能简单改用 BROM source 覆盖它。
+
+### 21.4 proper 的启动设备选择优先级存在源码分支差异
+
+**Rockchip 参考提交 8af2535：**
+- `boot_devtype_init()` 优先调用 `param_parse_assign_bootdev()`，再尝试 ATAGS，最后扫描；
+- `param_parse_assign_bootdev()` 使用编译期 `CONFIG_ROCKCHIP_BOOTDEV` 字符串；
+- 因此若构建时设置该宏，固定配置会覆盖 SPL ATAGS，必须在目标 defconfig/构建参数中核实该宏是否存在及其实际值。
+
+**Radxa stable-4.19-rock3 提交 c559871：**
+- 该分支 `boot_devtype_init()` 先处理 SCSI/NVMe，再读取 ATAGS，最后扫描；
+- 该函数没有 8af2535 中的 `param_parse_assign_bootdev()` 优先分支；
+- 若 ATAGS 有效且对应块设备存在，就使用 ATAGS 指定设备；否则再扫描并在失败时默认 `mmc 0`。
+
+不能把一个分支的优先级描述直接套到另一个分支，更不能据此推定当前 Panther X2 二进制的配置。
+
+### 21.5 对原有双介质启动设计的修正结论
+
+- 原有设计方向仍可保留：SPL 成功从哪一个 MMC loader 读取 proper，就将该 loader 设备写入 ATAGS；proper 依 ATAGS 选择相同介质上的启动文件。
+- 关键不是重新设计 ATAGS，而是确认当前 Panther X2 SPL 的 `board_boot_order()` / loader 列表确实包含现有设计所需的 MMC1/MMC2 顺序，并且实际成功设备能进入 `spl_image->boot_device`。
+- 对 8af2535 这一类存在编译期 bootdev 覆盖的 proper，必须确保目标构建没有固定配置压过 ATAGS；对 c559871 这类 ATAGS 优先分支则检查 ATAGS 缺失/设备不可用时的 scan 顺序。
+- 这项核对是对候选源码机制的限定，不重新调查本机已确认的 SPL→proper 介质路径。
+
+### 21.6 Vendor API 的额外安全发现
+
+在 8af2535 与 c559871 两份源码中均确认：
+- `vendor_storage_init()` 通过 `rockchip_get_bootdev()` 获取设备，并把解析结果放入全局 `vendor_info` / `bootdev_type`；
+- `vendor_ops()` 每次也重新调用 `rockchip_get_bootdev()`；
+- `vendor_storage_read()` 依赖上述全局初始化状态；
+- `rockchip_set_ethaddr()` 在读取失败/地址无效时生成随机 MAC；启用 Vendor Partition 时还可能调用 `vendor_storage_write()` 回写。
+
+因此，最小安全实现不应临时修改全局 `devnum` 后调用现有 `vendor_storage_read()`。这种做法会污染 bootdev 缓存及 Vendor 全局状态，也可能使其他调用者误读/写入另一介质。
+
+推荐保持原 API 完全不变，为 LAN_MAC 专用路径增加独立的只读解析上下文：显式取得 MMC device 0 的 block descriptor，按已确认 LBA 7168、四份 128-sector 副本规则只读解析，验证 ID=3 的 12-byte 双 MAC，再设置 env 并沿用原 FDT fixup。该路径不得调用 Vendor write，不得随机 fallback，也不得把解析状态写入通用全局缓存。
+
+### 21.7 尚未闭环的精确源码项目
+
+1. 当前实际使用的 Panther X2 SPL 源码/构建提交中，`board_boot_order()` 的实际定义及 MMC loader 顺序；
+2. 当前实际使用的 proper 源码分支中，ATAGS 是否启用、是否存在编译期固定 bootdev 覆盖，以及 ATAGS 缺失时的扫描顺序；
+3. 当前二进制的准确 `.config` 尚未恢复，候选源码配置不能代替它；
+4. 专用 eMMC-only Vendor read-only parser 的代码落点仍是设计项，未编写。
+
+这些是进入补丁设计前最后需要核对的源代码/构建配置边界。当前未编写补丁、未构建、未修改设备。
