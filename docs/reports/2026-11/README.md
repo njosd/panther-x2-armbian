@@ -4,6 +4,8 @@
 
 ## Panther X2 网络与启动链
 
+- [P3：实际 RK35xx BSP 的 STMMAC core TX 路径复核（2026-11-20）](./PANTHER-X2-P3-RK35XX-STMMAC-CORE-TX-PATH-REVIEW-20261120.md)：以高置信度 c2f148d 纠正普通 stable 源码端点，复核普通 TX 提交/回收、TSO、DMA init、open 与 hw_setup；普通 TX 主路径未发现有效新增差异，link-up/probe handoff 仍待精确比较。全程只读。
+
 - [P3：RK35xx GMAC probe/setup/PHY 电源交接差异（2026-11-19）](./PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md)：按 c2f148d 实际源码候选审查 probe flags、SPH、Vendor MAC、integrated PHY、regulator、runtime-PM 与外接 RGMII 分支；未发现能解释 Panther 普通 TX 故障的新增有效机制。下一步转为 c2f148d STMMAC core TX 路径复核。
 
 - [6.1.174-rk35xx Actions 构建与源码提交关联核验（2026-11-19）](./PANTHER-X2-6.1.174-RK35XX-ACTIONS-RUN-AND-SOURCE-PROVENANCE-CORRELATION-20261119.md)：将 6.1.174 自动 release asset 精确关联 Actions run #296 的编译/上传时间；run workflow 默认源码为 ophub/linux-6.1.y-rockchip，构建时 main 最新提交为 c2f148d。实际 workflow_dispatch inputs/source_hash 未直接取得，故 c2f148d 定为高置信度源码候选，不宣称逐字节证明。
