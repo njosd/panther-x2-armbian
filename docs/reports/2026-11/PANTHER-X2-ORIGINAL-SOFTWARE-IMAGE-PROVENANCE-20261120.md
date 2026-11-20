@@ -587,3 +587,63 @@ Boot1 相关字符串仍分别为：
 3. 以 6.1.116 已归档的 `fdtfile`、boot.cmd、boot.scr、磁盘 DTB 和 running FDT 为对照，比较实际节点资源和属性，而不是只比较板型字符串。
 
 本节修正第 19 节中容易被理解为“Linux 默认使用 E25 DTB”的表述；第 19 节关于 FIT 默认配置和 U-Boot FDT payload 哈希身份的二进制事实不变。
+
+
+## 21. 原始 6.1.65 BOOT 分区与 Linux 启动配置核验（2026-11-20）
+
+用户在 iMac 上对原始 gzip 镜像的第一个 GPT 分区进行只读解析。未安装额外工具、未挂载文件系统、未写入镜像或设备；使用 Python 标准库从 gzip 流中读取 ext4 元数据及文件内容。
+
+### 21.1 BOOT 分区身份与根目录（已验证）
+
+- 分区起始 LBA：32768（偏移 16 MiB）；结束 LBA：555007。
+- 文件系统：ext4；卷标：`BOOT`。
+- UUID：`a5110630-ef2e-4941-9a22-15784ef687a5`。
+- Block size：4096 bytes；inode size：256 bytes；descriptor size：64 bytes。
+- ext4 superblock magic：`0xef53`。
+- 根目录读取成功，包含 `armbianEnv.txt`、`boot.cmd`、`boot.scr`、`dtb/`、`extlinux/`、`Image`、`vmlinuz-6.1.65-ophub`、`uInitrd`、`uInitrd-6.1.65-ophub` 等文件。
+- `dtb/rockchip/` 目录中实际存在 `rk3566-panther-x2.dtb`，同时也存在 `rk3568-radxa-e25.dtb`、`rk3566-jp-tvbox.dtb` 等其他设备树文件。
+
+### 21.2 Linux 启动环境与 boot.cmd（已验证）
+
+`armbianEnv.txt` 实际内容包括：
+
+```text
+verbosity=7
+fdtfile=rockchip/rk3566-panther-x2.dtb
+rootdev=UUID=ddcbfa1d-95e7-4863-97c8-ec9b7767968b
+rootfstype=ext4
+earlycon=on
+console=both
+consoleargs=console=ttyS02,1500000 console=tty0
+extraboardargs=net.ifnames=0 max_loop=128
+overlay_prefix=rk3566
+overlays=
+user_overlays=
+```
+
+`boot.cmd` 的可见逻辑为：
+1. 若当前启动设备上存在 `armbianEnv.txt`，加载并导入环境变量；
+2. 加载 `uInitrd`；
+3. 加载 `Image`；
+4. 从 `dtb/${fdtfile}` 加载 Linux DTB；
+5. 对该 FDT 执行 resize，并按环境变量应用 overlay/fixup（本镜像环境中 `overlays` 和 `user_overlays` 均为空）；
+6. 最后执行 `booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}`。
+
+据此，**原始镜像的 Linux 启动配置意图明确指向 `dtb/rockchip/rk3566-panther-x2.dtb`**，并非 FIT 中的 Radxa E25 U-Boot FDT。该 Panther DTB 文件确实存在于 BOOT 分区。
+
+### 21.3 extlinux 文件的性质
+
+`extlinux/` 目录中只发现 `extlinux.conf.bak`。该备份文件也指向 `/dtb/rockchip/rk3566-panther-x2.dtb`，但文件名为备份，不能据此认定 U-Boot 实际采用 extlinux 启动路径。
+
+### 21.4 证据边界
+
+- **已验证：** BOOT 分区的 ext4 身份、关键文件存在、`armbianEnv.txt` 的 Panther X2 `fdtfile`、`boot.cmd` 的 DTB 加载路径、目标 DTB 文件存在。
+- **尚未验证：** `boot.scr` 的二进制脚本内容是否与当前 `boot.cmd` 完全一致；当年 U-Boot 实际执行的是该 `boot.scr`、extlinux，还是其他启动命令；实际加载 DTB 是否经过运行时 fixup/overlay 后改变。
+- 因此当前结论应表述为“原始镜像内的 Armbian Linux 启动配置指向 Panther X2 DTB”，不能扩大为“已证明当年实机最终使用的运行时 FDT 与磁盘 DTB 完全相同”。
+
+### 21.5 下一步最小核验
+
+1. 解析 `boot.scr` 的 legacy script header 与脚本 payload，和 `boot.cmd` 比较，确认二者内容是否一致。
+2. 读取 `rk3566-panther-x2.dtb` 的根节点身份及 GMAC 节点关键属性；与已归档的 6.1.116 磁盘 DTB、running FDT 对照。
+3. 重点比较实际 GMAC 资源与行为相关属性（reg、interrupt、clocks、clock-names、resets、reset-names、pinctrl、phy-mode、phy-handle、mdio/PHY 子节点），不根据板型名称或 SoC compatible 字符串单独判断兼容性。
+4. 在上述静态核验完成前，不修改启动脚本、DTB、U-Boot 或设备配置，不刷写 eMMC。
