@@ -176,3 +176,14 @@ P1–P4 限定静态源码审计均已结束。尚未定位 TX 故障的 MAC/RGM
 **不可越界推断：** 尚未证明当年 RKDevTool Boot 栏实际选择了该 FIT、实机 U-Boot 一定采用 default 配置，或 6.1.116 正常运行时仍使用该 DTB。因此目前不能将其定为 GMAC TX 根因，也不能据此直接制作补丁或重刷。
 
 **当前工作项调整：** 先完成原始 IMG 内 FIT/DTB 与 6.1.116 已归档启动文件、运行时 FDT 的来源关系核验；同时区分 RKDevTool 的 Boot 输入与 System IMG 内自带的 FIT。沿用既有报告，不重复扫描已确认的分区表、Loader 字符串和基础 FIT 结构。所有操作继续只读，未经明确授权不写 eMMC/TF。
+
+
+## 2026-11-20 解释边界修订：E25 FIT FDT 是 U-Boot FDT
+
+原始 6.1.65 FIT 中 `/images/fdt` 的 description 明确为 `U-Boot dtb`；该 FIT 配置组合为 ATF firmware 与 U-Boot loadables。因此此前核验的 Radxa E25 / RK3568 FDT 是 U-Boot proper 所用/随 U-Boot FIT 交付的 FDT，**不能据此声称 Linux 6.1.65 或 6.1.116 使用了 E25 Linux DTB**。
+
+6.1.116 实机归档另有 `fdtfile=rockchip/rk3566-panther-x2.dtb` 和 Panther X2 runtime FDT 证据。这与 U-Boot FIT 内 FDT 属于不同启动阶段，可以同时成立。
+
+同时修正研究方法：不以 `Radxa E25`、`RK3568`、甚至源码路径中的 SoC 名称单独判断兼容性；应追踪实际执行的二进制、U-Boot 实际控制器资源/时钟/复位/pinctrl，以及 Linux 最终加载的 DTB 和驱动路径。已有 RK3566 驱动使用 `rk3568_ops`、RK3566 启动配方复用 `rk3568_bl31` 的仓库证据，进一步说明代码/组件命名不等于板级身份。
+
+**当前工作项：** 只读识别原始 IMG 第一个分区的文件系统与启动目录，核实 Linux Panther X2 DTB、boot script 和环境是否独立存在；再与 6.1.116 已归档 boot.cmd/boot.scr、fdtfile、磁盘 DTB、running FDT 对照。不得重做基础 FIT 扫描，也不得据名称差异直接定根因或制作补丁。
