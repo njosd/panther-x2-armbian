@@ -530,3 +530,41 @@ Boot1 相关字符串仍分别为：
 - 不再反复追问为什么 `boot-before-6.1.116` 中出现 6.18.63；这是回退前快照的合理结果。
 - 6.18.63 只作为曾经尝试升级、后来回退的中间历史节点；主线仍是比较原始 6.1.65 镜像与已确认正常的 6.1.116。
 - 本节作为对第 2.3 节及后续相关表述的修正；原归档本身不做任何修改。
+
+
+## 19. 原始 6.1.65 镜像内 U-Boot FIT 默认配置与 DTB 身份核验（2026-11-20）
+
+用户在 iMac 上对 gzip 镜像偏移 0x800000 处的 FIT control FDT 完成结构解析，并进一步按 FIT 声明的 data-offset 定位内嵌 DTB，计算哈希并解析根节点属性。
+
+### 19.1 FIT 默认配置（已验证）
+
+- FIT control FDT：镜像偏移 `0x800000`，总长度 2547 bytes，FDT version 17，last compatible version 16。
+- `/configurations/default = "conf"`。
+- `/configurations/conf/description = "rk3568-radxa-e25"`。
+- 默认配置引用：`firmware = "atf-1"`、`loadables = "uboot", "atf-2", "atf-3", "atf-4", "atf-5"`、`fdt = "fdt"`。
+- `/images/fdt` 声明 `type = "flat_dt"`、`data-size = 0x4fc5`、`data-offset = 0x157e00`，SHA-256 为 `e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228`。
+
+### 19.2 默认 DTB 的内容与哈希（已验证）
+
+按 FIT data offset 对应到 gzip 解压流的镜像绝对偏移 `0x958800`，读取 20,421 bytes：
+
+- 实际 SHA-256：`e611e583d008c7b7384a74c87fe5cd2505a7838e2a8ec369cc3f758774948228`。
+- 与 FIT `/images/fdt/hash/value` 完全一致（HASH MATCH=True）。因此定位到的 DTB 数据确为 FIT 所声明的 fdt payload，而非仅凭附近出现的 FDT magic 推测。
+- 根节点 `model = "Radxa E25"`。
+- 根节点 `compatible = "radxa,e25", "rockchip,rk3568"`。
+- GMAC 节点包括 `ethernet@fe010000` 与 `ethernet@fe2a0000`，compatible 均为 `rockchip,rk3568-gmac` / `snps,dwmac-4.20a`。
+
+### 19.3 阶段性判断与证据边界
+
+**已验证：** 用户持有的原始 6.1.65 镜像在 0x800000 处包含一个结构可解析的 U-Boot FIT control FDT；其默认配置为 `conf`，该配置明确描述为 `rk3568-radxa-e25`；该配置引用的 fdt payload 经 SHA-256 与 FIT 内声明值匹配，内容明确标识 Radxa E25 / RK3568，而非 Panther X2 / RK3566 专用设备树。
+
+**尚未验证：** 当年 RKDevTool Boot 栏实际选择的 Loader/Boot 文件身份；当年刷入 eMMC 的 FIT 是否就是本镜像中的这份 FIT；当年实机 U-Boot 是否采用 FIT 的 default 配置、是否存在外部环境变量/启动脚本覆盖配置；以及这份 FIT/DTB 是否曾在 6.1.116 正常运行阶段继续使用。
+
+因此该发现是重要的原始镜像启动链错配疑点，但不能直接写成 6.1.116 正常或后续 GMAC TX 故障的根因。必须继续区分镜像默认配置、RKDevTool 实际 Boot 输入、eMMC 中实际启动组件和运行时 FDT 四个层次。
+
+### 19.4 后续最小工作项
+
+1. 继续只读追踪原始镜像中 FIT 与 6.1.116 实机运行时 FDT/磁盘 DTB 的来源关系；优先利用现有归档和仓库资产，不重复已完成的基础扫描。
+2. 检查原始镜像是否另含 Panther X2 专用 DTB，以及该 DTB 是否被 FIT 默认配置引用（当前已解析的 FIT 默认配置引用的是 Radxa E25 DTB）。
+3. 结合已确认的 RKDevTool Boot + System 历史流程，区分 Boot 栏输入与 System IMG 内自带的 U-Boot FIT；不得假设两者相同。
+4. 在没有确认实际历史写入内容前，不刷写、不替换 Loader/U-Boot、不修改 DTB。
