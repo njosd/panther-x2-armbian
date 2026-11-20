@@ -178,9 +178,9 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **状态：** 已完成静态可行性验收。证据与保留项见 [P1 审计报告](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)。已确认 6.12.81 实机解包 gzip initramfs、当前 U-Boot 从 SD/TF ext4 第一分区加载启动文件、6.1.116 配套 Kernel/DTB/initrd 资产、两版内核的 initramfs 与网络核心驱动基础，以及 8GB TF 静态布局候选。自制最小 initramfs 尚未构建或启动。
 
-## P2 — 双介质自包含启动链与最小系统构建设计（只读设计中；实际构建待授权）
+## P2 — 原有 Bootloader 基线下的局部问题方案评估（只读；实施待授权）
 
-**目标：** 首先审计 RK3566 BootROM 对 eMMC/SD 的实际启动选择与 SPL 加载规则，判断 TF 和 eMMC 能否各自提供自包含完整 U-Boot；同时追踪 eMMC Vendor Storage 的物理位置和只读读取路径，设计统一 MAC/vendor 数据传递机制。只有启动架构边界明确后，才按最新维护中的上游版本锁定用户空间组件、依赖、许可证、工具链和可复现 CI 方案。当前只做只读设计，不触发 workflow、不编译、不生成产物。
+**目标：** 延续原有 Bootloader 设计、软件包和启动流程，利用既有根因分析，评估如何最小范围处理 SPL/U-Boot proper 跨介质读取不一致，以及 eMMC 权威 Vendor 数据读取和向 Linux 传递问题。不再把 TF 自包含完整启动链作为硬性目标，不重复 BootROM/MMC 映射、Vendor Storage 布局或 MAC 来源调查。最小系统仅在有明确诊断收益时作为临时工具评估。当前只做静态方案设计，不触发 workflow、不编译、不写介质、不启动实验固件。
 
 **候选内容：**
 - `/init` 与最小目录树；
