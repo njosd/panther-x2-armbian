@@ -291,6 +291,7 @@ PY
 ### 9.1 Panther X2 板级 DTS 与正常实机证据
 
 - Panther X2 的 6.1.116 正常参考 DTS 和 6.12.81 DTS 均声明 `compatible = "rockchip,rk809"`，并设置 `rockchip,system-power-controller`。
+- 正常内核 Kconfig 符号为 `CONFIG_MFD_RK808`（依赖 I2C/OF，提供 RK809 MFD 与 IRQ 子设备）及 `CONFIG_INPUT_RK805_PWRKEY`（依赖 MFD_RK808，生成 `rk805_pwrkey` 输入驱动）。首轮最小内核配置必须显式保留这两个功能；MFD 所需的 I2C、OF、MFD_CORE、REGMAP_I2C、REGMAP_IRQ 及 PMIC IRQ 父控制器链也不可误删。6.1.116 的实机 IRQ 记录是运行时存在证据；新内核仍需在其最终 `.config` 与实机 probe 中分别验收。
 - 6.1.116 正常系统实机中断记录（`evidence/network/panther-eth-baseline-redacted.txt`）包含：
   - IRQ 38：`rk817`，`rk805_pwrkey_rise`
   - IRQ 39：`rk817`，`rk805_pwrkey_fall`
