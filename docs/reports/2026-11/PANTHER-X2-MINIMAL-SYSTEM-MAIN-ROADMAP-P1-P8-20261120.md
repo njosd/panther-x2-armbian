@@ -320,7 +320,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 3. 核对 Panther X2 SARADC0 Loader 按钮、USB OTG、RK809 PWRKEY 软件路径。
 4. 形成 eMMC Vendor Storage 只读解析、校验、FDT 传递和禁止随机 MAC/写回的设计约束。
 
-**当前唯一剩余项：** 获取 Panther X2 对应 PCB 版本的原理图/板级资料，确认是否存在安全且不改写 eMMC 的 eMMC-disable / BootROM SD 强制启动条件。若没有可靠证据，TF 独立完整冷启动保持“未证实”，不得清除 eMMC IDB 或照搬 RK3566 EVB2 eMMC_D0 短接方案。
+**当前剩余项：** 继续寻找 Panther X2 H1GW V04 原理图/PCB/BOM，确认是否存在安全且不改写 eMMC 的 eMMC-disable / BootROM SD 强制启动条件。第三方 yjdwbj Panther X2 v1.0 的 U-Boot 截图显示 SPL 从 MMC1 启动、proper 从 TF 控制器 `fe2b0000` 加载 extlinux/Kernel/DTB；同标签 Linux 日志确认 rootfs 位于 TF `mmcblk0p2`、eMMC 为 `mmcblk1`。这高度支持第三方采用 eMMC 前级 + TF 后级的混合链，而不是 TF 自包含完整 U-Boot。v1.0 标签没有提供可做二进制取证的 idbloader/u-boot.itb/整卡镜像。若无板级隔离/选择机制证据，TF 独立完整冷启动保持“未证实”，不得清除 eMMC IDB 或照搬 RK3566 EVB2 eMMC_D0 短接方案。
 
 完成该硬件证据闭环后，才冻结双介质启动架构；随后重新评估最新维护中的 BusyBox、iproute2、ethtool 等上游版本，设计最小 /init、目录树、串口日志和独立 CI。实际构建、写卡、启动实验内核仍须另行明确授权。
 
@@ -331,7 +331,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | P1 启动链与 initramfs 只读审计 | 已完成 | 静态可行性验收通过；自制 initramfs 尚未构建/启动 |
-| P2 双介质自包含启动链与最小系统架构设计 | 静态架构审计阶段性完成 | BootROM/SD Boot、Vendor Storage、Loader 按钮已审计；待 Panther X2 PCB 原理图闭环 eMMC-disable/SD 强制启动条件 |
+| P2 双介质自包含启动链与最小系统架构设计 | 静态架构审计阶段性完成 | BootROM/SD Boot、Vendor Storage 已审计；第三方 v1.0 混合启动路径有截图交叉证据；仅待 H1GW V04 板级资料确认 eMMC 隔离/启动选择机制 |
 | P3 独立 TF 完整启动链 | 待授权 | 必须先确认 SPL/U-Boot proper 均由 TF 提供；eMMC vendor 数据只读传递 |
 | P4 最小系统网络验收 | 待授权 | 需 P3 通过及用户授权 |
 | P5 黄金内核 A/B | 待开始 | P4 后执行 |
@@ -371,3 +371,13 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 2026-11-20 | 用户运行只读解析脚本确认归档 eMMC 备份中 vendor0 为唯一有效副本（DVKR、version/version2=2），vendor1–3 全零；vendor0 含 LAN_MAC ID 3、12 bytes，两个 MAC 均通过单播格式检查。Vendor Storage 备份解析阶段完成；P2 当前唯一执行项转为 BootROM eMMC/SD 启动选择及失败回退审计。
 
 后续每次推进必须先更新本文件中的阶段状态、当前唯一执行项和变更记录。
+
+
+## P2 新增进展：第三方 Panther X2 v1.0 启动链静态核对（2026-11-20）
+
+- 原始 U-Boot 截图显示 SPL 2024.01 的 `Trying to boot from MMC1`；U-Boot proper 从 `mmc@fe2b0000.bootdev.part_1` 加载 extlinux、Kernel、Panther X2 DTB 和 initramfs。
+- 同标签 Linux 日志确认 `mmcblk0` 为 uSD、rootfs 位于 `mmcblk0p2`；`mmcblk1` 为 eMMC。
+- 结合控制器映射，第三方启动路径高度支持 eMMC 前级 + TF 后级混合启动，与本项目当前实机路径属于同类；不构成 TF SPL + TF proper 自包含启动证据。
+- v1.0 标签 Git tree 仅含 README 和 PNG，没有 idbloader/u-boot.itb/整卡镜像；README 的预构建链接是源码标签压缩包，不是固件包。
+- 当前 main 分支已转向 Buildroot 2026.08、U-Boot next-dev、FIT/RKFW/eMMC 布局，不可与 v1.0 的 uSD 启动布局混为一谈。
+- 详见 P2 报告 §18。未执行下载、运行、写卡或设备操作。
