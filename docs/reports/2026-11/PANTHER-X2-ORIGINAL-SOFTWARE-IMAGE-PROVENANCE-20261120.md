@@ -647,3 +647,35 @@ user_overlays=
 2. 读取 `rk3566-panther-x2.dtb` 的根节点身份及 GMAC 节点关键属性；与已归档的 6.1.116 磁盘 DTB、running FDT 对照。
 3. 重点比较实际 GMAC 资源与行为相关属性（reg、interrupt、clocks、clock-names、resets、reset-names、pinctrl、phy-mode、phy-handle、mdio/PHY 子节点），不根据板型名称或 SoC compatible 字符串单独判断兼容性。
 4. 在上述静态核验完成前，不修改启动脚本、DTB、U-Boot 或设备配置，不刷写 eMMC。
+
+
+## 22. 原始 6.1.65 boot.scr 完整性及与 boot.cmd 一致性（2026-11-20）
+
+用户使用 Python 标准库从只读读取的 ext4 BOOT 分区中解析 inode 17 对应的 `boot.scr`。未执行脚本，未修改镜像或设备。
+
+### 22.1 U-Boot legacy image header（已验证）
+
+- 文件大小：3382 bytes。
+- Magic：`0x27051956`，符合 U-Boot legacy image header。
+- Header CRC：通过。
+- Payload size：3318 bytes。
+- Payload data CRC：通过。
+- OS 字段：5；Architecture：2（ARM）；Image type：6（Script）；Compression：0（未压缩）。
+- Payload 可按 UTF-8 解码为 U-Boot 命令脚本。
+
+### 22.2 与 boot.cmd 的关系（已验证）
+
+解析出的 `boot.scr` payload 与此前从同一 BOOT 分区读取的 `boot.cmd` 正文一致。关键启动逻辑包括：
+- 读取并导入 `armbianEnv.txt`；
+- 加载 `uInitrd` 和 `Image`；
+- 从 `dtb/${fdtfile}` 加载 Linux DTB；
+- 执行 FDT resize、可选 overlay/fixup；
+- 执行 `booti`。
+
+结合 `armbianEnv.txt` 中的 `fdtfile=rockchip/rk3566-panther-x2.dtb`，可确认原始镜像中的 `boot.scr` payload 使用与 `boot.cmd` 一致的逻辑，配置目标为 Panther X2 Linux DTB。
+
+### 22.3 证据边界
+
+- **已验证：** 镜像内 `boot.scr` 是 CRC 正确的 U-Boot legacy script；payload 与 `boot.cmd` 一致；配置路径指向 Panther X2 DTB。
+- **未验证：** 当年实机的 U-Boot 是否从该 BOOT 分区加载并执行此脚本；运行时是否有脚本外的环境变量或启动命令改变设备选择。
+- 因此，本节结论限定为“原始镜像内脚本的配置和内容”，不声称已证明历史实机执行轨迹。
