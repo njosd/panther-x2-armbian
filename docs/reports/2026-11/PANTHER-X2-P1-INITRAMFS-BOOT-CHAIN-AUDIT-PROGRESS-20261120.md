@@ -126,6 +126,58 @@ PartType: EFI 是分区类型信息，不是文件系统类型。现有仓库资
 
 **待补证：** 当前 TF /boot 所在分区的实际文件系统类型，以及 U-Boot 对该类型的支持。写入 8GB 卡前必须闭环此项；目前不指定新卡的分区格式。
 
+
+## 3.5 当前启动介质身份与文件系统：用户实机只读输出（2026-11-20）
+
+用户在当前 Armbian 系统中依次执行 findmnt、lsblk 和 sysfs 只读查询，原始输出如下：
+
+```text
+findmnt -no SOURCE,FSTYPE /boot
+/dev/mmcblk0p1 ext4
+
+lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL
+mmcblk1      29.1G disk
+├─mmcblk1p1   255M part ext4
+└─mmcblk1p2  28.9G part ext4
+mmcblk1boot0   4M disk
+mmcblk1boot1   4M disk
+mmcblk0      59.5G disk
+├─mmcblk0p1   511M part ext4 /boot
+└─mmcblk0p2    59G part ext4 /
+
+sysfs 设备身份输出：
+
+=== mmcblk0 ===
+removable=0
+type=SD
+name=SN64G
+
+=== mmcblk1 ===
+removable=0
+type=MMC
+name=DF4032
+```
+
+### 证据解释
+
+- /dev/mmcblk0p1 是当前 /boot，文件系统为 ext4。
+- /sys/block/mmcblk0/device/type 返回 SD，设备名 SN64G；因此 mmcblk0 是 SD/TF 存储介质。sysfs 的 removable=0 不改变其 type=SD 身份，不能仅凭 removable 位将其误判为 eMMC。
+- mmcblk1 的 device type 为 MMC、名称 DF4032，并暴露 mmcblk1boot0 / mmcblk1boot1 专用硬件分区；这是板载 eMMC。
+- 因此当前 /boot 和根文件系统都位于 SD/TF（mmcblk0），不是 eMMC（mmcblk1）。
+- 既有 U-Boot proper 日志将 SD 枚举为 mmc 1，并从 mmc 1:1 找到并执行 TF 上的 boot.scr；既有启动记录还显示随后加载 Kernel、uInitrd 和 Panther X2 DTB。结合本次 Linux 对 SD 设备及 ext4 /boot 的直接识别，可确认当前启动链实际从 SD/TF 的 ext4 第一分区读取启动文件。
+
+### 本项结论更新
+
+| P1 核验项 | 结论 | 证据等级 |
+|---|---|---|
+| 当前 /boot 介质 | SD/TF（Linux mmcblk0，型号字符串 SN64G） | 已验证（用户实机 sysfs + mount 输出） |
+| 当前 eMMC 身份 | Linux mmcblk1（MMC / DF4032，含 boot0/boot1） | 已验证（用户实机 sysfs + block device 节点） |
+| 当前 /boot 文件系统 | ext4 | 已验证（findmnt） |
+| 当前 U-Boot 对 SD/TF ext4 的读取能力 | 支持；成功从其第一分区找到并执行 boot.scr，且加载 Linux 启动文件 | 已验证（U-Boot 启动记录与本次介质身份/FSTYPE 对照） |
+| removable=0 是否否定 SD 身份 | 否；同一设备的 MMC protocol type 明确为 SD | 已验证（sysfs） |
+
+**对 8GB 实验卡的影响：** 当前链路已证明可从 SD/TF 上的 ext4 分区加载启动文件；因此无需为兼容当前 U-Boot 而强制改用 FAT。最终 8GB 卡的 GPT 分区起始 LBA、U-Boot proper 写入范围和 ext4 分区布局，仍须在写卡前单独完成静态布局审计。不得直接照抄现有 64GB 卡的容量/分区尺寸。
+
 ## 4. 6.1.116 正常基线对照边界
 
 6.1.116 归档已保存：
