@@ -59,7 +59,7 @@
 
 ### Layer 1 — 最小 RAM rootfs / initramfs（当前只做只读设计；构建待授权）
 
-当前先锁定上游组件版本、依赖、许可证、工具链与可复现构建方式；未经用户明确授权，不触发 CI、不下载/编译组件、不生成 initramfs 产物。授权后再构建 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
+当前只做上游组件来源/版本/依赖/许可证初审。组件初审见 P2 报告 PANTHER-X2-P2-UPSTREAM-USERSPACE-COMPONENT-AUDIT-20261120.md：BusyBox 1.36.1 为基础用户空间稳定版候选；ethtool 7.2 为诊断工具候选；独立 iproute2 与 tcpdump 暂缓。当前唯一工作是核验 BusyBox 1.36.1 源码中的 ip/nc applet、UDP broadcast 功能与 Kconfig 依赖。未经用户明确授权，不下载源码包、不触发 CI、不编译、不生成 initramfs 产物。授权后再构建 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
 
 - `/init` 和必要目录结构；
 - BusyBox（优先静态构建，减少动态库依赖）；
@@ -179,7 +179,9 @@
 | P1：initramfs/gzip 内核能力与 U-Boot ext4/legacy uInitrd 加载能力 | 已完成静态验收；详见 P1 报告 |
 | P1：6.1.116 资产匹配及历史 eMMC 启动边界 | 已完成静态核对；历史 U-Boot 实际执行轨迹仍未闭环但不阻塞当前固件下的受控对照 |
 | 8GB TF 卡 GPT/ext4 静态布局 | 已形成候选；未对实体卡核验或写入 |
-| BusyBox / iproute2 / ethtool 上游版本与依赖锁定 | P2 只读设计待做 |
+| BusyBox 1.36.1 上游源码/Kconfig 核验 | 当前唯一执行项 |
+| ethtool 7.2 依赖与 ioctl/netlink 构建选项 | 待 BusyBox 项完成后 |
+| iproute2 / tcpdump 首版是否需要 | 暂缓，只有明确功能缺口才重新评估 |
 | 最小 /init 与目录树设计 | P2 只读设计待做 |
 | 独立 CI workflow 设计/审查 | P2 只读设计待做 |
 | 构建 initramfs | 未授权、未执行 |
@@ -188,5 +190,5 @@
 
 ## 8. 下一项唯一工作
 
-进入 P2 只读设计：锁定 BusyBox、iproute2、ethtool 与广播/UDP 测试工具的上游来源、稳定版本/commit、依赖和许可证；设计最小 /init、目录树和独立可复现 CI workflow。此阶段不触发构建、不生成产物、不写卡、不启动实验内核。完成设计后再向用户确认是否授权实际 CI 构建。
+继续 P2，当前只核验 BusyBox 1.36.1 官方源码中的 ip applet、nc UDP/broadcast 功能与配置依赖。完成该组件后再进入 ethtool 7.2 的构建选项和依赖审查；不要并行展开其他组件。此阶段不下载源码包、不触发构建、不生成产物、不写卡、不启动实验内核。完成设计后再向用户确认是否授权实际 CI 构建。
 
