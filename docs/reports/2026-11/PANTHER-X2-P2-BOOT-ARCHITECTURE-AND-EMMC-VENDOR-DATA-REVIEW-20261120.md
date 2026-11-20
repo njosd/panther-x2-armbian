@@ -1036,3 +1036,87 @@ Rockchip `rk_atags.c` 的 `spl_bootdev_map[]` 映射：
 4. 专用 eMMC-only Vendor read-only parser 的代码落点仍是设计项，未编写。
 
 这些是进入补丁设计前最后需要核对的源代码/构建配置边界。当前未编写补丁、未构建、未修改设备。
+
+
+## 22. Rockchip 官方较新 U-Boot/rkbin 更新审查（2026-11-20）
+
+本节为上游只读源码与发布记录审查；没有下载二进制到设备、构建或写入介质。
+
+### 22.1 官方 U-Boot 上游当前状态
+
+审查 Rockchip 官方维护的 `rockchip-linux/u-boot` `next-dev` 分支（当前代码快照中关键文件提交标识：`spl.c=e770c57`、`rk_atags.c=991d99f`、`boot_rkimg.c=8ae682b`、`vendor.c=187f935`、`param.c=e91f902`）。
+
+与此前参考提交相比，关键启动逻辑没有出现能自动消除 Panther X2 混合介质问题的变化：
+
+- `spl_boot_device()` 默认仍返回 `BOOT_DEVICE_MMC1`（eMMC）。
+- SPL 通用 `board_boot_order()` 的 weak 默认实现仍只把 `spl_boot_device()` 放入启动列表；要有 MMC1→MMC2 或其他回退顺序，必须有板级 override。
+- `boot_from_devices()` 在 loader 成功加载 proper 后仍记录 `spl_image->boot_device`；Rockchip `spl_perform_fixups()` 仍将该成功 loader 通过 ATAGS 传给 proper。
+- ATAGS 映射仍为 MMC1→EMMC、MMC2→SD0。
+- proper 的 `boot_devtype_init()` 仍是配置 > ATAGS > scan list；`CONFIG_ROCKCHIP_BOOTDEV` 若指定有效设备，仍可能先于 ATAGS 生效。
+- 因此，上游保留了实现双介质 proper 选择的基础设施，但没有把“自动从 eMMC/TF 选择完整独立启动链”变成不需板级配置的通用默认行为。
+
+### 22.2 Rockchip rkbin 发布记录中与本项目有关的更新
+
+Rockchip 官方 `rkbin/doc/release/RK3566_EN.md` 当前列出的相关更新：
+
+| 版本 | 日期 | 官方说明 | 对本项目的意义 |
+|---|---|---|---|
+| rk356x_spl_v1.14 | 2024-05-30 | 修复 SPL 阶段 SD 卡初始化失败，原因是 SPL 阶段 pinctrl 节点被禁用 | 与 SPL 读取 TF 的能力直接相关；应列为候选 SPL 版本 |
+| rk356x_spl_v1.13 | 2023-09-25 | 首个 uboot.img 的 u-boot.dtb 加载/校验失败时，修复不加载备份镜像的问题 | 启动镜像冗余/回退可靠性改善；不是介质选源修复 |
+| rk3566 DDR v1.26 | 2025-05-26 | 优化 training、CKE/CA timing；修复 CS1 异常、启动概率及 DRAM 容量识别问题 | 可能改善 DDR 初始化可靠性；需按 Panther X2 实际 LPDDR 型号/拓扑匹配 |
+| rk3566 DDR v1.26 多频率版 | 2026-05-21 | 增加单通道 LPDDR4/LPDDR4X 支持，并修复启动概率/容量识别问题 | 是值得检查的较新 DDR blob；不等同于 Panther X2 已适配 |
+
+重要限定：
+- v1.14 修复的是 SPL 阶段 SD 初始化，不是 BootROM 选源优先级，也没有证明 eMMC SPL 会自动尝试 TF；当前实机已能从 MMC2 读取 proper，不能据此认定现有问题就是该缺陷。
+- v1.13 修复的是同一启动镜像体系中的备份镜像加载，不是“eMMC 取 SPL、TF 取 proper”的跨介质一致性。
+- DDR v1.26 需要匹配 Panther X2 板上 DRAM 颗粒、通道/Rank/容量及时序参数；不能只因版本更新就替换。
+
+### 22.3 主线 U-Boot v2026.10 的板级适配边界
+
+U-Boot v2026.10 的 Rockchip 官方板级支持列表列出多款 RK3566 设备（例如 ROCK 3C、Zero 3、Quartz64-A/B、ODROID-M1S 等），但没有 Panther X2/H1GW V04。
+
+因此主线 U-Boot 是可参考的更新方向，但当前不能把某个已支持 RK3566 板子的二进制直接当作 Panther X2 新版 Bootloader。必须补齐 Panther X2 的 DDR 初始化、GMAC/PHY、pinctrl、供电、FDT、Vendor MAC、USB Loader/rockusb 救援等板级差异。
+
+### 22.4 一个对 Vendor MAC 方案有帮助的新发现
+
+Rockchip 官方 `next-dev` 的 `vendor.c` 已新增/包含独立缓冲区解析 API：
+
+`vendor_storage_buffer_read(id, pbuf, size, vendor_addr, vendor_size)`
+
+其实现通过局部 `struct vendor_info vendor_buf` 解析调用者传入的 Vendor Storage buffer，而不是使用通用 API 的全局 `vendor_info` / `bootdev_type`。对应声明位于 `arch/arm/include/asm/arch-rockchip/vendor.h`。
+
+这比之前方案更好：未来可显式从 eMMC mmc0 只读取出 Vendor 原始 buffer，再用该 API 解析 LAN_MAC，而不必重写整个 item 解析器，也不必污染通用 Vendor 全局状态。
+
+但该 API **只解析传入的单份 buffer**，不会自行从 eMMC 读取，也不会自动扫描四份副本并选最新有效副本。因此仍需独立只读 eMMC 读取层和副本选择层；且必须检查传入长度、tag、version/version2、free_offset/free_size、item_num、item offset/size 边界。不得调用 Vendor write 或随机 MAC fallback。
+
+### 22.5 当前更新评估结论
+
+1. **值得纳入候选的更新：**
+   - rk356x SPL v1.14：重点作为 SPL SD 初始化候选，静态比对其 DDR/SPL 组合和板级 pinctrl 依赖；
+   - rk3566 DDR v1.26：重点检查与 Panther X2 DRAM 颗粒/拓扑是否匹配；
+   - Rockchip U-Boot next-dev：可作为代码参考，尤其 Vendor buffer parser 和 SPL ATAGS 交接机制。
+2. **尚未发现上游已经解决的事项：**
+   - 默认 SPL 自动尝试 eMMC 与 TF 两个 loader；
+   - proper 端自动忽略固定 bootdev 配置并始终优先按实际 SPL 成功 loader 选择；
+   - Vendor MAC 无条件固定从 eMMC 只读。
+3. **不能直接替换的原因：**
+   - 官方主线 U-Boot 板级列表没有 Panther X2；
+   - rkbin 发布记录没有说明 v1.14 改变介质优先级；
+   - 当前 Panther X2 原厂/JP/Ophub SPL、DDR blob、proper、FDT 的版本组合与板级配置仍须作为整体对照。
+
+### 22.6 下一步缩小为版本差分，不做盲目升级
+
+下一步只做静态版本核对：
+- 从仓库已保存的 Panther X2、JP-TvBox、Ophub U-Boot/SPL 镜像中识别 SPL/DDR blob 版本指纹；
+- 对照 rkbin v1.13→v1.14 的 SPL 变更，确认 SD pinctrl 修复是否已经包含在当前候选 SPL；
+- 核对 rk3566 DDR v1.26 与 Panther X2 实际 DRAM 参数是否兼容；
+- 检查 Rockchip next-dev 的 `vendor_storage_buffer_read()` 是否可在拟用原分支中回移或直接采用，保持通用 Vendor API 不变；
+- 仍以原有 Bootloader 设计为基线，不因“新版”名义重构；不下载/刷写设备、不构建、不修改系统。
+
+### 22.7 官方来源
+
+- Rockchip U-Boot `next-dev`：https://github.com/rockchip-linux/u-boot
+- Rockchip Vendor buffer parser：https://github.com/rockchip-linux/u-boot/blob/next-dev/arch/arm/mach-rockchip/vendor.c
+- Rockchip Vendor API 声明：https://github.com/rockchip-linux/u-boot/blob/next-dev/arch/arm/include/asm/arch-rockchip/vendor.h
+- Rockchip RK3566 rkbin 发布记录：https://github.com/rockchip-linux/rkbin/blob/master/doc/release/RK3566_EN.md
+- U-Boot v2026.10 Rockchip 主线板级支持列表：https://docs.u-boot.org/en/v2026.10/board/rockchip/rockchip.html
