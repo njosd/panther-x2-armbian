@@ -681,11 +681,12 @@ TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
 
 ### 17.1 第三方 uSD 启动系统证据
 
-1. `yjdwbj/panther-x2` 项目 README：
+1. `yjdwbj/panther-x2` 项目 README（tag `v1.0`，2024-06-14）：
    - 记录 U-Boot 2024.01、Kernel 6.9.4、Debian 12；
    - 明确标注 “Boot log (booting from uSD Card)”；
-   - 日志显示 Linux 根文件系统挂载自 `mmcblk0p2`，同时识别到另一块 32GB eMMC（`mmcblk1`，并枚举 boot0/boot1/RPMB）；
-   - 未提供完整 BootROM/SPL/U-Boot UART 日志，也未证明 SPL 与 proper 均由 uSD 提供。
+   - Linux kernel command line 的 root UUID 为 `248cdb28-ac33-4448-adbc-2972f265f0ff`；启动日志显示该 UUID 挂载自 `mmcblk0p2`，并将 `mmcblk0p1` 挂载为另一文件系统；
+   - 同时内核识别到另一块 32GB eMMC，设备号为 `mmcblk1`，并枚举其 boot0/boot1/RPMB；
+   - 这强力支持其 boot/root 系统分区均位于 uSD，而 eMMC 仍在机内；但 README 没有提供 BootROM/SPL/U-Boot 阶段 UART 日志，不能判定 U-Boot proper 的来源，也不能证明 SPL 与 proper 均由 uSD 提供。
 
 2. PiLoader Panther X2 / MerryIoT 安装指南：
    - 声称 Panther X2 与 MerryIoT Hotspot Miner V1 使用相同硬件；
@@ -693,7 +694,7 @@ TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
    - 声称不改动设备内部存储，并保留原卡用于恢复原厂软件；
    - 未说明 BootROM source、SPL/proper 实际介质，也未展示 U-Boot 阶段日志。
 
-两项资料支持的结论是：**Panther X2 存在从 TF/uSD 运行 Linux 系统、同时保留 eMMC 内容的第三方实践。** 它们不证明完整 U-Boot 自包含于 TF。结合本项目已验证的 eMMC SPL→TF proper 路径，合理但尚未由上述第三方日志直接证明的解释是：系统由 eMMC 前级启动，再从 TF 加载 proper/kernel/rootfs；也可能存在其他布局，必须取得完整 UART 启动日志或镜像布局才能确认。
+两项资料支持的结论是：**Panther X2 存在从 TF/uSD 运行 Linux、同时保留 eMMC 内容的第三方实践；其中 v1.0 明确把 rootfs 与另一分区放在 uSD。** 它们不证明完整 U-Boot 自包含于 TF。结合本项目已验证的 eMMC SPL→TF proper 路径，一个与现有证据吻合的解释是：BootROM/eMMC SPL → TF U-Boot proper → TF boot/kernel/rootfs；但第三方未提供 U-Boot UART 阶段日志，因此仍不能把这个解释升级为已验证事实。
 
 ### 17.2 第三方资料之间的表面矛盾
 
