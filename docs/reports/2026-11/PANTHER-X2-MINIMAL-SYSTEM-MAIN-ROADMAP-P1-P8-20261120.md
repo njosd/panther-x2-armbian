@@ -224,10 +224,10 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **P1 已完成，不重跑。当前只执行 P2 的只读设计：**
 
-1. 锁定 BusyBox、iproute2、ethtool 和广播/UDP 测试工具的官方上游来源与候选稳定版本；
-2. 审核最小静态/动态依赖、所需 applet、内核接口和许可证；
-3. 设计最小 /init、目录树、串口日志与网络诊断流程；
-4. 设计独立手动触发、固定工具链/Action/源码版本的 CI workflow 和产物 manifest；
+1. 先核验 BusyBox 1.36.1 官方源码中的 ip applet、nc UDP broadcast 功能及 Kconfig 依赖；
+2. 完成 BusyBox 这一组件的配置范围与许可证记录后，再进入 ethtool 7.2 的依赖/构建选项核验；
+3. iproute2 与 tcpdump 暂不进入首版，除非前两项审查发现明确功能缺口；
+4. 组件锁定后再设计最小 /init、目录树、串口日志与独立可复现 CI workflow；
 5. 完成设计审查后暂停，等待用户授权实际构建。
 
 不得触发构建、写卡或启动实验内核。
@@ -237,7 +237,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | P1 启动链与 initramfs 只读审计 | 已完成 | 静态可行性验收通过；自制 initramfs 尚未构建/启动 |
-| P2 最小网络 initramfs 组件锁定与构建设计 | 只读设计中 | 当前唯一执行项；实际构建待用户授权 |
+| P2 最小网络 initramfs 组件锁定与构建设计 | 只读设计中 | 已完成组件初筛；当前唯一执行项是 BusyBox 1.36.1 源码/Kconfig 核验；实际构建待用户授权 |
 | P3 独立 TF 启动 | 待授权 | 需用户明确授权 |
 | P4 最小系统网络验收 | 待授权 | 需 P3 通过及用户授权 |
 | P5 黄金内核 A/B | 待开始 | P4 后执行 |
