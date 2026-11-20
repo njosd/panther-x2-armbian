@@ -851,3 +851,105 @@ Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Arm
 - BROWAN H1GW V04 PCB 顶面照片及拆机记录：https://lorenzogangemi.com/blog/repurposing-panther-x2/
 - FCC 2022 Panther X2 Internal Photos #5825812：https://fccid.io/2A3OG-PANTHER-X2/Internal-Photos/Internal-Photos-5825812
 - FCC 2021 Panther X2 Internal Photos #5542190：https://fccid.io/2A3OGPANTHERX2/Internal-Photos/Internal-Photos-5542190
+
+
+## 20. 原有 Bootloader 内的 proper 介质选择与 eMMC 权威 Vendor 读取方案评估（2026-11-20）
+
+本节只审查已有 Rockchip U-Boot 源码机制并形成静态方案；不修改源码、不构建、不写入 TF/eMMC、不操作设备。
+
+### 20.1 原有启动设备选择机制已经具备按介质选择 proper 的基础
+
+以已审计的 Rockchip U-Boot 参考提交 `8af253525b7de5f29f7f97dffd18adb77db6456a` 为准：
+
+1. `arch/arm/mach-rockchip/param.c` 的 `param_parse_atags_bootdev()` 将 SPL 传入的启动介质标记映射为 U-Boot block device：
+   - `BOOT_TYPE_EMMC` → `devtype=mmc`, `devnum=0`；
+   - `BOOT_TYPE_SD0` / `BOOT_TYPE_SD1` → `devtype=mmc`, `devnum=1`。
+2. `arch/arm/mach-rockchip/boot_rkimg.c` 的 `boot_devtype_init()` 优先级为：
+   - 编译配置 `CONFIG_ROCKCHIP_BOOTDEV`；
+   - SPL ATAGS（启用 `CONFIG_ROCKCHIP_PRELOADER_ATAGS` 时）；
+   - `rk_board_scan_bootdev()` 扫描；
+   - 全部失败时回退 `mmc 0`。
+3. 该函数将选择结果写入 `devtype/devnum`。后续 `rockchip_get_bootdev()`、Rockchip Vendor Storage 和若干启动文件读取路径都使用这组结果。
+4. 同一源码的 `get_bootdev_type()` 把 `mmc 1` 标记为 SD，把 `mmc 0` 标记为 eMMC。
+
+这说明原设计并非只能从一个固定介质加载 proper。SPL 传入的 ATAGS 可以把 proper 阶段的启动设备明确标为 eMMC 或 SD。现有实机的 eMMC SPL → TF proper 路径也与 ATAGS → `mmc 1` 机制相吻合。
+
+### 20.2 启动文件来源的最小方案
+
+建议保留 SPL、ATAGS、`devtype/devnum`、Rockchip bootdev 和原有 proper 文件加载机制，不重写启动框架。
+
+目标行为：
+
+| 启动目标 | SPL/ATAGS 交接给 proper 的设备 | proper/启动文件来源 |
+|---|---|---|
+| TF 启动 | `mmc 1` / SD | TF |
+| eMMC 启动 | `mmc 0` / eMMC | eMMC |
+
+这里的“TF 启动”是指现有 SPL 已经选择 TF 作为 proper/系统启动介质；不表示 BootROM 已能绕过 eMMC 并从 TF 加载 SPL。当前 RK3566 BootROM 介质优先级和本机启动链证据仍然有效。
+
+需要注意：当前实机日志已证明本机此刻走的是 eMMC SPL → TF proper。要实现另一分支，还需确认现有 SPL 对“TF 不存在/不选择 TF 时回到 eMMC proper”的实际回退规则，以及配置中是否存在固定 `CONFIG_ROCKCHIP_BOOTDEV` 覆盖 ATAGS 的情况。这是实现方案的源码配置核对，不是重新调查已知混合启动根因。
+
+### 20.3 Vendor Storage 当前为何会随 proper 介质变化
+
+同一参考提交的 `arch/arm/mach-rockchip/vendor.c`：
+
+- `vendor_storage_init()` 调用 `rockchip_get_bootdev()` 选择 block device；
+- `vendor_ops()` 也调用 `rockchip_get_bootdev()` 执行底层读写；
+- MMC Vendor Storage 固定使用该 MMC 设备上的 `EMMC_VENDOR_PART_OFFSET`；
+- 全局 `bootdev_type`、`vendor_info` 缓存初始化后的设备类型和数据。
+
+因此，若 proper 的 `devtype/devnum` 为 `mmc 1`，标准 Vendor Storage 会读取 TF 的 Vendor 区；若为 `mmc 0`，才会读取 eMMC Vendor 区。该行为与本项目已确认的 TF Vendor 读取现象一致。
+
+**不能**简单地在启动早期全局把 `devnum` 强制改为 0：这样会同时改变启动文件、分区、bootargs、升级/恢复等其他依赖 `rockchip_get_bootdev()` 的路径，破坏原有介质选择职责。
+
+### 20.4 eMMC 权威 Vendor 数据的最小隔离方案
+
+建议将两种“设备来源”明确分离：
+
+- **Boot device（动态）**：继续由 ATAGS/`devtype/devnum` 决定，供 proper、Kernel、DTB、initramfs、bootargs 等现有启动路径使用。
+- **Board identity storage（固定）**：LAN_MAC 的权威来源固定为 eMMC user area 的 Vendor Storage 区，不跟随当前启动介质变化。
+
+实现方向（仅方案，不是已编写补丁）：
+
+1. 保留现有通用 `vendor_storage_read/write()` 及其 bootdev 语义，不改变其他现有调用者。
+2. 在 Vendor Storage 内部增加一个**只读、显式指定 eMMC mmc0 block descriptor** 的读取入口/内部 helper；独立解析 eMMC Vendor Storage 的四份副本，选择有效且版本最新的副本。
+3. 该专用入口不提供写操作，不调用通用 `vendor_storage_write()`，不修改通用 Vendor Storage 的全局 `bootdev_type/vendor_info` 状态，避免 TF/eMMC 两套数据上下文串扰。
+4. `rockchip_set_ethaddr()`（或保留原函数名的最小适配）改为从该 eMMC-only read-only 入口读取 LAN_MAC ID 3 的 12 bytes。
+5. 两个 MAC 均通过长度、单播有效性及互异性校验；读取失败或数据无效时打印明确错误并不设置伪造 MAC，不生成随机值、不写回任何 Vendor Storage。
+6. 保留现有 `ethaddr/eth1addr` 环境变量和 `fdt_fixup_ethernet()` 机制，将权威 MAC 交给 Linux DTB；继续按现有 `ethernet0` alias 与 `FDT_SEQ_MACADDR_FROM_ENV` 配置处理 GMAC 对应关系，不另造 Linux 私有传递接口。
+7. eMMC 读取失败时不得回退到 TF Vendor MAC；否则会再次出现不同启动介质导致 MAC 身份变化的问题。
+
+### 20.5 两项调整组合后的目标行为
+
+| 项目 | TF 作为系统启动介质 | eMMC 作为系统启动介质 |
+|---|---|---|
+| SPL 来源 | 按现有 BootROM/SPL 设计 | eMMC |
+| U-Boot proper | TF | eMMC |
+| Kernel/DTB/initramfs | TF | eMMC |
+| Linux rootfs | TF | eMMC |
+| LAN_MAC 权威来源 | eMMC Vendor Storage | eMMC Vendor Storage |
+| Linux MAC 交接 | 现有 U-Boot env → FDT fixup | 相同机制 |
+| USB 双公头救援 | 原有机制完整保留 | 原有机制完整保留 |
+
+说明：表格中的 TF SPL 来源并非承诺；在当前硬件证据下，TF 模式仍由 eMMC 前级 SPL 进入。表格真正要解决的是 proper 及其后续启动文件的介质一致性，以及硬件身份数据不随启动介质变化。
+
+### 20.6 风险、保护条件与待核对项
+
+- **构建版本边界：** 上述调用链来自与当前 U-Boot 时代相符的 Rockchip 参考提交，不能直接当成当前 Panther X2 二进制的精确源码；实施前须对拟采用的原有 U-Boot 源码分支逐项确认函数和配置仍一致。
+- **启动介质选择：** 核对原有 SPL 生成 ATAGS 的具体路径、proper 回退行为、`CONFIG_ROCKCHIP_BOOTDEV` 是否覆盖 ATAGS、TF/eMMC 分区/镜像格式是否匹配。只做源码/配置静态审查。
+- **Vendor 并发/缓存：** 专用 eMMC read-only 入口应使用独立上下文，不能复用会被通用 Vendor Storage 写接口修改的全局缓存。
+- **数据安全：** 禁止任何 Vendor 写回；禁止随机 MAC fallback；禁止把 eMMC user-area 以外的 boot0/boot1 当作 Vendor 来源。
+- **FDT 对应关系：** 必须保留现有 Panther X2 `ethernet0 → gmac1` alias 及两个 MAC 的编号关系；不得因新读取入口改变 ethaddr/eth1addr 顺序。
+- **恢复机制：** 不改变 USB 双公头、Loader/rockusb、MaskROM 等现有救援入口；任何 proper 更新都必须保留可恢复的原有组合。
+- **尚未完成：** 尚未逐文件审计当前拟用 U-Boot 分支的 SPL ATAGS 产生逻辑、SPL proper fallback 顺序、配置是否覆盖 ATAGS，以及专用 eMMC read-only API 的具体代码落点。
+
+### 20.7 当前静态方案结论
+
+**方案方向可行，且不需要重构原有 Bootloader：**
+- proper 的介质选择沿用原有 ATAGS/`devtype/devnum`；
+- proper 和系统启动文件按选定介质保持一致；
+- Vendor LAN_MAC 的读取源独立固定为 eMMC mmc0；
+- MAC 仍走原有 U-Boot 环境变量和 Linux FDT fixup；
+- 通用 Vendor API、其他启动路径和 USB 双公头救援机制保持不变。
+
+目前这是设计层面的可行方案，不代表当前二进制已经具备 eMMC 固定只读 Vendor 入口，也不代表 proper 的 eMMC fallback 已经通过源码配置核验。下一步应只做这两处具体源码落点的只读审查，再形成补丁设计；未经用户明确授权不编写/应用补丁、不构建、不写卡。
