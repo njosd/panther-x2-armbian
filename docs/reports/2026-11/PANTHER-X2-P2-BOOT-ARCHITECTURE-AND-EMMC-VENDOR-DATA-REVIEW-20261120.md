@@ -189,6 +189,103 @@ Linux `sdmmc_vendor_storage.c` 也逐份检查四份副本的 tag 与 `version2 
 5. 核实备份文件长度、来源和 SHA-256，确保输入确为此前归档的 eMMC user area，而非 TF 或其他镜像。
 
 在这一步完成前，不把某个副本编号写成“当前有效副本”，也不提供任何写入/修复操作。
+
+### 8.6 已有 eMMC 备份的只读解析脚本
+
+固定备份目录已在此前 eMMC 报告中记录为 `~/Desktop/Panther-X2/08-eMMC-Backup-20261120`，目标文件为 `eMMC-user-area-20261120.img`。下面脚本只读取该镜像文件，不访问块设备、不写文件、不输出真实 MAC 地址。它按固定 U-Boot 结构解析四份副本，并只输出 descriptor 与 MAC 格式检查结果。
+
+```bash
+cd ~/Desktop/Panther-X2/08-eMMC-Backup-20261120 || exit 1
+python3 - <<'PY'
+import os
+import struct
+
+path = "eMMC-user-area-20261120.img"
+expected_file_size = 31_268_536_320
+base = 7168 * 512
+copy_size = 128 * 512
+data_offset = 16 + 126 * 8
+data_capacity = copy_size - data_offset - 8
+tag_expected = 0x524B5644
+
+if not os.path.isfile(path):
+    raise SystemExit(f"STOP: file not found: {path}")
+
+actual_size = os.path.getsize(path)
+print(f"Input: {path}")
+print(f"File size: {actual_size}")
+if actual_size != expected_file_size:
+    raise SystemExit("STOP: file size differs from the previously archived eMMC user-area image; do not parse an uncertain input.")
+
+with open(path, "rb") as f:
+    f.seek(base)
+    region = f.read(copy_size * 4)
+
+if len(region) != copy_size * 4:
+    raise SystemExit("STOP: short read from backup image.")
+
+copies = []
+for i in range(4):
+    block = region[i * copy_size:(i + 1) * copy_size]
+    tag, version, next_index, item_num, free_offset, free_size = struct.unpack_from("<IIHHHH", block, 0)
+    stored_hash, version2 = struct.unpack_from("<II", block, copy_size - 8)
+    valid = tag == tag_expected and version > 0 and version2 == version and item_num <= 126
+
+    entry = {
+        "index": i,
+        "block": block,
+        "version": version,
+        "valid": valid,
+        "lan": None,
+    }
+
+    print(f"vendor{i}: tag=0x{tag:08x} version={version} version2={version2} "
+          f"next_index={next_index} item_num={item_num} "
+          f"free_offset={free_offset} free_size={free_size} valid={valid}")
+
+    if valid:
+        for j in range(item_num):
+            item_id, offset, size, flags = struct.unpack_from("<HHHH", block, 16 + j * 8)
+            if item_id == 3:
+                bounds_ok = offset <= data_capacity and size <= data_capacity - offset
+                mac_pair_ok = False
+                if bounds_ok and size == 12:
+                    payload = block[data_offset + offset:data_offset + offset + size]
+                    mac1, mac2 = payload[:6], payload[6:]
+                    def valid_unicast(mac):
+                        return (len(mac) == 6 and
+                                mac != b"\x00" * 6 and
+                                mac != b"\xff" * 6 and
+                                (mac[0] & 1) == 0)
+                    mac_pair_ok = valid_unicast(mac1) and valid_unicast(mac2) and mac1 != mac2
+                    entry["lan"] = payload
+                print(f"  LAN_MAC ID=3: offset={offset} size={size} flags={flags} "
+                      f"bounds_ok={bounds_ok} two_unicast_macs={mac_pair_ok}")
+                break
+        else:
+            print("  LAN_MAC ID=3: not present")
+    copies.append(entry)
+
+valid_copies = [x for x in copies if x["valid"]]
+if not valid_copies:
+    print("RESULT: no valid Vendor Storage copy found; do not infer or repair anything.")
+else:
+    max_version = max(x["version"] for x in valid_copies)
+    winners = [x for x in valid_copies if x["version"] == max_version]
+    print(f"Highest valid version: {max_version}")
+    print("Highest-version copies:", ", ".join(f"vendor{x['index']}" for x in winners))
+    payloads = [x["lan"] for x in winners if x["lan"] is not None]
+    if len(payloads) > 1:
+        print("LAN_MAC payloads identical across highest-version copies:", all(p == payloads[0] for p in payloads))
+    elif len(payloads) == 1:
+        print("LAN_MAC payload present in highest-version copy: yes (bytes intentionally not displayed)")
+    else:
+        print("LAN_MAC payload present in highest-version copies: no")
+PY
+```
+
+输出仅含副本元数据和 MAC 地址格式检查布尔值；不得追加 `xxd`、`hexdump` 或打印 payload 的命令。此脚本不改动备份文件或设备。
+
 ## 9. RK809 PMIC PWRKEY 软件路径（2026-11-20，补充核对）
 
 ### 9.1 Panther X2 板级 DTS 与正常实机证据
