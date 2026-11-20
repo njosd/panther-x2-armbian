@@ -26,7 +26,9 @@
 - 真实 MAC 字节未写入公开仓库，继续保持隐私；
 - 这是已验证的 eMMC 数据存在事实，不代表当前 TF 启动的 U-Boot 已经读取了它。
 
-**未闭环：** Vendor Storage 在 eMMC 用户区中的确切 sector/偏移、完整分区/保留区布局、数据副本/版本选择规则，以及 eMMC 设备在各 U-Boot 阶段的可靠枚举编号。后续必须先从现有只读原始证据中确定，不能猜偏移。
+**已补充闭环（源码级物理布局）：** Rockchip U-Boot 固定参考提交 `8af253525b7de5f29f7f97dffd18adb77db6456` 的 `arch/arm/mach-rockchip/vendor.c` 明确将 eMMC Vendor Storage 起点定义为 `EMMC_VENDOR_PART_OFFSET = 7 * 1024 = LBA 7168`，每份 128 sectors（64 KiB），共 4 份，合计 512 sectors（256 KiB），覆盖 user area LBA 7168–7679（结束位置为 exclusive LBA 7680）。Rockchip kernel 固定参考提交 `77168c8d5ab82399f65a80e9f807b50ba37cf483` 的 `drivers/soc/rockchip/sdmmc_vendor_storage.c` 使用同一 `EMMC_VENDOR_PART_START = 7 * 1024`、128-sector block 和 4 份副本，并通过 `rk_emmc_transfer()` 读取。该区域是 eMMC user area 的原始保留区，不是当前 GPT 文件系统分区。
+
+**仍待验证（实物副本级）：** 现有报告已确认 Vendor Storage 中有 `DVKR`、version=2、LAN_MAC ID=3、12-byte 双 MAC 条目，但尚未把已有 eMMC user-area 原始备份的 LBA 7168–7679 逐份解析并与此前读出的条目逐字节交叉核对。因此，物理布局已由两套 Rockchip 源码确认，实际四份副本的当前内容、有效副本编号和最高版本仍需从已有备份做只读核验；不得重新读取或写入实机 eMMC。
 
 ## 3. 当前 Rockchip U-Boot 的默认 Vendor Storage 机制不满足“始终读取 eMMC”
 
@@ -110,7 +112,84 @@ BootROM selects eMMC:
 
 此阶段不研究 BusyBox 具体版本、不下载源码包、不编译、不触发 CI、不写 TF、不写 eMMC、不执行启动实验。
 
-## 8. 证据与来源
+## 8. eMMC Vendor Storage 物理布局与副本选择规则（2026-11-20，源码交叉核对）
+
+### 8.1 固定物理位置（源码级确认）
+
+两套 Rockchip 实现给出一致布局：
+
+- Rockchip U-Boot：`rockchip-linux/u-boot@8af253525b7de5f29f7f97dffd18adb77db6456`，`arch/arm/mach-rockchip/vendor.c`：
+  - `EMMC_VENDOR_PART_OFFSET = 1024 * 7 = 7168`；
+  - `EMMC_VENDOR_PART_BLKS = 128` sectors；
+  - `VENDOR_PART_NUM = 4`；
+  - 源码注释明确说明起点为 3.5 MiB、总区大小为 256 KiB。
+- Rockchip Linux：`rockchip-linux/kernel@77168c8d5ab82399f65a80e9f807b50ba37cf483`，`drivers/soc/rockchip/sdmmc_vendor_storage.c`：
+  - `EMMC_VENDOR_PART_START = 1024 * 7`；
+  - `EMMC_VENDOR_PART_SIZE = 128` sectors；
+  - `EMMC_VENDOR_PART_NUM = 4`；
+  - 通过 `rk_emmc_transfer()` 对这些 sector 做读取。
+
+按 512-byte sector 计算：
+
+| 副本 | 起始 LBA | sector 数 | 结束 LBA（不含） |
+|---|---:|---:|---:|
+| vendor0 | 7168 | 128 | 7296 |
+| vendor1 | 7296 | 128 | 7424 |
+| vendor2 | 7424 | 128 | 7552 |
+| vendor3 | 7552 | 128 | 7680 |
+| 合计 | 7168 | 512 | 7680 |
+
+因此 Vendor Storage 覆盖 eMMC user area LBA 7168–7679，字节偏移 3,670,016–3,932,159，长度 262,144 bytes（256 KiB）。这是 raw user-area 保留区，不是 GPT 文件系统分区；不得对其格式化、清零或当作普通空闲空间使用。
+
+该区域位于已确认的 eMMC user-area IDB LBA64 之后、FIT/U-Boot proper LBA16384 之前。源码中的 `EMMC_SYS_PART_OFFSET=8064` 也位于 Vendor Storage 结束位置之后。
+
+### 8.2 副本有效性与选择规则（源码级确认）
+
+U-Boot `vendor_storage_init()` 对 vendor0–vendor3 逐份读取，按以下条件识别有效副本：
+- header tag 等于 `0x524B5644`（ASCII 字节序表现为 `DVKR`）；
+- 尾部 `version2` 与 header `version` 相等；
+- 在满足上述条件的副本中选择最高 `version`。
+
+选定副本后再完整读入内存，后续按 item ID 查找数据。四份副本是版本轮换/冗余布局；不能假定 vendor0 永远是当前有效副本，也不能只读取第一份就认定数据状态。
+
+Linux `sdmmc_vendor_storage.c` 也逐份检查四份副本的 tag 与 `version2 == version`，选择最高版本，再读入对应完整 64 KiB 数据块。两套实现的选择规则相互吻合。
+
+注意：源码注释把 `version2` 相等作为有效性条件；不能把这里描述成 SHA-256/密码学完整性验证。U-Boot 结构中的 hash 字段被注释为 future expansion，不能夸大其当前校验能力。
+
+### 8.3 当前 U-Boot 与 Linux 的读取源差异
+
+- U-Boot `vendor_ops()` 对 MMC/SCSI 设备将物理偏移设为 LBA 7168；proper 阶段使用 `rockchip_get_bootdev()`，SPL 阶段使用当前 `_spl_load_info->dev`。因此标准 U-Boot Vendor Storage 路径仍跟随当前启动设备，而不是自动固定到 eMMC。
+- Linux Rockchip `sdmmc_vendor_storage.c` 的 eMMC 读取路径则直接使用固定 LBA 7168 起点及 `rk_emmc_transfer()`，其设计目标是读取 eMMC user area Vendor Storage。
+- 这进一步说明：Linux 已有能力读 eMMC Vendor Storage，不代表当前 U-Boot 在 TF 启动时也读取了 eMMC 中同一份数据。
+
+### 8.4 与 Panther X2 已有实测条目的对应关系
+
+既有 `EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md` 已确认此前读取到的结构为：
+- magic：`DVKR`；
+- version：2；
+- item_num：1；
+- item ID：3（`LAN_MAC_ID`）；
+- size：12 bytes，包含两个 GMAC MAC 地址。
+
+真实 MAC 继续脱敏，不写入报告。
+
+**证据等级：**
+- Vendor Storage 物理起点、容量、四份副本布局：两套 Rockchip 源码静态交叉确认。
+- LAN_MAC ID 3、12-byte 数据条目存在：此前设备软件读取结果已验证。
+- 现有 eMMC 原始备份 LBA 7168–7679 中四份副本的逐份原始字节、实际有效副本编号及最高版本：尚未完成只读交叉核验。
+- 以上 Rockchip 源码证明标准实现布局，不自动证明设备当前运行的 2017.09 U-Boot 二进制一定编入了相同版本代码；当前二进制配置/源码 provenance 仍需单独区分。
+
+### 8.5 下一步只读动作
+
+下一步不访问实机 eMMC。仅使用已存在的 eMMC user-area 备份文件，读取备份文件偏移 `7168 * 512 = 3,670,016` 起的 256 KiB：
+1. 分别解析四个 64 KiB 副本的 `DVKR` tag、version、next_index、item_num、version2；
+2. 检查每份副本的 `version2 == version`；
+3. 选出最高版本副本，解析 ID=3 的 item descriptor 与 12-byte 内容；
+4. 与此前脱敏的 LAN_MAC 读取结果交叉核对，不在公开仓库记录真实 MAC；
+5. 核实备份文件长度、来源和 SHA-256，确保输入确为此前归档的 eMMC user area，而非 TF 或其他镜像。
+
+在这一步完成前，不把某个副本编号写成“当前有效副本”，也不提供任何写入/修复操作。
+## 9. 证据与来源
 
 - 项目报告：`docs/reports/2026-11/EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md`
 - 项目报告：`docs/reports/2026-11/PANTHER-X2-UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN-20261118.md`
@@ -121,3 +200,9 @@ BootROM selects eMMC:
   https://github.com/radxa/u-boot/blob/next-dev-v2026.01/arch/arm/mach-rockchip/board.c
 - Rockchip U-Boot reference commit used for vendor/bootdev/FDT source-path audit:
   https://github.com/rockchip-linux/u-boot/tree/8af253525b7de5f29f7f97dffd18adb77db6456
+- Rockchip U-Boot Vendor Storage layout and replica selection source:
+  https://github.com/rockchip-linux/u-boot/blob/8af253525b7de5f29f7f97dffd18adb77db6456/arch/arm/mach-rockchip/vendor.c
+- Rockchip Linux Vendor Storage eMMC fixed-sector reader and replica selection source:
+  https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/drivers/soc/rockchip/sdmmc_vendor_storage.c
+- Rockchip Linux Vendor Storage IDs and on-disk structure:
+  https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/include/linux/soc/rockchip/rk_vendor_storage.h
