@@ -229,3 +229,34 @@ NetworkManager 配置只能解释“是否发起 DHCP / 是否取得地址”，
 - 不把 `managed=false` 或移除 `networking.service` 单独当成 DHCP 根因。
 - 如需单独结清 DHCP 支线，应只核对故障镜像实际 Netplan YAML、NetworkManager 配置/插件、eth0 设备状态与 DHCP 日志；不修改系统配置。
 - GMAC TX 的软件静态审计已覆盖 P1–P4；当前仍未定位 MAC/RGMII/PHY/MDI 的实际故障边界。若继续追求物理根因，需要先评估 P5 的最小波形验证方案、仪器/接线、风险与判定标准，再由用户明确授权；未经授权不操作实机。
+
+
+## 2026-11-20 用户确认：双黄金基准的软件资产逐项替换路线
+
+用户明确确认采用其《网卡 DHCP 故障分析报告》的逐项比较方法：以正常版本为参照，从最可能的差异开始逐项核对、逐项设计软件替换验证；不考虑示波器/逻辑分析仪等硬件波形测试。未经明确授权，不启动故障内核、不刷写或替换设备文件。
+
+### 已完成子项
+
+1. **6.1.65 与 6.1.116 GMAC Linux DTB 语义交叉核对：** 已归档 `PANTHER-X2-GOLDEN-DTB-CROSSCHECK-6.1.65-6.1.116-20261120.md`。两条黄金线的 GMAC 主节点、RGMII、delay、PHY 地址、M0 pin groups、clock parent 设计高度一致；未发现值得优先替换的 GMAC DTB 差异。该结果不是完整 DTB 逐字节比较。
+2. **四版本资产来源矩阵：** 已归档 `PANTHER-X2-FOUR-VERSION-KERNEL-ASSET-MATRIX-20261120.md`。确认 6.1.65 原始 IMG 含 Image、uInitrd、Panther DTB；6.1.116 的 boot/DTB/modules 归档已校验；6.1.174 与 6.12.81 官方 RK35xx 发布资产身份及摘要已记录；6.12.81 的 GMAC 主链为 built-in。
+
+### 当前唯一工作项：补齐 6.1.65 与 6.1.174 内核套件闭包
+
+按最小范围推进，不重复已完成的 DTB、RGMII delay、STMMAC 普通 TX、PHY workaround、pinctrl 等源码审计：
+
+A. 6.1.65 原始 IMG rootfs：只读确认 `/lib/modules/6.1.65-ophub`、`modules.dep`、`modules.builtin`、`modules.order`，以及 `config-6.1.65-ophub` 或 Image 内嵌 IKCONFIG 是否存在；建立 Image 与 modules 的版本匹配关系。
+
+B. 6.1.174 官方自动包：对资产 `6.1.174.tar.gz`（SHA256 `49e2e81132b249b2b1e55fa18fa1fa002ddf9c91dc433cd672f914ab17af668a`）只读索引内部 boot/modules/DTB/config 子包与校验清单；不与 `deb-6.1.174.tar.gz` 或 Flippy 手动资产混淆。
+
+C. 6.12.81：已有完整 config/modules 审计，不重复；仅在四版本套件闭包需要时引用既有报告。
+
+D. 对照两条黄金线与两条故障线的 built-in / module 分布、kernel release、config、initramfs 依赖及打包布局。只有找到一个满足“两个正常版本共同具备、两个故障版本共同缺失或行为不同、且能独立替换并保持 ABI/依赖闭包”的变量，才把它列为首个实机软件替换候选。
+
+### 替换实验门槛
+
+- 不把跨版本 `.ko` 当作可互换文件；必须核对 vermagic、modversions、符号依赖及 kernel release。
+- 若 GMAC 主链 built-in，替换单个模块无效；需要按依赖闭包定义内核套件或寻找可独立替换的上游组件。
+- 每轮只改变一个可定义的软件变量，保持其他启动组件/测试环境不变；预先准备回退到 6.1.116 的方案与校验值。
+- 源码差异只能提出候选，最终是否有效必须由用户授权后的实机 A/B 结果决定。
+
+**路线说明：** 本项目当前不安排 P5 波形/硬件测量。旧阶段报告中的 P5 仅作为历史方案记录，不再作为当前执行路线。当前以软件资产闭包、版本差异和受控替换为唯一推进方向。
