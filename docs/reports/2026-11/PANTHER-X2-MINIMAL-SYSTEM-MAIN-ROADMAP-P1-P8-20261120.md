@@ -417,3 +417,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 主线 U-Boot v2026.10 支持多款 RK3566 板，但官方列表不含 Panther X2/H1GW V04，不能直接替换现有板级固件。
 - 新发现 Rockchip next-dev 有 `vendor_storage_buffer_read()`，使用局部 Vendor 解析上下文读取调用者提供的 buffer；可用于 eMMC-only MAC 方案，但仍需独立读取 eMMC 与扫描四份副本。
 - 详见 P2 报告 §22。下一步只做仓库现有固件版本指纹与 rkbin v1.13/v1.14、DDR v1.26 静态对照；不盲目升级、不构建、不写卡。
+
+
+## P2 更新：现有 SPL/DDR 指纹与官方新版比较（2026-11-20）
+
+- 当前实机 UART 运行的是 SPL 2017.09-armbian（2023-04-23）+ DDR V1.13；JP-TvBox 候选 idbloader 静态指纹为 SPL 2023-11-12 + DDR V1.10，二者不能混为一谈。
+- Rockchip 官方 SPL v1.14（Build commit 606f72bd97a，2024-05-30）修复 SPL 阶段 SD pinctrl 初始化失败。当前 SPL 已能从 MMC2/TF 读取 proper，故该修复不是当前混合链问题的直接解释；release note 未提及 BootROM 选源、loader order、ATAGS 或 proper bootdev 优先级。
+- 官方 DDR v1.26 有 ultra、普通多频率、单通道 LPDDR4/LPDDR4X 等不同变体；必须依据实际 DRAM 颗粒、通道/Rank/CS、PCB template、频率及 BL31 配套关系筛选。当前 4GB LPDDR4 的完整拓扑未闭环，不推荐直接替换。
+- rkbin 官方要求二进制提交可追溯到 source commit；后续优先选择有 Build commit 和明确更新说明的候选。
+- 详见 P2 报告 §23。下一步只静态检查 SPL v1.14 对应源码变更与 Panther X2 DRAM 拓扑证据；不构建、不刷写。
