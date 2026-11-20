@@ -1175,3 +1175,52 @@ Rockchip rkbin README 要求源码仓库补丁先合并，再构建并提交二�
 - https://github.com/rockchip-linux/rkbin/blob/master/specific/rk3566/RK3566_CN.md
 - https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
 - https://github.com/rockchip-linux/rkbin
+
+
+## 24. SPL v1.14 构建提交的逐项源代码差分与 Panther X2 适用性（2026-11-20）
+
+### 24.1 已找到 v1.14 对应的 rkbin 发布提交及真实构建来源
+
+Rockchip rkbin 提交 `1961bbd229b1f1698ce1b5ff1df9aaae07922e66`（2024-05-30）发布 `rk356x_spl_v1.14.bin`，明确给出 Build from U-Boot commit `606f72bd97a`，并列出 14 项相关变更。此项将前一节“只有 release note”的证据提升为可追溯的源码提交集合。
+
+### 24.2 与本项目最相关的实际源代码变更
+
+| 提交 | 变更 | 对 Panther X2 的相关性 |
+|---|---|---|
+| `05891810f6d` | `arch/arm/dts/rk3568-u-boot.dtsi` 中 `&pinctrl` 从 `u-boot,dm-pre-reloc` 改为 `u-boot,dm-spl`，并保持 `status = okay` | 使 pinctrl 在 SPL 阶段可用；提交说明指出错误 IOMUX 会使 SPL 无法识别 SD。测试板为 RK3566 EVB LP4X V10。是否影响 Panther X2 取决于实际 SPL DTS include/节点配置 |
+| `5ddf1f49b71` | MMC 初始化设置默认 sample phase，并处理 internal phase 与外部 sample clock 两种路径 | 可能改善 MMC 初始化兼容性；须核对 Panther X2 MMC 控制器和 DTS phase 属性 |
+| `0953e389873` | `dw_mmc.c` 数据读取超时余量从 10ms 增至 50ms | 提交说明明确针对 KOWIN eMMC CMD18/CMD7 timeout；是否对 Panther X2 eMMC 有帮助取决于其器件/控制器时序 |
+| `a0f322f5407` | 数据传输错误/超时后，控制器 reset 前增加 1µs 延时 | MMC 错误恢复改进 |
+| `e09ef32e9e8` | HS200 tuning 失败后发送 STOP_TRANSMISSION，恢复控制器状态机 | 对 eMMC HS200 调谐路径有潜在价值；是否进入 Panther X2 实际配置需核对 |
+| `3e4b5e88701` | 增加 DWMCI_CDETECT card detect | 需核对 Panther X2 SD 卡检测方式及板级 DTS |
+
+另有内部 phase、PLL timeout、RSA key repair 等变更。v1.14 还新增 OTP 断电后继续烧录 RSA key hash 能力，与本项目普通启动链选择无直接关系。
+
+### 24.3 对完整 TF/eMMC 启动链目标的判定
+
+逐项检查上述 v1.14 构建提交说明及补丁：
+- 未发现修改 `spl_boot_device()`、`board_boot_order()` 或 SPL loader 搜索顺序的变更；
+- 未发现修改 `spl_image->boot_device` 成功 loader 记录或 Rockchip ATAGS 映射的变更；
+- 未发现修改 proper 端 `CONFIG_ROCKCHIP_BOOTDEV` / ATAGS / scan 优先级的变更；
+- 未发现将 Vendor Storage 读取源固定为 eMMC 的变更。
+
+因此 v1.14 不是“TF 启动自动用 TF 完整 U-Boot、eMMC 启动自动用 eMMC 完整 U-Boot”的直接解决方案。它的价值是 MMC/pinctrl 可靠性增强，可能降低介质识别/读取失败概率，但不会改变两级启动源的选择规则。
+
+### 24.4 修正 DDR 适配信息：实物训练拓扑并非完全未知
+
+此前 §23 对 DRAM 拓扑描述过于保守，现根据已归档两份本机 UART 日志补正：
+- 当前 Panther X2 实机识别 `LPDDR4`、4096MB；
+- `ddrconfig:7`；
+- `BW=32 Col=10 Bk=8`；
+- `CS0 Row=16 CS1 Row=16 CS=2 Die BW=16 Size=4096MB`；
+- 原 SPL/DDR V1.13 最终 1560MHz；JP SPL/DDR V1.10 最终 1056MHz；两份日志的几何配置字段相同。
+
+因此，单通道 LPDDR4/LPDDR4X 是 v1.26 新增支持项，不能作为 Panther X2 当前配置的匹配理由：本机日志明确报告 CS0/CS1 双 rank，且 BW=32。Ultra v1.26 的训练和兼容性改进仍可进一步评估，但具体 DRAM 颗粒料号、板级 PCB template、实际 DQ mapping 与 v1.26 对应参数仍未闭环。不能因为容量/类型相同就认定适配。
+
+### 24.5 v1.14 候选价值排序
+
+- **值得重点静态移植性评估：** SPL pinctrl dm-spl 变更、MMC sample phase、MMC timeout 和错误恢复变更。
+- **不解决目标问题：** BootROM 启动源选择、SPL 双 loader 搜索顺序、ATAGS/proper 优先级、Vendor eMMC-only 来源。
+- **不建议当前替换：** 还没有 Panther X2 对应的完整 SPL DTS/defconfig/构建产物配套证明；原版当前已能从 MMC2 读 proper，故不能将 v1.14 当作必须升级的修复。
+
+下一步优先核对 Panther X2 当前 SPL FDT 的 pinctrl 节点及 SPL DTS 构建来源，和 `rk3568-u-boot.dtsi` 的 v1.14 变更作静态比较；再核对 eMMC/SD 控制器的 `default-sample-phase`、bus-width、card-detect、HS200/tuning 配置。只读现有仓库材料，不做新实机测试。
