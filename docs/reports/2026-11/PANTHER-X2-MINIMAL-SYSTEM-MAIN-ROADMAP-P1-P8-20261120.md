@@ -435,3 +435,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 逐项差分未发现 `spl_boot_device`、`board_boot_order`、成功 loader ATAGS、proper bootdev 优先级或 Vendor eMMC 来源变化；v1.14 改善 MMC/pinctrl 可靠性，不改变双介质启动源选择规则。
 - 修正 DDR 资料状态：现有 Panther X2 两份实机日志已记录 LPDDR4 4GB、ddrconfig 7、BW32、CS0/CS1 双 rank、CS=2、Die BW16；并非拓扑完全未知。v1.26 单通道新增支持与本机双 rank配置不构成匹配证据；颗粒料号、PCB template、DQ mapping 仍待证。
 - 详见 P2 报告 §24。下一步静态核对 Panther X2 当前 SPL FDT pinctrl、MMC phase/card-detect/HS200 配置；不构建、不刷写、不重跑设备测试。
+
+
+## P2 补充：Radxa U-Boot SPL 双介质启动顺序（2026-11-20）
+
+- Radxa `stable-4.19-rock3` commit `c55987146f4f9b20f7cb2f917ca88300419afe8d` 的 `rk3568-u-boot.dtsi` 明确配置 `u-boot,spl-boot-order = &sdmmc0, &sdhci, ...`，即 SPL 先尝试 TF/SD，再尝试 eMMC；同一 DTS 将两个控制器及 SD pin groups 纳入 `u-boot,dm-spl`。
+- aliases 为 mmc0=eMMC、mmc1=TF；不要把 Linux DTS alias 与 U-Boot SPL/proper alias 混淆。
+- 该属性证明板级 SPL 可配置双介质 loader 搜索顺序，但只控制 SPL 加载 proper 的介质，不能改变 BootROM 最初从何处加载 SPL，也不保证 TF/eMMC 启动链自包含。若 BootROM 从 eMMC 加载 SPL 而 SPL 优先从 TF 取 proper，反而会形成混合链。
+- Radxa DTS 的 `&pinctrl` 标记为 `u-boot,dm-pre-reloc`，而官方 v1.14 提交 `05891810f6d` 改为 `u-boot,dm-spl`；值得核对 SPL DTB 过滤和父节点保留规则，不能仅凭静态标签断言 pinctrl 失效。
+- 详见 P2 报告 §25。下一步锁定 Panther X2 实际 SPL 的 `/chosen/u-boot,spl-boot-order`、board_boot_order 与最终 SPL DTB；不重复检查 Linux DTS，不构建、不写卡。
