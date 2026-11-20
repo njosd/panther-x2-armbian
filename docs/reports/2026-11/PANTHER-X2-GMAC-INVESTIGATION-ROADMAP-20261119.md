@@ -279,3 +279,22 @@ D. 对照两条黄金线与两条故障线的 built-in / module 分布、kernel 
 **状态：工作流文件已提交，尚未运行。** 当前连接的 GitHub 工具没有 workflow_dispatch 写入/触发动作，因此不能声称已经开始或完成审计。需要在 GitHub 仓库 Actions 页面手动运行 `Audit Ophub RK35xx 6.1.174 kernel package`，随后读取 run/artifact 结果继续分析。不得为了触发而把 workflow 改成 push 自动运行。
 
 后续只围绕本轮产物补齐 6.1.174 内核套件闭包，再补齐 6.1.65 原始 IMG rootfs 的 modules/config 索引；不重复 6.12.81 已完成的 built-in 驱动配置审计，不返回已关闭 P1–P4 源码支线。
+
+
+## 2026-11-20：6.1.174 官方内核包审计已成功完成
+
+用户提供 Actions Job URL 后，已读取 run、job steps、完整 job logs 和 artifact，并下载 artifact 在分析环境中展开核对。
+
+- Run `44728503121` / Job `136261930960`：success，5/5 steps 成功。
+- Artifact ID `14625845189`，SHA256 `4d0da74e574037eeea37bbd2a5cd868b02bf7ea1c48532b08f9ede97e3f8fce2`。
+- 官方 6.1.174 外层资产 size/SHA256 匹配；boot、dtb-rockchip、modules、header 四个内层包 SHA256 全部匹配发布清单。
+- 6.1.174 config：`CONFIG_STMMAC_ETH=y`、`CONFIG_STMMAC_PLATFORM=y`、`CONFIG_DWMAC_ROCKCHIP=y`、`CONFIG_PHYLIB=y`、`CONFIG_REALTEK_PHY=y`、`CONFIG_MDIO_BUS=y`、`CONFIG_OF_MDIO=y`；`CONFIG_MODVERSIONS` 未启用。
+- `modules.builtin` 明确列出 stmmac、stmmac-platform、dwmac-rockchip、libphy、realtek PHY、of_mdio 等 built-in 路径；modules 文件索引中没有 Panther GMAC 主链独立 `.ko`。这与既有 6.12.81 built-in 结果一致，也符合 6.1.116 已知正常主链为 built-in 的情况。故“替换单个 GMAC .ko”不构成有效实验，跨版本混用模块更不应尝试。
+- 官方 DTB 套件含 `rk3566-panther-x2.dtb`，SHA256 `871bad4ded75e9da3aea61e26a9a26516c9f39968c49d5f32de2124420185e75`。目前仅确认文件存在，尚未与两条黄金线做 6.1.174 GMAC 节点字段差异；不能仅凭 hash 判断好坏。
+- boot 套件有 vmlinuz、initrd.img、uInitrd、System.map、config 五项。当前工作流未生成 vmlinuz 本体 hash，后续如需精确资产比对应补上。
+
+详细报告：`docs/reports/2026-11/PANTHER-X2-6.1.174-OFFICIAL-KERNEL-ASSET-AUDIT-20261120.md`。
+
+### 路线收敛
+
+当前不做模块替换；不立即替换 DTB。下一个最有价值的比较项是：对 6.1.174 官方 Panther DTB 做 GMAC 节点定向解码，与 6.1.65/6.1.116 黄金 DTB 已有字段逐项对照，同时补记 6.1.174 vmlinuz hash。若无差异，再收口 DTB 候选。随后补齐 6.1.65 原始镜像 rootfs 中 modules/config 闭包，才能形成真正四版本统一矩阵。任何候选仍需有明确可控的单变量软件替换方案才进入实机验证。
