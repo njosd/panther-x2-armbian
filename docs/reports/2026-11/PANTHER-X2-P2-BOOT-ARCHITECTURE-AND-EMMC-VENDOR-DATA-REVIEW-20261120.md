@@ -1120,3 +1120,58 @@ Rockchip 官方 `next-dev` 的 `vendor.c` 已新增/包含独立缓冲区解析 
 - Rockchip Vendor API 声明：https://github.com/rockchip-linux/u-boot/blob/next-dev/arch/arm/include/asm/arch-rockchip/vendor.h
 - Rockchip RK3566 rkbin 发布记录：https://github.com/rockchip-linux/rkbin/blob/master/doc/release/RK3566_EN.md
 - U-Boot v2026.10 Rockchip 主线板级支持列表：https://docs.u-boot.org/en/v2026.10/board/rockchip/rockchip.html
+
+
+## 23. 现有 Panther X2 固件指纹与官方 SPL/DDR 新版的针对性比较（2026-11-20）
+
+本节依据仓库已归档的 UART、二进制哈希/字符串检查和官方 rkbin 发布记录进行静态比对。没有重新读取设备、没有下载或写入任何启动介质。
+
+### 23.1 当前实际启动 SPL 与 JP 候选不能混为一谈
+
+| 对象 | 既有证据 | SPL/DDR 识别 | 状态 |
+|---|---|---|---|
+| 当前实机 UART 中运行的 SPL | 2026-11-17/18 启动日志 | U-Boot SPL 2017.09-armbian，2023-04-23；DDR V1.13 | 已验证运行指纹 |
+| eMMC 原 Panther X2/E25 idbloader | LBA64 原始备份/哈希及 UART 对照 | SPL 2023-04-23；E25 FDT；DDR V1.13 | 已验证镜像指纹 |
+| JP-TvBox 候选 idbloader | Ophub 固定提交 8bb67df906cdc8c4e33a30e5e4d562c5cb0e32a6 | 静态字符串 SPL 2023-11-12；DDR V1.10 | 已验证候选镜像指纹；不是当前实机 SPL 运行版本 |
+| Rockchip rkbin 官方 SPL v1.14 | 发布记录 Build commit 606f72bd97a，日期 2024-05-30 | 当前项目尚无该 blob 与现有镜像的逐字节比较 | 官方发布已确认；是否适配 Panther X2 未验证 |
+
+### 23.2 SPL v1.14 是否解决当前混合链问题
+
+官方 RK3566 release note 对 rk356x_spl_v1.14.bin 的说明：2024-05-30 发布，Build commit 606f72bd97a；修复 SPL 阶段 SD card initialization fails，原因是 SPL 阶段 pinctrl node disabled。
+
+当前实机日志已出现 SPL Trying to boot from MMC2，且后续 proper 已从 TF 成功加载。因此当前执行的 SPL 至少完成了本次 SD/MMC2 访问；不支持把当前混合链归因于 SD 初始化完全失败。v1.14 的公开变更说明没有提到 BootROM eMMC/SD 启动优先级、SPL loader 搜索顺序、成功 loader ATAGS、proper 固定 bootdev 优先级或 Vendor 数据来源。
+
+结论：v1.14 没有公开证据表明能直接消除本项目的混合链担忧。它仍可作为 SPL 候选，但需核对来源构建、板级 pinctrl/FDT 依赖和原设计启动顺序兼容性，不能仅凭版本号替换。
+
+### 23.3 DDR v1.26 不是一个可不加区分直接替换的单一文件
+
+官方 RK3566 release note 列出：
+- rk3566_ddr_1056MHz_ultra_v1.26.bin，2025-05-26：优化 training、调整 CKE/CA timing，修复 ultra wake-up CS1 数据异常、启动概率/容量识别问题及较大 tdqs2dq DRAM 兼容性问题。
+- rk3566_ddr_{1056...920}MHz_v1.26.bin，2026-05-21：新增单通道 LPDDR4/LPDDR4X 支持，并修复启动概率及较大 tdqs2dq DRAM 兼容性问题。
+
+部分特定混合封装 LPDDR4/4X 的 DDR bin 还要求配套特定 BL31。项目目前已知 Panther X2 为 4GB LPDDR4，但尚未闭环 DRAM 颗粒料号、通道数、Rank/CS、总线宽度、PCB template 及当前 DDR bin 完整配置。因此 v1.26 值得评估，但不是当前推荐直接替换项；ultra、普通多频率、特定混合封装版本不可互换。
+
+### 23.4 官方 rkbin 可追溯性要求
+
+Rockchip rkbin README 要求源码仓库补丁先合并，再构建并提交二进制；二进制提交说明应包含可追溯的 Build from source commit 和更新内容。后续优先采用带明确 Build commit、版本说明及可对应源码变更的官方二进制。只有版本字符串、缺少构建来源的候选应降低证据等级。
+
+### 23.5 对原有完整启动链目标的影响
+
+目前没有发现官方 v1.14 或 DDR v1.26 已经把“TF 启动使用 TF 上完整 SPL+proper；eMMC 启动使用 eMMC 上完整 SPL+proper”变成默认自动行为。但 SPL 成功 loader → ATAGS → proper 机制仍提供实现基础。下一步核心是确认原有 SPL loader 信息传递、两套介质的 SPL/proper/DDR/FDT 版本配对，以及 BootROM 在 eMMC 与 TF 同时存在时的第一阶段选源限制。
+
+### 23.6 结论与下一步
+
+- 已验证：当前实机运行 SPL/DDR V1.13；JP 候选 idbloader 内部为 SPL 2023-11-12/DDR V1.10。
+- 已验证：官方 SPL v1.14 的公开修复针对 SPL 阶段 SD pinctrl 初始化，不是启动介质优先级或混合链一致性。
+- 已验证：官方 DDR v1.26 存在多个功能变体，2026-05-21 版本增加单通道 LPDDR4/LPDDR4X 支持。
+- 未验证：官方 v1.14 是否可直接用于 Panther X2；DDR v1.26 哪个变体适配实物 DRAM；新版 SPL 是否有未体现在 release note 的 boot order 变更。
+- 不做：不因 v1.14/v1.26 更新而直接替换，不构建、不刷写、不改变设备配置。
+
+下一步只静态确认 Panther X2 实物 DRAM 颗粒/拓扑证据，以及 SPL v1.14 对应源码提交 606f72bd97a 的实际改动范围。若其没有触及 boot order/ATAGS 路径，就将其定位为 SD 初始化修复候选，而不是混合链修复方案。
+
+### 23.7 官方来源
+
+- https://github.com/rockchip-linux/rkbin/blob/master/doc/release/RK3566_EN.md
+- https://github.com/rockchip-linux/rkbin/blob/master/specific/rk3566/RK3566_CN.md
+- https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
+- https://github.com/rockchip-linux/rkbin
