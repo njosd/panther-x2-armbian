@@ -364,27 +364,40 @@ TF 上的 LBA64 idbloader 不是当前已观察启动链中执行的 SPL；当�
 
 该 artifact 只包含先前 workflow 生成的报告、DTB 反编译文本和配置快照，不包含原始 141MB kernel 发布包。没有重新下载原始大包，没有触发新的 workflow。
 
-## 6. 当前结论矩阵
+## 6. P1 验收结论矩阵
 
 | P1 问题 | 结论 | 证据等级 |
 |---|---|---|
-| 6.12.81 是否支持外部 initramfs | 是，实际日志证明成功解包 | 已验证（实机日志） |
-| gzip 是否可用 | 是，现有 uInitrd 为 gzip，内核成功解包 | 已验证（实机日志） |
-| CONFIG_BLK_DEV_INITRD / CONFIG_RD_GZIP | 构建默认配置快照均为 y | 静态配置确认；不是最终二进制 .config 直接导出 |
-| 现有 U-Boot 是否从 TF 读取启动文件 | 是，读取 mmc1:1 的 boot.scr、Kernel、initrd、DTB | 已验证（实机 UART） |
-| 现有 U-Boot 是否接受 legacy gzip uInitrd | 是，识别 AArch64 Linux RAMDisk、校验并传递给内核 | 已验证（实机 UART） |
-| 当前 TF 的 U-Boot proper 所在位置 | LBA 16384 | 已验证（历史写入回读记录与启动链报告） |
-| 当前 TF BOOT 分区文件系统类型 | 未知 | 待补证 |
-| 新 8GB 卡能否只靠普通分区文件启动 | 不能按现有混合链直接假设；需要 raw LBA 16384 U-Boot proper | 已验证启动链约束 |
-| 6.1.116 能否作为后续最小环境对照 | Kernel/DTB/uInitrd/boot script 资产已归档；启动脚本一致 | 可行性高；历史 U-Boot 二进制未闭环 |
+| 6.12.81 是否支持外部 initramfs | 是，实际运行日志证明成功解包 gzip initramfs | 已验证（实机 UART） |
+| 6.1.116 是否具备 initramfs/gzip 支持 | 实际运行配置与官方 config-6.1 模板 7,677 个符号完全一致；模板中 INITRD/GZIP 均为 y | 已验证（真实运行配置全量 diff + 模板） |
+| 最小网络所需 GMAC/PHY/SD 控制器驱动 | 6.1.116 实际配置及 6.12.81 构建模板中 STMMAC、Rockchip DWMAC、PHYLIB、MDIO、Realtek PHY、MMC/SD 核心均 built-in | 已验证（6.1.116 真实配置；6.12.81 模板；运行时设备成功 probe） |
+| 当前 TF 身份 | SD/TF，Linux mmcblk0 / SN64G | 已验证（用户实机 sysfs） |
+| 当前 eMMC 身份 | MMC，Linux mmcblk1 / DF4032，含 boot0/boot1 | 已验证（用户实机 sysfs） |
+| 当前 TF /boot 文件系统 | ext4 | 已验证（findmnt） |
+| 当前 U-Boot 是否能从 TF ext4 读取启动文件 | 是，成功读取 boot.scr、Kernel、initrd、Panther X2 DTB | 已验证（U-Boot UART + Linux FSTYPE 对照） |
+| 当前 U-Boot proper 位置与身份 | TF LBA16384，JP-TvBox 2023-11-12，SHA-256 a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce | 已验证（写入回读 + UART） |
+| eMMC SPL 依赖 | 当前启动链使用 eMMC LBA64 旧 SPL；项目不修改 eMMC | 已验证（现有链路记录；本轮不写入） |
+| 当前 boot script 是否能加载最小 initramfs | 脚本已按当前设备加载 uInitrd 并执行 booti；新 initramfs 需使用已验证的 legacy gzip uInitrd 包装形式 | 可行性已确认；新产物未构建 |
+| initramfs 下 root= / rootwait 是否会挂载 TF/eMMC | 两个源码端点均先检查 /init；可执行 /init 存在时跳过 prepare_namespace()，不处理传统 root= / rootwait 挂载路径 | 已验证（6.1.116/6.12.81 源码） |
+| 6.1.116 正常对照资产 | Kernel、DTB、initrd、boot script 已归档；其历史运行现场在 eMMC；后续可放到实验 TF，在当前固件链下做受控对照 | 资产已验证；历史 U-Boot 执行轨迹未完全闭环 |
+| 8GB TF 静态布局 | GPT + LBA16384 JP proper + LBA32768 起始 ext4 第一分区；只放启动文件，根运行于 RAM | 静态候选已形成；未对实体 8GB 卡核验或写入 |
+
+**P1 结论：通过静态可行性验收。** 已有证据支持：在不改 eMMC 的前提下，复用当前 eMMC SPL + TF JP-TvBox U-Boot proper，从 ext4 TF 第一分区加载匹配的 Kernel、Panther X2 DTB 和 gzip legacy uInitrd；两个目标内核具备运行最小网络 initramfs 所需的内核侧能力。尚未构建或实机启动本项目自制 initramfs，因此“最小系统能启动、GMAC 网络行为如何”仍属于后续阶段实测问题。
+
+P1 保留的非阻塞未知项：
+- 6.1.116 历史启动时实际执行的 U-Boot proper 尚无直接执行轨迹；eMMC 对应 raw 文件已找到，但不能仅凭文件存在认定其被执行。
+- 6.1.116 旧 uInitrd 包装文件自身 SHA-256 未记录；本项目会构建新的最小 uInitrd，不依赖复用旧文件。
+- 8GB 实验卡尚未插入/识别；分区布局目前是可复核的静态候选，实际写卡前仍须核对设备容量、节点和分区表影响。
 
 ## 7. 下一项唯一工作
 
-继续 P1，不进入 P2：
+P1 不再重复。下一阶段进入 **P2 的只读设计与来源锁定**：
+1. 固定 BusyBox、iproute2、ethtool 和 UDP/广播测试工具的上游仓库、正式版本/tag/commit 与许可证；
+2. 明确最小 /init、目录树、devtmpfs/proc/sysfs 挂载和串口日志方案；
+3. 设计独立、手动触发、可复现的 CI workflow 与 manifest；
+4. 只完成设计审查，不触发构建、不下载大型资产、不写 8GB TF 卡、不启动实验内核。
 
-**只补齐当前 TF BOOT 分区的文件系统类型和当前 U-Boot 文件系统读取能力证据。**
-
-优先从已有资料继续查找；如果仓库仍无直接证据，再向用户索取一条只读的当前系统挂载/文件系统信息。确认前不为 8GB 卡指定 FAT/ext4，不写卡。
+P2 实际构建、任何 CI 执行及写卡仍需用户明确授权。
 
 ## 8. 操作记录
 
