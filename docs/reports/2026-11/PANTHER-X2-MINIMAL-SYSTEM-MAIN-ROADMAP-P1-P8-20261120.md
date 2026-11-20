@@ -281,11 +281,10 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **P1 已完成，不重跑。当前只执行 P2 的启动架构只读审计：**
 
-1. **当前唯一执行项：** 使用已有 eMMC user-area 备份，解析 LBA 7168–7679 的四份 64 KiB Vendor Storage 副本，确认有效副本、最高版本和 LAN_MAC ID 3 descriptor，并与此前读取的脱敏条目交叉核对；不重新读取实机 eMMC。
-2. 回读现有 U-Boot SPL/BootROM 日志和 eMMC/TF 原始启动区域证据，结合 RK3566 官方文档及可用源码，明确 BootROM 对 eMMC 有效 IDB 与 SDMMC IDB 的选择/回退条件。
-3. 审计 Panther X2 板级启动配置、可用启动按键/strap/恢复信号资料，判断是否存在不改 eMMC 的 SD 优先/强制 SD 启动方式；不将 JTAG 复用脚误当作启动源选择脚。
-4. 形成双介质自包含启动方案与统一 vendor 数据传递方案，并列出硬件/BootROM 限制及证据缺口。
-5. 完成上述启动架构设计后，再按当前上游维护状态重新评估 BusyBox、iproute2、ethtool 等组件版本；最后设计最小 /init、目录树、串口日志和可复现 CI。全程只读，完成设计后再向用户确认实际构建/写卡授权。
+1. **当前唯一执行项：** 回读现有 U-Boot SPL/BootROM 日志和 eMMC/TF 原始启动区域证据，结合 RK3566 官方文档及可用源码，明确 BootROM 对 eMMC 有效 IDB 与 SDMMC IDB 的选择/失败回退条件。
+2. 审计 Panther X2 板级启动配置、可用启动按键/strap/恢复信号资料，判断是否存在不改 eMMC 的 SD 优先/强制 SD 启动方式；不将 JTAG 复用脚误当作启动源选择脚。
+3. 形成双介质自包含启动方案与统一 Vendor 数据传递方案，并列出硬件/BootROM 限制及证据缺口。
+4. 完成上述启动架构设计后，再按当前上游维护状态重新评估 BusyBox、iproute2、ethtool 等组件版本；最后设计最小 /init、目录树、串口日志和可复现 CI。全程只读，完成设计后再向用户确认实际构建/写卡授权。
 
 不得触发构建、写卡或启动实验内核。
 
@@ -331,5 +330,6 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 2026-11-20 | 用户确认硬件复位按钮只需延续原有功能。只读检查 6.12.81 与 6.1.116 Panther X2 DTS 均未发现 gpio-keys/软件按钮节点；因此不添加猜测的 GPIO 按键实现，保留原硬件复位功能，物理线路连接方式待原理图/板级证据确认。
 | 2026-11-20 | 修正按键软件审计结论：6.1.116 实机 IRQ 记录包含 rk805_pwrkey_rise/fall；RK809 MFD 会创建 rk805-pwrkey 子设备，配套驱动上报 KEY_POWER。新系统必须保留 PMIC PWRKEY 路径；但该 PMIC 电源键是否就是用户所说的实体硬件复位按钮仍未确认，两者不可混为一谈。
 | 2026-11-20 | P2 源码交叉审计确认 Rockchip U-Boot/Linux 的 eMMC Vendor Storage 固定布局为 user-area LBA 7168 起、4×128 sectors（256 KiB），按 tag/version/version2 选择最高有效副本。当前下一项收敛为仅解析已有 eMMC 备份中的四份副本，不重新读取实机。
+| 2026-11-20 | 用户运行只读解析脚本确认归档 eMMC 备份中 vendor0 为唯一有效副本（DVKR、version/version2=2），vendor1–3 全零；vendor0 含 LAN_MAC ID 3、12 bytes，两个 MAC 均通过单播格式检查。Vendor Storage 备份解析阶段完成；P2 当前唯一执行项转为 BootROM eMMC/SD 启动选择及失败回退审计。
 
 后续每次推进必须先更新本文件中的阶段状态、当前唯一执行项和变更记录。
