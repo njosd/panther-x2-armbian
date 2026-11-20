@@ -251,6 +251,47 @@ name=DF4032
 | 自制最小 initramfs 在 6.1.116 下启动 | 未验证，留待后续授权阶段 |
 | 自制最小 initramfs 在 6.12.81 下启动 | 未验证，留待后续授权阶段 |
 
+
+## 4.2 纠正：6.1.116 历史运行介质与当前 6.12.81 启动链不同（2026-11-20）
+
+回读原始 6.1.116 网络采集副本和 eMMC 启动区审计后，必须明确区分两个时间点，不能把 Linux 的 mmcblk 编号跨启动环境直接对照。
+
+### 6.1.116 正常网络基线现场
+
+`evidence/network/panther-eth-baseline-redacted.txt` 中的历史现场记录：
+- `uname` 为 `6.1.116-ophub`；
+- `/dev/mmcblk0` 容量 29.1G，并有 `mmcblk0boot0` / `mmcblk0boot1`；
+- `/boot=/dev/mmcblk0p1`，`/=/dev/mmcblk0p2`。
+
+结合 eMMC 专用 boot0/boot1 节点，这份 6.1.116 正常网络基线现场的系统根分区和 /boot 位于板载 eMMC。该现场的 Linux 设备编号与当前 6.12.81 现场相反，不能把 `mmcblk0` 当作固定的 TF 或 eMMC 名称。
+
+### 当前 6.12.81 现场
+
+本报告 §3.5 的用户实机输出确认：
+- `mmcblk0` 为 SD（SN64G），当前 /boot 与 / 均位于 SD/TF；
+- `mmcblk1` 为 MMC（DF4032），为板载 eMMC。
+
+当前启动链另由 UART 记录确认：旧 SPL 阶段后，U-Boot proper 从 SD/TF 对应的 `mmc 1:1` 加载 boot.scr、Kernel、initrd 和 Linux DTB。
+
+### eMMC 中发现的历史 Panther X2 U-Boot 文件
+
+`evidence/boot/2026-11-16-panther-x2-emmc-boot-files-audit.txt` 和 `EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md` 记录了 eMMC 用户区：
+- LBA 64 的原版 `idbloader.img`：SHA-256 `990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e`；
+- LBA 16384 的原版 Panther X2 `u-boot.itb`：SHA-256 `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af`。
+
+它们与 Ophub Panther X2 目录的相应文件逐字节一致。旧 6.1.116 备份归档本身不含这两个 raw bootloader 文件，但 eMMC 原始区域审计已取得它们。
+
+当前 TF LBA 16384 使用的 JP-TvBox U-Boot proper 则是另一份文件，SHA-256 `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。当前实机 UART 显示 U-Boot proper 为 2023-11-12 JP-TvBox 构建；因此当前 TF 启动路径与 eMMC 中保留的旧 Panther X2 U-Boot proper 资产不同。
+
+**证据边界：** eMMC 中存在原版 SPL / proper 文件、6.1.116 当时系统位于 eMMC、以及当前 6.12.81 使用 TF 上 JP proper，这三项都有证据；但不能仅凭文件存在和 Linux 根分区位置，声称已捕获 6.1.116 那次上电实际执行的 U-Boot 二进制轨迹。历史 6.1.116 的完整 BootROM→SPL→proper 执行链仍未直接闭环。
+
+### 对后续 A/B 的正确设计
+
+- 6.1.116 的正常网络结果是历史 eMMC 启动环境下的黄金基线。
+- 为了隔离 Kernel/DTB/initramfs 差异，后续可把 6.1.116 自己匹配的 Kernel、Panther X2 DTB 和 initramfs 资产放在独立实验 TF 的启动分区，在**当前固定的 eMMC SPL + TF JP-TvBox proper** 下启动。
+- 这种测试应标注为“共用当前启动固件的 6.1.116 受控对照”，不是历史 6.1.116 启动链复刻。
+- 不应为追求历史环境复刻而提前改写 eMMC 或替换当前 U-Boot；本阶段仍只做只读核验。
+
 ## 5. 本轮取得的额外审计材料
 
 为复核此前 6.12.81 双资产审计结果，本轮从 GitHub Actions 下载既有 artifact：
