@@ -101,3 +101,60 @@ P1–P4 的限定静态源码审计现已结束。纯源码继续搜索的边际
 - [6.12.81-rk35xx pinctrl-rockchip.c](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/pinctrl/pinctrl-rockchip.c)
 - [6.12.81-rk3568-pinctrl.dtsi](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/arch/arm64/boot/dts/rockchip/rk3568-pinctrl.dtsi)
 - [6.1.174-rk35xx rk3568-pinctrl.dtsi](https://github.com/ophub/linux-6.1.y-rockchip/blob/c2f148dece4b67ebd30aefad1bdd1990f41e5633/arch/arm64/boot/dts/rockchip/rk3568-pinctrl.dtsi)
+
+
+## 9. 2026-11-20 追加：核实首 pin 错误在 Panther RK3568 regmap 路径中的可达性
+
+本次继续只读追踪 `rockchip_set_mux()` 的错误返回来源，以及 Panther X2 实际使用的 GRF/syscon regmap 初始化方式。目的是判断 P4 的通用错误处理缺陷是否有正常、可触发的软件错误来源；没有进行任何设备操作。
+
+### 9.1 Panther 实际使用的 pinctrl / GRF 路径
+
+固定 6.12.81 源码候选 `661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 中：
+- Panther X2 DTS 包含 `rk3566-panther-x2.dts`，GMAC1 的默认 pinctrl state 选择 M0 group。
+- SoC `rk356x.dtsi` 中 pinctrl 节点通过 `rockchip,grf = <&grf>` 引用 GRF。
+- 同一 DTS 的 `grf: syscon@fdc60000` 只有 compatible 和 MMIO reg 范围；没有 `clocks`、`resets` 或 `hwlocks` 属性。
+- `pinctrl-rockchip.c` 通过 `syscon_node_to_regmap()` 获取该 GRF regmap。
+- `syscon.c` 对该节点建立 `regmap_init_mmio()`；没有 clock phandle 时不会调用 `regmap_mmio_attach_clk()`，没有 hwlock 属性时也不会启用 hwspinlock。
+
+因此，GPIO3 IOMUX 写入使用的是普通 MMIO-backed GRF regmap，不是带外部总线/时钟操作回调的 regmap。
+
+### 9.2 普通 MMIO regmap 的读写返回值
+
+三个源码端点所用的 Linux MMIO regmap 实现中：
+- `regmap_mmio_read()` 调用选定的 `readl()` 等 MMIO 读函数，读取后返回 0；
+- `regmap_mmio_write()` 调用 `writel()` 等 MMIO 写函数，写入后返回 0；
+- 只有附加 clock handle 时，clock enable 失败才可能从这两个 callback 返回错误；Panther GRF syscon 节点没有 clock handle。
+- 普通 MMIO `readl/writel` 本身不提供可转换为 regmap errno 的总线响应。若发生不可访问地址/总线外部中止，通常不是一个能让 `regmap_update_bits()` 正常返回负 errno 的可恢复写失败。
+
+这不等于数学上排除 regmap core 的所有内部错误，但已经排除了本机正常 GRF MMIO callback 中最直接的可返回错误来源。
+
+### 9.3 rockchip_set_mux() 的其他前置错误路径
+
+逐项核对 6.12.81 Panther 路径：
+- `rockchip_verify_mux()`：相关 GMAC1 GPIO3 pins 均为已定义、可路由 pin；mux=3 对 4-bit IOMUX 合法，不命中 GPIO-only 或 unrouted 拒绝条件。
+- `rockchip_set_rmio()`：只有 mux 值超出当前 IOMUX 位宽时才进入 RMIO 专用编码；mux=3 小于 4-bit 上限 15，直接返回 0。RK3506 专用分支不适用于 RK3568。
+- `rockchip_check_group_pins()`：只有 pinctrl 节点设置 `rockchip,group-info` 时才调用；Panther 的 RK356x pinctrl 节点未设置该属性，`group_info` 保持 0，因此 Trust Firmware group-info SMC 检查不启用。
+- IOMUX regmap offset 来自 RK3568 pinctrl SoC 数据，目标为 GRF 有效 MMIO 区域；本轮未发现越界或错误寄存器布局证据。
+
+6.1.174-rk35xx 中同样存在新增 `rockchip_set_rmio()` / group-info 相关代码，但 Panther 的 RK3568、mux=3、无 group-info 属性条件同样不进入这些拒绝路径。
+
+### 9.4 对 P4 候选的重新评级
+
+**已确认：** `rockchip_pmx_set()` 的 `if (ret && cnt)` 确实是异常源码端点共有的错误处理缺陷；如果首 pin 的 `rockchip_set_mux()` 返回负值，后续 pins 会被跳过而函数仍返回 0。
+
+**新增确认：** 对 Panther 当前 RK3568 GPIO3 IOMUX 正常路径：
+1. mux 校验条件满足；
+2. RMIO 专用路径不适用；
+3. Trust Firmware group-info 路径未启用；
+4. GRF regmap 是无附加时钟/硬件锁的普通 MMIO regmap，其 read/write callback 正常返回 0。
+
+因此，P4 先前假设的“GPIO3 GRF regmap 正常写入返回 errno”缺乏一个现实的正常软件触发源。若要让该分支触发，需要额外解释未见证据的内部 regmap 错误、配置/内存破坏或非正常系统总线异常。不能再把它作为当前最具体、优先的故障候选。
+
+**重新评级：P4 从“低至中优先级未证实候选”降为“通用代码缺陷已证实，但 Panther 正常路径触发条件未找到，极低优先级/理论候选”。** 这不是逻辑上绝对排除，也不代表 TX 根因已定位。
+
+### 9.5 下一步影响
+
+- 不再为 P4 安排 pinctrl debugfs、MMIO、devmem 或 regmap 读取；既有危险 dummy-syscon 事故仍然有效。
+- 不制作补丁，不重跑 pinctrl 测试。
+- 继续研究时应优先寻找能解释“Linux TX 请求/descriptor 回收/MAC 统计增长，但外部接收端收不到帧”的物理边界证据。
+- P5 仍需先评估仪器、测试点、风险和判定标准，并取得用户明确授权；本次不代表授权。
