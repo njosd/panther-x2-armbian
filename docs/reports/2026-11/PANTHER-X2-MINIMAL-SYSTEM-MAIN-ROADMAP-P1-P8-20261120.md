@@ -244,6 +244,11 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | P7 融合 Ophub / Armbian | 待开始 | 网络基线稳定后 |
 | P8 存储、NPU、Immich | 后续阶段 | 不进入当前网络最小系统 |
 
+## P1 最新进展
+
+- 2026-11-20：已归档 [P1 initramfs 与 TF 启动链审计进展](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)，确认 6.12.81 实机成功解包 gzip initramfs，当前混合启动链需保留 TF LBA 16384 的 U-Boot proper。
+- P1 尚未验收：当前 TF BOOT 分区文件系统类型与 U-Boot 文件系统读取能力仍待直接证据。
+
 ## 6. 关联文档
 
 - [最小 initramfs 构建蓝图](PANTHER-X2-MINIMAL-INITRAMFS-BUILD-PLAN-20261120.md)
