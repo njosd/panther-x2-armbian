@@ -1,6 +1,6 @@
 # Panther X2 GMAC TX 故障调查路线图（唯一主索引）
 
-- 更新日期：2026-11-19
+- 更新日期：2026-11-20
 - 当前现场基线：已恢复原版 6.1.116；不在现场运行故障内核。
 - 调查方式：优先只读源码、提交历史、仓库报告和公开技术资料。
 - 本文件是后续对话的路线锚点；每次继续前先读本文件及其指向的最新报告，不重新规划、不重复已完成工作。
@@ -36,7 +36,7 @@
 - JP proper 的精确源码、FIT control FDT、实际 clock_in_out 与 PHY 初始化行为无法从现有可审计资产确认；不得用 JP SPL FDT 或较新的 Radxa U-Boot 源码替代。
 - P2 未找到已证实可解释最早回归的启动交接根因，正式收口。报告：`PANTHER-X2-P2-UBOOT-LINUX-GMAC-CLOCK-HANDOFF-20261119.md`。
 
-### P3：实际 RK35xx BSP 与正常 general kernel 的 GMAC 初始化差异（当前唯一工作项）
+### P3：实际 RK35xx BSP 与正常 general kernel 的 GMAC 初始化差异（已正式关闭：未找到有效共同 TX 根因差异）
 
 **源码基线与证据等级：**
 - 正常 6.1.116：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`。
@@ -63,20 +63,22 @@
 - 其余 probe flags、CSU no-op、loopback sysfs 未发现可解释普通 TX 故障的机制。
 - 报告：`PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md`。
 
-**第四个子项已完成（部分）：** 对实际 c2f148d STMMAC core 进行源码归属纠正后的 TX 路径复核。
+**第四个子项已完成，P3 正式关闭：**
 - `stmmac_xmit()` / `stmmac_tx_clean()`：普通 TX 提交与回收主逻辑未发现有效新增差异；初步误报的 queue 参数变化已撤销。
 - `stmmac_hw_setup()`：函数体一致。
 - `stmmac_tso_xmit()`：存在 TSO 专用变化，但当前 DHCP/UDP 普通广播不命中。
 - `__stmmac_open()`：SerDes 条件分支差异，Panther RGMII 不命中。
-- DMA engine init 的 1500ms 延时已在 JL2xx1 专项中因 PHY 型号不匹配而降级，不重复追查。
-- 报告：`PANTHER-X2-P3-RK35XX-STMMAC-CORE-TX-PATH-REVIEW-20261120.md`。
-- **尚未完成：** `stmmac_mac_link_up()`、`stmmac_dvr_probe()` 及直接 MAC/DMA start handoff 的精确函数体比较。远程文件分段读取超时，不能把未完成写成相同或已排除。
+- `stmmac_mac_link_up()`：新增 SerDes powerup 分支不命中 Panther；speed callback 参数变化在 Rockchip RGMII 实现中不改变 speed 配置逻辑。
+- `stmmac_dvr_probe()`：发现 c2f148d 中 `LED_FIX` 明确启用，并注册 RTL8211F UID `0x001cc916` fixup；该 fixup 在 PHY init 时写 LED 扩展页 D04 的 Reg 0x10/0x11，代码语义为 LED 配置。未发现其写入 PHYCR、RGMII delay 或 TX/RX 数据通路寄存器；且 6.12.81 候选没有该 stmmac fixup 注册段，因此不是两个异常版本共同具备的有效根因线索。
+- 6.1.174 与 6.12.81 共有、6.1.116 不存在、且实际命中 Panther 普通 RGMII TX 的有效 STMMAC core 差异：未发现。
+- P3 报告：`PANTHER-X2-P3-STMMAC-LINKUP-PROBE-CLOSEOUT-20261120.md`。
+- **P3 正式关闭**。这表示限定源码审计未找到有效共同 TX 路径差异，不表示 GMAC 故障根因已解决。
+- 当前源码候选与发布二进制构建 inputs 仍未逐字节闭环；该不确定性保留，不扩大本阶段。
 
-**下一步唯一子项：** 只完成上述 link-up / probe handoff 精确比较。若无命中 Panther RGMII 的有效变化，则关闭 P3 core 子项，转 P4（pinctrl 首 pin 错误处理静态审计，低优先级、只读）。不再扩大 STMMAC 函数范围，不重复 descriptor OWN/tail pointer/barrier、DMA helper、queue parser、PHY MDIO、时钟、RX/NAPI 和物理边界测试。全程不操作 Panther。
 
 
-### P4：pinctrl 首 pin 错误处理差异
-只读低优先级；必须出现新证据才继续。不得为此重启故障内核。
+### P4：pinctrl 首 pin 错误处理差异（当前唯一工作项）
+只读静态审计；低优先级。先回读既有 pinctrl 报告和仓库记录，确认尚未完成的具体代码点；只审查首 pin 错误处理与后续 pin 配置是否可能导致 GMAC RGMII pinmux 部分失败。不得重复已完成的 pinctrl DTS 对照，不得为此重启故障内核。若没有足以支持继续的证据，明确结束该支线，不做补丁。
 
 ### P5：物理边界波形验证
 最后讨论；需用户明确授权。不得自行安排实机操作。
