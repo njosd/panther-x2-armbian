@@ -63,7 +63,16 @@
 - 其余 probe flags、CSU no-op、loopback sysfs 未发现可解释普通 TX 故障的机制。
 - 报告：`PANTHER-X2-P3-RK35XX-GMAC-PROBE-SETUP-POWER-HANDOFF-DIFF-20261119.md`。
 
-**下一步唯一子项：** 由于此前 TX core 审计有部分使用普通 stable 6.1.174，而不是当前高置信度的 c2f148d，针对源码归属纠正，定点复核 c2f148d 的 STMMAC core（stmmac_xmit/TSO、TX reclaim、DMA engine init/channel start、open/hw_setup/link-up handoff）。只比较正常 6.1.116 与 c2f148d，并用已有 6.12.81 结果做第三端交叉核对；只寻找 6.1.174-rk35xx 与 6.12.81-rk35xx 共有、但正常 6.1.116 不存在的有效 TX 路径变化。不要重做普通 descriptor OWN/tail pointer/barrier、DMA register helper、queue parser 和物理 TX 边界审计；若无差异则明确关闭。全程只读，不操作 Panther、不写寄存器、不发包、不抓包、不制作补丁。
+**第四个子项已完成（部分）：** 对实际 c2f148d STMMAC core 进行源码归属纠正后的 TX 路径复核。
+- `stmmac_xmit()` / `stmmac_tx_clean()`：普通 TX 提交与回收主逻辑未发现有效新增差异；初步误报的 queue 参数变化已撤销。
+- `stmmac_hw_setup()`：函数体一致。
+- `stmmac_tso_xmit()`：存在 TSO 专用变化，但当前 DHCP/UDP 普通广播不命中。
+- `__stmmac_open()`：SerDes 条件分支差异，Panther RGMII 不命中。
+- DMA engine init 的 1500ms 延时已在 JL2xx1 专项中因 PHY 型号不匹配而降级，不重复追查。
+- 报告：`PANTHER-X2-P3-RK35XX-STMMAC-CORE-TX-PATH-REVIEW-20261120.md`。
+- **尚未完成：** `stmmac_mac_link_up()`、`stmmac_dvr_probe()` 及直接 MAC/DMA start handoff 的精确函数体比较。远程文件分段读取超时，不能把未完成写成相同或已排除。
+
+**下一步唯一子项：** 只完成上述 link-up / probe handoff 精确比较。若无命中 Panther RGMII 的有效变化，则关闭 P3 core 子项，转 P4（pinctrl 首 pin 错误处理静态审计，低优先级、只读）。不再扩大 STMMAC 函数范围，不重复 descriptor OWN/tail pointer/barrier、DMA helper、queue parser、PHY MDIO、时钟、RX/NAPI 和物理边界测试。全程不操作 Panther。
 
 
 ### P4：pinctrl 首 pin 错误处理差异
