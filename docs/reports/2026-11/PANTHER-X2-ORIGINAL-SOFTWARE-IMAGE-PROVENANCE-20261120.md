@@ -568,3 +568,22 @@ Boot1 相关字符串仍分别为：
 2. 检查原始镜像是否另含 Panther X2 专用 DTB，以及该 DTB 是否被 FIT 默认配置引用（当前已解析的 FIT 默认配置引用的是 Radxa E25 DTB）。
 3. 结合已确认的 RKDevTool Boot + System 历史流程，区分 Boot 栏输入与 System IMG 内自带的 U-Boot FIT；不得假设两者相同。
 4. 在没有确认实际历史写入内容前，不刷写、不替换 Loader/U-Boot、不修改 DTB。
+
+
+## 20. 对 FIT 内 FDT 角色的解释边界修订（2026-11-20）
+
+第 19 节已证明 FIT 默认配置引用的 FDT payload 是 Radxa E25 / RK3568 设备树；但必须进一步准确描述它在启动链中的角色：该 FIT 的配置组合为 ATF firmware + U-Boot loadables，且该镜像节点 description 明确为 `U-Boot dtb`。因此这里核验的是 **U-Boot proper 所用/随 U-Boot FIT 交付的 FDT**，不能把它直接称作 Linux kernel 最终使用的 DTB。
+
+这意味着：
+- **已验证：** FIT 默认配置内的 U-Boot FDT 内容为 Radxa E25 / RK3568。
+- **不能推出：** Linux 6.1.65 或 6.1.116 必然使用该 E25 FDT；Linux 启动脚本可以从 boot 分区另行加载 Linux DTB。
+- **现有对照：** 6.1.116 实机归档记录 `armbianEnv.txt` 的 `fdtfile=rockchip/rk3566-panther-x2.dtb`，且实际启动身份记录为 Panther X2 / RK3566；该运行时证据与 FIT 内的 U-Boot FDT 属于不同启动阶段，不构成自相矛盾。
+- **行为判断原则：** U-Boot FIT 的描述/compatible 字符串本身不能作为硬件不兼容或 GMAC 根因。应检查 U-Boot 实际启用的控制器、时钟、复位、引脚和启动介质路径，以及 Linux 后续实际加载的 DTB 和驱动行为。RK3566/RK3568 的共用 IP/驱动代码也不能仅凭目录名或 compatible 名称判定错误。
+
+### 后续核验顺序
+
+1. 读取原始 6.1.65 IMG 第一个分区的文件系统类型与只读目录清单，确认其中是否有独立 Linux Panther X2 DTB、boot script 和环境文件。
+2. 核对该启动脚本实际加载 Linux DTB 的路径与默认环境；不把 FIT 的 U-Boot FDT 与 Linux DTB 混为一谈。
+3. 以 6.1.116 已归档的 `fdtfile`、boot.cmd、boot.scr、磁盘 DTB 和 running FDT 为对照，比较实际节点资源和属性，而不是只比较板型字符串。
+
+本节修正第 19 节中容易被理解为“Linux 默认使用 E25 DTB”的表述；第 19 节关于 FIT 默认配置和 U-Boot FDT payload 哈希身份的二进制事实不变。
