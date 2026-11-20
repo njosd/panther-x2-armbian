@@ -66,6 +66,14 @@ P1 已确认的 eMMC SPL + TF JP-TvBox proper 仅是当前设备的**临时诊�
 - 未经明确授权，不清除/禁用 eMMC IDB、不改 eMMC boot area/EXT_CSD、不短接、不编译、不写 TF/eMMC、不启动实验固件。
 - Vendor 数据始终只读来自 eMMC 权威区域，并沿既有 U-Boot 环境变量/FDT fixup 路径传递。
 
+### 0.2.1 新增公开证据（2026-11-20）
+
+- 第三方 Panther X2 项目记录 Debian 12/Linux 6.9.4 从 uSD 启动；PiLoader 也提供 TF 启动系统并声称不修改 eMMC。资料没有完整 BootROM/SPL/U-Boot UART 日志，不能证明 SPL 与 proper 都来自 TF。
+- Lorenzo Gangemi 对 BROWAN H1GW V04 的记录显示，普通 Armbian SD 镜像在其设备上未能触发 SD 启动，设备继续进入 eMMC 原厂系统；该作者随后选择直接写入 eMMC。此为第三方单机观察，不可推广成所有专用 TF 启动布局都不可行。
+- 已找到 H1GW V04 PCB 顶面照片；另有 Panther X2 拆机文章展示背面，但尚无可核验的 H1GW V04 原理图、PCB netlist 或 BOM，无法从现有公开照片确认 eMMC 电源/复位隔离电路。
+- 准确区分三件事：TF 上运行 Linux（有第三方记录）；eMMC SPL→TF proper（本项目已实测）；TF SPL→TF proper（完整 TF 自包含启动，仍未证明）。
+
+
 ## 1. 不可变执行原则
 
 ### 1.1 上游优先
