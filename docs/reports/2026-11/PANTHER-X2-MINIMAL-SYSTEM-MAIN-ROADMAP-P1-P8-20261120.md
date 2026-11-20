@@ -247,7 +247,8 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 ## P1 最新进展
 
 - 2026-11-20：已归档 [P1 initramfs 与 TF 启动链审计进展](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)，确认 6.12.81 实机成功解包 gzip initramfs，当前混合启动链需保留 TF LBA 16384 的 U-Boot proper。
-- P1 尚未验收：当前 TF BOOT 分区文件系统类型与 U-Boot 文件系统读取能力仍待直接证据。
+- 2026-11-20：用户实机 sysfs 已确认 Linux mmcblk0 为 SD（SN64G）、mmcblk1 为 eMMC（MMC / DF4032，含 boot0/boot1）；findmnt 确认 /boot=/dev/mmcblk0p1 ext4。结合既有 U-Boot 从 SD 对应 mmc 1:1 找到并执行 boot.scr、加载 Kernel/initrd/DTB 的日志，当前 SD/TF ext4 启动文件读取能力已验证。详见 P1 报告 §3.5。
+- P1 尚未验收：仍需完成 6.1.116 对照资产匹配边界核验，并整合最终启动参数、启动文件匹配关系和 8GB 卡安全布局，之后才能验收。
 
 ## 6. 关联文档
 
