@@ -4,7 +4,7 @@
 - 设备：Panther X2 / RK3566
 - 数据来源：用户从当前 Armbian 系统提供的 `sudo mmc extcsd read /dev/mmcblk1` 完整输出；此前已归档的 eMMC user area、boot0、boot1 镜像信息；仓库既有 eMMC 审计报告及 UART 启动链报告
 - 操作性质：本阶段仅分析现有读取结果；未执行 eMMC 写入、启动配置修改或重新采集
-- 状态：EXT_CSD 已读取；boot0/boot1 镜像内容尚待静态解析
+- 状态：EXT_CSD 已读取；boot0/boot1 全分区内容扫描已完成（两者均全零）
 
 ## 1. 本次最重要的结果
 
@@ -200,3 +200,48 @@ d0 0d fe ed
 ### 8.6 下一步（不重复首扇区读取）
 
 首轮十六进制检查已完成。下一步应直接做一次针对 boot0 全 4 MiB 的只读内容分布/非零区域扫描，并抽取字符串；不再重复读取 boot1。目标是判断 boot0 是“仅首扇区为零、后部另有数据”还是“整个分区均为零”，并识别是否存在可解析的启动/厂商数据。扫描只针对 iMac 上已归档的镜像文件，不接触实际 eMMC。
+
+
+## 9. boot0 全分区只读扫描结果（2026-11-20，用户提供）
+
+用户在 iMac 上对已归档的 `eMMC-boot0-20261120.img`（4,194,304 bytes）运行只读 Python 扫描。结果：
+
+```text
+文件大小: 4194304 bytes
+非零字节: 0
+全零: True
+非零数据区域: 整个镜像均为零
+RKNS / FDT-FIT / U-Boot / Rockchip / DDR / SPL / ATF: 均未发现
+长度至少 6 的连续可打印 ASCII 字符串: 未发现
+```
+
+### 已验证结论
+
+1. **eMMC boot0 的完整 4 MiB 镜像全部为零字节**，不只是首 512 bytes 为零。
+2. 此前已确认 boot1 与 boot0 的完整 4 MiB 镜像逐字节相同（`cmp` 返回相同），且 SHA-256 相同。因此可据此确认 **boot1 的完整 4 MiB 也全部为零**，本轮无需再扫描 boot1。
+3. 结合 EXT_CSD `PARTITION_CONFIG=0x00`（BOOT_PARTITION_ENABLE=0），当前 eMMC boot0/boot1 既未被配置为标准 boot partition 启动目标，且两者内容均为空白。
+4. eMMC user area LBA64 存在 RKNS IDB 头，LBA16384 存在 FIT/U-Boot 容器头；此前两段完整数据分别与 Ophub Panther X2 的 `idbloader.img`、`u-boot.itb` 完整哈希匹配。
+
+### 对启动链的影响
+
+现有证据强烈支持：本机 eMMC 启动代码存放在 **user area**，而不是 eMMC boot0/boot1：
+
+- boot0：全 4 MiB 为零；
+- boot1：全 4 MiB 为零；
+- user area LBA64：Rockchip IDB / idbloader；
+- user area LBA16384：U-Boot FIT / u-boot.itb；
+- EXT_CSD：未选择 boot0/boot1 启动；
+- 既有 U-Boot SRAM boot-source 只读记录为 `0x02`（此前报告解读为 eMMC）。
+
+**证据边界：** 这已经排除了“当前 boot0/boot1 内有启动镜像”的可能，也使 user area 路径成为明确且高度吻合的解释；但静态镜像和 EXT_CSD 仍不是 BootROM 读取总线轨迹。实际从 user area 的何处、以何种命令和顺序加载 IDB，仍应依据 RK3566 BootROM 资料/源码和现有启动日志完成最后的机制核验。
+
+### 本阶段状态
+
+- [x] 读取 EXT_CSD，确认 PARTITION_CONFIG。
+- [x] 确认 boot0/boot1 镜像大小、哈希和逐字节相同。
+- [x] 对 boot0/boot1 起始扇区做十六进制检查。
+- [x] 对 user area LBA64、LBA16384 做十六进制检查，识别 RKNS 与 FIT。
+- [x] 扫描 boot0 全 4 MiB，确认全零；由 boot0/boot1 完整逐字节相同，确认 boot1 全零。
+- [ ] 结合 RK3566 BootROM 启动介质机制和已有 SRAM/UART 证据，核实 BootROM 从 eMMC user area 读取 IDB 的具体规则。
+
+本阶段没有访问实际 eMMC 进行新的读取，没有写入或修改任何分区，也没有重新生成备份或哈希清单。
