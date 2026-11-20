@@ -73,12 +73,12 @@ P1 已确认的 eMMC SPL + TF JP-TvBox proper 仅是当前设备的**临时诊�
 - **1 个 USB 2.0 接口：可选。** 初始最小系统不要求启用，后续确有需要再加入。
 - **Wi-Fi：可选且基本不会使用。** 初始最小系统不要求启用。
 
-硬件复位按钮的软件证据边界：
-- 固定 Linux 源码快照 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 的 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts` 已检查：存在 GPIO LED、GMAC PHY reset、Wi-Fi/SDIO 电源时序等描述，但没有发现 `gpio-keys`、`gpio-key`、`reset-key` 或按钮输入事件节点。
-- 正常参考源码 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` 的同名 Panther X2 DTS 也未发现上述按钮输入节点。
-- 因此目前没有证据表明原有 Linux 软件包把该按钮实现为 GPIO 按键、Linux input 事件或软件重启按键。不得新增猜测的按键节点或驱动。
-- 当前执行原则是保留原有硬件复位电路和行为；若按钮直接作用于 SoC/PMIC reset，Linux 不需要专门驱动。具体电路连接与复位覆盖范围尚未由原理图或实机证据确认。
-- 后续精简 DTS/内核时，不得误删未知复位线路相关的 pinctrl/GPIO/PMIC 配置；只有现有板级软件包或电路资料明确指出按钮由软件管理时，才保留相应节点/驱动。
+硬件复位按钮与 PMIC 电源键的软件证据边界（2026-11-20 更新）：
+- 固定 Linux 源码快照 `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` 和正常参考源码 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` 的 Panther X2 DTS 均未发现 `gpio-keys`、`gpio-key`、`reset-key` 这类独立 GPIO 按键节点。
+- 但不能据此得出“软件包没有按键处理”。Panther X2 DTS 明确声明 `rockchip,rk809` PMIC，并设置 `rockchip,system-power-controller`。6.1.116 正常系统实机中断记录包含 `rk805_pwrkey_rise` 与 `rk805_pwrkey_fall` 两条 IRQ；对应正常内核源码的 `drivers/mfd/rk808.c` 会为 RK809/RK817 variant 创建 `rk805-pwrkey` MFD 子设备，`drivers/input/misc/rk805-pwrkey.c` 将 rise/fall 中断映射为 `EV_KEY / KEY_POWER`。6.12 Rockchip 内核同样保留该驱动机制。
+- 因此新最小系统必须保留现有 RK809 PMIC 主驱动/MFD、中断链以及 RK805/RK817 PWRKEY input 子设备和对应内核配置，不能只因 DTS 没有 `gpio-keys` 节点就裁掉。
+- **重要区分：** 以上证据确认的是 PMIC PWRKEY（Linux 电源键事件）软件路径，不足以证明用户所说的实体“硬件复位按钮”就是该 PMIC PWRON 键，也不足以证明它就是一颗独立 SoC/PMIC reset 按钮。板上是否存在第二颗按钮、各按钮的电路连接与按压行为，仍需原理图/板级资料确认。
+- 当前执行原则：保留 RK809 PWRKEY 软件支持及所有原有硬件复位功能；不新增猜测的 GPIO 按键节点，不把电源键事件擅自改成 reset/reboot。后续精简 DTS/内核时，保留 RK809 相关节点、IRQ 与 PMIC/pinctrl/reset 依赖；只有板级资料明确指出独立复位按钮需要额外软件控制时，才增加对应支持。
 
 ### 1.3 最小系统第一阶段只验证网络
 
@@ -329,5 +329,6 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 2026-11-20 | P1 静态可行性验收通过；纠正 6.1.116 历史 eMMC 启动现场与当前 6.12.81 TF/JP proper 启动链的差异。 |
 | 2026-11-20 | 用户明确新系统不复刻 6.1.116，组件优先当前维护中的上游版本；启动架构目标改为 TF/eMMC 各自自包含完整 U-Boot，并统一从 eMMC 只读读取 Vendor 数据。P2 当前唯一任务改为 BootROM/SPL 启动选择与 Vendor Storage 物理布局审计；BusyBox 1.36.1 默认候选撤回。
 | 2026-11-20 | 用户确认硬件复位按钮只需延续原有功能。只读检查 6.12.81 与 6.1.116 Panther X2 DTS 均未发现 gpio-keys/软件按钮节点；因此不添加猜测的 GPIO 按键实现，保留原硬件复位功能，物理线路连接方式待原理图/板级证据确认。
+| 2026-11-20 | 修正按键软件审计结论：6.1.116 实机 IRQ 记录包含 rk805_pwrkey_rise/fall；RK809 MFD 会创建 rk805-pwrkey 子设备，配套驱动上报 KEY_POWER。新系统必须保留 PMIC PWRKEY 路径；但该 PMIC 电源键是否就是用户所说的实体硬件复位按钮仍未确认，两者不可混为一谈。
 
 后续每次推进必须先更新本文件中的阶段状态、当前唯一执行项和变更记录。
