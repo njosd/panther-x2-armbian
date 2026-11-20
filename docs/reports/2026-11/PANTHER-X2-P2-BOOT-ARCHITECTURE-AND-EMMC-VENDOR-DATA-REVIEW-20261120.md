@@ -336,8 +336,10 @@ PY
 
 - 新系统必须保留 RK809 PMIC 主驱动/MFD、中断控制器连接及 PWRKEY input 子设备驱动和所需内核配置；不能仅因 Panther X2 DTS 未显式写出 `pwrkey` 子节点或没有 `gpio-keys` 就裁剪。
 - 目前已证实的是 PMIC PWRKEY 产生 Linux `KEY_POWER` 事件。
-- 用户提到的实体“硬件复位按钮”是否就是 PMIC PWRON 输入，或是否另有一颗直接连接 SoC/PMIC reset 的复位按钮，现有软件证据不能区分。不得把 `KEY_POWER` 事件擅自改为 reset/reboot，也不得据此宣称硬件复位线路已经查明。
-- 需要原理图、板级电路资料或清晰的板级丝印/按键标识才能闭环实体按钮与 PWRKEY/RESET 的对应关系；在资料缺失前保留现有 PMIC PWRKEY 软件功能及原有硬件复位能力。
+- Panther X2 专项公开资料 `yjdwbj/panther-x2` 将板载 Push-button 标为 SARADC Channel 0，并明确其功能为 Loader mode；同一资料将 USB-A 2.0 标为 RK3566 DWC3 OTG，可工作于 host/gadget。该按钮路径与 RK809 PMIC PWRKEY 是两条不同的软件/硬件路径。
+- 该项目进一步记录：Linux 运行时长按按钮约 5 秒，或在上电进入 U-Boot 时按住按钮，可进入 Rockchip Loader（rockusb）模式；社区 Panther X2 刷机记录也描述了背部按钮 + USB 连接进入 Loader，再由 RKDevTool 请求切换 MaskROM。此证据支持“板载按钮用于 Loader 恢复入口”，但不证明它直接控制 BootROM eMMC/SD 启动优先级。
+- 因此，新系统必须分别保留 RK809 PWRKEY 的 `KEY_POWER` 功能，以及 SARADC0 按钮的 Loader 模式功能；不能把 SARADC0 按钮简单改成普通 reset/reboot，也不能将其误认作 `SDMMC0_DET` 或 eMMC_D0 启动 strap。
+- 社区刷机教程把该实体按钮称作 Reset，但目前缺少 Panther X2 原理图/PCB 网络表，尚不能从电气层面确认按钮网络、PMIC PWRKEY、SoC RESETn 之间的关系。应按已验证的软件功能分别保留，不推断它能禁用 eMMC。
 
 ## 9. 证据与来源
 
@@ -356,3 +358,138 @@ PY
   https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/drivers/soc/rockchip/sdmmc_vendor_storage.c
 - Rockchip Linux Vendor Storage IDs and on-disk structure:
   https://github.com/rockchip-linux/kernel/blob/77168c8d5ab82399f65a80e9f807b50ba37cf483/include/linux/soc/rockchip/rk_vendor_storage.h
+
+
+## 10. RK3566 BootROM / SD Boot 选择机制：公开资料交叉审计（2026-11-20）
+
+### 10.1 BootROM 固定介质优先级
+
+Rockchip《RK3566 Hardware Design Guide V1.1.0》§2.1.5 明确列出复位后 BootROM 的自动启动优先级：
+
+1. Serial NOR (FSPI)
+2. Serial NAND (FSPI)
+3. NAND
+4. eMMC
+5. SDMMC
+
+因此，在没有其他启动选择机制的前提下，Panther X2 当前 eMMC user-area LBA 64 存在有效 IDB 时，eMMC 是先于 TF/SD 被 BootROM 检查的介质。该文档说明的是介质顺序，没有提供 Panther X2 可由软件设置的 eMMC/SD 优先级切换开关。
+
+### 10.2 SDMMC0_DET 不是启动介质选择 strap
+
+同一硬件设计指南 §2.1.6 对 SDMMC0_DET 的定义是 JTAG/SDMMC 复用功能选择：
+- 低电平：引脚切换为 SDMMC 功能，供 SD 卡接口使用；
+- 高电平：引脚切换为 JTAG/UART 功能。
+
+它会影响 SDMMC0 接口能否正常工作，但文档没有把它定义为 eMMC/SD BootROM 优先级选择信号。不得通过改变该引脚电平来推断可以绕过 eMMC。
+
+### 10.3 Rockchip SD Boot Card 流程的边界
+
+Rockchip《Rockchip SD Card Boot Reference》RK-KF-YF-171 V1.2.0（2021-04）说明：
+- Rockchip 的 SD Boot Card 在 LBA 64 的 IDB 区域带有专用标志；传统卡型标志位于该区域后续偏移；
+- 文档的兼容表标明 RK3566/RK3568 不支持旧式 IDB block flag，支持 Android BCB 方式；文档给出的 BCB 标记 `recovery\\n--rk_fwupdate\\n` 是 SD 固件升级标记；
+- 该指南把流程拆分为 BootROM 先加载 pre-loader/SPL，随后 pre-loader/SPL 检查 SD 卡及其启动标记，再由 SPL 决定是否从 SD 加载下一级固件。
+
+这说明 Rockchip 的“SD Boot Card/SD 优先加载下一阶段”属于 BootROM 已经启动 pre-loader/SPL 之后的阶段策略；它不能直接证明 BootROM 会在 eMMC 中存在有效 IDB 时跳过 eMMC、改为执行 TF 上的 SPL。该机制可解释“eMMC SPL → TF U-Boot proper”的混合链，但不等于“TF SPL 自包含启动”。
+
+尤其要注意：Rockchip 指南对 RK3566 的旧式 IDB flag 支持状态有限制，不能把其他 RK 芯片的卡型标志方案直接套用到 Panther X2。当前 eMMC SPL 是否支持相应 SD 启动/BCB路径，仍应以该 SPL 的精确源码/配置或受控实机证据为准。
+
+### 10.4 Panther X2 已有启动证据如何解释
+
+现有证据：
+- eMMC user area LBA 64 存在有效 Rockchip IDB/idbloader，SHA-256 与归档文件及 Ophub Panther X2 对应文件一致；
+- eMMC user area LBA 16384 存在 U-Boot FIT/proper，且与对应 Ophub 文件一致；
+- 既有 UART 日志中出现 SPL 阶段的 `Trying to boot from MMC2`，随后主 U-Boot 从 TF 对应 MMC 设备加载启动脚本、内核、initrd 和 DTB；
+- 当前日志与静态二进制指纹高度相关，但尚无 BootROM 读取介质的硬件轨迹，也没有在日志中直接记录 BootROM source register。
+
+因此当前可确认的是：主 U-Boot proper 和 Linux 启动资产可以来自 TF；SPL 实际来源仍按既有报告标为“高度相关/待直接闭环”，不能把“Linux 从 TF 启动”升级为“TF SPL 已独立执行”。
+
+另一个 Panther X2 公共项目展示了从 uSD 卡启动 Linux 的实例，并使用 U-Boot 2024.01/后续 Rockchip U-Boot；但其公开 README 没有给出 BootROM source 或 SPL 实际来源证据。它证明该板型支持 uSD 系统启动，不证明在 eMMC 有效 IDB 保留时能由 TF 提供第一阶段 SPL。
+
+### 10.5 MaskROM / Loader 恢复入口与正常 TF 冷启动的区别
+
+Panther X2 专项公开资料表明：
+- USB-A 2.0 是 RK3566 DWC3 OTG 接口，可用于 gadget；
+- SARADC Channel 0 的板载按钮用于进入 Loader mode；
+- Linux 中可通过 `reboot-loader` 进入 Loader；也可长按按钮或在 U-Boot 阶段按住按钮进入 Loader；
+- 社区刷机记录描述了先由该按钮进入 Loader，再通过 RKDevTool 请求切换 MaskROM。
+
+这是一条可用于恢复、调试或主机辅助装载的路径，不等于正常上电时 BootROM 会自动从 TF 执行 TF idbloader。进入 MaskROM 后由主机通过 USB 下载/运行 loader，也不属于用户定义的“TF 完整自包含冷启动”。
+
+### 10.6 eMMC_D0 强制失败方法：仅有参考板证据
+
+Rockchip RK3566 EVB2 用户指南描述：上电前将 eMMC_D0 拉低/接地可使 eMMC 引导失败并进入 MaskROM。该方法说明硬件上存在通过令 eMMC 无法响应来迫使 BootROM 转向恢复路径的设计思路。
+
+但这是 RK3566 EVB2 的参考设计，不是 Panther X2 原理图。当前没有证据确认 Panther X2 是否引出 eMMC_D0 测试点、是否有专用开关、是否能安全地在复位期间控制该信号。不得把 EVB2 的按键/短接点位置照搬到 Panther X2，也不得在未确认网络与风险前短接任何焊盘。
+
+### 10.7 当前启动架构判断
+
+- **已验证：** RK3566 官方硬件设计指南列出 eMMC 优先于 SDMMC；SDMMC0_DET 是 JTAG/SDMMC mux，不是介质优先级 strap。
+- **已验证：** Panther X2 eMMC 当前归档备份中有有效 IDB；eMMC LBA64 与 LBA16384 启动资产已完成哈希身份核对。
+- **已验证：** Panther X2 存在 SARADC0 Loader 按钮路径及可用的 USB OTG Gadget 接口（板级公开软件资料）；它提供 Loader/恢复入口，不是已证明的 BootROM SD 优先选择开关。
+- **未验证：** Panther X2 是否存在可在复位期间安全禁用 eMMC、强制 BootROM 跳过 eMMC 的硬件控制/测试点。
+- **未验证：** 当前 eMMC SPL 对 SD 启动标记、BCB 或 TF 下一级固件的精确支持机制，以及 eMMC SPL 加载失败后的细粒度回退条件。
+- **未验证：** 当前任何一次正常上电中 BootROM 实际选择的介质；现有 SPL/U-Boot 日志尚非 BootROM 读介质轨迹。
+
+**暂定结论：** 在 eMMC 有效 IDB 保留且没有确认到可用硬件 eMMC-disable/BootROM override 之前，不能承诺 TF 能独立提供完整 SPL + U-Boot proper。当前唯一已有实机依据的可复用路线仍是“现有第一阶段 loader/SPL → TF 上的 U-Boot proper → TF 上的 Kernel/initramfs”。真正 TF 自包含启动暂列为**可行性未证实**，不是已否决，也不是已通过。
+
+## 11. eMMC Vendor 数据只读传递：实现约束草案（不含代码）
+
+### 11.1 必须绕过默认“当前启动设备”读取路径
+
+固定参考 Rockchip U-Boot `vendor.c` 的 `vendor_ops()` 通过 `rockchip_get_bootdev()` 取得当前 boot device，再按设备类型确定 Vendor Storage 位置。因此从 TF 启动 U-Boot proper 时，标准接口不能保证读到 eMMC 的 Vendor Storage。
+
+新实现必须显式识别并选择 Panther X2 的 eMMC 控制器/块设备，而不是调用“当前启动设备”路径。优先依据 U-Boot Device Tree 的 eMMC 控制器节点/alias 或板级固定设备引用识别，不依赖 Linux 运行时 `/dev/mmcblkN` 编号。
+
+### 11.2 读取和校验流程
+
+TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
+1. 只读访问 eMMC user-area LBA 7168–7679，共 256 KiB；
+2. 读取 vendor0–vendor3 四份 64 KiB 副本；
+3. 依据 tag=`DVKR`、version>0、version2==version 筛选有效副本，选择最高 version；
+4. 校验 item_num、descriptor 数组边界、ID=3 的 offset/size 边界；
+5. 要求 LAN_MAC ID 3 为 12 bytes，校验两个地址均为合法单播地址且彼此不同；
+6. 记录副本编号、版本、校验结果，不在公开日志输出真实 MAC 字节。
+
+当前备份中 vendor0 是唯一有效副本（version=2），但启动代码必须按规则扫描四份，不能把 vendor0 永远有效写死。
+
+### 11.3 阻止默认随机 MAC 和 Vendor 写回
+
+固定参考 Rockchip U-Boot `board.c` 的 `rockchip_set_ethaddr()` 在 Vendor Storage 读取失败或 MAC 无效时会生成随机 MAC；启用 Vendor Partition 时还会调用 `vendor_storage_write()` 写回。该默认行为不符合本项目“eMMC 是权威来源、启动时只读、失败不能静默伪造板载 MAC”的原则。
+
+新系统必须禁用或替换这条默认 fallback/writeback 路径：
+- 不能在启动时写入或修复 eMMC Vendor Storage；
+- 不能因读取失败而自动生成并保存随机地址；
+- 失败必须输出明确状态，不能把临时地址记录成板载 MAC；
+- 若 eMMC Vendor 数据不可读或校验失败，应让网络接口保持未配置/不启用，或进入明确标记的人工恢复流程；不得静默切换数据源。
+
+### 11.4 Linux 传递
+
+- 对 MAC，优先由 U-Boot 设置 `ethaddr` / `eth1addr`，并通过标准 FDT Ethernet fixup 写入对应节点的 `mac-address` / `local-mac-address`；最终 Linux FDT、接口地址和 GMAC 节点映射需要实机核对。
+- 双 MAC 的顺序必须由 Panther X2 两个 GMAC 节点/aliases 明确映射，不以网卡枚举顺序猜测。
+- 其他板级数据先盘点消费者；可表达为标准设备树属性的使用标准属性，需要 Linux 驱动访问的再评估 NVMEM cell。
+- Rockchip Linux Vendor Storage 驱动虽然固定读取 eMMC LBA 7168，但其 `/dev/vendor_storage` ioctl 同时提供读写接口，不应未经隔离就作为日常系统的只读权威接口。
+
+以上为架构约束草案，尚未编写补丁，也未构建或启动任何新固件。
+
+## 12. P2 当前唯一剩余工作
+
+1. 获取 Panther X2 对应 PCB 版本的原理图/硬件资料，或在用户授权下仅做不拆焊、不短接的外观核对，确定 SARADC0 按钮、eMMC_D0、USB OTG0、复位网络的实际对应关系。
+2. 通过精确到 Panther X2 的证据判断是否有不改写 eMMC、可安全使 BootROM 跳过有效 eMMC IDB 的方法。没有该方法时，应把“TF 独立完整冷启动”标为当前硬件条件下不可行/未证实，并向用户提出可选架构，而不是擅自清除 eMMC IDB。
+3. 完成后才冻结双启动介质的 SPL/U-Boot/Vendor 读取设计，再重新评估最新维护中的用户空间组件、最小 /init 与 CI。
+4. 当前不下载组件源码、不编译、不触发 CI、不写 TF/eMMC、不执行任何短接/复位/刷机实验。
+
+## 13. 本轮新增公开来源
+
+- Rockchip RK3566 Hardware Design Guide V1.1.0, §2.1.5 / §2.1.6:  
+  https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- Rockchip Developer Guide SD Boot, RK-KF-YF-171 V1.2.0, §4–5:  
+  https://doc.9tripod.com/en/docs/rockchip-official-docs/MMC/Rockchip_Developer_Guide_SD_Boot_CN/
+- Rockchip RK3566 EVB2 User Guide V1.1, MaskROM section (eMMC_D0 to GND is EVB-specific reference only):  
+  https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_EVB2_User_Guide_V1.1_EN.pdf
+- Panther X2 board-specific public software/hardware notes (SARADC0 Loader button, DWC3 OTG USB-A, U-Boot/Buildroot releases):  
+  https://github.com/yjdwbj/panther-x2
+- Panther X2 community Loader/MaskROM procedure (button + USB, then RKDevTool MaskROM request):  
+  https://www.xwenw.com/249466.html
+  https://forum.naixi.net/thread-9716-1-1.html
+- Rockchip U-Boot reference `vendor.c` and `board.c` at commit `8af253525b7de5f29f7f97dffd18adb77db6456`:  
+  https://github.com/rockchip-linux/u-boot/tree/8af253525b7de5f29f7f97dffd18adb77db6456
