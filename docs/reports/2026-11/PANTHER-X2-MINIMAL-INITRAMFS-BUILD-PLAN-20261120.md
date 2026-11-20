@@ -2,9 +2,9 @@
 
 ## 1. 目的与边界
 
-用户补充并确认两项原则：
+用户补充并确认以下原则：
 
-- **上游优先**：每个组件尽量采用对应项目主线/正式发布的原始源码与标准构建方式；优先配置和组合现有上游组件，不先写 Panther X2 私有替代实现。
+- **上游优先与版本策略**：新系统不复刻 6.1.116；每个组件尽量采用当前仍维护的上游主线或最新正式稳定版本。6.1.116 只作为已知正常的硬件/内核/网络行为参照。每轮实验固定版本、commit、工具链、配置和哈希；完成一轮后再主动升级回归。
 - **最小系统只验证网络**：第一阶段只保留启动 Linux、识别网卡/PHY、查看链路状态和执行定向网络收发测试所需内容。DHCP、DNS、SSH、存储、NPU/RKNN、Immich 等均不是第一阶段目标，只有网络基线明确后才逐项增加。
 
 
@@ -44,7 +44,7 @@
 
 ## 3. 总体分层
 
-### Layer 0 — 只读资产与启动链核验（已完成）
+### Layer 0 — 现有启动链只读可行性核验（已完成；不代表最终启动架构认可）
 
 只检查已有仓库、Actions Artifact 和已归档资产，回答：
 
@@ -55,11 +55,17 @@
 - 6.1.116 正常基线中的 Kernel Image、DTB、boot 文件是否能以相同启动链做对照；不跨版本混用模块。
 - 8GB 卡的分区/文件系统布局需服从已核实的 U-Boot 读取能力。当前不预设 FAT 或 EXT4，不预设写入扇区布局。
 
-本层结束条件已满足：资产清单、依赖关系、哈希、已知/未知项和安全写卡静态候选均已归档于 P1 报告。结论为可复用当前 eMMC SPL + TF JP-TvBox proper，从 SD/TF ext4 第一分区加载 legacy gzip uInitrd、Kernel 和 Panther X2 DTB。P1 不代表自制 initramfs 已构建或启动。
+本层结束条件已满足：现有启动链的资产、日志、文件系统与安全边界已归档于 P1 报告。结论仅是当前临时诊断路径可复用 eMMC SPL + TF JP-TvBox proper，从 SD/TF ext4 第一分区加载 legacy gzip uInitrd、Kernel 和 Panther X2 DTB。**这不是最终架构认可。** 用户已明确最终目标是 TF 与 eMMC 各自提供自包含完整 U-Boot 启动链，并从统一 eMMC Vendor 数据源读取 MAC 等板级信息。此目标可行性尚未证明，必须先完成 P2 启动架构审计。
 
-### Layer 1 — 最小 RAM rootfs / initramfs（当前只做只读设计；构建待授权）
+### Layer 1 — 启动架构与 eMMC Vendor 数据传递审计（当前唯一工作；只读）
 
-当前只做上游组件来源/版本/依赖/许可证初审。组件初审见 P2 报告 PANTHER-X2-P2-UPSTREAM-USERSPACE-COMPONENT-AUDIT-20261120.md：BusyBox 1.36.1 为基础用户空间稳定版候选；ethtool 7.2 为诊断工具候选；独立 iproute2 与 tcpdump 暂缓。当前唯一工作是核验 BusyBox 1.36.1 源码中的 ip/nc applet、UDP broadcast 功能与 Kconfig 依赖。未经用户明确授权，不下载源码包、不触发 CI、不编译、不生成 initramfs 产物。授权后再构建 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
+先审计 RK3566 BootROM 启动优先级、eMMC/SD IDB 选择与回退条件、板级 boot strap/恢复机制，以及 eMMC Vendor Storage 的物理位置和只读读取路径。目标是判断能否在不改写 eMMC 的情况下真正从 TF 启动完整 TF U-Boot，同时从 eMMC 读取权威 MAC/vendor 数据并通过标准 FDT/NVMEM 机制传递给 Linux。报告见 `PANTHER-X2-P2-BOOT-ARCHITECTURE-AND-EMMC-VENDOR-DATA-REVIEW-20261120.md`。
+
+在本层完成前，不进入用户空间组件锁版。
+
+### Layer 2 — 最小 RAM rootfs / initramfs（后续只读设计；构建待授权）
+
+启动架构审计完成后，再按当时最新维护中的上游版本重新评估 BusyBox、iproute2、ethtool、广播测试工具和依赖。此前 BusyBox 1.36.1 默认候选已撤回，不锁定任何旧版本。未经用户明确授权，不下载源码包、不触发 CI、不编译、不生成 initramfs 产物。授权后再构建 ARM64、可从 RAM 启动的 initramfs。原则上仅包含：
 
 - `/init` 和必要目录结构；
 - BusyBox（优先静态构建，减少动态库依赖）；
@@ -179,9 +185,9 @@
 | P1：initramfs/gzip 内核能力与 U-Boot ext4/legacy uInitrd 加载能力 | 已完成静态验收；详见 P1 报告 |
 | P1：6.1.116 资产匹配及历史 eMMC 启动边界 | 已完成静态核对；历史 U-Boot 实际执行轨迹仍未闭环但不阻塞当前固件下的受控对照 |
 | 8GB TF 卡 GPT/ext4 静态布局 | 已形成候选；未对实体卡核验或写入 |
-| BusyBox 1.36.1 上游源码/Kconfig 核验 | 当前唯一执行项 |
-| ethtool 7.2 依赖与 ioctl/netlink 构建选项 | 待 BusyBox 项完成后 |
-| iproute2 / tcpdump 首版是否需要 | 暂缓，只有明确功能缺口才重新评估 |
+| P2：RK3566 BootROM/双介质自包含启动链审计 | 当前唯一执行项 |
+| P2：eMMC Vendor Storage 物理位置及只读读取路径 | 与启动链审计顺序衔接 |
+| 用户空间组件最新上游版本锁定 | 暂缓，启动架构完成后重新评估 |
 | 最小 /init 与目录树设计 | P2 只读设计待做 |
 | 独立 CI workflow 设计/审查 | P2 只读设计待做 |
 | 构建 initramfs | 未授权、未执行 |
@@ -190,5 +196,5 @@
 
 ## 8. 下一项唯一工作
 
-继续 P2，当前只核验 BusyBox 1.36.1 官方源码中的 ip applet、nc UDP/broadcast 功能与配置依赖。完成该组件后再进入 ethtool 7.2 的构建选项和依赖审查；不要并行展开其他组件。此阶段不下载源码包、不触发构建、不生成产物、不写卡、不启动实验内核。完成设计后再向用户确认是否授权实际 CI 构建。
+继续 P2，当前只审计 RK3566 BootROM 对 eMMC/SD 启动介质的选择规则，以及 eMMC Vendor Storage 的实际物理位置和从 U-Boot 显式只读读取的可行性。完成这一架构审计后，再重新锁定最新维护中的上游用户空间组件。此阶段不下载源码包、不触发构建、不生成产物、不写卡、不启动实验内核。
 
