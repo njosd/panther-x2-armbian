@@ -292,6 +292,67 @@ name=DF4032
 - 这种测试应标注为“共用当前启动固件的 6.1.116 受控对照”，不是历史 6.1.116 启动链复刻。
 - 不应为追求历史环境复刻而提前改写 eMMC 或替换当前 U-Boot；本阶段仍只做只读核验。
 
+
+## 4.3 两个黄金/故障内核的 initramfs 与最小网络依赖闭包
+
+### 6.1.116
+
+6.1.116 实际运行配置已从硬件审计归档提取；7,677 个 Kconfig 符号与 Ophub 官方 `general/config-6.1`（commit `8f6eb6e392d68b89a4708c8c45caf9d3f46eadaa`，blob `c5e4598301c3ef3675be0058b99b9b6044a14bbf`）全量一致，差异为 0。
+
+因此以下配置可视为 6.1.116 实际运行配置的闭环值：
+- initramfs：`CONFIG_BLK_DEV_INITRD=y`、`CONFIG_RD_GZIP=y`；
+- 基础用户空间挂载：`CONFIG_DEVTMPFS=y`、`CONFIG_DEVTMPFS_MOUNT=y`、`CONFIG_PROC_FS=y`、`CONFIG_SYSFS=y`、`CONFIG_TMPFS=y`；
+- 网络基础：`CONFIG_PACKET=y`、`CONFIG_INET=y`；
+- GMAC/PHY 主链：`CONFIG_STMMAC_ETH=y`、`CONFIG_STMMAC_PLATFORM=y`、`CONFIG_DWMAC_ROCKCHIP=y`、`CONFIG_PHYLIB=y`、`CONFIG_MDIO_BUS=y`、`CONFIG_OF_MDIO=y`、`CONFIG_REALTEK_PHY=y`；
+- MMC/SD：`CONFIG_MMC=y`、`CONFIG_MMC_BLOCK=y`、`CONFIG_MMC_DW=y`、`CONFIG_MMC_DW_ROCKCHIP=y`。
+
+以上关键驱动为 built-in，不要求最小 initramfs 额外携带 Panther GMAC、RTL8211F 或 Rockchip SD/MMC 控制器模块。
+
+### 6.12.81
+
+6.12.81 的 RK35xx config 快照（commit `c23196e10d7702ee2906de4a05421d8971fb2717`，blob `dee127c6c644f38426eeb28000d73536084d34a3`）包含同一组 initramfs、devtmpfs、proc/sysfs/tmpfs、packet/IPv4、STMMAC/DWMAC/PHY、MMC/SD built-in 选项。
+
+6.12.81 的运行时 UART 又直接证明该内核已成功解包现有 gzip initramfs。因此：
+- initramfs/gzip 能力不只是配置快照推测，6.12.81 有实际启动日志；
+- 6.1.116 的实际配置与其官方模板全量一致，且该版本曾成功运行与其匹配的 initrd；
+- 两个内核均具备本项目最小网络 initramfs 的必要内核侧基础。最小用户空间本身尚未构建或实机启动。
+
+**配置来源边界：** 6.12.81 此处列出的完整选项来自对应构建配置快照；此前运行时配置核验只闭环了关键 STMMAC/DWMAC/DMA 项，不能把整个 config 快照冒充最终运行配置逐字节导出。实际 gzip initramfs 解包日志则是运行时能力的直接证据。
+
+## 4.4 initramfs 存在时 root= / rootwait 的处理：两个源码端点一致
+
+对两个已锁定源码端点只读检查：
+
+- 6.12.81：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- 6.1.116：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`
+
+两个版本的 `init/main.c` 均将默认早期用户空间入口设为 `/init`。内核在进入传统根文件系统挂载流程前检查该文件：
+- 若 initramfs 中可执行的 `/init` 存在，直接执行早期用户空间；
+- 只有 `/init` 不存在时，才调用 `prepare_namespace()`，处理 `root=`、`rootwait` 并尝试挂载块设备根文件系统。
+
+两个版本的 `init/do_mounts.c` 均将 `rootwait` 等待逻辑放在 `prepare_namespace()` 的传统根文件系统路径中。
+
+**对本项目的意义：** 只要最小 initramfs 内确实包含可执行的 `/init`，现有 Armbian boot script 传入的 `root=UUID=...` / `rootwait` 不会触发 TF/eMMC 根分区挂载；内核会运行 RAM 中的 initramfs。后续启动环境仍应显式设置 `rdinit=/init`，并确保文件存在且可执行。若 /init 缺失，内核会退回传统 root 挂载路径；这是构建验收必须检查的硬条件，不能依赖“应该存在”。
+
+## 4.5 8GB TF 卡的静态布局候选（不写卡）
+
+既有当前 TF 卡布局与启动链记录提供了可复用边界：
+- GPT 第一分区起始 LBA：32768（16 MiB）；
+- 当前 JP-TvBox U-Boot proper：LBA 16384，大小 1,464,832 bytes（2,861 个 512-byte sector）；
+- U-Boot proper 从 SD/TF 的第一分区读取 ext4 文件系统中的 boot.scr、Kernel、uInitrd 和 DTB；
+- 当前 eMMC LBA64 的 SPL 是现有启动链前置依赖，本项目不修改它。
+
+因此，供当前 Panther X2 现有 eMMC SPL 启动的 8GB 实验 TF 卡，可采用以下**静态候选**：
+1. GPT；
+2. 保留 LBA 0–32767 启动/对齐区域；
+3. 在 LBA 16384 放置已验证的 JP-TvBox U-Boot proper（固定哈希）；
+4. 第一分区从 LBA 32768 开始，采用 ext4；
+5. 第一分区只存放 boot.scr、armbianEnv.txt、Kernel、uInitrd 和匹配 Panther X2 DTB；RAM initramfs 作为运行时根，不创建独立持久 rootfs 分区。
+
+TF 上的 LBA64 idbloader 不是当前已观察启动链中执行的 SPL；当前 SPL 从 eMMC 启动后，转而从 SD/TF 的 MMC2 读取 proper。因此首轮候选布局不要求再复制一份未被当前启动链使用的 TF idbloader。此结论只适用于本机当前启动链，不代表这张卡可脱离 Panther X2 eMMC 独立启动。
+
+以上是布局设计，不是对用户尚未插入/确认的 8GB 卡进行容量核验；不生成分区表、不写卡、不触碰 eMMC。
+
 ## 5. 本轮取得的额外审计材料
 
 为复核此前 6.12.81 双资产审计结果，本轮从 GitHub Actions 下载既有 artifact：
