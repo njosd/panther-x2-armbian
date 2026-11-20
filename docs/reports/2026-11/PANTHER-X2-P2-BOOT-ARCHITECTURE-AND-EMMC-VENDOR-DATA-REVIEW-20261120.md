@@ -105,7 +105,7 @@ BootROM selects eMMC:
 
 按顺序，只做只读研究：
 
-1. 从已有 eMMC 原始镜像/审计资产中确定 Vendor Storage 的实际物理位置、sector 范围、冗余副本和版本选择逻辑；不得让用户重复已完成读取。
+1. **当前唯一执行项：** 使用已有 eMMC user-area 备份，解析 LBA 7168–7679 的四份 64 KiB Vendor Storage 副本，确认有效副本、最高版本和 LAN_MAC ID 3 descriptor；与此前已读出的脱敏条目交叉核对。不得重新读取实机 eMMC。
 2. 回读现有 U-Boot SPL/BootROM 日志和 eMMC/TF 原始启动区域证据，结合 RK3566 官方文档及可用源码，明确 BootROM 对 eMMC 有效 IDB 与 SDMMC IDB 的选择/回退条件。
 3. 审计 Panther X2 板级启动配置、可用启动按键/strap/恢复信号资料，判断是否存在不改 eMMC 的 SD 优先/强制 SD 启动方式。不要将 JTAG 复用脚误当作启动源选择脚。
 4. 只有完成 1–3 后，才给出“真正 TF 自包含启动是否可行”的结论和备选方案。
@@ -189,6 +189,30 @@ Linux `sdmmc_vendor_storage.c` 也逐份检查四份副本的 tag 与 `version2 
 5. 核实备份文件长度、来源和 SHA-256，确保输入确为此前归档的 eMMC user area，而非 TF 或其他镜像。
 
 在这一步完成前，不把某个副本编号写成“当前有效副本”，也不提供任何写入/修复操作。
+## 9. RK809 PMIC PWRKEY 软件路径（2026-11-20，补充核对）
+
+### 9.1 Panther X2 板级 DTS 与正常实机证据
+
+- Panther X2 的 6.1.116 正常参考 DTS 和 6.12.81 DTS 均声明 `compatible = "rockchip,rk809"`，并设置 `rockchip,system-power-controller`。
+- 6.1.116 正常系统实机中断记录（`evidence/network/panther-eth-baseline-redacted.txt`）包含：
+  - IRQ 38：`rk817`，`rk805_pwrkey_rise`
+  - IRQ 39：`rk817`，`rk805_pwrkey_fall`
+- 这说明正常运行系统确实注册了 RK817/809 PMIC 的 PWRKEY rise/fall 中断。它不是 `gpio-keys` GPIO 按键节点。
+
+### 9.2 驱动路径（源码级确认）
+
+正常参考内核固定源码 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`：
+- `drivers/mfd/rk808.c` 将 RK809/RK817 variant 纳入 RK817 MFD cell 集合，创建名为 `rk805-pwrkey` 的子设备，并为其分配 PWRON rise/fall IRQ resources。
+- `drivers/input/misc/rk805-pwrkey.c` 注册 `EV_KEY / KEY_POWER`，下降沿上报按下，升高沿上报释放。
+- 对应 6.12 Rockchip 内核固定快照 `rockchip-linux/kernel@77168c8d5ab82399f65a80e9f807b50ba37cf483` 也保留 RK809/RK817 PWRKEY MFD 与输入驱动路径。
+
+### 9.3 对最小系统的要求与边界
+
+- 新系统必须保留 RK809 PMIC 主驱动/MFD、中断控制器连接及 PWRKEY input 子设备驱动和所需内核配置；不能仅因 Panther X2 DTS 未显式写出 `pwrkey` 子节点或没有 `gpio-keys` 就裁剪。
+- 目前已证实的是 PMIC PWRKEY 产生 Linux `KEY_POWER` 事件。
+- 用户提到的实体“硬件复位按钮”是否就是 PMIC PWRON 输入，或是否另有一颗直接连接 SoC/PMIC reset 的复位按钮，现有软件证据不能区分。不得把 `KEY_POWER` 事件擅自改为 reset/reboot，也不得据此宣称硬件复位线路已经查明。
+- 需要原理图、板级电路资料或清晰的板级丝印/按键标识才能闭环实体按钮与 PWRKEY/RESET 的对应关系；在资料缺失前保留现有 PMIC PWRKEY 软件功能及原有硬件复位能力。
+
 ## 9. 证据与来源
 
 - 项目报告：`docs/reports/2026-11/EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md`
