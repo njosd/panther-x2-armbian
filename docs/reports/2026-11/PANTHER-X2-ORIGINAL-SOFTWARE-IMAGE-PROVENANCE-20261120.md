@@ -416,3 +416,36 @@ Boot1 相关字符串仍分别为：
 4. 后续 kernel update 是否触及 eMMC LBA64 IDB 或 LBA16384 FIT。
 
 本节将“框架谱系高度支持 Ophub 衍生”与“镜像中每个二进制均来自 Ophub”明确分离，避免过度归因。
+
+
+## 15. 用户计划复原首次刷机流程并重刷 eMMC；公开流程交叉验证（2026-11-20）
+
+用户明确希望按照最初刷机顺序完整重刷，目标记忆为 eMMC，而不是仅从 TF 卡试启动。用户回忆最初先刷 `MiniLoaderAll.bin`。目前没有找到当年本人实际使用的 RKDevTool 操作记录、命令、截图或完整刷机日志，因此目标 eMMC 是用户明确表达的当前计划及其历史回忆，具体工具参数仍未被历史记录证实。
+
+### 15.1 历史记录回溯结果
+
+此前对话只记录了用户回忆“最初刷机要求先刷入 MiniLoaderAll.bin”。截至本次回溯，未检索到当年实际使用 RKDevTool / upgrade_tool、MaskROM / Loader 流程、写入地址、eMMC 目标选择或写入日志的直接记录。2026-11-13 对 BSP 包的检查也未发现 Panther X2 专用刷机、USB OTG、RKDevTool、upgrade_tool、MiniLoaderAll.bin 或 eMMC/TF 写入脚本。因此不能声称已复原当年的逐项操作。
+
+### 15.2 同型号公开刷机资料的交叉验证（不是用户本人历史记录）
+
+- 2023-06-27 的 Panther X2 Rockchip 刷机指南明确使用 RKDevTool；进入 LOADER 后切换 Maskrom，再在 Download Image 页选择 Boot 文件 `rk356x-MiniLoaderAll.bin` 和 Armbian system image，执行后等待 `Download image OK`。该指南使用 2023-06 的 6.1.35 Bookworm 镜像，不是用户的 2023-12 6.1.65 Jammy 镜像。
+  来源：`https://kingtam.eu.org/posts/rk3566-flash/`
+- 2024-09-09 的 Panther X2 指南也记录了 RKDevTool、LOADER→Maskrom、Boot 栏选择 `MiniLoaderAll.bin`、System 栏选择 Panther X2 Armbian IMG 的流程。它使用 2024-07 的 6.1.57 Bullseye 镜像，不是用户原件。
+  来源：`https://blog.van.ac.cn/wiki/黑豹X2（Panther-x2）刷机并驱动NPU-VPU、Jellyfin转码/`
+
+这些资料与用户“先刷 MiniLoaderAll.bin，再刷系统镜像”的回忆相互吻合，并支持 RKDevTool 的 Boot + System 两项刷写模式是 Panther X2 社区使用过的流程。但它们不能证明用户当年具体用的是哪一个工具版本、哪一份 loader、哪种存储器切换设置，也不能代替本机原始流程证据。
+
+### 15.3 当前不可跳过的安全边界
+
+当前研究状态与首次刷机时不同：eMMC user area LBA64 的原版 E25 IDB 已在 2026-11-19/20 研究中被 JP-TvBox IDB 替换；eMMC LBA16384 有 U-Boot FIT；TF 卡曾承担加载 JP U-Boot proper 和 Linux rootfs 的启动路径。因此，直接执行“Boot + System”写入可能改变已有 eMMC 启动组件与分区内容，不能在未确认 RKDevTool 配置和存储目标前开始。
+
+原始 `MiniLoaderAll.bin` 当前已归档并完成哈希核对（RK3566 DDR 1056 MHz 候选），但仍需验证它是否就是当年实际使用的 Loader，以及 RKDevTool 对 Boot 文件和 System 镜像分别写入何种介质/位置。原始镜像为 gzip 压缩 raw disk image，公开指南要求先解压为 `.img` 后再选作 System；解压后的长度为 2,969,567,232 bytes，SHA256 为 `0326e757a72182b5e60b112000ceef808bcb3a2bfd954448bbb6c9b16eb6f3ea`。
+
+### 15.4 后续执行前的必需核对
+
+1. 只读解析原始镜像分区表及启动区，确定镜像本身的布局与启动组件位置。
+2. 取得当年或对应版本的 RKDevTool 配置文件（尤其是 `config.cfg`）并检查 Boot/System 下载项的地址/存储器行为；不要凭现代教程臆测配置。
+3. 明确本次要恢复的 eMMC 区域与当前实验性状态的影响；保留现有已归档原版 E25 IDB、JP IDB、eMMC/boot0/boot1 研究记录。
+4. 在任何写入前再次核对设备枚举、存储介质选择、Loader 文件哈希、解压后 IMG 哈希及目标设备。当前阶段不执行刷写。
+
+目标是复现首次安装的核心顺序并以 eMMC 独立启动验证为结果，但必须将“与公开教程一致的推定流程”和“当年本人实际执行过的流程”分开标注。
