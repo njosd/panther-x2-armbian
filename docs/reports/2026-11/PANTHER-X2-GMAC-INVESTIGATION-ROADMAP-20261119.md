@@ -14,6 +14,10 @@
 - 6.1.174-rk35xx：最早明确异常版本。
 - 6.12.81-rk35xx：持续异常。
 
+## 当前阶段状态
+
+P1–P4 限定静态源码审计均已结束。尚未定位 TX 故障的 MAC/RGMII/PHY 物理边界。当前不自动进行实机操作；是否进入 P5 需先评估并取得用户明确授权。
+
 ## 当前唯一工作项
 
 ### P1：JL2xx1 workaround 的 PHY MDIO 写入组（已收口，证据不足）
@@ -77,11 +81,18 @@
 
 
 
-### P4：pinctrl 首 pin 错误处理差异（当前唯一工作项）
-只读静态审计；低优先级。先回读既有 pinctrl 报告和仓库记录，确认尚未完成的具体代码点；只审查首 pin 错误处理与后续 pin 配置是否可能导致 GMAC RGMII pinmux 部分失败。不得重复已完成的 pinctrl DTS 对照，不得为此重启故障内核。若没有足以支持继续的证据，明确结束该支线，不做补丁。
+### P4：pinctrl 首 pin 错误处理差异（已正式关闭：潜在错误路径存在，现场触发未证实）
 
-### P5：物理边界波形验证
-最后讨论；需用户明确授权。不得自行安排实机操作。
+- 精确比较三个源码端点的 `rockchip_pmx_set()`：正常 6.1.116 使用 `if (ret)`；异常 6.1.174-rk35xx 与 6.12.81-rk35xx 使用 `if (ret && cnt)`。
+- 若 group 第一个 pin 的 `rockchip_set_mux()` 返回错误，异常版本会跳过错误返回并最终返回 0；循环已 break，group 后续 pin 不会配置。这是真实跨两个异常源码候选共有、正常版本没有的潜在软件错误路径。
+- Panther GMAC1 M0 的 `tx_bus2`、`rgmii_clk`、`rgmii_bus` group 首 pin/后续 pin 顺序已核实：首 pin 写入失败可分别跳过 TXD1/TXEN、TXCLK、TXD2/TXD3 等后续 TX pin。
+- RK3568 mux=3 是合法 4-bit IOMUX，不命中 RK3506 RMIO 或其他 SoC 特殊分支；正常路径 regmap 写入错误可传回 `rockchip_pmx_set()`。
+- **未验证：** Panther 实际启动时 GPIO3 IOMUX regmap 写入是否失败、具体 group、运行时 ownership/硬件 mux 状态。不得将潜在机制认定为根因。
+- P4 报告：`PANTHER-X2-P4-PINCTRL-FIRST-PIN-ERROR-CLOSEOUT-20261120.md`。
+- **P4 正式关闭**：不再扩大源码搜索、不制作补丁、不操作 Panther。该候选保留为未证实的低至中优先级风险。
+
+### P5：物理边界波形验证（待决策，未授权）
+只有在汇总现有证据并说明测试目的、仪器、接线、风险和判定标准后，取得用户明确授权才可讨论/执行。不得自行安排实机操作。
 
 ## 已完成/已降级项目（禁止无新证据重复）
 
