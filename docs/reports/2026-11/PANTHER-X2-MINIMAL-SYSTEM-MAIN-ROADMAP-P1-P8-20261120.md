@@ -407,3 +407,13 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - BROM source tag helper 与 SPL successful-loader ATAGS 是不同语义；本项目要保持 proper 与实际成功 loader 一致，应沿用 successful-loader 语义。
 - Vendor 专用读取不得临时修改全局 devnum 后复用通用 Vendor API；必须独立 eMMC mmc0 descriptor + 独立只读解析上下文，避免全局缓存污染和意外写回。
 - 详见 P2 报告 §21。当前仍未写补丁/构建/写卡。
+
+
+## P2 新增进展：Rockchip 官方较新 U-Boot/rkbin 更新审查（2026-11-20）
+
+- Rockchip U-Boot `next-dev` 仍保留 SPL 成功 loader → ATAGS → proper 选择的机制；默认 `spl_boot_device()` 仍为 MMC1/eMMC，weak `board_boot_order()` 默认只尝试一个设备；proper 仍是配置 > ATAGS > scan。没有发现上游默认自动完成双介质完整启动的变化。
+- Rockchip rkbin SPL v1.14（2024-05-30）明确修复 SPL 阶段 SD 初始化失败（SPL pinctrl 节点被禁用）；v1.13 修复 uboot.img 的 u-boot.dtb 失败后不加载备份镜像。两项都不是 BootROM 选源优先级修复。
+- RK3566 DDR v1.26（2025/2026）改善训练、启动概率、容量识别并增加单通道 LPDDR4/LPDDR4X 支持；是否适配 Panther X2 需按实物 DRAM 拓扑核对。
+- 主线 U-Boot v2026.10 支持多款 RK3566 板，但官方列表不含 Panther X2/H1GW V04，不能直接替换现有板级固件。
+- 新发现 Rockchip next-dev 有 `vendor_storage_buffer_read()`，使用局部 Vendor 解析上下文读取调用者提供的 buffer；可用于 eMMC-only MAC 方案，但仍需独立读取 eMMC 与扫描四份副本。
+- 详见 P2 报告 §22。下一步只做仓库现有固件版本指纹与 rkbin v1.13/v1.14、DDR v1.26 静态对照；不盲目升级、不构建、不写卡。
