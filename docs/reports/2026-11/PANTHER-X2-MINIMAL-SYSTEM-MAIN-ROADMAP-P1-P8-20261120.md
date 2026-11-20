@@ -381,3 +381,10 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - v1.0 标签 Git tree 仅含 README 和 PNG，没有 idbloader/u-boot.itb/整卡镜像；README 的预构建链接是源码标签压缩包，不是固件包。
 - 当前 main 分支已转向 Buildroot 2026.08、U-Boot next-dev、FIT/RKFW/eMMC 布局，不可与 v1.0 的 uSD 启动布局混为一谈。
 - 详见 P2 报告 §18。未执行下载、运行、写卡或设备操作。
+
+## P2 新增进展：H1GW V04 板级资料与 eMMC 上电隔离边界（2026-11-20）
+
+- 已核对 BROWAN H1GW V04 顶面照片及 FCC Panther X2 两组内部照片档案（2021 #5542190、2022 #5825812）；均未提供原理图/netlist/BOM 或可闭环的 eMMC VCC/VCCQ/RESETn 控制网络。
+- RK3566 eMMC VCC/VCCQ 必须在 BootROM 发 CMD 前稳定；运行期 sleep 后关断 VCC 的能力不能证明启动前存在可用的 eMMC-disable 机制。
+- 当前没有证据证明 H1GW V04 可在 BootROM 介质探测前隔离 eMMC。继续保留该硬件问题为未验证，不猜测测试点、不短接。
+- 详见 P2 报告 §19。
