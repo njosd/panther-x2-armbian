@@ -363,3 +363,56 @@ Boot1 相关字符串仍分别为：
 2. 若旧镜像原始下载源已失效，优先考虑用户 U 盘副本作为唯一可用原件；不要求用户上传整个大文件。
 3. 可采用用户本机只读提取方式，单独导出镜像中的启动相关区域/文件（在确认镜像分区布局后），以便通过较小文件分析 bootloader、DTB、boot.scr、内核等内容。提取前只做只读检查，不写设备。
 4. 若找到候选公开镜像，必须先对比下载文件的 SHA256、gzip 元数据、解压长度，再判断是否为同一原件；不得只按文件名认定。
+
+
+## 14. 重新界定原始镜像与 Ophub 技术路线的关系（2026-11-20）
+
+用户指出，仅从镜像文件名看，似乎不像 Ophub 路线。该质疑成立：**文件名本身不足以证明 Ophub 归属**。进一步核对公开项目资料后，需要把“构建/维护框架来源”和“具体内核、U-Boot 二进制来源”分开。
+
+### 14.1 公开项目谱系证据
+
+与 Panther X2 早期镜像相关的公开项目 `lintao1890/panther-x2-armbian`，GitHub 页面明确标注：
+- `forked from ophub/amlogic-s9xxx-armbian`；
+- README 将 `rk3566` 的 Panther-X2、JP-TvBox 列为支持设备，并列出 `6.1.y` 内核系列；
+- README 的 `armbian-update` 说明中，`-r` 参数默认仓库是 `ophub/kernel`；
+- `-u` 可选内核 tag 后缀包括 `rk35xx`；
+- `-m` 参数用于选择 mainline U-Boot，默认值为 no。
+
+公开来源：
+- `https://github.com/lintao1890/panther-x2-armbian`
+- README 相关内容见 Armbian System Description 与 Update Armbian Kernel 部分。
+
+这些资料强力支持：该项目属于 Ophub 的 fork/衍生项目，且其 Panther X2 内核更新机制明确接入 `ophub/kernel`。所以不宜简单说“完全不是 Ophub 线”。
+
+### 14.2 但不能据此推出的结论
+
+上述 README 是项目文档/当前可见说明，不能单独证明用户手中 2023-12-07 构建的 6.1.65 镜像：
+- 一定由 Ophub 当时的某个 commit 原样构建；
+- 其中 Linux 6.1.65 内核二进制一定来自 `ophub/kernel`；
+- 其中 U-Boot proper、SPL、DDR 初始化代码一定来自 Ophub；
+- 其首次安装或后续升级必然写入 eMMC 的 IDB 或 U-Boot FIT。
+
+特别是 README 将 kernel 更新和 mainline U-Boot 作为不同参数描述（`armbian-update` 的 `-m`），这进一步说明 kernel update 与 U-Boot update 不应混为一谈。必须检查该时期脚本版本及具体镜像内容。
+
+### 14.3 当前更准确的分类
+
+| 层次 | 当前判断 |
+|---|---|
+| Armbian 发行/系统镜像 | 已知为 Panther X2 专用 Armbian 镜像，文件名与 gzip 元数据支持 |
+| 构建/升级框架谱系 | 高度支持为 Ophub fork/衍生项目 |
+| Panther X2 kernel 支持线 | 项目 README 列为 RK3566 Panther-X2 / 6.1.y |
+| 具体 6.1.65 kernel 二进制来源 | 未验证 |
+| 该镜像中的 U-Boot/SPL/DDR 来源 | 未验证 |
+| 系统升级是否改写 eMMC IDB/U-Boot FIT | 未验证 |
+
+### 14.4 修正前述表述与研究重点
+
+此前将“同项目 6.1.74 发布资产”表述为与 6.1.65 同源线索时，必须限定为同一公开 fork 项目的相邻发布版本；它不是 6.1.65 原件，也不能代替原始镜像。
+
+后续应检索该 fork 在 2023-12-07 前后的 commit、workflow、release、`armbian-update` 脚本版本及 `compile-kernel` 构建定义，尤其追查：
+1. 6.1.65 是在原始 Armbian BSP 上直接编译，还是经 Ophub kernel package 更新/替换；
+2. 首次安装 `MiniLoaderAll.bin` 的工具链与实际写入位置；
+3. 默认 U-Boot 与可选 mainline U-Boot 的具体选择；
+4. 后续 kernel update 是否触及 eMMC LBA64 IDB 或 LBA16384 FIT。
+
+本节将“框架谱系高度支持 Ophub 衍生”与“镜像中每个二进制均来自 Ophub”明确分离，避免过度归因。
