@@ -2,8 +2,8 @@
 
 - 建立日期：2026-11-20
 - 主线性质：项目长期进度与执行顺序的权威记录
-- 当前阶段：P1 — 启动链与 initramfs 只读可行性审计
-- 当前允许操作：只读仓库、已归档证据和现有构建资产；不在设备上执行变更
+- 当前阶段：P2 — 最小网络 initramfs 的上游组件与可复现构建方案只读设计
+- 当前允许操作：只读核对上游源码/正式发布、依赖、许可证和构建方案；不执行构建、不写卡、不启动实验系统
 
 ## 0. 主线目标
 
@@ -82,7 +82,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 ## 3. 阶段主线
 
-## P1 — 启动链与 initramfs 只读可行性审计（进行中）
+## P1 — 启动链与 initramfs 只读可行性审计（已完成）
 
 **目标：** 确定能否利用现有启动链加载 6.12.81 Kernel + 匹配 Panther X2 DTB + 最小 RAM initramfs，并明确安全实验介质布局。
 
@@ -103,11 +103,11 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **禁止事项：** 不构建、不写卡、不启动实验内核、不更改现有设备。
 
-**状态：** 进行中。已有 6.1.65 原始镜像、6.1.116 基线和 6.1.174 官方包审计资产；6.12.81 initramfs 配置与当前 U-Boot/TF 加载能力仍待核实。
+**状态：** 已完成静态可行性验收。证据与保留项见 [P1 审计报告](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)。已确认 6.12.81 实机解包 gzip initramfs、当前 U-Boot 从 SD/TF ext4 第一分区加载启动文件、6.1.116 配套 Kernel/DTB/initrd 资产、两版内核的 initramfs 与网络核心驱动基础，以及 8GB TF 静态布局候选。自制最小 initramfs 尚未构建或启动。
 
-## P2 — 最小网络 initramfs 构建（待开始）
+## P2 — 最小网络 initramfs 组件锁定与构建方案设计（只读设计中；实际构建待授权）
 
-**目标：** 构建一个 ARM64 RAM rootfs，仅包含启动与网络诊断所需组件。
+**目标：** 先锁定上游组件、精确版本、依赖闭包、许可证、工具链和独立可复现 CI 方案；待用户明确授权后，再构建 ARM64 RAM rootfs。当前只做只读设计，不触发 workflow、不编译、不生成产物。
 
 **候选内容：**
 - `/init` 与最小目录树；
@@ -222,21 +222,22 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 ## 4. 当前唯一执行项
 
-当前只执行 **P1**，并按以下顺序完成：
+**P1 已完成，不重跑。当前只执行 P2 的只读设计：**
 
-1. 6.12.81 initramfs 配置项与 boot 包文件核验；
-2. Panther X2 当前 U-Boot / TF 加载能力证据核验；
-3. 6.1.116 对照资产匹配边界核验；
-4. 形成 P1 验收报告，更新本主线状态。
+1. 锁定 BusyBox、iproute2、ethtool 和广播/UDP 测试工具的官方上游来源与候选稳定版本；
+2. 审核最小静态/动态依赖、所需 applet、内核接口和许可证；
+3. 设计最小 /init、目录树、串口日志与网络诊断流程；
+4. 设计独立手动触发、固定工具链/Action/源码版本的 CI workflow 和产物 manifest；
+5. 完成设计审查后暂停，等待用户授权实际构建。
 
-不得并行启动 P2，不得先写卡或实机启动。
+不得触发构建、写卡或启动实验内核。
 
 ## 5. 主线状态看板
 
 | 阶段 | 状态 | 说明 |
 |---|---|---|
-| P1 启动链与 initramfs 只读审计 | 进行中 | 当前唯一执行项 |
-| P2 最小网络 initramfs 构建 | 待开始 | 等待 P1 验收 |
+| P1 启动链与 initramfs 只读审计 | 已完成 | 静态可行性验收通过；自制 initramfs 尚未构建/启动 |
+| P2 最小网络 initramfs 组件锁定与构建设计 | 只读设计中 | 当前唯一执行项；实际构建待用户授权 |
 | P3 独立 TF 启动 | 待授权 | 需用户明确授权 |
 | P4 最小系统网络验收 | 待授权 | 需 P3 通过及用户授权 |
 | P5 黄金内核 A/B | 待开始 | P4 后执行 |
@@ -248,7 +249,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 - 2026-11-20：已归档 [P1 initramfs 与 TF 启动链审计进展](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)，确认 6.12.81 实机成功解包 gzip initramfs，当前混合启动链需保留 TF LBA 16384 的 U-Boot proper。
 - 2026-11-20：用户实机 sysfs 已确认 Linux mmcblk0 为 SD（SN64G）、mmcblk1 为 eMMC（MMC / DF4032，含 boot0/boot1）；findmnt 确认 /boot=/dev/mmcblk0p1 ext4。结合既有 U-Boot 从 SD 对应 mmc 1:1 找到并执行 boot.scr、加载 Kernel/initrd/DTB 的日志，当前 SD/TF ext4 启动文件读取能力已验证。详见 P1 报告 §3.5。
-- P1 尚未验收：仍需完成 6.1.116 对照资产匹配边界核验，并整合最终启动参数、启动文件匹配关系和 8GB 卡安全布局，之后才能验收。
+- P1 已完成静态验收：6.1.116 历史正常网络基线位于 eMMC；当前 6.12.81 从 TF 启动。两者资产匹配边界、initramfs 行为和 8GB TF 静态布局候选已记录。不得将历史 6.1.116 启动链误写为当前 JP-TvBox 启动链。
 
 ## 6. 关联文档
 
@@ -265,6 +266,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 | 日期 | 变更 |
 |---|---|
-| 2026-11-20 | 建立 P1—P8 独立主线；明确上游优先、本地 patch 可追溯及上游融合原则；第一阶段限定为网络验证；锁定 P1 为唯一当前执行项。 |
+| 2026-11-20 | 建立 P1—P8 独立主线；明确上游优先、本地 patch 可追溯及上游融合原则；第一阶段限定为网络验证。 |
+| 2026-11-20 | P1 静态可行性验收通过；纠正 6.1.116 历史 eMMC 启动现场与当前 6.12.81 TF/JP proper 启动链的差异；进入 P2 只读组件与构建方案设计，实际构建仍待授权。
 
 后续每次推进必须先更新本文件中的阶段状态、当前唯一执行项和变更记录。
