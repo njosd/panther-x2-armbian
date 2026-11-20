@@ -221,3 +221,19 @@ P5 的目的不是“再跑一遍网络测试”，而是把发送链物理边�
 - P5：待用户综合考虑，尚未授权；本报告不安排实机操作。
 
 **阶段性结论：** 现有软件证据已把 Linux TX 请求、descriptor 回收和 MAC MMC 统计路径推进到可观察状态，但未证明 MAC→RGMII→PHY→MDI 的物理发送成功。当前最具体的软件候选是 P4 pinctrl 首 pin 错误处理，但其触发条件尚未在 Panther 现场证实。下一步应由用户基于仪器/测试点/风险/成本决定是否进入物理边界验证，而不是继续无边界地搜索源码或盲目打补丁。
+
+
+## 11. 2026-11-20 追加：P4 Panther 正常 regmap 错误来源复核
+
+继续追踪三个源码端点的 `rockchip_set_mux()` 后，新增证据显示 P4 的通用首 pin 错误处理缺陷在 Panther 正常 RK3568 路径中缺少现实的软件触发来源：
+
+- Panther pinctrl 的 `rockchip,grf` 指向 `grf: syscon@fdc60000`；该 syscon 节点无 clocks/resets/hwlocks 属性。
+- syscon 使用普通 `regmap_init_mmio()`；无 clock handle 时，MMIO read/write callback 正常路径直接返回 0。
+- GMAC1 pins 的 mux=3 对 4-bit IOMUX 合法；`rockchip_verify_mux()` 不应因这些静态属性拒绝。
+- RK3568 不进入 `rockchip_set_rmio()` 的 RK3506 专用错误分支。
+- Panther pinctrl 节点没有 `rockchip,group-info`，不会调用 Trust Firmware group-info SMC 检查。
+- 未发现 IOMUX register offset 越界证据。
+
+**P4 更新评级：** 通用源码缺陷真实存在，但 Panther 正常路径中首 pin `rockchip_set_mux()` 返回 errno 的触发条件未找到；由原“低至中优先级未证实候选”降为“极低优先级/理论候选”。仍不宣称绝对排除，也不认定根因。
+
+该复核基于三个固定源码端点、Panther DTS、RK356x GRF/pinctrl DTS、syscon 与 regmap-mmio 实现。没有进行设备操作。详细记录见 `PANTHER-X2-P4-PINCTRL-FIRST-PIN-ERROR-CLOSEOUT-20261120.md` 第 9 节。
