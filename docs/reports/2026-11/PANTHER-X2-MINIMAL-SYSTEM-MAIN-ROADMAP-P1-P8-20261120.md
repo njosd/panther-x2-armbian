@@ -2,8 +2,8 @@
 
 - 建立日期：2026-11-20
 - 主线性质：项目长期进度与执行顺序的权威记录
-- 当前阶段：P2 — 最小网络 initramfs 的上游组件与可复现构建方案只读设计
-- 当前允许操作：只读核对上游源码/正式发布、依赖、许可证和构建方案；不执行构建、不写卡、不启动实验系统
+- 当前阶段：P2 — 双介质自包含启动链与 eMMC Vendor 数据传递只读架构审计
+- 当前允许操作：只读核对 RK3566 BootROM/SPL/U-Boot 启动规则、已有 eMMC Vendor 数据布局和公开源码；不下载组件源码、不执行构建、不写卡、不启动实验系统
 
 ## 0. 主线目标
 
@@ -132,9 +132,9 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **状态：** 已完成静态可行性验收。证据与保留项见 [P1 审计报告](PANTHER-X2-P1-INITRAMFS-BOOT-CHAIN-AUDIT-PROGRESS-20261120.md)。已确认 6.12.81 实机解包 gzip initramfs、当前 U-Boot 从 SD/TF ext4 第一分区加载启动文件、6.1.116 配套 Kernel/DTB/initrd 资产、两版内核的 initramfs 与网络核心驱动基础，以及 8GB TF 静态布局候选。自制最小 initramfs 尚未构建或启动。
 
-## P2 — 最小网络 initramfs 组件锁定与构建方案设计（只读设计中；实际构建待授权）
+## P2 — 双介质自包含启动链与最小系统构建设计（只读设计中；实际构建待授权）
 
-**目标：** 先完成独立启动链与 vendor 数据传递的只读架构审计，再按最新维护中的上游版本锁定用户空间组件、依赖闭包、许可证、工具链和可复现 CI 方案；待用户明确授权后，再构建 ARM64 RAM rootfs。当前只做只读设计，不触发 workflow、不编译、不生成产物。
+**目标：** 首先审计 RK3566 BootROM 对 eMMC/SD 的实际启动选择与 SPL 加载规则，判断 TF 和 eMMC 能否各自提供自包含完整 U-Boot；同时追踪 eMMC Vendor Storage 的物理位置和只读读取路径，设计统一 MAC/vendor 数据传递机制。只有启动架构边界明确后，才按最新维护中的上游版本锁定用户空间组件、依赖、许可证、工具链和可复现 CI 方案。当前只做只读设计，不触发 workflow、不编译、不生成产物。
 
 **候选内容：**
 - `/init` 与最小目录树；
@@ -153,9 +153,9 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 **验收条件：** 产物结构、架构、依赖闭包、启动脚本和哈希均通过静态验收；此时仍不自动代表已在 Panther X2 实机启动成功。
 
-## P3 — 独立 TF 完整启动链与最小系统验收（待授权）
+## P3 — 独立启动介质与最小系统验收（待授权）
 
-**目标：** 优先从 TF 自身提供完整启动链，在独立 8GB TF 卡上启动最小 RAM initramfs，不依赖 eMMC 上的 SPL/U-Boot proper，不触碰 eMMC vendor 数据和当前系统。
+**目标：** 在 P2 证明可行且用户授权后，按最终确认的启动介质策略启动最小 RAM initramfs；优先要求 TF 自身提供完整启动链，同时 eMMC Vendor 数据只读读取。若 RK3566 BootROM 规则使其不可行，必须先由用户审阅替代方案，不默认采用混合链。
 
 **前置条件：**
 - P1 当前启动链可行性审计通过；
@@ -165,8 +165,9 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 用户明确授权写卡与启动。
 
 **验收条件：**
-- 从指定 TF 卡启动，且启动日志证明 SPL/U-Boot proper 均来自 TF；
-- 启动时从 eMMC 只读读取权威 vendor 数据，并正确传递 MAC 等信息（若 BootROM/硬件限制不允许，须先由用户批准替代方案）；
+- 启动来源与 SPL/U-Boot proper 的实际介质由日志/证据确认；
+- 若采用 TF 自包含路径，须证明 SPL/U-Boot proper 均来自 TF；
+- 启动时从 eMMC 只读读取权威 vendor 数据，并正确传递 MAC 等信息；
 - 进入 initramfs 的 `/init`；
 - 串口日志完整可读；
 - 目标设备、内核、DTB、启动参数可确认；
@@ -251,7 +252,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 ## 4. 当前唯一执行项
 
-**P1 已完成，不重跑。当前只执行 P2 的只读设计：**
+**P1 已完成，不重跑。当前只执行 P2 的启动架构只读审计：**
 
 1. **当前第一项：** 只读审计 RK3566 BootROM 的启动介质选择、SPL 加载规则及现有 eMMC/TF 启动资产，评估 TF 与 eMMC 各自自包含完整启动链的可行性；
 2. 只读追踪 eMMC 中 MAC/vendor 数据的真实来源、格式、偏移/分区和当前 U-Boot/Linux 传递路径；
@@ -266,7 +267,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | P1 启动链与 initramfs 只读审计 | 已完成 | 静态可行性验收通过；自制 initramfs 尚未构建/启动 |
-| P2 最小系统架构与构建设计 | 只读设计中 | 当前先审计双介质自包含启动链及 eMMC vendor 数据传递；随后重新锁定最新维护中的上游组件；实际构建待授权 |
+| P2 双介质自包含启动链与最小系统架构设计 | 只读设计中 | 当前只审计 BootROM/SPL 启动选择及 eMMC Vendor 数据只读读取；用户空间组件版本暂不锁定 |
 | P3 独立 TF 完整启动链 | 待授权 | 必须先确认 SPL/U-Boot proper 均由 TF 提供；eMMC vendor 数据只读传递 |
 | P4 最小系统网络验收 | 待授权 | 需 P3 通过及用户授权 |
 | P5 黄金内核 A/B | 待开始 | P4 后执行 |
@@ -282,6 +283,8 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 
 ## 6. 关联文档
 
+- [P2 启动架构与 eMMC Vendor 数据审计](PANTHER-X2-P2-BOOT-ARCHITECTURE-AND-EMMC-VENDOR-DATA-REVIEW-20261120.md)
+- [P2 上游用户空间组件初审（版本策略已修订）](PANTHER-X2-P2-UPSTREAM-USERSPACE-COMPONENT-AUDIT-20261120.md)
 - [最小 initramfs 构建蓝图](PANTHER-X2-MINIMAL-INITRAMFS-BUILD-PLAN-20261120.md)
 - [GMAC 调查路线图](PANTHER-X2-GMAC-INVESTIGATION-ROADMAP-20261119.md)
 - [6.1.65 原始镜像来源审计](PANTHER-X2-ORIGINAL-SOFTWARE-IMAGE-PROVENANCE-20261120.md)
@@ -296,6 +299,7 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 | 日期 | 变更 |
 |---|---|
 | 2026-11-20 | 建立 P1—P8 独立主线；明确上游优先、本地 patch 可追溯及上游融合原则；第一阶段限定为网络验证。 |
-| 2026-11-20 | P1 静态可行性验收通过；纠正 6.1.116 历史 eMMC 启动现场与当前 6.12.81 TF/JP proper 启动链的差异；进入 P2 只读组件与构建方案设计，实际构建仍待授权。
+| 2026-11-20 | P1 静态可行性验收通过；纠正 6.1.116 历史 eMMC 启动现场与当前 6.12.81 TF/JP proper 启动链的差异。 |
+| 2026-11-20 | 用户明确新系统不复刻 6.1.116，组件优先当前维护中的上游版本；启动架构目标改为 TF/eMMC 各自自包含完整 U-Boot，并统一从 eMMC 只读读取 Vendor 数据。P2 当前唯一任务改为 BootROM/SPL 启动选择与 Vendor Storage 物理布局审计；BusyBox 1.36.1 默认候选撤回。
 
 后续每次推进必须先更新本文件中的阶段状态、当前唯一执行项和变更记录。
