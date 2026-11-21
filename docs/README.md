@@ -6,6 +6,10 @@
 
 先让 Panther X2（RK3566）的最小系统稳定启动。当前优先排查 Ophub Linux 6.12.81 从独立 TF 卡启动时，MMC 已枚举后出现的 EXT4/JBD2 写入 I/O 错误。暂不部署 Immich、不启用 NPU、不写入 eMMC。
 
+## 长期架构决策
+
+- [开发阶段与启动介质原则](DEVELOPMENT-STAGES-AND-BOOT-MEDIA-POLICY.md)：明确当前 TF 测试阶段 eMMC 绝对只读，以及最终正式版本必须安装并从 eMMC 启动。后续报告和对话均以此为准。
+
 ## 文档分类
 
 | 目录 | 内容 |
