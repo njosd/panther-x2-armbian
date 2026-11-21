@@ -1526,3 +1526,19 @@ Boot Probe 的“人工停留”机制已经解决：首选复用原版 U-Boot �
 ### UART 自动接管脚本的关键行为（纠正说明）
 
 这里的“Ctrl+C 接管”不是让操作者靠手速手动按键。已验证流程由脚本自动完成：脚本持续监听 UART 接收数据流，识别到 `Hit key to stop autoboot('CTRL+C'):` 提示后，立即通过 UART 发送 Ctrl+C。该提示匹配与发送动作由同一自动化流程完成，避免人工响应延迟导致 autoboot 超时。后续文档和实验步骤统一按“UART 自动检测提示并自动发送 Ctrl+C”描述。脚本的具体源码/路径及串口参数应从此前项目记录或仓库资产中追溯；当前归档只固化已验证行为，不臆造脚本文件名、实现语言或参数。
+
+
+### 28｜NixOS Panther X2 配方源码追溯及 RK3566 DDR/SPL/BL31 候选比较（2026-11-21）
+
+本节的详细文件/commit/版本矩阵已单独归档：
+[Panther X2 U-Boot 与 RK3566 DDR/SPL/BL31 候选审计](PANTHER-X2-P2-UBOOT-RK3566-DDR-SPL-BL31-CANDIDATE-AUDIT-20261121.md)。
+
+关键结论：
+- NixOS Panther X2 配方当前使用 Nixpkgs 锁定的 U-Boot v2026.10；历史 Radxa stable-4.19-rock3 只是早期源码基线，不能与当前方案混为一谈。
+- 当前 defconfig 虽名为 Panther X2，仍设置 `TARGET_EVB_RK3568` 和 EVB1 V10 control/default DT；没有 Panther X2 专用 U-Boot control DTS、board C 或 SPL boot-order 实现。
+- 配方启用 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y`，但主线 RK3566 板级 defconfig未启用；RK3566 BootROM NEXTSTAGE 介质选择语义仍未验证，不作为探针默认机制。
+- 配方未显式启用 `CONFIG_SPL_PINCTRL=y`；主线 RK3566 板级配置均启用，且 Rockchip SPL v1.14 发布说明明确修复 SPL pinctrl 节点未启用导致的 SD 初始化失败。
+- Rockchip 当前 RK3566 MINIALL profile 采用 DDR v1.26 standard + SPL v1.14；DDR v1.26 standard/ultra、BL31 v1.45/v1.46 均列为静态候选，尚未确认 Panther X2 颗粒/PCB 参数匹配和完整 handoff 配套。
+- 不直接采用 NixOS 配方、不构建、不写 TF/eMMC、不实机启动。
+
+当前 P2 唯一研究项更新为：静态核对 DDR v1.26 standard/ultra 与 Panther X2 LPDDR4 双 CS 参数适配，以及 BL31 v1.45/v1.46 的 ATF/DMC/PMU handoff 兼容；完成后再决定唯一探针构建输入。
