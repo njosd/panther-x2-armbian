@@ -112,15 +112,11 @@ jobs:
           echo "${BUSYBOX_SHA256}  work/busybox-${BUSYBOX_VERSION}.tar.bz2" | sha256sum -c -
           tar -xjf work/busybox-${BUSYBOX_VERSION}.tar.bz2 -C work
           cd work/busybox-${BUSYBOX_VERSION}
+          # One static BusyBox binary; expose only commands used by /init and rescue shell.
+          # defconfig may compile extra applets; upload the inventory for transparency.
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
           sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
-          grep -q '^CONFIG_STATIC=y$' .config
-          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CONFIG_PREFIX="${GITHUB_WORKSPACE}/work/initramfs" install
-          cd "${GITHUB_WORKSPACE}"
-          readelf -l work/initramfs/bin/busybox | tee work/busybox-program-headers.txt
-          ! grep -q 'INTERP' work/busybox-program-headers.txt
+          grep -q '^CONFIG_STATIC=y
 
       - name: Build read-only guard and initramfs
         run: |
@@ -129,8 +125,7 @@ jobs:
           mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
-          aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/mmc-wp-read-last.c             -o work/mmc-wp-read-last
-          chmod 0755 "$ROOT/sbin/blockro" work/mmc-wp-read-last
+          chmod 0755 "$ROOT/sbin/blockro"
           install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
           printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.63 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
           cd "$ROOT"
@@ -203,6 +198,104 @@ jobs:
             work/boot/boot.cmd
             work/boot/boot.scr
             work/busybox-program-headers.txt
-            work/mmc-wp-read-last
+            work/busybox-compiled-applets.txt
+          if-no-files-found: error
+          retention-days: 30
+ .config
+          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
+          mkdir -p "${GITHUB_WORKSPACE}/work/initramfs/bin"
+          install -m 0755 busybox "${GITHUB_WORKSPACE}/work/initramfs/bin/busybox"
+          cd "${GITHUB_WORKSPACE}"
+          readelf -l work/initramfs/bin/busybox | tee work/busybox-program-headers.txt
+          ! grep -q 'INTERP' work/busybox-program-headers.txt
+          work/initramfs/bin/busybox --list | sort > work/busybox-compiled-applets.txt
+          for applet in sh mount mkdir cat uname sleep dmesg tail; do
+            grep -qx "$applet" work/busybox-compiled-applets.txt || {
+              echo "::error::Required BusyBox applet missing: $applet"
+              exit 1
+            }
+            ln -s busybox "work/initramfs/bin/$applet"
+          done
+
+      - name: Build read-only guard and initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
+          install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
+          aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
+          install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
+          printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.63 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
+          cd "$ROOT"
+          find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
+          cd "${GITHUB_WORKSPACE}"
+          mkimage -A arm64 -O linux -T ramdisk -C gzip             -n "Panther X2 minimal RAM initramfs"             -d work/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/uinitrd-header.txt
+          grep -qi 'AArch64' work/uinitrd-header.txt
+          sha256sum work/initramfs.cpio.gz work/boot/uInitrd
+
+      - name: Prepare U-Boot script and hybrid TF image
+        run: |
+          set -euo pipefail
+          mkdir -p work/mnt
+          install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/boot/boot.cmd
+          mkimage -A arm -O linux -T script -C none             -n "Panther X2 minimal RAM boot"             -d work/boot/boot.cmd work/boot/boot.scr
+
+          curl -fL --retry 3             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb"             -o work/JP-TvBox-u-boot.itb
+          echo "${JP_UBOOT_SHA256}  work/JP-TvBox-u-boot.itb" | sha256sum -c -
+          test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
+
+          truncate -s 2G work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.63-hybrid.img
+
+          LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.63-hybrid.img)"
+          trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/mnt
+          sudo cp -a work/boot/. work/mnt/
+          printf '%s\n'             'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.'             'No TF IDB/SPL is installed in this image.'             'Do not boot this image until the active eMMC SPL write-path audit is cleared.'             > work/mnt/TEST-INFO.txt
+          sync
+          sudo umount work/mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          # JP-TvBox U-Boot proper is placed at LBA 16384 (8 MiB).
+          # Partition 1 begins at LBA 32768 (16 MiB), so the raw FIT does not overlap GPT/filesystem.
+          dd if=work/JP-TvBox-u-boot.itb             of=work/panther-x2-minimal-6.18.63-hybrid.img             bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk -i 1 work/panther-x2-minimal-6.18.63-hybrid.img | tee work/partition-1.txt
+          grep -q 'EF00' work/partition-1.txt
+          SIZE="$(stat -c %s work/JP-TvBox-u-boot.itb)"
+          ACTUAL_SHA="$(dd if=work/panther-x2-minimal-6.18.63-hybrid.img bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          echo "JP proper expected: ${JP_UBOOT_SHA256}"
+          echo "JP proper readback: ${ACTUAL_SHA}"
+          test "$ACTUAL_SHA" = "$JP_UBOOT_SHA256"
+          mkimage -l work/boot/boot.scr
+          file work/boot/Image work/boot/uInitrd work/boot/boot.scr
+          sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/boot/boot.scr
+
+          zstd -T0 -10 work/panther-x2-minimal-6.18.63-hybrid.img             -o work/panther-x2-minimal-6.18.63-hybrid.img.zst
+          (
+            cd work
+            sha256sum panther-x2-minimal-6.18.63-hybrid.img.zst               kernel-6.18.63.tar.gz initramfs.cpio.gz JP-TvBox-u-boot.itb               > SHA256SUMS
+          )
+          cat work/SHA256SUMS
+
+      - name: Upload preparation artifact (not yet cleared for flashing)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-minimal-6.18.63-hybrid-PREPARE-ONLY
+          path: |
+            work/panther-x2-minimal-6.18.63-hybrid.img.zst
+            work/SHA256SUMS
+            work/boot/boot.cmd
+            work/boot/boot.scr
+            work/busybox-program-headers.txt
           if-no-files-found: error
           retention-days: 30
