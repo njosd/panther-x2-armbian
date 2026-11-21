@@ -71,6 +71,7 @@ jobs:
           fi
           echo "Selected kernel payload: $IMAGE_FILE"
           file "$IMAGE_FILE"
+          mkdir -p work/boot
           MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d " \\n")"
           if [ "$MAGIC" = "41524d64" ]; then
             cp -L "$IMAGE_FILE" work/boot/Image
