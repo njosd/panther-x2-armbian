@@ -362,3 +362,16 @@ cat /sys/block/mmcblkXboot1/force_ro 2>/dev/null
 - 已验证：eMMC 为 `/dev/mmcblk1`，CID/容量匹配；MMC 5.1；WP group 8 MiB；user area 完整组 0–3726 未保护；boot0/boot1 未芯片级保护；支持 power-on locking。
 - 未验证：尾部 4 MiB 部分组保护方式；设置后 CMD31 读回策略；实际启动过程中 WP 状态是否持续到目标复位/启动序列。
 - 未执行：任何写保护设置、任何 EXT_CSD 写操作、TF 镜像写入或实机启动测试。
+
+
+### 12.6 mmc-utils 源码交叉核对（补充）
+
+对 mmc-utils `mmc_cmds.c` 的 `do_writeprotect_user_get()` 与 `do_writeprotect_user_set()` 做了源码检查（交叉参考源码镜像：`Asuswrt-Merlin/asuswrt-merlin.ng`，commit `5f55bac2886f205d11bd44761bd3be4c02c58e79`，文件 `release/src-rt-5.04axhnd.675x/router-sysdep.xt12/mmc-utils/mmc_cmds.c`）：
+
+- `user get` 使用 `cnt = dev_sizeblks / wp_sizeblks`，整数除法会舍弃最后不足一个 WP group 的余数；它只对完整组发起 CMD31 查询。
+- `user set` 明确检查 `blk_start % wp_blks == 0` 和 `blk_cnt % wp_blks == 0`，否则拒绝；随后按 `wp_blks` 步长对每个 group 起始地址发 CMD28。它不能通过该命令保护 8,192-sector 的半组长度。
+- 该实现对 `USER_WP` 先设置相应 enable 位，再逐组发 CMD28，最后恢复原 `USER_WP` 值；真正逐组锁定由 CMD28 完成。
+- `user get` 通过 CMD31 查询 group 的 write-protect type。其输出未覆盖的最后半组，不能被误读成“末尾未保护”或“末尾已保护”；只说明工具没有查询该区域。
+- 此处源码是可审计的 mmc-utils 实现参考，不代表用户设备上的 `/usr/bin/mmc` 已证明与该 commit 完全一致；后续应读取本机 mmc-utils 版本/源码包或二进制构建信息核对。
+
+因此目前的严格结论是：**mmc-utils 的标准 user-set/get 接口无法按其边界参数直接表达最后 4 MiB；最后半组的芯片级实际保护行为仍未验证。不得自行把 blocks 向上取整后执行，也不得猜测 CMD28 会自动覆盖或拒绝。**
