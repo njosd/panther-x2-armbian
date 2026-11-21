@@ -31,18 +31,43 @@ jobs:
           mkdir -p work/kernel-package work/kernel-boot work/kernel-dtb
           curl -fL --retry 3             "https://github.com/ophub/kernel/releases/download/kernel_stable/${KERNEL_VERSION}.tar.gz"             -o work/kernel-${KERNEL_VERSION}.tar.gz
           echo "${KERNEL_PACKAGE_SHA256}  work/kernel-${KERNEL_VERSION}.tar.gz" | sha256sum -c -
+          echo "===== OUTER KERNEL PACKAGE CONTENTS ====="
+          tar -tzf work/kernel-${KERNEL_VERSION}.tar.gz | tee work/kernel-package-members.txt
           tar -xzf work/kernel-${KERNEL_VERSION}.tar.gz -C work/kernel-package
+          echo "===== EXTRACTED PACKAGE FILES ====="
+          find work/kernel-package -type f -printf '%P (%s bytes)\\n' | sort | tee work/kernel-package-files.txt
+
           BOOT_ARCHIVE="$(find work/kernel-package -type f -name "boot-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
-          DTB_ARCHIVE="$(find work/kernel-package -type f -name "dtb-rockchip-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
-          test -n "$BOOT_ARCHIVE"
-          test -n "$DTB_ARCHIVE"
+          DTB_ARCHIVE="$(find work/kernel-package -type f -name "dtb*-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
+          if [ -z "$BOOT_ARCHIVE" ]; then
+            echo "::error::Missing boot archive boot-${KERNEL_VERSION}-ophub.tar.gz"
+            exit 1
+          fi
+          if [ -z "$DTB_ARCHIVE" ]; then
+            echo "::error::Missing versioned DTB archive. Available files:"
+            find work/kernel-package -type f -maxdepth 3 -printf '%P\\n' | sort
+            exit 1
+          fi
+          echo "Selected boot archive: $BOOT_ARCHIVE"
+          echo "Selected DTB archive: $DTB_ARCHIVE"
           tar -xzf "$BOOT_ARCHIVE" -C work/kernel-boot
           tar -xzf "$DTB_ARCHIVE" -C work/kernel-dtb
 
+          echo "===== BOOT ARCHIVE FILES ====="
+          find -L work/kernel-boot -type f -printf '%P (%s bytes)\\n' | sort
+          echo "===== ROCKCHIP DTB CANDIDATES ====="
+          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\\n' | grep -i 'panther\\|rk3566' | sort || true
+
           IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
           DTB_FILE="$(find -L work/kernel-dtb -type f -path "*/rockchip/rk3566-panther-x2.dtb" -print -quit)"
-          test -n "$IMAGE_FILE"
-          test -n "$DTB_FILE"
+          if [ -z "$IMAGE_FILE" ]; then
+            echo "::error::Kernel Image not found in boot archive"
+            exit 1
+          fi
+          if [ -z "$DTB_FILE" ]; then
+            echo "::error::rk3566-panther-x2.dtb not found in DTB archive"
+            exit 1
+          fi
           mkdir -p work/boot/dtb/rockchip
           cp -L "$IMAGE_FILE" work/boot/Image
           cp "$DTB_FILE" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
