@@ -38,7 +38,7 @@ jobs:
           find work/kernel-package -type f -printf '%P (%s bytes)\\n' | sort | tee work/kernel-package-files.txt
 
           BOOT_ARCHIVE="$(find work/kernel-package -type f -name "boot-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
-          DTB_ARCHIVE="$(find work/kernel-package -type f -name "dtb*-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
+          DTB_ARCHIVE="$(find work/kernel-package -type f -name "dtb-rockchip-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
           if [ -z "$BOOT_ARCHIVE" ]; then
             echo "::error::Missing boot archive boot-${KERNEL_VERSION}-ophub.tar.gz"
             exit 1
@@ -58,12 +58,36 @@ jobs:
           echo "===== ROCKCHIP DTB CANDIDATES ====="
           find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\\n' | grep -i 'panther\\|rk3566' | sort || true
 
+          # Ophub may publish the ARM64 kernel as vmlinuz-<version>-ophub.
+          # Accept only a raw AArch64 Image (magic 41 52 4d 64 at offset 0x38),
+          # or gzip data that decompresses to that exact Image header.
           IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
-          DTB_FILE="$(find -L work/kernel-dtb -type f -path "*/rockchip/rk3566-panther-x2.dtb" -print -quit)"
           if [ -z "$IMAGE_FILE" ]; then
-            echo "::error::Kernel Image not found in boot archive"
+            IMAGE_FILE="$(find -L work/kernel-boot -type f -name "vmlinuz-${KERNEL_VERSION}-ophub" -print -quit)"
+          fi
+          if [ -z "$IMAGE_FILE" ]; then
+            echo "::error::No Image or versioned vmlinuz kernel payload found"
             exit 1
           fi
+          echo "Selected kernel payload: $IMAGE_FILE"
+          file "$IMAGE_FILE"
+          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d " \n")"
+          if [ "$MAGIC" = "41524d64" ]; then
+            else
+            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d " \n")"
+            if [ "$PREFIX" = "1f8b" ]; then
+              gzip -dc "$IMAGE_FILE" > work/boot/Image
+              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d " \n")"
+              if [ "$MAGIC" != "41524d64" ]; then
+                echo "::error::Decompressed kernel does not have ARM64 Image magic"
+                exit 1
+              fi
+            else
+              echo "::error::Unsupported kernel payload format; refusing to rename blindly"
+              exit 1
+            fi
+          fi
+          DTB_FILE="$(find -L work/kernel-dtb -type f -path "*/rockchip/rk3566-panther-x2.dtb" -print -quit)"
           if [ -z "$DTB_FILE" ]; then
             echo "::error::rk3566-panther-x2.dtb not found in DTB archive"
             exit 1
