@@ -36,14 +36,17 @@ Do not assume this prompt/timing behavior on JP-TvBox or other U-Boot builds wit
 
 `panther-uart-terminal.py` is the interactive bidirectional terminal. It is deliberately separate from `uart-autoboot-interrupt.py`, which only interrupts autoboot and then exits.
 
-The terminal addresses the earlier macOS input/echo problems:
+The first interactive-terminal implementation was tested on the user's iMac on 2026-11-21 and failed acceptance: the TX log contained duplicated/mangled command bytes and the intended two-key local exit did not reliably work. The script has since been revised; the revision is **not yet hardware-validated**.
 
-- Opens `/dev/tty` directly, so its keyboard input is not confused with Python stdin or a heredoc.
-- Uses POSIX raw terminal mode; local echo, canonical line buffering and terminal-generated Ctrl-C signals are disabled while connected.
-- Forwards keyboard bytes to the target and displays only bytes received from UART. Thus characters echoed by Linux/U-Boot are shown once; the Mac does not add a second local echo.
-- Disables bracketed-paste wrappers during the session so `ESC[200~` / `ESC[201~` markers are not sent as command text.
-- Ctrl+C is forwarded as byte `0x03` to the target. Local exit is Ctrl+] followed by `.`.
-- Saves received and transmitted bytes separately as `.rx.bin` and `.tx.bin`; this avoids mixing local keystrokes into the target's receive log.
+Current revision design:
+
+- Opens `/dev/tty` directly, not Python stdin.
+- Uses POSIX raw mode to disable local echo, canonical buffering and terminal-generated Ctrl+C signals while connected.
+- Forwards keyboard bytes to UART and displays only UART RX bytes.
+- Disables bracketed-paste wrappers during the session.
+- Ctrl+C is forwarded as byte `0x03` to the target.
+- **Press Ctrl+] once to exit locally**; no second key is required. This is intentionally different from the failed first revision.
+- Creates unique RX/TX log files for every session using a timestamp and process ID; it does not append to or overwrite earlier session logs.
 - Restores the original terminal attributes and closes the serial port/logs in `finally`.
 
 Run from an ordinary interactive Terminal window (not a Python heredoc):
@@ -58,4 +61,4 @@ Optional overrides:
 "$HOME/panther-uart-venv/bin/python" panther-uart-terminal.py --port /dev/cu.usbserial-1460 --baud 1500000 --log-prefix "$HOME/panther-uart-session"
 ```
 
-**Validation status:** Python syntax compilation passed in the development environment. This replacement has not yet been connected to the Panther X2 hardware; terminal behavior, paste handling and long-session stability still require a controlled real-device test. The old `panther-uart.py` is not overwritten. The historical autoboot-interrupt script remains a separate tool.
+**Validation status:** The user's iMac confirmed Python 3 compilation, pySerial 3.5 and the serial device node. The first revision connected and received Armbian shell output, but its TX log showed malformed/duplicated bytes and the exit sequence failed. The revised single-key-exit implementation has not yet been run on the user's iMac or connected to the hardware. Character integrity, Enter, paste, Ctrl+C forwarding, single-key exit and terminal restoration remain to be tested. The old `panther-uart.py` is not overwritten. The historical autoboot-interrupt script remains a separate tool.
