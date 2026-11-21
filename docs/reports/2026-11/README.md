@@ -8,6 +8,8 @@
 
 ## 项目 A：当前权威文档
 
+- [项目 A 干净基线与网络组件隔离决策（2026-11-22）](./PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：B1 先隔离网络变量，再逐项引入的强制决策。
+
 - [Panther X2 项目 A 总路线图（2026-11-21）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威总路线，统一项目定义、架构原则、组件选择、JP-TvBox U-Boot proper 测试基线论证、B0—B7 阶段和安全边界。
 - [Panther X2 项目 A 分阶段实施计划（2026-11-21）](./PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：将阶段拆解为 B0.1、B0.2……等可执行步骤和验收条件。
 - [最小 RAM 启动与 eMMC 安全关口审计（2026-11-21）](./PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)：B1 构建和实机启动前置安全证据。
