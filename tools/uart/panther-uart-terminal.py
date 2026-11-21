@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Reliable interactive macOS UART terminal for Panther X2.
+"""Interactive macOS UART terminal for Panther X2.
 
-Transparent bidirectional serial terminal. The Mac terminal is put in raw
-mode (local echo/canonical buffering disabled); Ctrl+C is passed to the target.
-Use Ctrl+] followed by . to exit locally.
+The Mac terminal is put in raw mode (local echo/canonical buffering disabled).
+All ordinary keyboard bytes are forwarded to UART; UART RX bytes are displayed.
+Ctrl+C is passed to the target. Press Ctrl+] (one key chord) to exit locally.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import os
 import select
 import termios
+import time
 import tty
 from pathlib import Path
 
@@ -30,26 +31,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-prefix",
         default=str(Path.home() / "panther-uart-session"),
-        help="prefix for separate .rx.bin and .tx.bin logs (default: ~/panther-uart-session)",
+        help="log filename prefix (a unique timestamp and PID are added)",
     )
     return parser.parse_args()
+
+
+def write_terminal(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
 
 
 def main() -> int:
     args = parse_args()
     tty_fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-    old_tty = termios.tcgetattr(tty_fd)
+    old_tty = None
     ser = None
-    rx_log = tx_log = None
-    pending_escape = False
-    exit_requested = False
-    rx_path = Path(args.log_prefix + ".rx.bin")
-    tx_path = Path(args.log_prefix + ".tx.bin")
+    rx_log = None
+    tx_log = None
+    raw_enabled = False
+    result = 0
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    log_base = f"{args.log_prefix}-{stamp}-{os.getpid()}"
+    rx_path = Path(log_base + ".rx.bin")
+    tx_path = Path(log_base + ".tx.bin")
 
     try:
-        tty.setraw(tty_fd, when=termios.TCSANOW)
-        # Prevent terminal-emulator bracketed-paste wrappers from reaching U-Boot.
-        os.write(tty_fd, BRACKETED_PASTE_OFF)
+        old_tty = termios.tcgetattr(tty_fd)
         ser = serial.Serial(
             port=args.port,
             baudrate=args.baud,
@@ -62,55 +72,56 @@ def main() -> int:
             rtscts=False,
             dsrdtr=False,
         )
-        rx_log = open(rx_path, "ab", buffering=0)
-        tx_log = open(tx_path, "ab", buffering=0)
+        rx_log = open(rx_path, "xb", buffering=0)
+        tx_log = open(tx_path, "xb", buffering=0)
+
+        tty.setraw(tty_fd, when=termios.TCSANOW)
+        raw_enabled = True
+        write_terminal(tty_fd, BRACKETED_PASTE_OFF)
 
         banner = (
             f"\r\nUART {args.port} | {args.baud} 8N1 | local echo OFF | raw mode\r\n"
             f"RX log: {rx_path}\r\nTX log: {tx_path}\r\n"
-            "Exit locally: Ctrl+] then .   (Ctrl+C is sent to Panther X2)\r\n\r\n"
+            "Local exit: press Ctrl+] once. Ctrl+C is sent to Panther X2.\r\n\r\n"
         )
-        os.write(tty_fd, banner.encode())
+        write_terminal(tty_fd, banner.encode())
 
+        exit_requested = False
         while not exit_requested:
-            readable, _, _ = select.select([tty_fd, ser.fileno()], [], [], 0.25)
-            if ser.fileno() in readable:
-                data = ser.read(ser.in_waiting or 1)
-                if data:
-                    rx_log.write(data)
-                    os.write(tty_fd, data)
+            readable, _, _ = select.select([tty_fd], [], [], 0.02)
 
-            if tty_fd in readable:
+            if readable:
                 data = os.read(tty_fd, 4096)
                 if not data:
                     break
-                out = bytearray()
-                for byte in data:
-                    if pending_escape:
-                        pending_escape = False
-                        if byte == ord("."):
-                            exit_requested = True
-                            break
-                        out.extend((0x1D, byte))
-                    elif byte == 0x1D:
-                        pending_escape = True
-                    else:
-                        out.append(byte)
-                if out:
-                    ser.write(out)
-                    tx_log.write(out)
 
-        if pending_escape:
-            ser.write(b"\x1d")
-            tx_log.write(b"\x1d")
-        return 0
+                outgoing = bytearray()
+                for byte in data:
+                    if byte == 0x1D:
+                        exit_requested = True
+                        break
+                    outgoing.append(byte)
+
+                if outgoing:
+                    ser.write(outgoing)
+                    tx_log.write(outgoing)
+
+            waiting = ser.in_waiting
+            if waiting:
+                incoming = ser.read(waiting)
+                if incoming:
+                    rx_log.write(incoming)
+                    write_terminal(tty_fd, incoming)
 
     except Exception as exc:
+        result = 1
         try:
-            os.write(tty_fd, f"\r\nUART terminal error: {exc}\r\n".encode())
+            if raw_enabled:
+                write_terminal(tty_fd, f"\r\nUART terminal error: {exc}\r\n".encode())
+            else:
+                print(f"UART terminal error: {exc}")
         except Exception:
             pass
-        return 1
     finally:
         if ser is not None and ser.is_open:
             ser.close()
@@ -118,12 +129,22 @@ def main() -> int:
             rx_log.close()
         if tx_log is not None:
             tx_log.close()
-        try:
-            os.write(tty_fd, BRACKETED_PASTE_ON)
-            termios.tcsetattr(tty_fd, termios.TCSANOW, old_tty)
-            os.write(tty_fd, b"\r\nUART terminal closed; local terminal settings restored.\r\n")
-        finally:
-            os.close(tty_fd)
+
+        if old_tty is not None:
+            try:
+                if raw_enabled:
+                    write_terminal(tty_fd, BRACKETED_PASTE_ON)
+                termios.tcsetattr(tty_fd, termios.TCSANOW, old_tty)
+                if raw_enabled:
+                    write_terminal(
+                        tty_fd,
+                        b"\r\nUART terminal closed; local terminal settings restored.\r\n",
+                    )
+            except Exception:
+                pass
+        os.close(tty_fd)
+
+    return result
 
 
 if __name__ == "__main__":
