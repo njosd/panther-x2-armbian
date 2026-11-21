@@ -523,3 +523,8 @@ Hit key to stop autoboot('CTRL+C'):
 - 重要核对：当前 eMMC 安装的 Panther-X2 U-Boot IDB SHA-256 为 `990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e`，proper SHA-256 为 `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af`；JP-TvBox IDB/proper 是另一套不同二进制。不能混称为同一 SPL。
 - Radxa ROCK 3C defconfig 的 SPL A/B、MMC write、Vendor Storage 等写路径是高相关候选风险，但尚未把当前 eMMC IDB 精确映射到该源码 commit/final .config。当前阶段仍不允许实机启动，需先完成当前 IDB 源码映射及 TF 失败/回退路径的 eMMC 写入目标审计。
 - 详细方案与安全关口：[最小 RAM 启动系统方案与 eMMC 安全关口](PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)。
+
+
+### eMMC 芯片级临时写保护路径（2026-11-21）
+
+为避免仅依赖 Linux initramfs RO，已在最小 RAM 启动方案中新增 eMMC Power-on Write Protect 评估：先只读查询 EXT_CSD、WP group、user-area 和 boot0/boot1 状态；如支持，在单独授权后设置 user-area `pwron` 保护及 boot0/boot1 非永久保护，验证完整覆盖后才执行实机启动。永久写保护一律禁止。详见同一最小 RAM 启动安全报告第 11 节。当前未查询 EXT_CSD、未设置 WP、未写 TF、未启动实机。
