@@ -469,3 +469,12 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 当前待证重点收敛为 Panther X2 所用 RK3566 BootROM revision 在 SPL 回交后如何选择下一阶段介质，以及原厂 SPL 是否采用该流程；不是再泛泛怀疑 Rockchip 是否有该机制。
 - 用户允许字面研究后考虑可控小范围实机测试。先做零写入基线采集与 eMMC 隔离/救援路径核对；只有备用 TF、恢复方案、阶段标记和风险边界全部明确后，才提交具体测试步骤供确认。不得默认覆盖 eMMC 启动区域。
 - 详见 P2 报告 §27.6–§27.7。当前仅研究与测试设计，未构建、未写卡、未刷机、未实测。
+
+
+## P2 补充：第一轮 TF-only 实机测试边界（2026-11-21）
+
+- 用户确认第一轮只用备用 TF 卡测试，eMMC 全程只读，暂不写入；若完整从 TF 启动即视为阶段性成果。
+- RK3566 BootROM 冷启动优先级中 eMMC 高于 SD/TF，且 Panther X2 eMMC 已有有效启动内容。单纯插入 TF 卡不能确保 BootROM 从 TF 取首阶段。
+- 先做零写入板级核查，确认有无可逆、非破坏性的 eMMC 硬件隔离方式；不能假定 RECOVERY/MaskROM/软件命令能禁用 eMMC。若无可靠隔离方式，不做 TF 独立启动实测，不擦除 eMMC。
+- 通过标准必须排除 eMMC SPL→TF proper 混合链，且记录各阶段独特标记与 UART 全日志。
+- 详见 P2 报告 §27.8。当前只研究隔离与救援条件，不制作镜像、不写 TF/eMMC、不进行物理改造。
