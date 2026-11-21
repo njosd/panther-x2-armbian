@@ -1669,3 +1669,15 @@ https://www.mouser.com/catalog/specsheets/SanDisk_01-12-2026_SDINADF4-16-128GB-H
 下一步应优先回读已有 EXT_CSD 原始记录，核实 EXT_CSD_REV、BOOT_SIZE_MULT、PARTITION_CONFIG、RST_N_FUNCTION、POWER_OFF_NOTIFICATION 等字段，避免重复采集；然后以该具体料号的数据手册 pin assignment / reference schematic 为基础，结合 H1GW V04 正反面照片定位 eMMC 焊盘与周边去耦网络。暂不进行通电测量、拆焊或短接。
 
 本节基于用户实物照片及公开数据手册；没有对设备进行任何硬件操作。
+
+
+
+### 31.4 型号版本判定补充与 EXT_CSD 交叉验证要求
+
+对数据手册原文进一步核对后，型号版本判定可以明确，不应再写成“需以实机 EXT_CSD REV 再核对”作为型号识别的前提：
+- 实物第二行完整 P/N 是 `SDINADF4-32G`，没有 `-L` 或 `-H` 后缀。
+- 数据手册 §9 表 23 明确：`SDINADF4-32G` = eMMC 5.0；`SDINADF4-32G-L` 与 `SDINADF4-32G-H` = eMMC 5.1。
+- 同一数据手册 §7.2 表格说明 EXT_CSD_REV[192] 的 0x07 对应 eMMC 5.0、0x08 对应 eMMC 5.1。因此，若能从此前已保存的原始 EXT_CSD dump 找到该字节，可作为软件侧交叉验证；不得为此重复做写操作，也不必重新采集，除非原始记录确实不存在。
+- 数据手册整体标题为 iNAND 7232 e.MMC 5.1，但其订货表对基础 SKU 明确标为 5.0。之前描述时应以具体订货号表为准，而不是以系列数据手册标题概括所有 SKU。
+
+因此当前实物型号判定为 **SanDisk iNAND 7232 SDINADF4-32G，32GB，eMMC 5.0**。若日后 EXT_CSD_REV 与预期不符，应保留矛盾并调查芯片版本/标记，不可静默改写实物型号结论。
