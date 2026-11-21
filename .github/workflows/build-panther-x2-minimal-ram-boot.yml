@@ -83,8 +83,9 @@ jobs:
           cd "$ROOT"
           find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
           cd "${GITHUB_WORKSPACE}"
-          mkimage -A arm -O linux -T ramdisk -C gzip             -n "Panther X2 minimal RAM initramfs"             -d work/initramfs.cpio.gz work/boot/uInitrd
-          mkimage -l work/boot/uInitrd
+          mkimage -A arm64 -O linux -T ramdisk -C gzip             -n "Panther X2 minimal RAM initramfs"             -d work/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/uinitrd-header.txt
+          grep -qi 'AArch64' work/uinitrd-header.txt
           sha256sum work/initramfs.cpio.gz work/boot/uInitrd
 
       - name: Prepare U-Boot script and hybrid TF image
