@@ -393,3 +393,57 @@ RK3566 LPDDR4/LPDDR4X 项列出若干 Rockchip PCB template，并说明只有使
 **当前可成立的结论只有：** DDR v1.26 standard + SPL v1.14 是 Rockchip 当前通用 RK3566 loader 的官方参考组合；不能据此宣布它就是 Panther X2 的最终正确组合。DDR v1.26 specific mixed-mode + BL31 v1.46 是有严格颗粒条件的专用组合，当前没有证据证明 Panther X2 满足条件。
 
 本轮只读取 GitHub 上游文档/ini；未下载二进制、未构建、未写 TF/eMMC、未操作实机。
+
+
+## 11. Panther X2 实物 LPDDR4 颗粒丝印解码：Micron D9WMH（2026-11-21）
+
+用户提供的 PCB 近照中，DRAM 封装可读丝印为 `MT 7VD77` 与 `D9WMH`。本轮以 Micron 官方产品目录交叉核验，确认 D9WMH 是 Micron FBGA code。
+
+### 11.1 官方型号匹配
+
+Micron 官方 LPDRAM 产品目录将 FBGA code `D9WMH` 唯一对应到：
+
+`MT53D1024M32D4DT-046 AAT:D`
+
+官方产品页数据：
+- Technology：LPDDR4
+- Density：32Gb
+- Width：x32
+- Data rate：DDR4-4166（Micron 产品页标注）
+- FBGA code：D9WMH
+- Orderable part：MT53D1024M32D4DT-046 AAT:D
+
+Micron 官方产品页：https://www.micron.com/products/dram/lpdram/part-catalog/mt53d1024m32d4dt-046-aat
+
+Micron 官方产品目录镜像/产品信息同时列出 LPDDR4 200-ball、1.1V/0.6V、32Gb x32、2133MHz（数据率 4266MT/s）等规格；Micron AUT:D 同系列官方详细页列出 1Gb x32 component configuration、200-ball、10.00 x 14.50 x 0.95 mm、Number of Components=4。后者为同基础型号的 AUT 温度等级页面，不能将其后缀/温度等级直接当作实物 AAT:D 的完整订货后缀，但基础颗粒型号一致。
+
+### 11.2 容量与组织结构
+
+- 单颗容量：32Gb = 4GiB（标称字节容量为 4GB，系统常见显示约 3.7GiB）。
+- 组织：1Gb × 32。
+- 数据总线：x32，与 RK3566 32-bit DRAM 总线宽度相符。
+- 封装系列：200-ball VFBGA/WFBGA，封装尺寸约 10.0 × 14.5 mm（以该型号官方详细资料为准）。
+
+该型号中的 `D4` / 4-die stack 信息不能直接等同于 SoC 侧 CS0/CS1 rank 数；封装内部 die 数、LPDDR4 channel、SoC chip-select/rank 是不同层次的概念。当前仍需以实机 DDR training/UART 输出、原理图和控制器配置交叉确认 CS/rank 映射，不能仅凭 D4 推断双 rank 或 specific mixed-mode。
+
+### 11.3 对 DDR BIN 选择的影响
+
+这次识别解决了此前最重要的缺口之一：实物 DRAM 不再只是“4GB LPDDR4”，而是精确到 Micron `MT53D1024M32D4DT-046 AAT:D`。
+
+但仍不能直接从型号跳到 DDR BIN：
+1. 必须把完整料号 `MT53D1024M32D4DT-046 AAT:D` 与 Rockchip DDR Approved/Reference Vendor List、对应 Application Note 和 PCB template 交叉映射。
+2. 核对该颗粒是否要求 WDQS 或特殊训练参数。
+3. 核对本板实际布线、DQ mapping、CS/CKE/CA 连接与该 application note/template 一致。
+4. 只有上述匹配成立，才能决定 standard/ultra/专用 BIN；D9WMH 本身不能证明 specific mixed-mode 条件成立。
+
+### 11.4 丝印中尚未解码部分
+
+`D9WMH` 已由 Micron 官方产品目录确认是 FBGA code。封装上的另一行 `MT 7VD77` 尚未从当前可访问的 Micron 官方资料中可靠解码；本报告不把它臆断为完整料号、批次日期或 wafer lot。
+
+### 11.5 证据状态
+
+- 已验证：实物照片可读 D9WMH；Micron 官方目录将 D9WMH 映射到 MT53D1024M32D4DT-046 AAT:D；LPDDR4、32Gb、x32。
+- 有官方同基础型号资料支持：1Gb ×32 组织、200-ball、封装外形信息。
+- 未验证：实物完整订货后缀是否与照片中所有 lot/assembly 标记完全一致；MT 7VD77 的含义；本板 PCB template / DQ mapping；该颗粒在本板上实际 CS/rank 映射；最终 DDR BIN 兼容性。
+
+本轮仅分析用户提供的芯片照片并查询 Micron 官方产品资料；未操作硬件、未构建、未写 TF/eMMC。
