@@ -1,0 +1,217 @@
+name: Read-only Ophub 6.18.y package audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: Ophub kernel package version to inspect
+        required: true
+        type: choice
+        options:
+          - "6.18.64"
+          - "6.18.63"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Resolve current GitHub release asset metadata
+        id: asset
+        shell: bash
+        env:
+          VERSION: ${{ inputs.kernel_version }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/ophub/kernel/releases/tags/kernel_stable"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$api" -o release.json
+          python3 - <<'PY'
+          import json, os, sys
+          version = os.environ["VERSION"]
+          data = json.load(open("release.json"))
+          name = version + ".tar.gz"
+          matches = [a for a in data.get("assets", []) if a.get("name") == name]
+          if len(matches) != 1:
+              sys.exit(f"Expected exactly one release asset named {name}; found {len(matches)}")
+          a = matches[0]
+          digest = a.get("digest") or ""
+          if not digest.startswith("sha256:"):
+              sys.exit(f"Release API has no SHA256 digest for {name}: {digest!r}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"url={a['browser_download_url']}\n")
+              f.write(f"digest={digest.split(':',1)[1]}\n")
+              f.write(f"size={a['size']}\n")
+              f.write(f"asset_id={a['id']}\n")
+              f.write(f"release_updated_at={data.get('updated_at','')}\n")
+          PY
+          {
+            echo "Requested version: $VERSION"
+            echo "Release updated_at: $(python3 -c 'import json;print(json.load(open("release.json")).get("updated_at",""))')"
+            echo "Asset name: $VERSION.tar.gz"
+            echo "Asset URL: ${{ steps.asset.outputs.url }}"
+          } > /dev/null
+
+      - name: Download and independently verify exact release asset
+        shell: bash
+        env:
+          VERSION: ${{ inputs.kernel_version }}
+          ASSET_URL: ${{ steps.asset.outputs.url }}
+          EXPECTED_SHA256: ${{ steps.asset.outputs.digest }}
+          EXPECTED_SIZE: ${{ steps.asset.outputs.size }}
+          ASSET_ID: ${{ steps.asset.outputs.asset_id }}
+          RELEASE_UPDATED_AT: ${{ steps.asset.outputs.release_updated_at }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit/inner audit/extracted
+          outer="audit/${VERSION}.tar.gz"
+          curl --fail --location --retry 3 --retry-delay 3 "$ASSET_URL" -o "$outer"
+          actual_sha="$(sha256sum "$outer" | awk '{print $1}')"
+          actual_size="$(stat -c '%s' "$outer")"
+          printf '%s\n' \
+            "Version: $VERSION" \
+            "Release updated_at: $RELEASE_UPDATED_AT" \
+            "Asset ID: $ASSET_ID" \
+            "Asset URL: $ASSET_URL" \
+            "Expected size: $EXPECTED_SIZE" \
+            "Actual size: $actual_size" \
+            "Expected SHA256: $EXPECTED_SHA256" \
+            "Actual SHA256: $actual_sha" > audit/outer-asset-verification.txt
+          [[ "$actual_sha" == "$EXPECTED_SHA256" ]] || { echo "::error::Outer SHA256 mismatch"; exit 1; }
+          [[ "$actual_size" == "$EXPECTED_SIZE" ]] || { echo "::error::Outer asset size mismatch"; exit 1; }
+          gzip -t "$outer"
+          tar -tzf "$outer" > audit/outer-archive-list.txt
+
+          python3 - <<'PY'
+          import pathlib, re, sys
+          version = __import__("os").environ["VERSION"]
+          names = [x.strip() for x in open("audit/outer-archive-list.txt") if x.strip()]
+          nested = [x for x in names if re.fullmatch(rf"(?:.*/)?{re.escape(version)}/[^/]+\.tar\.gz", x)]
+          if not nested:
+              # Some Ophub package generations put nested archives at the archive root.
+              nested = [x for x in names if x.endswith(".tar.gz") and pathlib.PurePosixPath(x).name != f"{version}.tar.gz"]
+          if not nested:
+              sys.exit("No nested kernel package archives found")
+          pathlib.Path("audit/nested-members.txt").write_text("\n".join(nested) + "\n")
+          print("\n".join(nested))
+          PY
+          while IFS= read -r member; do
+            name="$(basename "$member")"
+            out="audit/inner/$name"
+            tar -xOzf "$outer" "$member" > "$out"
+            gzip -t "$out"
+            tar -tzf "$out" > "audit/inner/$name.list"
+            sha256sum "$out" >> audit/nested-archive-sha256.txt
+          done < audit/nested-members.txt
+
+          # Verify nested archive bytes against the checksum manifest shipped in the outer archive.
+          python3 - <<'PY'
+          import hashlib, pathlib, re, sys, tarfile
+          outer = pathlib.Path("audit") / ( __import__("os").environ["VERSION"] + ".tar.gz")
+          manifest = None
+          with tarfile.open(outer, "r:gz") as tf:
+              candidates = [m for m in tf.getmembers() if pathlib.PurePosixPath(m.name).name.lower() in ("sha256sums", "sha256sum", "sha256sums.txt")]
+              if len(candidates) == 1:
+                  manifest = tf.extractfile(candidates[0]).read().decode(errors="replace").splitlines()
+          if manifest is None:
+              sys.exit("Expected exactly one published SHA256 manifest in outer archive")
+          expected = {}
+          for line in manifest:
+              m = re.match(r"^\s*([0-9a-fA-F]{64})\s+\*?(.+?)\s*$", line)
+              if m: expected[pathlib.PurePosixPath(m.group(2)).name] = m.group(1).lower()
+          report=[]; failed=False
+          for p in sorted(pathlib.Path("audit/inner").glob("*.tar.gz")):
+              digest=hashlib.sha256(p.read_bytes()).hexdigest()
+              exp=expected.get(p.name)
+              status="MATCH" if exp == digest else ("MISSING" if exp is None else "MISMATCH")
+              report.append(f"{p.name}: {status}; expected={exp or 'N/A'}; actual={digest}")
+              failed |= status != "MATCH"
+          pathlib.Path("audit/nested-checksum-verification.txt").write_text("\n".join(report)+"\n")
+          print("\n".join(report))
+          if failed: sys.exit("Nested package checksum verification failed")
+          PY
+
+      - name: Inspect boot image, actual config, Panther X2 DTB and archive contents
+        shell: bash
+        env:
+          VERSION: ${{ inputs.kernel_version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          boot_candidates=(audit/inner/boot-"${VERSION}"-ophub.tar.gz audit/inner/boot-"${VERSION}"*.tar.gz)
+          dtb_candidates=(audit/inner/dtb-rockchip-"${VERSION}"-ophub.tar.gz audit/inner/dtb-rockchip-"${VERSION}"*.tar.gz)
+          [[ ${#boot_candidates[@]} -ge 1 ]] || { echo "::error::Boot package not found"; exit 1; }
+          [[ ${#dtb_candidates[@]} -ge 1 ]] || { echo "::error::Rockchip DTB package not found"; exit 1; }
+          [[ ${#boot_candidates[@]} -eq 1 ]] || { echo "::error::Ambiguous boot package candidates"; exit 1; }
+          [[ ${#dtb_candidates[@]} -eq 1 ]] || { echo "::error::Ambiguous DTB package candidates"; exit 1; }
+          boot_pkg="${boot_candidates[0]}"
+          dtb_pkg="${dtb_candidates[0]}"
+
+          tar -tzf "$boot_pkg" > audit/boot-package-list.txt
+          tar -tzf "$dtb_pkg" > audit/dtb-package-list.txt
+          mapfile -t dtbs < <(grep -E '(^|/)rk3566-panther-x2\.dtb$' audit/dtb-package-list.txt || true)
+          [[ ${#dtbs[@]} -eq 1 ]] || { echo "::error::Expected exactly one Panther X2 DTB; found ${#dtbs[@]}"; exit 1; }
+          tar -xOzf "$dtb_pkg" "${dtbs[0]}" > audit/extracted/rk3566-panther-x2.dtb
+          [[ -s audit/extracted/rk3566-panther-x2.dtb ]] || { echo "::error::Empty Panther X2 DTB"; exit 1; }
+          sha256sum audit/extracted/rk3566-panther-x2.dtb > audit/panther-x2-dtb-sha256.txt
+
+          mapfile -t configs < <(grep -E '(^|/)config-[^/]*ophub$' audit/boot-package-list.txt || true)
+          mapfile -t images < <(grep -E '(^|/)vmlinuz-'${VERSION}'-ophub$|(^|/)Image$' audit/boot-package-list.txt || true)
+          [[ ${#configs[@]} -eq 1 ]] || { echo "::error::Expected exactly one actual kernel config; found ${#configs[@]}"; exit 1; }
+          [[ ${#images[@]} -eq 1 ]] || { echo "::error::Expected exactly one kernel image; found ${#images[@]}"; exit 1; }
+          tar -xOzf "$boot_pkg" "${configs[0]}" > audit/extracted/kernel.config
+          tar -xOzf "$boot_pkg" "${images[0]}" > audit/extracted/kernel-image
+          [[ -s audit/extracted/kernel.config && -s audit/extracted/kernel-image ]] || { echo "::error::Missing/empty config or image"; exit 1; }
+          file audit/extracted/kernel-image | tee audit/kernel-image-file.txt
+          grep -Eiq 'ARM aarch64|ARM64|AArch64' audit/kernel-image-file.txt || { echo "::error::Kernel image file does not identify as ARM64"; exit 1; }
+          sha256sum audit/extracted/kernel-image audit/extracted/kernel.config > audit/boot-file-sha256.txt
+
+          keys='CONFIG_ARM64 CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT CONFIG_PACKET CONFIG_INET CONFIG_ARCH_ROCKCHIP CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE CONFIG_SERIAL_8250_DW CONFIG_SERIAL_OF_PLATFORM CONFIG_PINCTRL_ROCKCHIP CONFIG_GPIOLIB CONFIG_GPIO_ROCKCHIP CONFIG_MFD_RK8XX CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE CONFIG_ROCKCHIP_IOMMU CONFIG_RESET_CONTROLLER CONFIG_OF CONFIG_OF_FLATTREE CONFIG_OF_EARLY_FLATTREE CONFIG_OF_ADDRESS CONFIG_OF_IRQ CONFIG_PROC_FS CONFIG_SYSFS CONFIG_TMPFS CONFIG_PM_GENERIC_DOMAINS CONFIG_ARM_PSCI_FW CONFIG_ARM_PSCI_CPUIDLE CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP CONFIG_REALTEK_PHY CONFIG_MMC CONFIG_MMC_BLOCK CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP CONFIG_MMC_SDHCI CONFIG_MMC_SDHCI_OF_DWCMSHC'
+          : > audit/required-config-status.txt
+          for key in $keys; do
+            value="$(grep -E "^$key=" audit/extracted/kernel.config | tail -n1 || true)"
+            unset="$(grep -E "^# $key is not set$" audit/extracted/kernel.config | tail -n1 || true)"
+            if [[ -n "$value" ]]; then printf '%s %s\n' "$key" "$value" >> audit/required-config-status.txt
+            elif [[ -n "$unset" ]]; then printf '%s %s\n' "$key" "$unset" >> audit/required-config-status.txt
+            else printf '%s NOT_RECORDED\n' "$key" >> audit/required-config-status.txt
+            fi
+          done
+
+          sudo apt-get update
+          sudo apt-get install -y device-tree-compiler
+          dtc -I dtb -O dts -o audit/extracted/rk3566-panther-x2.from-dtb.dts audit/extracted/rk3566-panther-x2.dtb 2> audit/dtc-warnings.txt
+          grep -E 'model =|compatible =' audit/extracted/rk3566-panther-x2.from-dtb.dts > audit/dtb-identity.txt
+          grep -q 'Panther X2' audit/dtb-identity.txt || { echo "::error::DTB model does not identify Panther X2"; exit 1; }
+          grep -q 'panther,x2' audit/dtb-identity.txt || { echo "::error::DTB compatible does not identify panther,x2"; exit 1; }
+          grep -q 'rockchip,rk3566' audit/dtb-identity.txt || { echo "::error::DTB compatible does not identify rk3566"; exit 1; }
+
+          {
+            echo "Read-only Ophub package audit"
+            echo "Kernel version: $VERSION"
+            echo "Boot package: $boot_pkg"
+            echo "DTB package: $dtb_pkg"
+            echo "Boot image member: ${images[0]}"
+            echo "Config member: ${configs[0]}"
+            echo "Panther X2 DTB member: ${dtbs[0]}"
+            echo
+            echo "DTB SHA256:"
+            cat audit/panther-x2-dtb-sha256.txt
+            echo
+            echo "DTB identity:"
+            cat audit/dtb-identity.txt
+            echo
+            echo "Required config status:"
+            cat audit/required-config-status.txt
+          } | tee audit/audit-report.txt
+
+      - name: Upload audit evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ophub-kernel-${{ inputs.kernel_version }}-read-only-audit
+          path: audit/
+          if-no-files-found: error
+          retention-days: 14
