@@ -98,7 +98,7 @@ jobs:
           test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
 
           truncate -s 2G work/panther-x2-minimal-6.18.64-hybrid.img
-          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
+          sgdisk --clear             --new=1:32768:0             --typecode=1:8300             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
 
           LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.64-hybrid.img)"
           trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
