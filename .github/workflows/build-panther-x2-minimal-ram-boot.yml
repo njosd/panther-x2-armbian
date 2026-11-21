@@ -23,7 +23,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y             bc bison build-essential cpio curl device-tree-compiler             e2fsprogs flex gcc-aarch64-linux-gnu gdisk gzip             libncurses-dev libssl-dev make mkimage u-boot-tools             xz-utils zstd
+          sudo apt-get install -y             bc bison build-essential cpio curl device-tree-compiler             e2fsprogs flex gcc-aarch64-linux-gnu gdisk gzip             libncurses-dev libssl-dev make u-boot-tools             xz-utils zstd
 
       - name: Download and verify kernel package
         run: |
