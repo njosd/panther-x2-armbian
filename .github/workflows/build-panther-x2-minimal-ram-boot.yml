@@ -84,6 +84,7 @@ jobs:
           find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
           cd "${GITHUB_WORKSPACE}"
           mkimage -A arm -O linux -T ramdisk -C gzip             -n "Panther X2 minimal RAM initramfs"             -d work/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd
           sha256sum work/initramfs.cpio.gz work/boot/uInitrd
 
       - name: Prepare U-Boot script and hybrid TF image
@@ -98,7 +99,7 @@ jobs:
           test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
 
           truncate -s 2G work/panther-x2-minimal-6.18.64-hybrid.img
-          sgdisk --clear             --new=1:32768:0             --typecode=1:8300             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
+          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
 
           LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.64-hybrid.img)"
           trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
@@ -120,9 +121,16 @@ jobs:
           # Partition 1 begins at LBA 32768 (16 MiB), so the raw FIT does not overlap GPT/filesystem.
           dd if=work/JP-TvBox-u-boot.itb             of=work/panther-x2-minimal-6.18.64-hybrid.img             bs=512 seek=16384 conv=notrunc status=none
           sgdisk -v work/panther-x2-minimal-6.18.64-hybrid.img
+          sgdisk -i 1 work/panther-x2-minimal-6.18.64-hybrid.img | tee work/partition-1.txt
+          grep -q 'EF00' work/partition-1.txt
           SIZE="$(stat -c %s work/JP-TvBox-u-boot.itb)"
-          dd if=work/panther-x2-minimal-6.18.64-hybrid.img             bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum
-          sha256sum work/JP-TvBox-u-boot.itb
+          ACTUAL_SHA="$(dd if=work/panther-x2-minimal-6.18.64-hybrid.img bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          echo "JP proper expected: ${JP_UBOOT_SHA256}"
+          echo "JP proper readback: ${ACTUAL_SHA}"
+          test "$ACTUAL_SHA" = "$JP_UBOOT_SHA256"
+          mkimage -l work/boot/boot.scr
+          file work/boot/Image work/boot/uInitrd work/boot/boot.scr
+          sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/boot/boot.scr
 
           zstd -T0 -10 work/panther-x2-minimal-6.18.64-hybrid.img             -o work/panther-x2-minimal-6.18.64-hybrid.img.zst
           (
