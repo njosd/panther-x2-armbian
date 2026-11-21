@@ -268,3 +268,69 @@ NixOS 配方使用 `rk3568_bl31_v1.29.elf`：
 5. 完成静态兼容矩阵后，才决定唯一探针构建输入；构建与写卡另行确认。
 
 当前阶段仍然是源码和构建配方研究。当前 TF 测试 eMMC 绝对只读；最终正式产品目标仍是 eMMC 安装、eMMC 启动、eMMC 运行。
+
+
+## 9. RK3566 DDR v1.26 专用变体与 PCB Template 约束复核（2026-11-21）
+
+本轮只补充启动前 DDR 初始化固件的选型证据，不涉及网络、GMAC 或系统用户空间。
+
+### 9.1 官方 DDR v1.26 并非只有 standard / ultra 两个通用候选
+
+重新核对 Rockchip rkbin 当前公开文档后，发现 RK3566 还有一组 2026-06 发布的专用混合模式固件：
+
+- DDR：`rk3566_ddr_1056MHz_lp4_4x_specific_mixed_mode_v1.26.bin`，Build commit `a7079cfc6e`；
+- BL31：`rk3568_bl31_lp4_4x_specific_mixed_mode_v1.46.elf`，Build commit `b80232164`。
+
+官方说明明确限定：该 DDR BIN 仅适用于两个 CS 需要不同 Latency Mode 配置的特定 LPDDR4/LPDDR4X 混合封装；对应 BL31 也仅为这类混合封装的 DDR frequency scaling 配套版本，必须成对使用。
+
+来源：
+- https://github.com/rockchip-linux/rkbin/blob/master/specific/rk3566/RK3566_CN.md
+- https://github.com/rockchip-linux/rkbin/blob/master/specific/rk3566/RK3566_EN.md
+
+**重要纠正：** Panther X2 已知 CS0/CS1 双 rank，只能证明有两个片选，不能证明 CS0 与 CS1 使用不同 Latency Mode，更不能证明是官方所说的特定混合封装。故不能因为本机 CS=2 就选择 specific_mixed_mode DDR/BL31；在取得 DRAM 颗粒完整料号、封装信息及对应 vendor/application note 前，该组合只能列为条件性候选，禁止作为默认输入。
+
+### 9.2 官方 RK3566 PCB Template 表进一步限制了可选范围
+
+Rockchip 当前公开的《Rockchip Specific PCB Template and DDR bin Configuration Table》为 RK3566 列出若干 LPDDR4/LPDDR4X PCB template，例如：
+
+- LP4XD200P132SD4_29x43_1333MHz
+- LP4XD200P132SD6_39x25_1066MHz
+- LP4XD200P132SS8_35x20_1066MHz
+- LP4XD200P232DD61346_43R0x28R0_1848Mbps_2112Mbps
+- LP4XD320P164SD6H1_41x24_1066MHz
+- LP4D342P164SD6H1_44x32_533MHz
+- LP4D366P164SD6H1_44R6x27R4_800MHz
+- LP4M254P132SS6H1_34x19_800MHz
+
+该表说明 DDR BIN 与 PCB template / DRAM 颗粒组合有关；需要 WDQS 的特定颗粒还必须使用表中指定的 WDQS BIN。该表没有给出 Panther X2 / BROWAN H1GW V04 对应关系。
+
+来源：
+- https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
+
+目前本项目只有 LPDDR4、4GB、BW32、CS0/CS1 双 rank 等 UART 运行信息，没有 DRAM 厂商/完整料号、颗粒封装、PCB template、DQ mapping 的证据。因此尚不能从上述列表中选出任何一个模板，也不能据模板名称中的容量/宽度猜测本板布局。
+
+### 9.3 standard / ultra / specific mixed-mode 的当前判定
+
+| 候选 | 官方用途/变更 | 本机证据是否满足选型条件 | 当前状态 |
+|---|---|---|---|
+| DDR v1.26 standard | 通用 RK3566 v1.26；新增单通道 LPDDR4/4X 支持，修复启动概率和较大 tdqs2dq 兼容 | 本机不是单通道；颗粒/PCB 匹配未证实 | 保留通用候选，未选定 |
+| DDR v1.26 ultra | 优化 training、CKE/CA timing；修复 ultra wake-up CS1 数据异常、启动概率及大 tdqs2dq 兼容 | 已知双 CS，但没有 ultra wake-up 使用条件或板级匹配证据 | 条件性候选，未选定 |
+| DDR v1.26 specific mixed-mode | 仅适用于 CS0/CS1 需要不同 Latency Mode 的特定混合封装 | 没有不同 Latency Mode 或混合封装证据 | 不纳入默认候选；需料号证据才重新评估 |
+| DDR v1.10 | Panther X2 既有 JP 启动日志中有初始化成功记录 | 既有实际启动证据，但长期稳定性未证明 | 现有基线/回退参照，不自动作为新方案 |
+
+### 9.4 BL31 v1.45 / v1.46 的配套关系需要按 DDR 类型区分
+
+- 普通 RK3566 DDR v1.26 与 BL31 v1.45/v1.46：公开 release note 分别说明其更新内容，但目前没有找到足以证明这两个普通 BL31 版本与本机 DDR v1.26 profile 完成 Panther X2 专项认证的资料；仍需检查源码/接口及官方 loader profile 的实际组合。
+- specific mixed-mode DDR v1.26：必须与对应的 specific mixed-mode BL31 v1.46 配套，不能替换为普通 BL31 v1.45/v1.46。
+- 不同 DDR bin / BL31 组合不可只按版本号拼装；必须确认 DDR frequency scaling、DMC/PMU handoff 与配套关系。
+
+### 9.5 下一步收敛为一个可验证问题
+
+当前最优先的阻塞项不是再比较更多版本号，而是取得 Panther X2 实际 LPDDR4 颗粒的完整标识并映射到 Rockchip approved/reference vendor list 与 PCB template：
+
+1. 追溯已有拆机照片/板上丝印和历史 BOM 资料，确认 LPDDR4 颗粒的完整厂商料号、封装及是否多颗/混合封装；不得把 SoC 或 SanDisk eMMC 丝印误认成 DRAM。
+2. 用完整料号查 Rockchip DDR Approved/Reference Vendor List 中的 application note，确认是否需要 WDQS、是否有特殊 Latency Mode、是否属于 specific mixed-mode。
+3. 只有料号与 PCB template 映射成立后，才能在 standard / ultra / specific mixed-mode 中缩小到正确 DDR BIN，再审查与 BL31 的成对关系。
+4. 若公开资料无法取得料号或模板映射，结论应保持“无法证明匹配”，而不是按 4GB / LPDDR4 / 双 CS 猜选 v1.26。
+
+本轮未下载或运行 DDR 工具、未反汇编二进制、未构建固件、未操作设备、未写 TF/eMMC。
