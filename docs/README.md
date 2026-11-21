@@ -32,6 +32,7 @@
 | 当前文件 | 主题归属 | 整理状态 |
 |---|---|---|
 | [BUILD-PLAN.md](BUILD-PLAN.md) | 00-project / 02-boot | 待整理 |
+| [PANTHER-X2-P2-UBOOT-RK3566-DDR-SPL-BL31-CANDIDATE-AUDIT-20261121.md](reports/2026-11/PANTHER-X2-P2-UBOOT-RK3566-DDR-SPL-BL31-CANDIDATE-AUDIT-20261121.md) | 02-boot / reports | 2026-11-21 候选静态审计 |
 | [BUILD-QUICKSTART.md](BUILD-QUICKSTART.md) | 08-operations | 待整理 |
 | [BOOT-DEPENDENCY-AUDIT.md](BOOT-DEPENDENCY-AUDIT.md) | 02-boot | 待整理 |
 | [BSP-SOURCE-AUDIT.md](BSP-SOURCE-AUDIT.md) | 03-kernel-bsp | 待整理 |
