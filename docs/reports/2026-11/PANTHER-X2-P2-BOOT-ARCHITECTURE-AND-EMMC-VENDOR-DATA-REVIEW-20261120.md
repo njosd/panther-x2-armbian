@@ -1622,3 +1622,50 @@ Boot Probe 的“人工停留”机制已经解决：首选复用原版 U-Boot �
 仅凭两面照片仍无法证明电源/复位隔离；最终闭环仍需要与 H1GW V04 PCB revision 对应的原理图、器件型号/网络追踪或经过授权的专业测量证据。
 
 本节结论仅来自用户提供的静态照片；没有对设备通电、测量、拆焊或改动。照片中的 MAC/条码唯一标识不复制进公开报告。
+
+
+
+## 31. H1GW V04 正面近照确认 eMMC 实物型号（2026-11-21）
+
+用户提供 SanDisk 封装近照。芯片表面可读标记：
+- 第一行：SanDisk 标识
+- 第二行：`SDINADF4-32G`
+- 第三行：`CHINA`
+- 后续行是制造/追溯码，当前不作为产品型号解读，也不在公开报告中转录完整追溯码。
+
+### 31.1 型号确认与软件证据对应
+
+SanDisk iNAND 7232 数据手册的 Marking 章节说明第二行为 Sales item P/N，第三行为产地标识；Ordering Information 表列出 `SDINADF4-32G`，容量 32GB、153-ball TFBGA、11.5 × 13 × 0.9 mm，并将无后缀型号列为 eMMC 5.0。带 `-L` / `-H` 后缀的同容量型号列为 eMMC 5.1。因此不能把数据手册标题中的“e.MMC 5.1”直接套用到无后缀的实物型号。
+
+数据手册来源：SanDisk iNAND 7232 e.MMC data sheet, DOC-06397 / DOC-04417, Rev 1.13, Oct 2015：
+https://www.mouser.com/catalog/specsheets/SanDisk_01-12-2026_SDINADF4-16-128GB-H.pdf
+
+数据手册相关位置：§8 Marking（PDF 文本页 43）及 §9 Ordering Information（PDF 文本页 44）。
+
+本项目此前 eMMC 软件侧证据：CID 厂商 ID `0x45`、产品名 `DF4032`、容量约 32GB（见本报告 §18/§20 及先前 EXT_CSD 采集记录）。现在实物丝印、容量和 SanDisk CID 厂商字段相互吻合，足以把该封装确认为本机 32GB SanDisk eMMC；CID 产品名 DF4032 与封装订货号 SDINADF4-32G 是不同标识层级，不应要求字符串相同。
+
+### 31.2 对启动隔离研究的直接意义
+
+数据手册 §1.5 定义 eMMC 的独立信号/电源：
+- `CMD`、`DAT0-7`、`CLK`
+- `RST_n` 硬件复位输入
+- `VCCQ` 主机接口 I/O 电源
+- `VCC` 内部 NAND 电源
+
+数据手册 §2.7 说明该系列 8GB–64GB 出厂配置具有两个各 4MB 的 Boot Partition；§2.8 说明 RPMB 为 4MB。该型号因此确有独立硬件复位输入和分离的 VCC/VCCQ 电源域，值得在原理图/布局中追踪。但这只证明芯片端具备这些引脚/电源域，不证明 Panther X2 PCB 把它们接到了独立开关或可控 GPIO，也不证明切断某一路即可安全隔离 eMMC。
+
+### 31.3 当前证据状态与下一步
+
+| 项目 | 状态 |
+|---|---|
+| 实物封装为 SanDisk eMMC | 已确认 |
+| 完整订货型号 | `SDINADF4-32G`，无后缀，照片可读 |
+| 标称容量 | 32GB，与 Linux 侧约 32GB 一致 |
+| 型号对应 eMMC 版本 | 数据手册订货表：无后缀型号为 eMMC 5.0；需以实机 EXT_CSD REV 再核对 |
+| eMMC 的 RST_n / VCC / VCCQ 引脚存在 | 数据手册已确认 |
+| 这些信号在 H1GW V04 PCB 上的实际网络连接 | 未验证 |
+| 独立断电/复位是否可行 | 未验证，不可据此操作 |
+
+下一步应优先回读已有 EXT_CSD 原始记录，核实 EXT_CSD_REV、BOOT_SIZE_MULT、PARTITION_CONFIG、RST_N_FUNCTION、POWER_OFF_NOTIFICATION 等字段，避免重复采集；然后以该具体料号的数据手册 pin assignment / reference schematic 为基础，结合 H1GW V04 正反面照片定位 eMMC 焊盘与周边去耦网络。暂不进行通电测量、拆焊或短接。
+
+本节基于用户实物照片及公开数据手册；没有对设备进行任何硬件操作。
