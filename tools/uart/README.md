@@ -31,3 +31,31 @@ First verify the serial device path on the current Mac; it is machine/adapter-sp
 The script only reads UART output and sends Ctrl+C. It does not issue U-Boot commands and contains no MMC, flash, environment-save, upgrade, or storage-write operations. It does not alter the eMMC or TF. After the prompt appears, the operator takes over manually.
 
 Do not assume this prompt/timing behavior on JP-TvBox or other U-Boot builds without separate verification.
+
+## Interactive UART terminal (separate from autoboot helper)
+
+`panther-uart-terminal.py` is the interactive bidirectional terminal. It is deliberately separate from `uart-autoboot-interrupt.py`, which only interrupts autoboot and then exits.
+
+The terminal addresses the earlier macOS input/echo problems:
+
+- Opens `/dev/tty` directly, so its keyboard input is not confused with Python stdin or a heredoc.
+- Uses POSIX raw terminal mode; local echo, canonical line buffering and terminal-generated Ctrl-C signals are disabled while connected.
+- Forwards keyboard bytes to the target and displays only bytes received from UART. Thus characters echoed by Linux/U-Boot are shown once; the Mac does not add a second local echo.
+- Disables bracketed-paste wrappers during the session so `ESC[200~` / `ESC[201~` markers are not sent as command text.
+- Ctrl+C is forwarded as byte `0x03` to the target. Local exit is Ctrl+] followed by `.`.
+- Saves received and transmitted bytes separately as `.rx.bin` and `.tx.bin`; this avoids mixing local keystrokes into the target's receive log.
+- Restores the original terminal attributes and closes the serial port/logs in `finally`.
+
+Run from an ordinary interactive Terminal window (not a Python heredoc):
+
+```sh
+"$HOME/panther-uart-venv/bin/python" "$HOME/path/to/panther-x2-armbian/tools/uart/panther-uart-terminal.py"
+```
+
+Optional overrides:
+
+```sh
+"$HOME/panther-uart-venv/bin/python" panther-uart-terminal.py --port /dev/cu.usbserial-1460 --baud 1500000 --log-prefix "$HOME/panther-uart-session"
+```
+
+**Validation status:** Python syntax compilation passed in the development environment. This replacement has not yet been connected to the Panther X2 hardware; terminal behavior, paste handling and long-session stability still require a controlled real-device test. The old `panther-uart.py` is not overwritten. The historical autoboot-interrupt script remains a separate tool.
