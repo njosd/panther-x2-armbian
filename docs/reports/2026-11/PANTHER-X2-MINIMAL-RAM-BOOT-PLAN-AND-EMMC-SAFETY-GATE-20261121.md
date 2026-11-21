@@ -815,3 +815,31 @@ umount /media/devmon/ROOTFS
 - 当前设备列表未出现 64GB SD64G 对照卡。
 
 结论：已再次确认 SU08G 身份及其分区卸载状态，达到后续镜像写入前置条件之一。该操作仅卸载文件系统，没有执行擦除、分区表修改、格式化或写入。用户虽已授权清空 SU08G，但仍须先取得成功构建的最小系统 artifact，并完成镜像文件、分区布局、启动文件和哈希审查；在此之前不向 TF 卡发出任何破坏性命令。eMMC 与 64GB 对照卡继续保持不写入。
+
+
+## 24. 2026-11-21 最小启动系统范围与工作流修订基线
+
+本节优先于本报告前文旧版构建描述。历史失败记录继续保留，但不能据此声称新工作流已通过。
+
+### 24.1 阶段目标
+
+当前首要目标是 B1：最小 RAM Linux 启动认证，不是网络测试，也不是完整系统构建。B1 只包含 Kernel、Panther X2 DTB、静态 BusyBox、最小 `/init`、MMC block-layer 只读保护及必要目录。不加入 iproute2、ethtool、DHCP、DNS、SSH、NetworkManager、systemd、udev、Docker、NPU/RKNN、Immich。B1 通过后才建立 B2/B3 网络验证层。
+
+### 24.2 BusyBox
+
+CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shell 实际使用的命令链接，不安装完整 applet 链接树。当前仍以 BusyBox defconfig 编译，二进制内部可能含未暴露的 applet；CI 上传编译 applet 清单，不能将它描述为逐项裁剪后的最小 BusyBox 二进制。若后续需要进一步缩小二进制，应单独制作精简配置并验证，不得阻碍首轮启动认证。
+
+### 24.3 工作流修订
+
+- 将 `/init` 与 `boot.cmd` 中残留的 6.18.64 标识更正为当前固定候选 6.18.63。
+- 从 initramfs 构建中移除 `mmc-wp-read-last`；它不再作为启动镜像组件或 artifact 交付。
+- BusyBox 运行时只建立实际需要的命令链接，并输出编译 applet 清单。
+- 启动脚本分别检查 Kernel、uInitrd、DTB 加载结果，避免把某一阶段失败误报为下一阶段成功。
+
+### 24.4 安全门
+
+本次修订没有解决 SPL/U-Boot 阶段可能写入 eMMC 的风险。Linux `/init` 设置 block-layer RO 发生得太晚，不能保护 pre-Linux。未取得用户对具体 eMMC Power-on WP 操作及范围的明确授权前，不得向 SU08G 写入测试镜像或启动该混合链。64GB 对照卡保持不动。
+
+### 24.5 状态
+
+本节记录工作流/文档修订；必须等新的 GitHub Actions run 通过、artifact 检查通过后，才能把 CI 构建标记为已验证。写卡和实机启动仍为未执行。
