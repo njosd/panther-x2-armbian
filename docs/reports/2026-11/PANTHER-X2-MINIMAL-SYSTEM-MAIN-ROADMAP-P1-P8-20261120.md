@@ -486,3 +486,22 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 已运行的 pre-loader/SPL 可检测 SD 卡启动标志并提升 SD 后续启动优先级；这与 BootROM 冷启动选首阶段是不同层次。不能用通用 SD Boot Card 或 u-boot,spl-boot-order 直接证明 TF-only。
 - 第一轮测试镜像仅设计为分阶段独特标记：TF LBA64 loader/SPL token、proper/FIT token、UART 日志；首轮止于 proper，不先引入 Linux。proper 偏移须先按所选 BACK_TO_BROM 方案核实，不能机械套用通用 0x4000。
 - 下一步只读静态审计现有 eMMC LBA64 SPL/IDB 是否含 SD boot flag 检测/切换及 BACK_TO_BROM；不向 eMMC 写入。详见 P2 §27.9–§27.10。
+
+
+## P9｜复用已实机验证的 UART 自动接管脚本（2026-11-21）
+
+**状态：原版 Panther X2 U-Boot 实机已验证。**
+
+接管不是依赖人工手速。此前已通过脚本自动实现：脚本持续监听 UART 输出，检测到
+
+```text
+Hit key to stop autoboot('CTRL+C'):
+```
+
+后，自动通过同一 UART 发送 Ctrl+C，中断 autoboot 并进入 U-Boot 命令行。后续 Boot Probe 应直接复用该自动化方法，不得把“人工看到提示后手动按 Ctrl+C”写成标准步骤，也不需要重新研究如何实现接管。
+
+标准流程：启动 UART 监听/接管脚本 → 捕获上述提示 → 自动发送 Ctrl+C → 确认 U-Boot 命令行可交互 → 人工执行本轮只读检查并保存完整 UART 日志。禁止执行 `saveenv`、存储写入/擦除、升级、Fastboot 刷写和自动修复；eMMC 永远只读，任何获准写入仅限经明确确认的专用 TF。
+
+该验证目前只适用于此前实测的原版 U-Boot 2017.09-armbian。JP-TvBox / Radxa 候选版本是否具有相同提示和时序，仍需分别核实。此机制只证明 proper 阶段的自动接管，不证明 BootROM/SPL 的启动介质来源。
+
+详细记录见 P2 报告 §27.11。脚本具体文件路径、串口参数及源码尚待从既有项目资产中追溯，本条不臆造名称或参数。
