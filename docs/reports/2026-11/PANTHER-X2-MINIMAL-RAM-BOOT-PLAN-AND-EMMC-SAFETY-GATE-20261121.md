@@ -205,3 +205,49 @@ Workflow 使用 `workflow_dispatch`，将：
 - eMMC 只读：Linux 阶段可设置 block-layer RO；SPL/BL31/U-Boot 阶段仍未证明零写入。
 - 实机启动：**未放行**，待活动 eMMC SPL 写入审计。
 - 最终产品：eMMC 安装、eMMC 启动、eMMC 运行；正式版本按明确分区/更新/恢复策略允许受控写入。
+
+
+## 10. 重要补充：确认 eMMC 当前安装的 U-Boot 与 JP-TvBox 不是同一套 IDB/SPL（2026-11-21）
+
+回读 2026-11-20 用户归档清单、eMMC 分区只读 debugfs 提取记录及 2026-11-16 UART/原始 IDB 读取记录后，纠正此前容易混淆的描述：
+
+### 10.1 当前 eMMC 安装的 Panther-X2 U-Boot 资产
+
+用户从当前 eMMC 的 `/usr/lib/u-boot` 只读提取：
+- `idbloader.img`：305,152 bytes，SHA-256 `990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e`；
+- `u-boot.itb`：1,431,552 bytes，SHA-256 `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af`。
+
+这两个 SHA-256 与仓库 `ophub/u-boot` 的 `u-boot/rockchip/panther-x2/` 资产相符：
+- IDB blob SHA-1 `d22b624fc90c46e656baf98894bee182316e692e`；
+- proper blob SHA-1 `04cd10bddd4e823d2ea495ee95b264cb2bce1f4c`。
+
+2026-11-16 的只读原始设备采集日志还记录从 eMMC 原始区域读取的 IDB 与上述文件 SHA-256 相同。因此这不是仅仅从包管理器推断的候选，而是当前 eMMC 安装资产的强证据。
+
+### 10.2 JP-TvBox 归档资产是另一套不同二进制
+
+JP-TvBox U-Boot 归档：
+- `idbloader.img`：归档 SHA-256 `e8450168f8ac0b35b4ebabe901654d58d6b73cc3d24a5154ef23384339975f63`；
+- `u-boot.itb`：归档 SHA-256 `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。
+
+JP IDB 与当前 eMMC IDB 不同，不能再把 JP-TvBox 的 SPL 直接说成当前 eMMC 正在执行的 SPL。历史 UART 日志中曾出现 SPL 2017.09-armbian（2023-04-23）加载 U-Boot proper（2023-11-12）的组合；它支持“eMMC 前级与 TF proper 分离”的路径，但每次测试实际运行哪一个 IDB，必须由该次串口日志与原始二进制 hash 对应确认。
+
+### 10.3 写入风险的准确表述
+
+Radxa `stable-4.19-rock3` commit `c55987146f4f9b20f7cb2f917ca88300419afe8d` 的 `rock-3c-rk3566_defconfig` 开启 `CONFIG_SPL_AB`、`CONFIG_SPL_MMC_WRITE`、`CONFIG_ROCKCHIP_VENDOR_PARTITION` 和 `CONFIG_FASTBOOT_FLASH`；同一源码树确有 SPL A/B `blk_dwrite()`、Vendor Storage `blk_dwrite()` 和 board_late_init MAC fallback 写入路径。
+
+但尚未证明当前 eMMC IDB（SHA-256 990afd…）就是由该 commit、该 defconfig 和对应最终 .config 构建。因此这些源码只能作为高相关候选证据，不能写成当前二进制已确认包含所有这些代码/配置。
+
+现有日志中的 `No misc partition` 是运行时 U-Boot 输出，但尚未严格定位它对应 eMMC 还是 TF 的设备描述符；必须从原始日志上下文和当前 eMMC GPT 分别核对，不能用该字符串直接证明 eMMC 没有 misc 分区。
+
+### 10.4 对当前构建方案的影响
+
+本方案只把 JP-TvBox `u-boot.itb` proper 放到 TF LBA 16384（8 MiB），不写 JP `idbloader.img`；TF 分区从 LBA 32768（16 MiB）开始。它依赖当前已验证的 eMMC SPL 能从 TF 的对应 raw sector 读取 proper。构建产物仍标记为 PREPARE-ONLY。
+
+在允许实机启动之前，还必须完成：
+1. 读取当前 eMMC 原始 IDB 二进制并提取/识别 SPL 版本、DDR blob 标识及可匹配的构建来源；
+2. 追溯 `ophub/u-boot` Panther-X2 IDB/proper 二进制的构建 commit、defconfig、最终 .config；
+3. 核对当前 eMMC GPT 中 misc 分区是否存在及 Vendor Storage 实际物理目标；
+4. 对“TF proper 正常加载”“TF 读取失败”“TF proper FIT 校验失败”“MMC 初始化失败/回退”分别建立实际设备目标和写入调用矩阵；
+5. 若任何路径可能写 eMMC，则当前阶段不得执行该启动链，必须改用能隔离 eMMC 写入的启动方法或取得经验证的硬件只读隔离。
+
+这项补充取代本报告第 6 节中任何将 JP-TvBox IDB/SPL 直接等同于当前 eMMC SPL 的表述。
