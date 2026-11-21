@@ -1482,3 +1482,42 @@ RK3566/RK3568 TRM 资料也确认支持 eMMC 与 SDMMC 启动。该顺序解释�
 测试入口仍有一个前置条件：先确认怎样让 RK3566 BootROM 实际执行 TF 上的首阶段。当前资料没有证明只插 TF 即可做到；若 eMMC 首阶段优先且没有硬件/ROM 级介质选择方式，则先做 eMMC SPL 的静态审计，不能直接将该实验描述为 TF-only。
 
 本节未生成镜像、未写 TF/eMMC、未构建固件、未进行实机测试。
+
+
+## 27.11 原版 U-Boot UART 中断自动启动与人工接管（实机已验证，2026-11-21 回溯归档）
+
+### 结论
+
+本项目此前已在 Panther X2 实机通过 UART 验证：原版 U-Boot 2017.09-armbian 在自动启动前提供 Ctrl+C 中断入口，人工发送 Ctrl+C 可以中断 autoboot 并进入 U-Boot 命令行。该方法简单、可靠，优先复用，不为 Boot Probe 另行修改 `bootdelay`、`bootcmd` 或重构启动流程。
+
+历史 UART 输出：
+
+```text
+U-Boot 2017.09-armbian (Apr 23 2023)
+Model: Radxa E25
+Hit key to stop autoboot('CTRL+C'): 0
+```
+
+该提示在 2026-11-15 和 2026-11-18 的实机启动记录中出现。用户已确认此前通过 UART 人工中断并接管 U-Boot 的方法实际测试过，后续研究不得将其误列为尚待实现的能力。
+
+### 已验证能力与边界
+
+- 已验证：原版 U-Boot 输出 Ctrl+C autoboot 中断提示。
+- 已验证：在提示窗口发送 Ctrl+C，可中断自动启动并进入人工 U-Boot 命令行（以此前实机操作记录为依据）。
+- 已验证：可在接管后人工执行检查，避免让系统自动继续执行 Linux 启动脚本。
+- 未据此证明：JP-TvBox 或 Radxa `stable-4.19-rock3` 构建具有相同提示、倒计时和接管行为；候选版本须分别核实。
+- 未据此证明：BootROM/SPL 的启动来源或物理 MMC 设备映射；该入口发生在 U-Boot proper 阶段，不能反推此前阶段的启动介质。
+
+### 后续 Boot Probe 标准步骤
+
+1. 使用已验证的原版启动链启动测试 TF；本步骤不要求修改 U-Boot 环境或启动配置。
+2. 打开 UART 串口终端并持续记录完整启动日志。
+3. 等待出现 `Hit key to stop autoboot('CTRL+C'):` 提示，在倒计时期间发送 Ctrl+C。
+4. 确认进入 U-Boot 命令提示符后，先记录版本、当前环境和 MMC 设备枚举信息；检查类命令优先采用只读操作。
+5. 按本轮实验目标人工执行最少量只读探测，记录命令、完整输出及时间顺序；不执行自动启动脚本。
+6. 不执行 `saveenv`、`env save`、`mmc write`、`mmc erase`、`gpt` 修改、Fastboot 刷写、升级、自动修复或任何可能写入存储的命令。对作用不确定的命令先查源码，不执行。
+7. 保存完整 UART 日志；若需继续下一阶段，必须先明确目标和写入范围。所有获准写入仅限经确认的专用 TF，eMMC 永远只读。
+
+### 对研究路线的影响
+
+Boot Probe 的“人工停留”机制已经解决：首选复用原版 U-Boot 的 Ctrl+C autoboot 中断，不再把修改 `CONFIG_BOOTDELAY`、`bootcmd` 或增加专用停留代码列为前置任务。研究重点回到 SPL 启动源、MMC 选择/回退、Vendor Storage 读取来源及写入风险。若后续换用 JP/Radxa proper，只有在其接管入口尚未验证时才单独评估，不得将原版验证结果外推到候选版本。
