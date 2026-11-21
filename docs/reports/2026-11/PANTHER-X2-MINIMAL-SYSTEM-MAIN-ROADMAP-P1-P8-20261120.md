@@ -571,3 +571,39 @@ mmc-utils 默认 `writeprotect user get` 使用向下取整，漏查最后组。
 - boot0/boot1 的 Linux RO=1 仅是块设备层状态，不等于芯片级写保护。8GB 卡尚未插入或识别。
 - 下一步先只读执行 mmc extcsd read /dev/mmcblk0、mmc writeprotect user get /dev/mmcblk0、mmc writeprotect boot get /dev/mmcblk0；严禁误用 set 子命令。再按单卡槽流程识别 8GB 卡 CID/容量，之后才安排格式化与镜像写入。
 - 详细记录见最小 RAM 启动安全报告 §17。
+
+
+
+## 9. 执行路线纠偏：run 44873044571 不属于当前批准的最小网络系统构建（2026-11-21）
+
+用户指出近期构建内容与“最小网络测试系统”目标不符。回读本路线图、P2 启动架构审计报告、最小 initramfs 蓝图及 Actions run 后，确认近期独立 workflow 的构建范围发生了越级扩张；该 workflow/run 不应被当作当前路线的有效交付物或网络测试系统。
+
+### 9.1 当前权威路线仍然有效
+
+本路线图 §0、§1.3、§3 的约束没有变更：
+- 第一阶段只为启动 Linux、识别 GMAC/PHY、查看链路、执行定向网络收发测试提供必要功能。
+- 不加入 DHCP、DNS、SSH、NetworkManager、systemd（除非启动机制确有必要）、存储管理、NPU/RKNN、Docker、Immich、桌面或其他常驻服务。
+- 当前 P2 唯一执行项是只读审计 RK3566 启动介质选择、Panther X2 板级 eMMC 隔离/启动选择机制，以及 eMMC Vendor 数据的权威只读读取与传递路径。
+- P2 架构审计未完成前，不锁定/下载用户空间组件、不构建、不触发 CI、不写 TF、不启动实验固件。P2 完成后，才重新评估最小用户空间组件和构建设计。
+
+### 9.2 Run 44873044571 的实际内容及失败
+
+Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44873044571
+
+- workflow 输入为 Ophub stable/6.18.63，而路线图第一轮 GMAC 故障诊断对象明确是 Ophub RK35xx 6.12.81；stable/6.18.y 是另一条独立正式板型路线，不能混入首轮网络对照。
+- 下载 6.18.63 kernel tarball 后，SHA-256 校验失败（日志：`sha256sum: WARNING: 1 computed checksum did NOT match`，文件约 118 MiB）。因此本次没有证明该下载包与锁定摘要一致，未进入 DTB 提取。
+- BusyBox、initramfs、镜像和 artifact 后续步骤全部 skipped；无 artifact。
+- 即使忽略本次校验失败，现有 workflow 的设计也明显超出“最小网络测试”边界：使用 BusyBox 完整 defconfig（只强制 STATIC，并未建立最小 applet 配置）；额外编译 `blockro` 和 `mmc-wp-read-last`；生成 2 GiB hybrid TF 镜像；将 JP-TvBox U-Boot proper 原始 FIT 写到镜像 LBA 16384；制作 ext4 分区。该方案还把 eMMC SPL→TF proper 混合链作为实际镜像设计，而 P2 启动架构审计仍未完成。
+- initramfs 当前没有集成 ethtool，也没有可审查的定向 UDP 广播测试工具/网络测试流程；`/init` 明确写着“不启动网络配置或 GMAC traffic test”。因此它不是可直接执行网络联通/GMAC TX 对照的最小网络系统。
+- workflow 使用 6.18.63 的 DTB 哈希与脚本中残留的 6.18.64 文案，版本信息也未统一。
+
+### 9.3 纠偏决定
+
+1. 将 run 44873044571 标记为**越级构建尝试/失败，无有效产物**；不继续修补该 workflow 以追求产出。
+2. 暂停触发 `build-panther-x2-minimal-ram-boot.yml`；不写入或启动 SU08G。SU08G 已确认卸载，但不因此自动进入写卡阶段。
+3. 回到 P2 唯一工作项：完成板级 eMMC 隔离/启动选择机制的只读证据核查，并收敛 eMMC Vendor Storage 只读来源/传递方案。不得重复已经完成的 BootROM 优先级、source ID、LBA64 IDB、SDMMC0_DET、Vendor Storage 布局和 MAC 来源调查。
+4. P2 审计完成并经用户确认后，再按路线图重新设计真正最小的 ARM64 网络 initramfs：保留串口 shell、必要 proc/sys/devtmpfs、网卡/PHY状态检查、最小 IP 配置能力、ethtool 只读诊断和受控 UDP 广播发送；工具选择以当时上游稳定版本和依赖闭包为准。初始版本不带完整 BusyBox 默认 applet 集、不带存储管理/写保护辅助程序、不制作与目标无关的 hybrid 固件镜像。
+5. 第一轮网络诊断内核必须回到 6.12.81 + 对应 Panther X2 DTB；6.1.116 作为后续黄金正常对照。启动固件在对照测试中固定，不同时更换 U-Boot、Kernel、DTB、rootfs。
+6. 只有最小网络 initramfs 通过静态验收、启动链方案获得批准、用户明确授权写卡和启动后，才使用经 CID 确认的 8GB SU08G 测试卡。64GB 对照卡和 eMMC 继续不动。
+
+本节是对近期执行偏差的纠正记录，不修改原有 P1—P8 目标和验收条件。
