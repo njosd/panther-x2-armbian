@@ -501,3 +501,74 @@ Panther X2 只有一个 TF 卡槽。当前 64GB TF 卡是 6.12 对照系统；8G
 ### 15.2 当前阶段状态
 
 尚未执行介质切换；尚未从 eMMC 6.1.116 启动；尚未插入/识别 8GB TF；64GB 对照卡未修改。执行切换前须先确认当前服务可安全关机，并保留现有 6.12 对照卡原状。
+
+
+## 16. 最小 RAM 启动构建流程复核与只读 CMD31 工具准备（2026-11-21）
+
+### 16.1 复用既有 eMMC boot.cmd 启动语义已核对
+
+回读 `docs/reports/2026-11/EMMC-UBOOT-VENDOR-STORAGE-AUDIT.md` 的 eMMC 原始 `boot.cmd` 审计，确认 Panther X2 现有启动脚本使用：
+
+```sh
+load ${devtype} ${devnum} ${ramdisk_addr_r} ${prefix}uInitrd
+load ${devtype} ${devnum} ${kernel_addr_r} ${prefix}Image
+load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
+booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
+```
+
+因此，本项目继续使用 U-Boot legacy uInitrd 包装 + `booti` 的路径与当前 Panther X2 原版 6.1.116 启动配置一致，不另换启动机制。新构建的 legacy ramdisk image architecture 字段必须标为 AArch64；此前工作流写成 `-A arm` 不够准确，现已改为 `-A arm64` 并增加 `mkimage -l` 输出检查。
+
+U-Boot v2026.10 `booti` 源码的 `bootm_find_images()` 调用 `boot_get_ramdisk()` 解析传入的 ramdisk 地址，legacy image 格式可按其 image header 识别；当前原版脚本和既有 U-Boot 运行记录也提供了相同用法的本机先例。
+
+### 16.2 已修正测试镜像布局及构建检查
+
+GitHub Actions workflow 已修正：
+- GPT 分区类型恢复为已验证的 `EF00`（EFI System 类型），不再使用此前临时改成的 `8300`；文件系统仍为 ext4，与当前 U-Boot 从 SD/TF ext4 分区加载 `boot.scr` 的既有实机证据一致。
+- JP proper 在镜像 LBA 16384 的写后哈希由“只打印”改为严格比较，任何不匹配均使 workflow 失败。
+- 记录 GPT 分区信息并检查类型代码；输出 boot.scr/uInitrd header、Image、DTB、脚本哈希。
+- uInitrd legacy header 明确标记 AArch64，并检查 `mkimage -l` 的架构字段。
+- workflow 仍只生成 PREPARE-ONLY artifact，不触碰任何物理 TF/eMMC。
+
+### 16.3 新增最后一个 WP group 的只读查询程序
+
+新增源文件：
+- `scripts/panther-x2-minimal-initramfs/mmc-wp-read-last.c`
+
+该程序只允许目标设备同时满足：
+- Linux MMC type 为 `MMC`；
+- eMMC name 为 `DF4032`；
+- CID 与命令行提供的预期 CID 完全相同。
+
+程序读取 EXT_CSD（CMD8），从 SEC_COUNT、HC_ERASE_GRP_SIZE 和 HC_WP_GRP_SIZE 计算容量与 WP group；核对 BLKGETSIZE64 与 SEC_COUNT 一致后，计算最后一个可寻址 WP group，并以 CMD31 查询包含该组的最后一批 32 组状态。它会输出最后一组索引、起始 LBA、CMD31 payload 和保护状态。
+
+源码只发出：
+- CMD8 SEND_EXT_CSD（读 512 bytes）；
+- CMD31 SEND_WRITE_PROT_TYPE（读 8 bytes）。
+
+源码没有 CMD6、CMD28、CMD29 或数据写入调用；没有实现任何写保护设置功能。该工具必须在 root 权限下运行，且内核允许 MMC_IOC_CMD；若返回权限错误，不要改用任何写命令或尝试规避限制。
+
+GitHub Actions workflow 已加入该程序的静态 ARM64 编译，并将二进制作为 PREPARE-ONLY artifact 附件输出。该工具尚未在目标设备编译或运行，CMD31 对 DF4032 最后组的实际返回仍未验证。
+
+### 16.4 关于 2 GiB 镜像写入 8GB 卡后的 GPT 备份表位置
+
+当前 workflow 产物为 2 GiB image，之后会写入容量更大的 8GB TF。GPT backup header 在 image 内位于 2 GiB 边界，不会自动移动到 8GB 卡物理末尾。写卡后需要对 8GB 卡执行一次只针对 GPT 元数据的 `sgdisk -e`（或等效 GPT relocate 操作），并用 `sgdisk -v` 验证；该步骤必须在用户确认 8GB 测试卡 CID/容量和写入目标后才进行。它不会扩展 ext4 分区，测试分区仍保留 2 GiB 上限。64GB 6.12 对照卡不参与此操作。
+
+### 16.5 当前构建和实机状态
+
+- 已复核：现有 eMMC 6.1.116 `boot.cmd` 使用 legacy uInitrd + booti；现有 U-Boot proper 已从 TF ext4 分区加载文件。
+- 已修正：GPT 类型恢复 EF00；uInitrd 标记 AArch64；JP proper 镜像写入哈希改为强制校验。
+- 已新增：DF4032 最后 WP group 的只读 CMD8/CMD31 查询程序；已加入 ARM64 静态构建 artifact。
+- 尚未执行：GitHub Actions workflow；8GB TF 识别或写入；eMMC CMD31 查询；任何 CMD28/boot WP 设置；最小 Linux 实机启动。
+- 64GB TF 6.12 对照卡保持冻结。
+- 用户已明确：读取 8GB TF 必须先取出 64GB 卡、从板载 eMMC 启动原版 6.1.116，再在唯一 TF 卡槽插入 8GB 测试卡。该顺序为实机采集前提。
+
+### 16.6 下一步顺序
+
+1. 用户按单卡槽顺序切换至 eMMC 原版 6.1.116；确认 root 和 /boot 确实位于 eMMC。
+2. 插入 8GB 测试卡（如热插拔安全未确认，则关机插卡后从 eMMC 启动），只读采集其 CID、容量、分区与设备节点；64GB 卡保持取出。
+3. 运行 artifact 中的 `mmc-wp-read-last`，参数使用重新确认的 eMMC CID；只读查询最后 WP group。
+4. 在独立授权后，才考虑 eMMC user-area 和 boot0/boot1 Power-on WP 设置；不得把查询工具误作设置工具。
+5. 可并行在 GitHub Actions 手动触发 PREPARE-ONLY 构建；成功后审查 artifact 的文件清单、hash、GPT 和启动脚本，不写任何实体存储。
+6. 完成 eMMC 芯片级保护全覆盖验证后，才授权将镜像写入经 CID 识别的 8GB 测试卡并进行 UART 实机启动。
+
+**当前仍未获准实机启动。** 本报告不把“构建流程已准备”写成“已构建”，也不把历史 6.12.81 启动成功写成新 6.18.64 最小 initramfs 已实机验证。
