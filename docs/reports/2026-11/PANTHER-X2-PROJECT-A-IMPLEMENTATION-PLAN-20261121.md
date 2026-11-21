@@ -50,13 +50,16 @@
 验收：总路线与实施计划的启动链表述一致，不把 JP IDB/SPL 说成当前 eMMC 正在执行的 SPL。
 
 ### B0.3 Kernel 与 Panther X2 DTB 复核
-- 优先复核当前仍维护的 Ophub stable Kernel 发布资产。
-- 重点复核 6.18.63 当前 Release asset：核对官方 digest、归档成员、Image、config、Panther X2 DTB 路径及 DTB SHA-256。
-- 6.18.64 因既有检查未找到 Panther X2 DTB，不作为已验证输入，除非出现新证据。
-- 6.12.81 仅作历史 initramfs 能力参照，不自动成为新系统首选。
-- 只有 Kernel/DTB 来源匹配、配置与硬件兼容可确认，才锁定 B1 输入。
+- 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
+- 按相邻修订顺序审计 6.18.64、6.18.63、6.18.62（必要时 6.18.61），优先选距离 6.18.64 最近且当前发布资产完整合格的版本。
+- 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；必须核验当前新资产，不能沿用旧包结论。
+- 6.18.63 历史 artifact 的 DTB 证据只适用于旧包；当前同名资产 digest 已变化，必须重新核验内部成员。
+- 每个候选均须实际下载并独立计算外层 SHA-256，与 Release API digest 比对；检查真实归档成员、唯一 boot/DTB 资产、ARM64 Image、实际 config、Panther X2 DTB 及其哈希。
+- 同时核对 B1 所需配置闭环（ARM64、initramfs、gzip、devtmpfs、IPv4/PACKET、Rockchip STMMAC/DWMAC、Realtek PHY、MMC/eMMC）。
+- 若 6.18.64 当前资产合格则优先使用；否则只向相邻 6.18.y 回退。6.1.116 仅作历史正常行为对照，6.12.81 仅作项目 B 历史证据来源。
+- 只有发布包实物、配置、DTB 和硬件兼容证据闭环后，才锁定 B1 Kernel+DTB。
 
-验收：固定一个 B1 Kernel+DTB 组合，记录发布包哈希、内部文件哈希、配置证据及 DTB model/compatible。
+验收：固定一个 B1 Kernel+DTB 组合，记录当前发布包哈希、内部文件哈希、配置证据及 DTB model/compatible，并明确哪些项目仍未验证。
 
 ### B0.4 eMMC pre-Linux 写入安全审计
 - 确认当前实际 eMMC IDB/SPL 身份，不用 JP IDB 哈希替代。
