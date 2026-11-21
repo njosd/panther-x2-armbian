@@ -647,3 +647,11 @@ mmc writeprotect boot get /dev/mmcblk0
 - 下一步先通过 sysfs CID 精确查找 DF4032 的当前设备节点，再对该节点执行只读 `mmc writeprotect user get` 与 `mmc writeprotect boot get`。不要沿用历史 mmcblk0/1 编号。
 - WP group 理论大小为 8 MiB。SEC_COUNT 对应容量不是 8 MiB 的整数倍，需以 mmc-utils 的实际逐组查询及 CMD31 返回进一步确认末尾部分组的边界/处理；不可自行把不完整尾组忽略。
 - 尚未执行任何 WP 设置命令，尚未插入/识别 8GB 测试卡，尚未写入 TF 或启动最小系统。
+
+
+### 18.4 对第二份 EXT_CSD 输出的证据强度补充
+
+第二份上传记录只显示执行了 `mmc extcsd read /dev/mmcblk0` 及 EXT_CSD 内容，没有在同一份记录中附带该时刻 `/sys/class/block/mmcblk0/device/cid`、name 和容量。因此：
+- SEC_COUNT=61,071,360 与已知 DF4032 容量完全一致，强烈符合 DF4032 的身份；
+- 但仅凭该输出不能严格证明该次命令目标的 CID 就是 DF4032；
+- 在执行任何后续 WP 查询前，必须在同一次终端会话中先打印 CID/name/sectors，并按 DF4032 的已知 CID 精确匹配，再使用动态确定的设备节点。
