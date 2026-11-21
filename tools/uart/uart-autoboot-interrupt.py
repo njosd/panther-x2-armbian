@@ -17,7 +17,7 @@ BAUD = 1500000
 DURATION = 20.0
 INTERVAL = 0.05
 POST_DETECT_READ = 2.0
-PROMPT_RE = re.compile(rb"(?m)(=>|U-Boot>)\\s*$")
+PROMPT_RE = re.compile(rb"(?m)(=>|U-Boot>)\s*$")
 
 
 def main() -> int:
@@ -52,7 +52,7 @@ def main() -> int:
                 break
 
             if waiting_for_prompt and now >= next_send:
-                ser.write(b"\\x03")
+                ser.write(b"\x03")
                 ser.flush()
                 sent += 1
                 next_send = now + INTERVAL
@@ -67,7 +67,7 @@ def main() -> int:
 
                 if detected_at is None and PROMPT_RE.search(output):
                     detected_at = time.monotonic()
-                    print("\\nU-Boot prompt detected. Stopping Ctrl+C.", flush=True)
+                    print("\nU-Boot prompt detected. Stopping Ctrl+C.", flush=True)
 
             if detected_at is not None and time.monotonic() - detected_at >= POST_DETECT_READ:
                 break
