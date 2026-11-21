@@ -334,3 +334,62 @@ Rockchip 当前公开的《Rockchip Specific PCB Template and DDR bin Configurat
 4. 若公开资料无法取得料号或模板映射，结论应保持“无法证明匹配”，而不是按 4GB / LPDDR4 / 双 CS 猜选 v1.26。
 
 本轮未下载或运行 DDR 工具、未反汇编二进制、未构建固件、未操作设备、未写 TF/eMMC。
+
+
+## 10. 官方 rkbin 原始文件复核：mixed-mode 限定条件与通用 loader 输入（2026-11-21）
+
+本节依据本轮直接读取的 Rockchip rkbin 当前原始文件，补充 §9 的证据出处；仅限启动固件。
+
+### 10.1 RK3566 专用 DDR/BL31 文档原文确认
+
+文件：`specific/rk3566/RK3566_EN.md`
+
+当前文档列出：
+- `rk3566_ddr_1056MHz_lp4_4x_specific_mixed_mode_v1.26.bin`，build commit `a7079cfc6e`，日期 2026-06-15；
+- `rk3568_bl31_lp4_4x_specific_mixed_mode_v1.46.elf`，build commit `b80232164`，日期 2026-06-13。
+
+文档的限制语义明确：
+- DDR BIN 仅适用于两个 CS 使用不同 Latency Mode 的特定 LPDDR4/LPDDR4X mixed-package；
+- 对应 BL31 仅适用于该特定 mixed-package 的 DDR frequency scaling，且必须与对应 DDR BIN 配套。
+
+因此 §9 的选型边界得到原始官方文件直接支持。双 CS/rank 数量不等于 mixed-package，也不等于两个 CS 的 Latency Mode 不同；当前 Panther X2 证据不满足该专用变体的选型前提。
+
+原始文件：https://github.com/rockchip-linux/rkbin/blob/master/specific/rk3566/RK3566_EN.md
+
+### 10.2 RK3566 通用官方 loader 配方直接确认
+
+文件：`RKBOOT/RK3566MINIALL.ini`
+
+原始配置明确：
+- `Path1=bin/rk35/rk3566_ddr_1056MHz_v1.26.bin`
+- `FlashData=bin/rk35/rk3566_ddr_1056MHz_v1.26.bin`
+- `FlashBoot=bin/rk35/rk356x_spl_v1.14.bin`
+- 输出 loader 名称：`rk356x_loader_v1.26.114.bin`
+
+这直接证明 Rockchip 当前通用 RK3566 MINIALL loader profile 的 DDR/SPL 输入组合是 DDR v1.26 standard + SPL v1.14。该 ini 没有在上述条目中列出 Panther X2 专用 DRAM 参数，也没有证明该 profile 已针对 H1GW V04 的颗粒/PCB 认证。
+
+原始文件：https://github.com/rockchip-linux/rkbin/blob/master/RKBOOT/RK3566MINIALL.ini
+
+### 10.3 PCB template 表的解释边界
+
+文件：`specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md`
+
+RK3566 LPDDR4/LPDDR4X 项列出若干 Rockchip PCB template，并说明只有使用需要 WDQS 功能的特定颗粒时，才使用该表指定的 WDQS DDR BIN。文档将 WDQS 需求与 Rockchip Approved/Reference Vendor List 中特定 Application Note 编号关联。
+
+这意味着不能仅因板上是 LPDDR4 就选 WDQS 版本，也不能仅因 DTS/DDR 日志显示双 CS 就选 specific mixed-mode 版本。必须先确定 DRAM 颗粒 P/N，再查 Approved/Reference Vendor List 的 Application Note 与 PCB template 对应关系。
+
+原始文件：https://github.com/rockchip-linux/rkbin/blob/master/specific/Rockchip_Specific_PCB_Template_and_DDR_bin_Configuration_Table.md
+
+### 10.4 本轮静态核验的最终状态
+
+| 启动资产 | 官方当前参考 | Panther X2 匹配状态 |
+|---|---|---|
+| DDR | RK3566 MINIALL 使用 v1.26 standard | SoC/profile 方向吻合；颗粒和 PCB template 未闭环 |
+| SPL | RK3566 MINIALL 使用 v1.14 | 官方 RK3566 参考；Panther X2 专用 SPL DTS/pinctrl/bootph 仍需核验 |
+| BL31 | mixed-mode 有专用 v1.46，且限定特定混合封装 | 本机是否属于该封装未知；不能选用该专用 BL31 |
+| U-Boot proper | 另由 U-Boot 源码、control DTS、FIT/ATF 配置构建 | Panther X2 专用 control DTS 和板级配置仍未完成 |
+| DRAM PCB template | 官方列出若干 RK3566 LPDDR4/4X 模板 | 没有证据将 H1GW V04 映射到其中任一模板 |
+
+**当前可成立的结论只有：** DDR v1.26 standard + SPL v1.14 是 Rockchip 当前通用 RK3566 loader 的官方参考组合；不能据此宣布它就是 Panther X2 的最终正确组合。DDR v1.26 specific mixed-mode + BL31 v1.46 是有严格颗粒条件的专用组合，当前没有证据证明 Panther X2 满足条件。
+
+本轮只读取 GitHub 上游文档/ini；未下载二进制、未构建、未写 TF/eMMC、未操作实机。
