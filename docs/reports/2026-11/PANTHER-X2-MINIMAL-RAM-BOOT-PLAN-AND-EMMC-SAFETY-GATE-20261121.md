@@ -944,3 +944,17 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 - 未执行设备启动认证。
 
 本轮未触发 Actions、未写 TF、未启动设备。
+
+
+## 29. Kernel inventory 格式修正与 MMC 节点保护边界审查（2026-11-21）
+
+- Workflow 中 `kernel-boot-files.txt` 的 `find -printf` 格式此前含双反斜杠，现改为标准单个 `\\n` 转义，提交 `ae30ba597c0d72f85a588dfc5aee6b63fbd16314`。
+- 回读确认当前 Workflow SHA `c35f591c9931fc6e63d1690bc642096f6aae8cb8`，inventory 命令完整，`workflow_dispatch` 仍存在，七个步骤仍各出现一次。
+
+同时审查 `init` 的 MMC glob：
+- `/sys/class/block/mmcblk*` 可能覆盖普通 MMC 用户区设备、分区，以及 eMMC boot0/boot1/RPMB 等特殊节点。
+- 当前 `blockro` 对每个匹配节点都执行 `BLKROSET` 和 `BLKROGET`；任一失败就 fail-closed。
+- 特殊节点对该 ioctl 的支持与行为尚未实机验证，因此当前 initramfs 可能在保护阶段停住。不得假设所有 MMC 节点均支持同样的 block-layer RO ioctl。
+- 后续需基于实际 Linux sysfs/block 节点枚举，明确用户区、普通分区、boot partitions、RPMB 的分别处理策略；不能简单忽略错误，也不能把 Linux block RO 当作 pre-Linux 写保护。
+
+**当前仍未进行：** YAML parser/actionlint、ShellCheck、真实发布 tarball 下载与内部结构审计、Actions 构建、TF 写入和设备启动。eMMC pre-Linux 写入安全门继续保持关闭。
