@@ -65,7 +65,7 @@ jobs:
           done
           echo "Required minimal-RAM/MMC kernel options verified:"
           grep -E '^CONFIG_(DEVTMPFS|BLK_DEV_INITRD|RD_GZIP|MMC|MMC_BLOCK|MMC_DW|MMC_DW_ROCKCHIP)=y$' work/kernel-config.txt | sort | tee work/kernel-required-config.txt
-          find -L work/kernel-boot -type f -printf '%P (%s bytes)\\n' | sort | tee work/kernel-boot-files.txt
+          find -L work/kernel-boot -type f -printf '%P (%s bytes)\n' | sort | tee work/kernel-boot-files.txt
           find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\n' | grep -Ei 'panther|rk3566' | sort | tee work/rockchip-dtb-candidates.txt
 
           IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
