@@ -49,12 +49,6 @@ jobs:
               f.write(f"asset_id={a['id']}\n")
               f.write(f"release_updated_at={data.get('updated_at','')}\n")
           PY
-          {
-            echo "Requested version: $VERSION"
-            echo "Release updated_at: $(python3 -c 'import json;print(json.load(open("release.json")).get("updated_at",""))')"
-            echo "Asset name: $VERSION.tar.gz"
-            echo "Asset URL: ${{ steps.asset.outputs.url }}"
-          } > /dev/null
 
       - name: Download and independently verify exact release asset
         shell: bash
@@ -181,6 +175,22 @@ jobs:
             fi
           done
 
+          # B1 boot-critical options must be built in (not unset or modules).
+          required_b1='CONFIG_ARM64 CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT CONFIG_PACKET CONFIG_INET CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE CONFIG_SERIAL_OF_PLATFORM CONFIG_OF CONFIG_OF_FLATTREE CONFIG_OF_EARLY_FLATTREE'
+          : > audit/b1-required-config-gate.txt
+          gate_failed=0
+          for key in $required_b1; do
+            if grep -q "^$key=y$" audit/extracted/kernel.config; then
+              printf '%s=y PASS\n' "$key" >> audit/b1-required-config-gate.txt
+            else
+              line="$(grep -E "^$key=|^# $key is not set$" audit/extracted/kernel.config | tail -n1 || true)"
+              printf '%s FAIL (%s)\n' "$key" "${line:-NOT_RECORDED}" >> audit/b1-required-config-gate.txt
+              gate_failed=1
+            fi
+          done
+          cat audit/b1-required-config-gate.txt
+          [[ "$gate_failed" -eq 0 ]] || { echo "::error::One or more B1 boot-critical kernel config options are not built in"; exit 1; }
+
           sudo apt-get update
           sudo apt-get install -y device-tree-compiler
           dtc -I dtb -O dts -o audit/extracted/rk3566-panther-x2.from-dtb.dts audit/extracted/rk3566-panther-x2.dtb 2> audit/dtc-warnings.txt
@@ -206,6 +216,9 @@ jobs:
             echo
             echo "Required config status:"
             cat audit/required-config-status.txt
+            echo
+            echo "B1 required config gate:"
+            cat audit/b1-required-config-gate.txt
           } | tee audit/audit-report.txt
 
       - name: Upload audit evidence
