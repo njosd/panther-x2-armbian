@@ -53,8 +53,8 @@ jobs:
 
           tar -xzf "$BOOT_ARCHIVE" -C work/kernel-boot
           tar -xzf "$DTB_ARCHIVE" -C work/kernel-dtb
-          find -L work/kernel-boot -type f -printf '%P (%s bytes)\\n' | sort | tee work/kernel-boot-files.txt
-          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\\n' | grep -Ei 'panther|rk3566' | sort | tee work/rockchip-dtb-candidates.txt
+          find -L work/kernel-boot -type f -printf '%P (%s bytes)\n' | sort | tee work/kernel-boot-files.txt
+          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\n' | grep -Ei 'panther|rk3566' | sort | tee work/rockchip-dtb-candidates.txt
 
           IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
           if [ -z "$IMAGE_FILE" ]; then
@@ -64,14 +64,14 @@ jobs:
           echo "Selected kernel payload: $IMAGE_FILE"
           file "$IMAGE_FILE"
 
-          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d ' \\n')"
+          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d ' \n')"
           if [ "$MAGIC" = "41524d64" ]; then
             cp -L "$IMAGE_FILE" work/boot/Image
           else
-            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d ' \\n')"
+            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d ' \n')"
             if [ "$PREFIX" = "1f8b" ]; then
               gzip -dc "$IMAGE_FILE" > work/boot/Image
-              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d ' \\n')"
+              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d ' \n')"
               test "$MAGIC" = "41524d64" || { echo "::error::Decompressed payload is not ARM64 Image"; exit 1; }
             else
               echo "::error::Unsupported kernel payload format"
@@ -131,7 +131,7 @@ jobs:
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror \
             scripts/panther-x2-minimal-initramfs/blockro.c -o "$ROOT/sbin/blockro"
           install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
-          printf '%s\\n' \
+          printf '%s\n' \
             'Panther X2 RAM-only minimal boot test' \
             'Kernel: Linux 6.18.63 stable' \
             'No persistent root filesystem is mounted.' \
@@ -180,7 +180,7 @@ jobs:
           sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
           sudo mount "$PART" work/mnt
           sudo cp -a work/boot/. work/mnt/
-          printf '%s\\n' \
+          printf '%s\n' \
             'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
             'No TF IDB/SPL is installed in this image.' \
             'Do not boot until the active eMMC SPL write-path audit and hardware write-protection gate are cleared.' \
