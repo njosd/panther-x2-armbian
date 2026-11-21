@@ -1542,3 +1542,50 @@ Boot Probe 的“人工停留”机制已经解决：首选复用原版 U-Boot �
 - 不直接采用 NixOS 配方、不构建、不写 TF/eMMC、不实机启动。
 
 当前 P2 唯一研究项更新为：静态核对 DDR v1.26 standard/ultra 与 Panther X2 LPDDR4 双 CS 参数适配，以及 BL31 v1.45/v1.46 的 ATF/DMC/PMU handoff 兼容；完成后再决定唯一探针构建输入。
+
+
+
+## 29. Panther X2/H1GW V04 板级启动隔离公开证据复核（2026-11-21）
+
+本节只回答一个问题：公开资料能否证明 Panther X2 原厂板上存在可在上电前隔离 eMMC、改变 BootROM 首选介质，或令 TF 成为首阶段启动源的硬件机制。没有对设备进行任何操作。
+
+### 29.1 直接对应 Panther X2 / BROWAN H1GW V04 的公开资料
+
+1. Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 拆机/Armbian 记录明确将其设备标识为 BROWAN H1GW V04，列出 RK3566、4GB LPDDR4、32GB eMMC 和 microSD。文章提供 PCB 顶面照片，丝印可见 `BROWAN H1GW V04` 及日期标记；当前公开页面只展示顶面视角，没有可核验的底面走线、原理图、netlist 或 BOM。
+2. 同一作者报告将 Armbian 写入 SD 后，设备仍启动 eMMC 原系统；作者将其归因于 eMMC bootloader 优先，并表示未找到按钮组合、bootloader 菜单或短接点来强制 SD 启动，除非进一步拆机并接触 JTAG。此为另一台同型号设备的用户实测/个人调查，不是 Panther X2 全批次硬件保证，也不是电路级证明；但与本项目 RK3566 eMMC 优先启动证据方向一致。
+3. Crankk Panther X2 设备页面将 Pair Button 描述为 ADC 输入（`iio:device0/in_voltage0_raw`，阈值 500），用途是配对按钮；没有把它描述为 boot-source selector 或 eMMC enable/reset 控制。该页面未提供 H1GW V04 原理图，因此不能据此证明板上没有其他按钮或隐藏 strap。
+4. yjdwbj Panther X2 项目 README 提供 uSD 启动日志，且 Crankk 页面也称支持从 SD 运行。但这只证明有系统可从 SD 运行/出现过 SD 启动结果；缺少 BootROM、SPL、proper 的完整分阶段日志，不能证明 SPL 与 proper 均来自 TF，更不能证明存在 eMMC 硬件隔离。它们与上述“普通 SD 镜像在某台设备上仍进入 eMMC 系统”的报告并不构成必然矛盾：可能采用不同启动镜像、前级 loader 或设备批次，现有资料不足以确定具体原因。
+
+公开来源：
+- Lorenzo Gangemi, Panther X2 / BROWAN H1GW V04 拆机与 SD 启动观察：https://lorenzogangemi.com/blog/repurposing-panther-x2/
+- Crankk Panther X2 硬件/按键接口记录：https://github-wiki-see.page/m/crankkio/docs/wiki/Panther-X2
+- yjdwbj Panther X2 uSD 启动项目及日志：https://github.com/yjdwbj/panther-x2
+
+### 29.2 交叉证据与不能混用的资料
+
+- FCC ID 2AAS9-L0001 的申请对象是 BROWAN MerryIoT Hotspot Miner V1，列出内部照片等认证附件；但目前没有取得证据将 FCC 申请中的 L0001 主板版本与本项目实物的 H1GW V04 PCB revision 一一对应。因此不能把该 FCC 内部照片或“Schematics Metadata only”当作本机原理图。
+- Rockchip RK3566 Hardware Design Guide V1.1 是 SoC 参考设计资料，说明 RK3566 普通启动顺序 eMMC 高于 SDMMC，并描述 eMMC 接口/电源域设计；它不是 H1GW V04 原厂电路图，不能据此推断本板 eMMC RESET、电源开关或隔离电阻的实际连接。
+- 其他 RK3566 开发板的原理图即使有 eMMC_RESETn、电源负载开关或 strap，也不能外推到 H1GW V04。
+
+### 29.3 本轮结论
+
+| 问题 | 结论 | 证据等级 |
+|---|---|---|
+| Panther X2 硬件型号与 H1GW V04 关联 | 直接拆机文章标识一致 | 公开资料支持 |
+| 普通 SD 镜像可能被 eMMC 启动链压过 | 另一台 H1GW V04 有实测记录；与本项目 BootROM/eMMC 证据一致 | 外部单机佐证，不是本机新增实测 |
+| Pair Button 是否为启动源选择开关 | 公开软件资料将其定义为 ADC 配对输入；没有启动选择证据 | 不能当作启动选择开关 |
+| H1GW V04 是否存在 eMMC 电源/复位/总线隔离 | 没有找到原理图、PCB netlist、BOM 或足够清晰的正反面走线证据 | 未验证 |
+| 是否存在 BootROM strap/可逆启动源选择机制 | 公开资料未提供可核验电路或时序 | 未验证 |
+| 能否据此安排短接/拆焊/断电隔离 | 不能 | 不允许推测性操作 |
+
+**结论：** 本轮新增资料没有证明 Panther X2 存在原厂 eMMC 隔离/启动源选择硬件；也不足以证明它不存在。公开资料的有效推进是：H1GW V04 另一台设备上普通 SD 启动失败且未找到用户可用的外部选择方式；Crankk 将可见 Pair Button 定义为 ADC 配对输入。当前仍不能批准任何短接、拆焊、割线或探测未知焊盘。
+
+### 29.4 下一步唯一有价值的输入
+
+继续公开网页搜索的边际收益已经较低。要闭环板级问题，需要至少一种与 H1GW V04 硬件 revision 精确对应的资料：
+- 原厂 schematic / PCB layout / BOM / netlist；或
+- 用户设备 PCB 正反面清晰、无遮挡的照片（不要求拆焊、不要求通电探测），并且能辨认 PCB revision、eMMC 周边电源器件、RESET/CLK/CMD/D0 走线和丝印。
+
+即使取得照片，也只能用于提出可核查的候选网络，不能仅凭外观授权短接或改造。任何电气隔离方案都必须先有原理图/测量证据、上电时序与恢复方案，再单独评审。
+
+本轮只读公开资料和仓库报告；未连接设备、未要求用户重跑测试、未读取/写入 eMMC 或 TF、未修改硬件。
