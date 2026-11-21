@@ -77,7 +77,8 @@ jobs:
           mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
-          chmod 0755 "$ROOT/sbin/blockro"
+          aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/mmc-wp-read-last.c             -o work/mmc-wp-read-last
+          chmod 0755 "$ROOT/sbin/blockro" work/mmc-wp-read-last
           install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
           printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.64 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
           cd "$ROOT"
@@ -150,5 +151,6 @@ jobs:
             work/boot/boot.cmd
             work/boot/boot.scr
             work/busybox-program-headers.txt
+            work/mmc-wp-read-last
           if-no-files-found: error
           retention-days: 30
