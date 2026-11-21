@@ -26,6 +26,7 @@
 #define MMC_RSP_PRESENT (1U << 0)
 #define MMC_RSP_CRC     (1U << 2)
 #define MMC_RSP_OPCODE  (1U << 4)
+#define MMC_RSP_SPI_R1   (1U << 7)
 #define MMC_CMD_ADTC    (1U << 5)
 #define EXT_CSD_HC_WP_GRP_SIZE 221
 #define EXT_CSD_HC_ERASE_GRP_SIZE 224
@@ -62,7 +63,7 @@ static int mmc_read_cmd(int fd, unsigned int opcode, uint32_t arg,
     memset(&cmd, 0, sizeof(cmd));
     cmd.opcode = opcode;
     cmd.arg = arg;
-    cmd.flags = MMC_RSP_PRESENT | MMC_RSP_CRC | MMC_RSP_OPCODE | MMC_CMD_ADTC;
+    cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_PRESENT | MMC_RSP_CRC | MMC_RSP_OPCODE | MMC_CMD_ADTC;
     cmd.blksz = block_size;
     cmd.blocks = blocks;
     cmd.write_flag = 0;
