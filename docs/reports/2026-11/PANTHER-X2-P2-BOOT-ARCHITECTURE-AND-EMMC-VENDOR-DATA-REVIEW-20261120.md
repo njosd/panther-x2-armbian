@@ -1450,3 +1450,35 @@ RK3566/RK3568 TRM 资料也确认支持 eMMC 与 SDMMC 启动。该顺序解释�
 授权边界：用户已授权“仅 TF 卡测试，暂不写入 eMMC”的测试方向；并未授权任何 eMMC 写入，也未自动授权焊接、拆焊、短接、割线或其他可能损伤硬件的隔离操作。任何需要物理改造的方案必须先单独评估并取得明确同意。
 
 本轮未进行实机测试、未制作 TF 镜像、未写 TF/eMMC、未更改硬件或启动配置。
+
+
+### 27.9 RK3566 官方 SD Boot Card 机制核对与测试镜像边界（2026-11-21）
+
+新增资料：Rockchip《Rockchip SD Card Boot Reference》RK-KF-YF-171 V1.2.0（2021-04）。
+
+已确认：
+- Rockchip 将普通 SD、SD Upgrade、SD Boot、SD Repair 区分为不同卡类型；SD Boot Card 设计目标是直接从 SD 启动。
+- 传统 SD Boot Card 在 LBA64 的 IDBLOCK 中写入 magic 0xFCDC8C3B，并在 LBA64+616 bytes 写入 card type flag=1。
+- 该文档的支持表显示 RK3566/RK3568 的传统 IDBLOCK flag 栏为空，而 Android BCB 栏有支持标记。文档对 RK3566 的 BCB 标记说明是 recovery\n--rk_fwupdate\n，用于 SD upgrade/recovery 路径；不能把它等同于 SD Boot Card 的 IDBLOCK flag，也不能据此推断 BootROM 会跳过有效 eMMC。
+- 文档流程图描述 pre-loader/SPL 检查 SD 卡及其 Startup Flag，若识别为可启动 SD 卡则将 SD 提升为优先设备并加载后续固件。这是已经运行的 pre-loader/SPL 层行为，不是 BootROM 冷启动优先级被改变的证据。
+- RK3566 U-Boot Developer Guide 另明确区分 MaskROM 启动优先级（eMMC 高于 SD）与 pre-loader/SPL 的设备顺序（可配置 SD 优先）；u-boot,spl-boot-order 仅约束已运行 SPL 的后续设备选择。
+
+对本项目的影响：
+1. 不能直接拿通用 Rockchip SD Boot Card 制作方式作为 Panther X2 完整 TF 自包含启动方案。
+2. 当前 eMMC 有效 IDB/SPL，因此冷启动时 BootROM 仍可能先执行 eMMC 中的首阶段；若该首阶段再从 TF 加载后续固件，仍然属于混合链。
+3. 需要静态审计当前 eMMC LBA64 IDB/SPL 是否含有 Rockchip SD Boot Card 检测/切换逻辑，以及该逻辑在 RK3566 上是否可用。该审计只读取已有备份或已取得的镜像，不向 eMMC 写入。
+4. 真正 TF-only 的验证必须分别识别：BootROM 首次加载的 SPL 来源、SPL 是否回交 BootROM、回交后 proper 来源。不能用 Linux 根文件系统来自 TF 或 U-Boot 显示 mmc1 作为完整启动证明。
+
+### 27.10 第一轮 TF 测试镜像的阶段标记设计（仅设计，未生成）
+
+不先构建完整 Armbian 镜像。测试固件应分成可独立辨认的阶段：
+- TF LBA64（sector 64，byte offset 32 KiB）：测试用 IDB/loader，加入独特 SPL build banner、短唯一 token 和可区分的版本号。
+- TF proper 区（候选 sector 0x4000，byte offset 8 MiB）：只有在选定的 BACK_TO_BROM 流程和对应 Rockchip 镜像布局核实后才放置 proper/FIT；不能先假定所有 RK3566 loader 都从此位置读取。
+- proper/FIT 内加入不同于 SPL 的唯一 build ID，并让 UART 在最早可输出阶段打印；同时保留 FIT 中 Panther X2 DTB、BL31 等板级依赖的一致性。
+- Linux kernel/rootfs 暂不纳入第一轮判定；第一轮止于 proper 启动并报告实际启动来源，避免把 Linux 启动成功混为 BootROM/loader 介质来源证明。
+- 每个阶段的 token 必须不同；记录 TF 写入前后的镜像哈希和关键 LBA 读回校验。所有写入只针对经用户确认的测试 TF 设备，禁止任何自动探测后盲写的脚本。
+- eMMC 的 LBA64、LBA0x4000 等区域只读，不允许测试固件升级、环境保存、自动修复或回写。
+
+测试入口仍有一个前置条件：先确认怎样让 RK3566 BootROM 实际执行 TF 上的首阶段。当前资料没有证明只插 TF 即可做到；若 eMMC 首阶段优先且没有硬件/ROM 级介质选择方式，则先做 eMMC SPL 的静态审计，不能直接将该实验描述为 TF-only。
+
+本节未生成镜像、未写 TF/eMMC、未构建固件、未进行实机测试。
