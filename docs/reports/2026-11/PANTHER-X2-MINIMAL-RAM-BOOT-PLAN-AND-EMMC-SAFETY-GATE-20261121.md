@@ -867,3 +867,23 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 - `/init` 的 devtmpfs 挂载失败现在停止启动，不再忽略错误。
 
 **验证边界：**以上是仓库文件回读与结构检查，不等于 GitHub Actions YAML/runner 构建已通过。尚未运行 workflow、尚未写入 SU08G、尚未启动设备。即使 CI 成功，eMMC pre-Linux 写入安全门仍未解除；本 artifact 继续仅供 PREPARE-ONLY 检查。
+
+
+## 26. Ophub 6.18.63 发布资产摘要核验（2026-11-21）
+
+通过 GitHub Release API 直接读取 `ophub/kernel` 的 `kernel_stable` 发布资产元数据，找到唯一匹配资产：
+
+- 文件：`6.18.63.tar.gz`
+- 大小：124,405,384 bytes
+- Release API digest：`sha256:67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9`
+- 资产更新时间：2026-11-16T02:42:31Z
+
+已将 Workflow 的 `KERNEL_PACKAGE_SHA256` 从错误的历史值 `47e3...` 改为发布端公布的 `67d2...`，提交 `9121c06d62bb8c197f8777bba7e0685c69fdf75a`，并回读确认。
+
+**尚未验证：**
+- 尚未成功下载该 124 MB 资产，因此未独立计算本地 SHA256。
+- 尚未检查归档内部成员、boot/dtb/config 文件的实际名称与路径。
+- 因此 Workflow 对内部归档文件名的假设仍需在允许执行的构建验证中确认。
+- Kernel config 选项检查已写入 Workflow，但尚未对真实 config 执行。
+
+本次只读取 Release API 元数据并修改仓库文本；未触发 Actions、未写 TF、未启动设备。
