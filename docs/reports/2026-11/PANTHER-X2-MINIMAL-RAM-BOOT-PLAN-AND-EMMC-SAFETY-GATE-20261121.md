@@ -375,3 +375,78 @@ cat /sys/block/mmcblkXboot1/force_ro 2>/dev/null
 - 此处源码是可审计的 mmc-utils 实现参考，不代表用户设备上的 `/usr/bin/mmc` 已证明与该 commit 完全一致；后续应读取本机 mmc-utils 版本/源码包或二进制构建信息核对。
 
 因此目前的严格结论是：**mmc-utils 的标准 user-set/get 接口无法按其边界参数直接表达最后 4 MiB；最后半组的芯片级实际保护行为仍未验证。不得自行把 blocks 向上取整后执行，也不得猜测 CMD28 会自动覆盖或拒绝。**
+
+
+## 13. 纠正“最后 4 MiB 无法保护”的判断：SanDisk DF4032 最后一个部分 WP group 可寻址（2026-11-21）
+
+本节修正第 12.3、12.4、12.6 节中“尾部半组无法保护/尚无法确认是否存在”的过度保守结论。新证据来自与实机 CID 精确匹配的 SanDisk iNAND 7232 数据手册，以及 JEDEC JESD84-B51 对 CMD28/CMD31 的定义。
+
+### 13.1 实机 eMMC 型号得到确认（高度匹配，型号已识别）
+
+实机 CID：
+
+```
+450100444634303332010f37d8066500
+```
+
+CID 字段解码：
+- MID `0x45`：SanDisk；
+- CBX `0x01`：BGA embedded device；
+- OID `0x00`；
+- PNM ASCII `DF4032`；
+- PRV `0x01`。
+
+SanDisk iNAND 7232 eMMC 5.1 数据手册明确列出 CID MID=45h、OID=00h、PNM 的 32GB 型号为 DF4032、PRV=01h；并列出 32GB 用户容量 `0x3A3E000` LBA、`HC_ERASE_GROUP_SIZE=1`、`HC_WP_GRP_SIZE=0x10`，写保护组大小 8 MiB。这与实机 EXT_CSD/CID/SEC_COUNT 完全吻合。因此可把实机识别为 SanDisk iNAND 7232 DF4032 32GB 型号，而非仅凭通用 CID MID 推测品牌。
+
+### 13.2 尾部不是“半个不存在的组”，而是最后一个有效组的可用容量只有半组
+
+实机 user area：
+- 总容量：`SEC_COUNT = 0x03A3E000 = 61,071,360` sectors；
+- WP group：`0x4000 = 16,384` sectors = 8 MiB；
+- `floor(SEC_COUNT / WP_GROUP)=3727` 个完整组；
+- `ceil(SEC_COUNT / WP_GROUP)=3728` 个可寻址组；
+- 最后一个组 index 3727 的起始 LBA：`3727 × 16384 = 61,063,168 = 0x03A3C000`；
+- 最后一个组在 user area 中实际存在的可用部分：LBA 61,063,168–61,071,359，共 8,192 sectors = 4 MiB；组的名义边界会延伸到设备容量之外，但组起始地址仍在有效 user-area 地址范围内。
+
+SanDisk 数据手册同时将 32GB user density 定义为 `0x3A3E000` LBA，并定义其 WP group 为 8 MiB；这与上述 3728 个可寻址组（最后一组容量被设备末端截断）的解释一致。
+
+### 13.3 JEDEC 命令语义支持对最后一个有效组起始地址操作
+
+JEDEC JESD84-B51 §6.6.15 规定 CMD28 SET_WRITE_PROT 对“addressed write-protect group”设置保护；地址单位对大于 2GB 的设备是 sector。该节还规定，只有提供给 CMD28/CMD29/CMD30 的地址参数越出有效范围，设备才以 ADDRESS_OUT_OF_RANGE 拒绝命令。
+
+最后组起始地址 LBA 61,063,168 小于 SEC_COUNT 61,071,360，因此 CMD28 的地址参数本身位于有效 user-area 地址范围内。CMD31 §6.10.4 的说明规定一次返回 32 个 WP groups 的保护类型；超出有效范围的尾部组位返回 0。因此可以从最后组起始地址直接发起 CMD31 查询该组；同一次 32-group payload 中超出容量的组位应为 0。
+
+**据标准命令模型和 SanDisk 容量/组大小定义，最后 4 MiB 是最后一个有效 WP group 的实际容量尾段，应由对该组起始 LBA 的 CMD28 保护覆盖；不是一个需要独立 CMD28 地址的半组。** 这解决了“是否存在可寻址最后组”的规范层问题。
+
+### 13.4 mmc-utils 的真实缺陷与正确覆盖参数
+
+mmc-utils 当前上游实现：
+- `do_writeprotect_user_get()` 使用向下取整 `dev_sizeblks / wp_sizeblks`，只查询 3727 个完整组，漏掉最后一个可寻址组；
+- `do_writeprotect_user_set()` 要求 start 和 count 均为 WP group 的整数倍，之后按 group 起始地址逐个发送 CMD28；但它没有用 `blk_cnt <= dev_sizeblks` 限制 count，也不会对 count 范围逐扇区写数据。
+
+因此覆盖 3728 个可寻址组的参数计算为：
+- start = 0；
+- group_count = 3728；
+- blocks = `3728 × 16384 = 61,079,552` sectors；
+- mmc-utils 循环发送的最后一条 CMD28 地址为 `61,063,168`，即有效最后组的起始 LBA，未向设备发送越界的 CMD28 地址。
+
+这说明标准 mmc-utils 的 user-set 参数可以用“向上取整后的 group 数 × group size”迭代所有可寻址组。blocks 参数会比 BLKGETSIZE 返回的容量多 8,192 sectors，但它只用于循环次数；真正发给 eMMC 的 CMD28 参数是每组起始 LBA。**这是源码控制流推导，不是已经在本机实测的行为；执行前必须先确认设备上 mmc-utils 二进制与所审查源码一致，或自行构建/审查固定版本。**
+
+### 13.5 仍须补做的只读验证，不再把它当作容量未知问题
+
+下一步只读验证方案：
+1. 获取本机 mmc-utils 版本/构建来源，固定上游源码 commit。
+2. 对 `do_writeprotect_user_get()` 做仅查询范围的临时补丁：把组数从 floor 改为 ceil，即 `(dev_sizeblks + wp_sizeblks - 1) / wp_sizeblks`；不改变任何写保护设置函数。
+3. 使用修改版 `mmc writeprotect user get`，确认它对最后查询批次仍以 group 3712 起始地址发 CMD31，并解析 group 3727 的两位状态；这只是 CMD31 查询，不发送 CMD28。
+4. 若现状仍为 No WP，则确认最后组确实可读回且状态为 No WP；这将完成最后组可寻址性实机验证。
+5. 只有用户另行明确授权后，才执行 3728 组的 Power-on WP 设置；随后再次运行 ceil 版只读查询，确认 group 0–3727 全部为 Power-on protection。
+
+### 13.6 状态修正
+
+- 已验证：SanDisk DF4032/iNAND 7232 型号与实机 CID 匹配；32GB 容量和 8 MiB WP group 与数据手册吻合。
+- 规范支持：最后一组起始 LBA 在设备容量内，CMD28 对该组起始地址有效；CMD31 可查询该组，超出设备范围的后续位应为 0。
+- 源码已确认：标准 mmc-utils 的 `get` 向下取整而漏查最后一组；`set` 按 group 起始地址循环且未对总 blocks 做设备容量上限检查。
+- 尚未实机验证：该 DF4032 对最后组 CMD31 的实际返回；mmc-utils 当前安装二进制与审查源码是否一致。
+- 未执行：任何 CMD28、任何 user-area Power-on WP 设置、boot WP 设置、TF 写入或实机启动。
+
+参考：SanDisk iNAND 7232 eMMC 5.1 datasheet DOC-06397/DOC-04417，CID、User Density、Table 18 WP group size；JEDEC JESD84-B51 §6.6.15、§6.10.4；mmc-utils `mmc_cmds.c` `do_writeprotect_user_get/set`。
