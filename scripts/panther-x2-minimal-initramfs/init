@@ -15,7 +15,7 @@ fail_closed() {
 mkdir -p /proc /sys /dev /run
 /bin/busybox mount -t proc proc /proc 2>/dev/null || fail_closed
 /bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || fail_closed
-/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || fail_closed
 /bin/busybox mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run 2>/dev/null || fail_closed
 
 echo
