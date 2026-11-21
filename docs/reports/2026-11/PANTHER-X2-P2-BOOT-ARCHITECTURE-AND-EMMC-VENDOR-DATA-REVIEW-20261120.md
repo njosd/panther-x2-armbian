@@ -1521,3 +1521,8 @@ Hit key to stop autoboot('CTRL+C'): 0
 ### 对研究路线的影响
 
 Boot Probe 的“人工停留”机制已经解决：首选复用原版 U-Boot 的 Ctrl+C autoboot 中断，不再把修改 `CONFIG_BOOTDELAY`、`bootcmd` 或增加专用停留代码列为前置任务。研究重点回到 SPL 启动源、MMC 选择/回退、Vendor Storage 读取来源及写入风险。若后续换用 JP/Radxa proper，只有在其接管入口尚未验证时才单独评估，不得将原版验证结果外推到候选版本。
+
+
+### UART 自动接管脚本的关键行为（纠正说明）
+
+这里的“Ctrl+C 接管”不是让操作者靠手速手动按键。已验证流程由脚本自动完成：脚本持续监听 UART 接收数据流，识别到 `Hit key to stop autoboot('CTRL+C'):` 提示后，立即通过 UART 发送 Ctrl+C。该提示匹配与发送动作由同一自动化流程完成，避免人工响应延迟导致 autoboot 超时。后续文档和实验步骤统一按“UART 自动检测提示并自动发送 Ctrl+C”描述。脚本的具体源码/路径及串口参数应从此前项目记录或仓库资产中追溯；当前归档只固化已验证行为，不臆造脚本文件名、实现语言或参数。
