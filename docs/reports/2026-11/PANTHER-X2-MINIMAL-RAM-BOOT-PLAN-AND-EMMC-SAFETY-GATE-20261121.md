@@ -572,3 +572,42 @@ GitHub Actions workflow 已加入该程序的静态 ARM64 编译，并将二进�
 6. 完成 eMMC 芯片级保护全覆盖验证后，才授权将镜像写入经 CID 识别的 8GB 测试卡并进行 UART 实机启动。
 
 **当前仍未获准实机启动。** 本报告不把“构建流程已准备”写成“已构建”，也不把历史 6.12.81 启动成功写成新 6.18.64 最小 initramfs 已实机验证。
+
+
+## 17. 8GB TF 测试卡数据处置授权及当前 eMMC 实机基线（2026-11-21）
+
+用户明确授权：后续使用的 8GB TF 卡现有内容不需要保留，可以全部删除、重新分区和格式化，用作本项目专用测试介质。此授权仅针对那张经 CID/容量/型号确认的 8GB TF，不适用于 64GB 对照卡或 eMMC。
+
+介质约束更新：
+- 8GB TF：允许破坏性重分区、格式化和写入测试镜像；必须先读取 CID、型号、精确容量、设备节点、分区及挂载状态，并在执行前再次核对目标身份。
+- 64GB TF：6.12.81 对照系统，完全冻结，不插入、不写入、不格式化、不修复。
+- eMMC：当前临时采集环境及测试阶段保护对象；不得因 8GB TF 数据可删除而扩大对 eMMC 的写入授权。
+- 单卡槽切换规则不变：取出 64GB 卡 → 从 eMMC 启动 6.1.116 → 再插入 8GB 卡；除非已确认板级热插拔安全，否则关机插卡。
+
+### 17.1 已取得的 eMMC 实机身份与挂载基线
+
+用户在 root shell 提供的 2026-11-21 实机输出确认：
+- 系统：Armbian unofficial，Linux 6.1.116-ophub，BOARD_NAME=RK-Panther-X2。
+- 根文件系统：/dev/mmcblk0p2，ext4；/boot：/dev/mmcblk0p1，ext4。
+- 当前唯一识别到的主 MMC 设备：/dev/mmcblk0，type=MMC，name=DF4032。
+- CID：450100444634303332010f37d8066500。
+- 容量：61071360 个 512-byte sectors（约 29.1 GiB）。
+- boot0/boot1 各约 4 MiB，Linux 当前显示 RO=1；该值只是块层状态，不能当作 eMMC 芯片级 WP 已生效的证据。
+- 当前 lsblk 未显示任何 SD 卡设备；8GB TF 尚未插入/识别。
+- 本机 /usr/bin/mmc 为 mmc-utils 0.1 风格命令集；mmc version 不受支持，准确包版本/构建来源尚待查证。
+
+### 17.2 下一步只读查询
+
+先在当前 eMMC 6.1.116 环境对 /dev/mmcblk0 执行以下只读查询：
+
+```sh
+mmc extcsd read /dev/mmcblk0
+mmc writeprotect user get /dev/mmcblk0
+mmc writeprotect boot get /dev/mmcblk0
+```
+
+以上子命令用于读取 EXT_CSD 和现有 WP 状态，不是设置命令。严禁误用 user set 或 boot set。取得输出后再核对 user area 全部 WP group、boot0/boot1 状态及 CMD31 工具适配情况。
+
+随后再按单卡槽顺序插入 8GB 卡，先只读识别其 CID/容量/分区/挂载状态。用户已授权该 8GB 卡可格式化，但在身份确认前不运行任何擦除/分区/格式化/镜像写入命令。
+
+当前仍未执行：EXT_CSD/WP 查询、8GB 卡插入识别、eMMC WP 设置、TF 写入和最小系统实机启动。
