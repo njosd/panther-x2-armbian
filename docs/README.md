@@ -7,6 +7,7 @@
 - [项目 A 总路线图](reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威路线，涵盖项目边界、JP U-Boot 测试基线论证、最小系统架构、组件选择原则、安全门和 B0—B7。
 - [项目 A 分阶段实施计划](reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 细化为可执行子步骤、验收标准和停止条件。
 - [B1 最小 RAM 启动与 eMMC 安全关口审计](reports/2026-11/PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)：B1 的专项技术证据与安全审计。
+- [项目 A 干净基线与网络组件隔离决策（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：项目 A 总目标修订、B1 网络变量隔离门和逐项引入规则。
 - [2026-11 报告索引](reports/2026-11/README.md)：项目 A 文件及独立历史专题索引。
 
 新对话、新任务和仓库更新必须先回读项目 A 总路线图及实施计划。历史路线文件如与其冲突，以项目 A 文档为准。
@@ -15,7 +16,7 @@
 
 项目 A 只负责最小 RAM Linux 启动、基础硬件枚举、静态网络连通性、必要的 TCP/UDP 验证、可复现构建和长期启动架构评估。
 
-网卡故障根因调查、GMAC/MDIO/PHY 驱动专项排障为独立专题。其历史报告和原始证据保留，不删除，但不属于项目 A 的路线、任务或验收条件。
+网卡故障根因调查、GMAC/MDIO/PHY 驱动专项根因排障仍为独立历史专题，项目 A 不恢复其根因调查。但项目 A 必须将相关历史线索作为风险输入，在 B1 干净基线中隔离 GMAC 及所有未经审查、可能影响网络行为的组件；基线通过后再按单变量顺序逐项引入。隔离和受控引入是项目 A 的实验设计与验收条件，不是项目 B 专项排障。
 
 家庭照片中心、Immich、NPU/RKNN、正式存储采购与备份恢复属于后续独立阶段。
 
