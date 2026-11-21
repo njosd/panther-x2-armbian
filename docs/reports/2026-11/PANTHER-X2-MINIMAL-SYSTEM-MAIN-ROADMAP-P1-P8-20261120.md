@@ -550,3 +550,14 @@ mmc-utils 默认 `writeprotect user get` 使用向下取整，漏查最后组。
 ### 单 TF 卡槽的介质切换顺序（2026-11-21）
 
 机器只有一个 TF 卡槽，不能在 64GB 6.12 对照卡仍插入时读取 8GB 测试卡。读取 8GB 卡须先正常关机、取出并保存 64GB 对照卡、从板载 eMMC 启动原版 6.1.116，再确认系统确实从 eMMC 启动后，才插入 8GB 卡并只读采集其 CID/型号/容量/分区信息。若不能确认 SD 热插拔安全，则关机状态插入 8GB 卡，再从 eMMC 启动。不得触碰 64GB 卡；8GB 卡身份确认前不得写镜像。详见最小 RAM 启动安全报告第 15 节。
+
+
+### 最小 RAM 启动构建复核与 CMD31 只读工具（2026-11-21）
+
+- 回读 eMMC 6.1.116 原版 `boot.cmd`，确认其使用 legacy uInitrd + `booti`；新测试沿用该已验证机制。
+- 修正构建 workflow：GPT 分区类型恢复为已验证的 EF00；uInitrd legacy header 使用 AArch64；增加 header 检查及 JP proper 写入偏移的强制 SHA-256 比较。
+- 新增 `scripts/panther-x2-minimal-initramfs/mmc-wp-read-last.c`：仅执行 CMD8/CMD31，校验 MMC type、DF4032 name 和预期 CID，查询最后一个 WP group；无 CMD6/CMD28/CMD29 或数据写入调用。已加入 ARM64 静态构建 artifact。
+- 2 GiB GPT 镜像写入 8GB 测试卡后，需在确认目标卡身份后 relocate GPT backup header（`sgdisk -e`）并验证；64GB 6.12 对照卡保持取出、冻结。
+- 当前尚未触发 Actions 构建、尚未运行 CMD31、尚未写入 8GB 卡、尚未执行任何 eMMC WP 设置、尚未实机启动。
+- 下一步按单卡槽流程：取出 64GB 对照卡 → eMMC 启动 6.1.116 → 插入 8GB 卡并只读识别 → CMD31 查询 → 单独授权 eMMC 临时写保护 → 8GB 卡写入与 UART 测试。
+- 详细记录见最小 RAM 启动安全报告第 16 节。
