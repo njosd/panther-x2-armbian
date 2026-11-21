@@ -461,3 +461,11 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 该命令的软件注释只承诺继续启动序列，不承诺沿用原介质。RK3566 官方硬件设计指南确认冷启动优先级为 SPI NOR、SPI NAND、NAND、eMMC、SDMMC；没有公开证据说明回交后的 ROM 是否锁定首次 source 或重新扫描。
 - 因此 BACK_TO_BROM 仍是未验证候选，不可作为 TF→TF/eMMC→eMMC 已可实现的依据；不移植 NixOS defconfig、不启用选项。
 - 详见 P2 报告 §27。当前唯一执行项：继续只读查证 RK3566 BootROM NEXTSTAGE 的状态续接语义；若公开资料无法闭环，再评估离线二进制静态分析。禁止重复实机测试、构建、写卡或刷机。
+
+
+## P2 补充：Back-to-BootROM 通用机制与受控实机测试准备（2026-11-21）
+
+- 修正前一轮过窄判断：U-Boot Kconfig 将 SPL/TPL 回交 BootROM 描述为 Rockchip 多阶段启动机制；ArmSoM Rockchip 启动说明明确列出启用 SPL_BACK_TO_BROM 后由 BootROM 加载 stage 3，并描述完整 eMMC/SD 启动布局。故该机制不应被限定为 RK3288/RK3036。
+- 当前待证重点收敛为 Panther X2 所用 RK3566 BootROM revision 在 SPL 回交后如何选择下一阶段介质，以及原厂 SPL 是否采用该流程；不是再泛泛怀疑 Rockchip 是否有该机制。
+- 用户允许字面研究后考虑可控小范围实机测试。先做零写入基线采集与 eMMC 隔离/救援路径核对；只有备用 TF、恢复方案、阶段标记和风险边界全部明确后，才提交具体测试步骤供确认。不得默认覆盖 eMMC 启动区域。
+- 详见 P2 报告 §27.6–§27.7。当前仅研究与测试设计，未构建、未写卡、未刷机、未实测。
