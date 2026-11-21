@@ -887,3 +887,24 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 - Kernel config 选项检查已写入 Workflow，但尚未对真实 config 执行。
 
 本次只读取 Release API 元数据并修改仓库文本；未触发 Actions、未写 TF、未启动设备。
+
+
+## 27. Workflow 尾部重复片段清理与回读（2026-11-21）
+
+继续检查发现：虽然 Workflow 主体已恢复，但文件在 Artifact upload step 之后仍残留 34 行非空重复 shell 片段（从 `work/kernel-config.txt | sort ...` 开始，包含重复的 Kernel/DTB 查找与处理代码）。该尾部不属于任何合法 step，存在 YAML 结构风险。
+
+已删除 Artifact upload 结束后的全部重复尾部，提交：
+- `eec31af55ef78adb0e2806858069d8fbf79f7932`
+
+随后重新 fetch 默认分支回读，确认：
+- 文件 262 行；
+- `workflow_dispatch` 存在；
+- 七个步骤按预期顺序各出现一次；
+- BusyBox、initramfs、image、artifact 关键步骤均没有重复；
+- Kernel SHA256 为 Release API digest `67d2d78a...`；
+- Kernel 配置 grep 命令完整；
+- 文件在 `retention-days: 30` 后正常结束，没有多余命令。
+
+**验证限制：**这仍然是内容回读和结构静态检查，不是 YAML parser/actionlint 通过，也不是 GitHub Actions runner 构建成功。Release tarball 仍未下载，内部成员和配置文件位置未得到实物验证。
+
+本轮没有触发 Actions、没有写 TF、没有启动设备。
