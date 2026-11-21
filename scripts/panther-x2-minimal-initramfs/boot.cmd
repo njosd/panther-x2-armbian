@@ -4,15 +4,15 @@ setenv bootargs "console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel prin
 
 echo "Panther X2 minimal RAM-only test"
 echo "Boot source: ${devtype} ${devnum}"
-echo "Loading Linux 6.18.64 Image..."
+echo "Loading Linux 6.18.63 Image..."
 if load ${devtype} ${devnum} ${kernel_addr_r} /Image; then
-    echo "Loading RAM initramfs..."
+    echo "Kernel Image loaded."
 else
-    echo "ERROR: Image load failed"
+    echo "ERROR: Kernel Image load failed"
     reset
 fi
 if load ${devtype} ${devnum} ${ramdisk_addr_r} /uInitrd; then
-    echo "Loading Panther X2 DTB..."
+    echo "RAM initramfs loaded."
 else
     echo "ERROR: uInitrd load failed"
     reset
