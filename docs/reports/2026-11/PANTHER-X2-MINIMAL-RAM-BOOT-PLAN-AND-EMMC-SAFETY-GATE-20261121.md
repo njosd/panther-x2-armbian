@@ -908,3 +908,39 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 **验证限制：**这仍然是内容回读和结构静态检查，不是 YAML parser/actionlint 通过，也不是 GitHub Actions runner 构建成功。Release tarball 仍未下载，内部成员和配置文件位置未得到实物验证。
 
 本轮没有触发 Actions、没有写 TF、没有启动设备。
+
+
+## 28. Workflow 依赖与 Artifact 完整性修正（2026-11-21）
+
+再次回读 Workflow、`init`、`blockro.c`、`boot.cmd` 后发现两个确定的构建缺陷：
+
+1. Artifact upload 列表包含 `work/kernel-boot-files.txt`，但 Kernel 解包步骤没有生成该文件。
+2. 镜像构建调用 `partprobe`，但 apt 安装列表没有安装提供该命令的 `parted` 包。
+
+已修复：
+- 增加 Kernel boot archive 文件清单生成命令。
+- 安装 `parted`，补齐 `partprobe`。
+- 显式安装 `file`，避免后续 `file` 检查依赖 runner 镜像预装状态。
+
+提交：
+- 缺少 inventory / parted：`d291234f77069b556b06e959237478bb7805cc38`
+- 显式 file 依赖：`a6151510fe1e568464b9e54452f4881e2592d9d3`
+
+修复后回读确认：
+- 七个 Workflow steps 顺序正确；
+- kernel boot inventory 的生成与 artifact 引用都存在；
+- `partprobe` 与 apt 的 `parted` 依赖匹配；
+- `file` 已显式安装；
+- BusyBox/initramfs/image/artifact 四个关键 step 各出现一次；
+- init 的 devtmpfs fail-closed、MMC 节点遍历和 blockro 的 BLKROSET/BLKROGET 逻辑与前述设计一致；
+- boot.cmd 加载 `/Image`、`/uInitrd` 和 Panther X2 DTB。
+
+**未完成验证：**
+- 仍未对 YAML 执行独立 parser/actionlint；
+- 未执行 ShellCheck 或实际 runner 构建；
+- 未下载并检查 6.18.63 发布 tarball 内部成员；
+- 未证明 Kernel config 文件名和路径；
+- 未实际验证 Kernel 所需配置；
+- 未执行设备启动认证。
+
+本轮未触发 Actions、未写 TF、未启动设备。
