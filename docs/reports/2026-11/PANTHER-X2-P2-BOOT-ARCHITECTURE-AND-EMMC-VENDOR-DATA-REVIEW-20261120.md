@@ -1695,3 +1695,67 @@ https://www.mouser.com/catalog/specsheets/SanDisk_01-12-2026_SDINADF4-16-128GB-H
 5. 对基础 SKU `SDINADF4-32G`，数据手册明确 EXT_CSD[192] `EXT_CSD_REV` 预期为 0x07；-L/-H SKU 预期为 0x08。可用已保存原始 EXT_CSD 数据作只读交叉核对。
 
 因此当前板级隔离的优先方向仍应是先定位 VCC/VCCQ 两个供电域对应的去耦网络和供电源，再判断是否经过独立开关；RST_n 则必须同时核对 PCB 连接和 EXT_CSD[162]。不能仅凭“芯片支持硬件复位”安排任何操作。
+
+
+## 32. eMMC 硬件复位能力：EXT_CSD 已启用，转入板级连线核验（2026-11-21）
+
+本节仅讨论启动相关的 eMMC 复位路径。
+
+### 32.1 已有实机 EXT_CSD 证据（不是推测）
+
+回读仓库既有完整 EXT_CSD 分析报告 PANTHER-X2-EMMC-BOOT0-BOOT1-EXTCSD-ANALYSIS-20261120.md，其中用户 2026-11-20 提供的 mmc extcsd read 结果明确记录：
+
+- RST_N_FUNCTION = 0x01
+- 报告解释：eMMC RST_n 硬件复位功能已启用。
+
+这修正了此前只依据数据手册默认值（0）讨论的泛化表述。**本机当前 EXT_CSD 实测值为 0x01，不能再把 RST_n 功能描述为未启用或默认关闭。** 本节不重新读取设备，也不改变 EXT_CSD。
+
+### 32.2 与实物型号数据手册的对应
+
+用户近照确认实物 P/N 为 SDINADF4-32G。SanDisk iNAND 7232 数据手册：
+- §5.2 Table 16：RST_n 对应 BGA ball K5，定义为 Hardware Reset Input。
+- §2.20：硬件复位可由 host 用于将设备复位至 Pre-idle state。
+- §6.3：RST_n 不是强制连接项；可连接到 host reset，也可不连接而悬空。
+- EXT_CSD byte 162 RST_N_FUNCTION 的默认值为 0，由 host 更新。
+
+公开数据手册：
+- https://files.pine64.org/doc/datasheet/pine64/SDINADF4-16-128GB-H%20data%20sheet%20v1.13.pdf
+- https://www.mouser.com/catalog/specsheets/SanDisk_01-12-2026_SDINADF4-16-128GB-H.pdf
+
+注意：数据手册中的 153-ball package ball map 可提供 K5 的封装坐标，但不能直接给出 H1GW V04 PCB 的网络连接。照片看不到 BGA 焊球和内层走线；尚未找到本板原理图或 netlist。
+
+### 32.3 对 TF 独立启动问题的意义
+
+RST_n 已启用，意味着该 eMMC 具备接受硬件复位输入的配置条件；如果 H1GW V04 确实把 K5 接到一个在 BootROM 采样前可控的外部复位/隔离网络，那么它可能成为启动介质研究的线索。
+
+但现有证据不证明：
+- K5 在本板上实际连接，而不是悬空；
+- K5 连接到 RK3566 的哪一个引脚、外部复位源或其他逻辑；
+- 上电复位期间 K5 的电平和时序；
+- 在 BootROM 启动介质检测窗口内保持 RST_n 有效，会使 eMMC 不被枚举或使 BootROM 跳过 eMMC；
+- 该机制可安全、可逆地令 BootROM 改从 TF 启动。
+
+因此不能把“RST_N_FUNCTION=1”直接等同于“可以靠拉低 RST_n 实现 SD 启动”。数据手册 §2.20 描述的是 eMMC 复位行为，不是 Rockchip BootROM 选源行为。
+
+### 32.4 下一步唯一聚焦的静态核验
+
+1. 使用 SanDisk 153-ball map 定位 K5（RST_n）及 VCC/VCCQ balls；以封装 index/orientation 规则确认方向，不根据照片中圆点自行猜 pin-1。
+2. 在 H1GW V04 正面照片中，仅围绕 eMMC 封装边缘、邻近去耦电容和可能的串联/上拉电阻，寻找可与 K5 网络对应的可见器件/测试点。
+3. 若无原理图、PCB CAD 或可见扇出，明确记录“BGA K5 网络不可由照片确认”，不再扩大到无关电源芯片猜测。
+4. 下一份最有价值的资料是 H1GW V04 原理图/PCB layout/netlist；其次才是 eMMC 周边高分辨率微距照片。照片不能代替电气连通性证据。
+
+不安排短接、飞线、拆焊、通电探测或启动试验。eMMC LBA64、boot0/boot1、EXT_CSD、现有 TF 均保持不变。
+
+### 32.5 当前结论
+
+| 事项 | 状态 |
+|---|---|
+| 实物型号 SDINADF4-32G | 已确认 |
+| 芯片端 RST_n 输入存在，ball K5 | 数据手册已确认 |
+| 本机 EXT_CSD RST_N_FUNCTION=0x01 | 已有实机读取记录确认 |
+| PCB 是否连接 K5 | 未验证 |
+| K5 上电期间电平/控制源 | 未验证 |
+| RST_n 是否可影响 BootROM eMMC 选源 | 未验证 |
+| 可否据此实现 TF-only 冷启动 | 尚不能得出结论 |
+
+本节只推进 BootROM 启动源可行性所需的 eMMC reset 线索，没有讨论与启动无关的存储性能、电源优化或其他板级功能。
