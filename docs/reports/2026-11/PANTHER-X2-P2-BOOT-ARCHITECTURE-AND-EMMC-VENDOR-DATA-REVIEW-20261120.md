@@ -1318,3 +1318,64 @@ Radxa `c559871` 的 `rk3568-u-boot.dtsi` 将 `&pinctrl` 标记为 `u-boot,dm-pre
 4. 与原版 2023 SPL 的 E25 FDT、已知 SPL 日志及构建日期作来源差分。若无法精确追溯原二进制，就明确保留“来源未知”，不把候选构建配方冒充原版源码。
 
 不构建、不刷写、不要求用户重跑已完成测试。
+
+
+## 27. RK3566 的 CONFIG_SPL_ROCKCHIP_BACK_TO_BROM 机制与介质一致性边界（2026-11-21）
+
+本节针对 §26 的 Panther X2 NixOS defconfig 中 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM=y` 做源码与硬件资料交叉核对。目标只在判断该机制是否可能实现 TF→TF、eMMC→eMMC，不构成构建或部署授权。
+
+### 27.1 U-Boot v2026.10 软件路径已确认
+
+固定上游源码版本：U-Boot `v2026.10`。
+
+- `arch/arm/mach-rockchip/spl.c`：当 `CONFIG_IS_ENABLED(ROCKCHIP_BACK_TO_BROM)` 为真，`spl_boot_device()` 返回 `BOOT_DEVICE_BOOTROM`，不再走默认 `BOOT_DEVICE_MMC1`。
+- `common/spl/spl_bootrom.c`：注册名为 `BOOTROM` 的 SPL image loader，调用 `board_return_to_bootrom(spl_image, bootdev)`。
+- `arch/arm/mach-rockchip/spl.c`：Rockchip 实现的 `board_return_to_bootrom()` 调用 `back_to_bootrom(BROM_BOOT_NEXTSTAGE)`。
+- `arch/arm/mach-rockchip/bootrom.c`：通过启动时 `save_boot_params()` 建立的 setjmp 上下文恢复早期入口；`BROM_BOOT_NEXTSTAGE` 分支把返回值设为 0，注释说明以此指示 BROM 继续启动序列。
+- `arch/arm/include/asm/arch-rockchip/bootrom.h`：该命令注释是“continue boot-sequence”，没有写明保持原始介质、禁止重新扫描或从同一介质加载。
+
+因此，BACK_TO_BROM 不是 SPL 自己继续读取另一个 MMC，也不是切换 mmc devnum；它是把控制权交还 BootROM，由 ROM 决定下一步。U-Boot 软件调用链已闭环。
+
+### 27.2 RK3566 官方硬件资料已确认的部分
+
+Rockchip《RK3566 Hardware Design Guide V1.1》系统启动顺序列为：
+
+1. Serial NOR Flash (FSPI)
+2. Serial NAND Flash (FSPI)
+3. NAND Flash
+4. eMMC Flash
+5. SDMMC Card
+
+RK3566/RK3568 TRM 资料也确认支持 eMMC 与 SDMMC 启动。该顺序解释了本项目冷启动时 eMMC SPL 优先于 TF SPL 的既有实机现象，与历史判断相符。
+
+但公开可查的硬件指南/TRM摘录没有描述 SPL 调用 NEXTSTAGE 返回 ROM 后的内部状态机，也没有说明 ROM 是否保留首次命中的 source index、是否继续该介质的下一阶段读取，或是否重新执行完整介质扫描。
+
+### 27.3 关键判定：目前不能把 BACK_TO_BROM 认定为自包含启动方案
+
+已验证：
+- U-Boot v2026.10 的通用 Rockchip SPL 路径确实会在该配置下回交 BootROM。
+- RK3566 冷启动介质优先级为 eMMC 高于 SD/TF。
+- `BROM_BOOT_NEXTSTAGE` 的软件语义仅为“继续启动序列”。
+
+未验证：
+- RK3566 BootROM 是否支持从 SPL 正常返回并继续加载下一阶段的完整流程。
+- 返回后 ROM 是沿用最初启动源，还是重新扫描；是否会重新从高优先级 eMMC 读取 SPL/下一阶段。
+- 若返回后重新扫描，是否有 ROM 内部状态/标志保证不会重复执行 SPL，或是否存在不同的介质阶段布局。
+- 该机制在 RK3566 silicon revision、BootROM 版本及 Panther X2 板级实现上的实际限制。
+
+**当前结论：BACK_TO_BROM 是值得继续查证的机制，但还不能作为 TF→TF、eMMC→eMMC 的方案依据。** 若 ROM 重新按固定优先级扫描，TF 上电时仍可能回到 eMMC；若 ROM 保留最初 source 并加载其下一阶段，才可能达成介质一致性。现有公开证据不足以在两者之间作出选择。
+
+### 27.4 对 NixOS Panther X2 配方的风险限定
+
+该配方启用 BACK_TO_BROM，但同时使用 `CONFIG_TARGET_EVB_RK3568` 与 `rockchip/rk3568-evb1-v10` 默认设备树，补丁未提供 Panther X2 专用 board SPL 代码。它只能证明配置被打开，不能证明该固件在 Panther X2 上已验证可启动，更不能证明启动介质一致性。
+
+因此不建议直接移植该 defconfig 或启用该选项。尤其不能因为选项名包含 Rockchip 就推断 RK3566 BootROM 必然实现相同行为。
+
+### 27.5 下一步只读研究顺序
+
+1. 继续从 Rockchip 官方 SDK/BootROM 文档、RK3566 TRM完整启动流程图及公开 rkbin/loader 资料寻找 NEXTSTAGE 对 RK3566 的定义；重点是“ROM 状态续接”而非普通冷启动优先级。
+2. 检查 RK3566 BootROM source ID（U-Boot 读取地址为 `CFG_IRAM_BASE + 0x10`）在 SPL 回交前后的语义。它可用于识别最初 source，但目前没有证据表明它会约束 ROM 的后续介质读取。
+3. 若公开资料仍无明确答案，再考虑对现有 BootROM/Loader 二进制做离线静态指纹或反汇编研究；不写设备、不构建、不刷写，也不要求重复已有实机测试。
+4. 在上述证据闭环前，维持现有启动设计，不将 BACK_TO_BROM 纳入候选实施改动。
+
+本节仅为只读源码与公开资料研究；未构建、未改代码、未写 TF/eMMC、未刷机、未进行新的设备测试。
