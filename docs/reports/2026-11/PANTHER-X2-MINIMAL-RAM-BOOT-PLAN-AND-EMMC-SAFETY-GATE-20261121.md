@@ -251,3 +251,66 @@ Radxa `stable-4.19-rock3` commit `c55987146f4f9b20f7cb2f917ca88300419afe8d` 的 
 5. 若任何路径可能写 eMMC，则当前阶段不得执行该启动链，必须改用能隔离 eMMC 写入的启动方法或取得经验证的硬件只读隔离。
 
 这项补充取代本报告第 6 节中任何将 JP-TvBox IDB/SPL 直接等同于当前 eMMC SPL 的表述。
+
+
+## 11. 优先采用 eMMC 芯片级临时写保护，建立真正的测试保护层（2026-11-21）
+
+在 Linux initramfs 的 block-layer RO 之外，新增一个更早生效的保护评估：如果当前 eMMC 支持 eMMC Power-on Write Protect，可在启动测试前由当前运行中的 Linux 设置 user area 的 power-on write protect，并设置 boot0/boot1 的非永久 write protect。该保护由 eMMC 芯片执行，早于 BootROM/SPL/BL31/U-Boot；用户区 power-on 保护在下一次真正 power-on 后解除，boot partition 保护也不是永久配置。
+
+这项功能已由 mmc-utils 文档/源码确认：
+- `mmc writeprotect user get <device>`：只读查询 user-area write-protect groups；
+- `mmc writeprotect boot get <device>`：只读查询 boot partition 写保护状态；
+- `mmc writeprotect user set pwron <start-block> <blocks> <device>`：设置 user area power-on write protection，范围必须按 WP group 对齐；
+- `mmc writeprotect boot set <device>`：保护 boot0/boot1，直到下一次 boot/power-on 周期；
+- 严禁使用 `perm`、`-p` 或任何永久写保护操作。
+
+### 11.1 只读预检（可先执行，不改变 eMMC）
+
+先在当前已运行的 Linux 中确认 eMMC 设备名和 CID，不能假定它始终是 `/dev/mmcblk1`：
+
+```sh
+lsblk -o NAME,MAJ:MIN,SIZE,MODEL,SERIAL,RO,MOUNTPOINTS
+
+for d in /sys/block/mmcblk[0-9]*; do
+    [ -e "$d/device/cid" ] || continue
+    echo "===== $d ====="
+    cat "$d/device/cid"
+    cat "$d/device/name" 2>/dev/null
+    cat "$d/size"
+done
+
+mmc extcsd read /dev/mmcblkX
+mmc writeprotect user get /dev/mmcblkX
+mmc writeprotect boot get /dev/mmcblkX
+cat /sys/block/mmcblkX/size
+cat /sys/block/mmcblkXboot0/force_ro 2>/dev/null
+cat /sys/block/mmcblkXboot1/force_ro 2>/dev/null
+```
+
+其中 `mmcblkX` 必须替换成通过 CID、型号、容量和当前挂载点确认的 eMMC，而不是 TF。以上均为读取 EXT_CSD、WP 状态和 sysfs 信息，不执行写保护设置。
+
+### 11.2 写保护设置（当前未授权、未执行）
+
+只有在只读预检证明该 eMMC 支持 power-on user-area WP、WP group 大小和容量边界可完整覆盖，并确认 boot0/boot1 状态后，才向用户请求单独授权。授权后计划：
+
+1. 先设置 user area 从 block 0 到容量末尾的 `pwron` WP，确保起止 block 都按 WP group 对齐；
+2. 再设置 boot0/boot1 的非永久 write protect；
+3. 重新读取 EXT_CSD 和 WP group 状态，逐组确认整个 user area 均为 power-on protected，boot0/boot1 均受保护；
+4. 任一组保护失败、容量不对齐、状态查询不完整或设备映射有歧义，立即停止，不进行启动测试；
+5. 只有芯片级写保护完整验证后，才允许进行 eMMC SPL → TF proper → RAM initramfs 测试。
+
+设置 WP 本身会写入 eMMC 的保护配置/发送写保护命令，但不会改写用户数据区内容；它不是永久保护。该动作属于硬件存储配置变更，必须取得用户明确授权后执行。
+
+### 11.3 该保护的边界
+
+- eMMC 芯片级 WP 覆盖 user area 和 boot0/boot1 后，能够拒绝测试期间对这些区域的写入，包括 SPL A/B metadata、Vendor Storage、U-Boot 环境或误触发的更新写入。
+- RPMB 不作为普通块设备访问；本轮启动链不应启用 RPMB 写服务。若有 secure monitor/TEE 触发 RPMB 写入路径，仍需单独审计。
+- 必须确认 WP 状态在所用的复位方式下仍有效。Power-on WP 的解除条件是下一次真正 power-on；如果测试流程会切断 eMMC VCC 或触发会清除该状态的硬复位，则需重新预检，不能假定仍受保护。
+- Linux initramfs 的 `blockro` 仍保留，作为第二层软件只读验证；芯片级 WP 和 Linux block-layer RO 是两层不同保护。
+
+### 11.4 当前状态
+
+- 已确认 eMMC 当前安装的 IDB/proper 哈希与 JP-TvBox 不同。
+- 现有 Linux 采集记录显示 eMMC user area 只有 BOOT/ROOTFS 两个 GPT 分区，没有 `misc` 分区；仍须用当前原始 eMMC GPT 再次只读确认。
+- Vendor Storage 的 LAN_MAC 项在此前 eMMC-user-area 镜像解析中有效；仍须确保芯片级 WP 覆盖其实际物理位置。
+- **尚未读取当前 eMMC 的 EXT_CSD/WP group 能力；尚未设置任何 eMMC 写保护；尚未运行 workflow；尚未写 TF；尚未实机启动。**
