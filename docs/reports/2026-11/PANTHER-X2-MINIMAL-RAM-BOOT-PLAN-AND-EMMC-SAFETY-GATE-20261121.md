@@ -958,3 +958,41 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 - 后续需基于实际 Linux sysfs/block 节点枚举，明确用户区、普通分区、boot partitions、RPMB 的分别处理策略；不能简单忽略错误，也不能把 Linux block RO 当作 pre-Linux 写保护。
 
 **当前仍未进行：** YAML parser/actionlint、ShellCheck、真实发布 tarball 下载与内部结构审计、Actions 构建、TF 写入和设备启动。eMMC pre-Linux 写入安全门继续保持关闭。
+
+
+## 30. MMC block-layer RO 语义复核及 6.18.63 历史检查证据回读（2026-11-21）
+
+### 30.1 修正上一节对 boot0/boot1/RPMB 的风险判断
+
+直接检查 Linux block 层与 MMC block driver 源码后，修正此前“特殊 MMC 节点可能不支持 BLKROSET，因此容易导致 fail-closed”的判断：目前没有源码证据支持这一推断。
+
+核对依据：
+- `block/ioctl.c` 的 `blkdev_roset()` 对 `BLKROSET` 进行 `CAP_SYS_ADMIN` 检查，然后设置/清除该 block_device 的 `BD_READ_ONLY` 标志；若具体 disk driver 提供 `set_read_only` callback 才额外调用。
+- 当前上游 `drivers/mmc/core/block.c` 的 `mmc_bdops` 未提供 `set_read_only` callback，因此通用 block ioctl 路径适用于 MMC block devices。
+- MMC driver 对 boot area 有独立的只读初始化/force_ro 机制；这与通用 ioctl 并不矛盾。
+- `BLKROGET` 检查的是当前 block_device 的只读状态；sysfs `ro` 则通过 gendisk 的只读状态报告。对 whole disk 与 partition 的组合关系仍应以实际内核版本和实机节点为准。
+
+因此当前不修改 `/init` 的 MMC glob，也不跳过 boot0/boot1。原先将特殊节点不支持 ioctl 作为已知高风险的说法撤回。仍保留“设备枚举、节点创建和 ioctl 结果必须在实机串口日志确认”的验证要求。
+
+源码参考：
+- Linux `block/ioctl.c`：`blkdev_roset`、`BLKROGET`
+- Linux `include/linux/blkdev.h`：`get_disk_ro`、`bdev_read_only`
+- Linux `drivers/mmc/core/block.c`：`mmc_bdops`、`force_ro`、boot partition RO handling
+
+### 30.2 回读历史 6.18.63 实际检查 run
+
+重新读取 GitHub Actions run `43543451274` 的 job log 与 artifact metadata：
+- Job `inspect` 成功，job id `132289067398`。
+- Artifact `ophub-kernel-6.18.63-driver-inspection`，artifact id `14093500129`，大小 175,648 bytes，尚未过期。
+- 日志明确显示：外层包 SHA-256 `47e3f46636594cbf212474a13bac97e1310c3ee51007dee3fa20f93d8659f1ca` 匹配；boot archive 解包后实际存在 `config-6.18.63-ophub` 与 `vmlinuz-6.18.63-ophub`。
+- 日志确认 vmlinuz 是 ARM64 Linux boot executable Image；DTB 为 `rk3566-panther-x2.dtb`，SHA-256 `5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。
+- 历史 artifact 的 `relevant-kernel-config.txt` 确认 `CONFIG_MMC=y`、`CONFIG_MMC_SDHCI=y`、`CONFIG_MMC_SDHCI_OF_DWCMSHC=y`、`CONFIG_MMC_DW=y`、`CONFIG_MMC_DW_ROCKCHIP=y`。
+- 该历史报告没有记录 `CONFIG_MMC_BLOCK`、`CONFIG_DEVTMPFS`、`CONFIG_BLK_DEV_INITRD`、`CONFIG_RD_GZIP` 的实际值，不能声称这些选项已由该 artifact 验证。
+
+### 30.3 发布资产 SHA 变更必须谨慎处理
+
+历史 run 在 2026-11-14 下载的 `6.18.63.tar.gz` 实际摘要是 `47e3...`。2026-11-21 读取到的 Ophub Release API 对同名资产公布 digest `67d2...`，且资产更新时间为 2026-11-16。
+
+这说明同名 Release asset 在历史检查后发生过更新或替换。历史 run 的归档成员证据只直接适用于 `47e3...` 对应的旧字节，不自动证明当前 `67d2...` 包内部完全相同。当前 Workflow 使用 `67d2...` 是按当前 Release API 元数据锁定；仍需由新的下载/检查确认其内部成员、配置文件和内层校验清单。
+
+本轮下载并展开了历史检查 artifact，仅读取内容；没有运行 Actions、写入 TF/eMMC 或启动设备。
