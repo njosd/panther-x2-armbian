@@ -1,0 +1,145 @@
+name: Build Panther X2 minimal RAM boot TF image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-minimal-ram-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KERNEL_VERSION: "6.18.64"
+      KERNEL_PACKAGE_SHA256: "6d7ba9ffee7b84ecb2f9095b3b9441f83bdce8a2e2e7958c18795c8d59eb7812"
+      BUSYBOX_VERSION: "1.37.0"
+      BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
+      JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             bc bison build-essential cpio curl device-tree-compiler             e2fsprogs flex gcc-aarch64-linux-gnu gdisk gzip             libncurses-dev libssl-dev make mkimage u-boot-tools             xz-utils zstd
+
+      - name: Download and verify kernel package
+        run: |
+          set -euo pipefail
+          mkdir -p work/kernel-package work/kernel-boot work/kernel-dtb
+          curl -fL --retry 3             "https://github.com/ophub/kernel/releases/download/kernel_stable/${KERNEL_VERSION}.tar.gz"             -o work/kernel-${KERNEL_VERSION}.tar.gz
+          echo "${KERNEL_PACKAGE_SHA256}  work/kernel-${KERNEL_VERSION}.tar.gz" | sha256sum -c -
+          tar -xzf work/kernel-${KERNEL_VERSION}.tar.gz -C work/kernel-package
+          BOOT_ARCHIVE="$(find work/kernel-package -type f -name "boot-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
+          DTB_ARCHIVE="$(find work/kernel-package -type f -name "dtb-rockchip-${KERNEL_VERSION}-ophub.tar.gz" -print -quit)"
+          test -n "$BOOT_ARCHIVE"
+          test -n "$DTB_ARCHIVE"
+          tar -xzf "$BOOT_ARCHIVE" -C work/kernel-boot
+          tar -xzf "$DTB_ARCHIVE" -C work/kernel-dtb
+
+          IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
+          DTB_FILE="$(find -L work/kernel-dtb -type f -path "*/rockchip/rk3566-panther-x2.dtb" -print -quit)"
+          test -n "$IMAGE_FILE"
+          test -n "$DTB_FILE"
+          mkdir -p work/boot/dtb/rockchip
+          cp -L "$IMAGE_FILE" work/boot/Image
+          cp "$DTB_FILE" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+
+          MODEL="$(fdtget -t s work/boot/dtb/rockchip/rk3566-panther-x2.dtb / model)"
+          echo "DTB model: $MODEL"
+          echo "$MODEL" | grep -qi "Panther"
+          file work/boot/Image
+          sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+
+      - name: Build static ARM64 BusyBox
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3             "https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2"             -o work/busybox-${BUSYBOX_VERSION}.tar.bz2
+          echo "${BUSYBOX_SHA256}  work/busybox-${BUSYBOX_VERSION}.tar.bz2" | sha256sum -c -
+          tar -xjf work/busybox-${BUSYBOX_VERSION}.tar.bz2 -C work
+          cd work/busybox-${BUSYBOX_VERSION}
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+          grep -q '^CONFIG_STATIC=y$' .config
+          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CONFIG_PREFIX="${GITHUB_WORKSPACE}/work/initramfs" install
+          cd "${GITHUB_WORKSPACE}"
+          readelf -l work/initramfs/bin/busybox | tee work/busybox-program-headers.txt
+          ! grep -q 'INTERP' work/busybox-program-headers.txt
+
+      - name: Build read-only guard and initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
+          install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
+          aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
+          chmod 0755 "$ROOT/sbin/blockro"
+          install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
+          printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.64 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
+          cd "$ROOT"
+          find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
+          cd "${GITHUB_WORKSPACE}"
+          mkimage -A arm -O linux -T ramdisk -C gzip             -n "Panther X2 minimal RAM initramfs"             -d work/initramfs.cpio.gz work/boot/uInitrd
+          sha256sum work/initramfs.cpio.gz work/boot/uInitrd
+
+      - name: Prepare U-Boot script and hybrid TF image
+        run: |
+          set -euo pipefail
+          mkdir -p work/mnt
+          install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/boot/boot.cmd
+          mkimage -A arm -O linux -T script -C none             -n "Panther X2 minimal RAM boot"             -d work/boot/boot.cmd work/boot/boot.scr
+
+          curl -fL --retry 3             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb"             -o work/JP-TvBox-u-boot.itb
+          echo "${JP_UBOOT_SHA256}  work/JP-TvBox-u-boot.itb" | sha256sum -c -
+          test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
+
+          truncate -s 2G work/panther-x2-minimal-6.18.64-hybrid.img
+          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
+
+          LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.64-hybrid.img)"
+          trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/mnt
+          sudo cp -a work/boot/. work/mnt/
+          printf '%s\n'             'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.64 -> RAM initramfs.'             'No TF IDB/SPL is installed in this image.'             'Do not boot this image until the active eMMC SPL write-path audit is cleared.'             > work/mnt/TEST-INFO.txt
+          sync
+          sudo umount work/mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          # JP-TvBox U-Boot proper is placed at LBA 16384 (8 MiB).
+          # Partition 1 begins at LBA 32768 (16 MiB), so the raw FIT does not overlap GPT/filesystem.
+          dd if=work/JP-TvBox-u-boot.itb             of=work/panther-x2-minimal-6.18.64-hybrid.img             bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v work/panther-x2-minimal-6.18.64-hybrid.img
+          SIZE="$(stat -c %s work/JP-TvBox-u-boot.itb)"
+          dd if=work/panther-x2-minimal-6.18.64-hybrid.img             bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum
+          sha256sum work/JP-TvBox-u-boot.itb
+
+          zstd -T0 -10 work/panther-x2-minimal-6.18.64-hybrid.img             -o work/panther-x2-minimal-6.18.64-hybrid.img.zst
+          (
+            cd work
+            sha256sum panther-x2-minimal-6.18.64-hybrid.img.zst               kernel-6.18.64.tar.gz initramfs.cpio.gz JP-TvBox-u-boot.itb               > SHA256SUMS
+          )
+          cat work/SHA256SUMS
+
+      - name: Upload preparation artifact (not yet cleared for flashing)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-minimal-6.18.64-hybrid-PREPARE-ONLY
+          path: |
+            work/panther-x2-minimal-6.18.64-hybrid.img.zst
+            work/SHA256SUMS
+            work/boot/boot.cmd
+            work/boot/boot.scr
+            work/busybox-program-headers.txt
+          if-no-files-found: error
+          retention-days: 30
