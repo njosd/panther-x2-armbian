@@ -750,3 +750,49 @@ Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44871804530
 - 卸载目标必须明确限定为 `/dev/mmcblk1p1` 与 `/dev/mmcblk1p2`，且执行前重新核对 CID/name/sectors，不能只凭历史 mmcblk1 编号。
 - 64GB 对照 TF 与 DF4032 eMMC 继续保持不写入。
 - 只有最小系统镜像构建成功、artifact 可下载并完成内容/哈希检查后，才进入 8GB 卡写入和实机启动测试。
+
+
+
+## 22. GitHub Actions run 44872611656：6.18.64 包缺少 Panther X2 DTB，构建输入回退至已验证 6.18.63（2026-11-21）
+
+Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44872611656
+
+### 22.1 本次失败的准确位置
+
+- 外层 Ophub 6.18.64 kernel package 下载成功，SHA-256 与锁定值匹配。
+- 工作流正确选中了 `dtb-rockchip-6.18.64-ophub.tar.gz`，并成功解出 boot 与 Rockchip DTB 归档。
+- boot archive 中找到 `vmlinuz-6.18.64-ophub`；日志的 `file` 输出确认它是原生 ARM64 Linux Image（little-endian，4K pages）。本轮不再是 Image 文件名/格式问题。
+- 随后精确查找 `*/rockchip/rk3566-panther-x2.dtb` 失败，日志明确报 `rk3566-panther-x2.dtb not found in DTB archive`。
+- BusyBox、initramfs、U-Boot script、hybrid TF image 均未执行；run 无 artifact。
+
+### 22.2 与历史 6.18.63 证据交叉核对
+
+仓库已有 6.18.63 检查 run `43543451274` 的 artifact 证据：
+- 6.18.63 外层包 SHA-256：`47e3f46636594cbf212474a13bac97e1310c3ee51007dee3fa20f93d8659f1ca`。
+- Rockchip DTB 包曾成功提取 Panther X2 专用 `rk3566-panther-x2.dtb`。
+- 该 DTB SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`。
+- 该二进制曾成功由 dtc 反编译，识别为 Panther X2（model/compatible）；其启动关键节点审查见本仓库 DTB 核验报告。
+
+因此，当前能作出的结论是：6.18.64 的本次发布包未提供工作流要求的 Panther X2 DTB 路径；不能把它当作 DTB 已验证的构建输入。回退到已有包内 DTB 实物、哈希和反编译证据的 6.18.63，是为了先完成最小 RAM 启动链验证，不代表 6.18.63 是最终内核版本决定。
+
+### 22.3 已提交的工作流调整
+
+提交：`be4b4748182a9857e8b98d2f40bea7949d7d512f`
+
+工作流 `.github/workflows/build-panther-x2-minimal-ram-boot.yml` 已调整：
+- Kernel version 从 6.18.64 改为 6.18.63；
+- 外层包 SHA-256 固定为上述已验证值；
+- 新增 Panther X2 DTB SHA-256 固定值，提取后先做 SHA-256 校验，再检查 model；
+- 修正候选打印的 grep 表达式，便于日志列出 Panther/RK3566 DTB。
+
+本次只修改 GitHub Actions 工作流文件；没有对 Panther X2、eMMC、8GB TF 或 64GB 对照卡执行任何操作。
+
+### 22.4 当前状态与下一步
+
+- 已验证：6.18.64 kernel Image 格式正确，但本次包内目标 DTB 缺失。
+- 已有历史证据：6.18.63 包含 Panther X2 DTB，且其 DTB SHA-256 已知。
+- 已提交：工作流改用 6.18.63 并强制校验 DTB 二进制哈希。
+- 待验证：新工作流是否通过 DTB 提取/校验，并继续完成 BusyBox、initramfs、镜像及 artifact 构建。
+- 未执行：任何 TF 写入、eMMC 写保护设置、实机启动。
+
+下一步手动运行更新后的 workflow。只有新 run 的日志和 artifact 证实构建完整，才继续检查镜像内容；仍不因构建成功自动放行 TF 写入或实机启动。
