@@ -796,3 +796,22 @@ Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44872611656
 - 未执行：任何 TF 写入、eMMC 写保护设置、实机启动。
 
 下一步手动运行更新后的 workflow。只有新 run 的日志和 artifact 证实构建完整，才继续检查镜像内容；仍不因构建成功自动放行 TF 写入或实机启动。
+
+
+
+## 23. SU08G 8GB TF 卸载确认（2026-11-21）
+
+用户执行针对两个已识别分区的普通卸载：
+```sh
+umount /media/devmon/BOOT
+umount /media/devmon/ROOTFS
+```
+
+随后输出确认：
+- `findmnt /dev/mmcblk1p1` 与 `findmnt /dev/mmcblk1p2` 均无输出，两个分区已不再挂载。
+- 同一会话再次读取 `/sys/class/block/mmcblk1/device/cid`、name、size：CID=`035344535530384780b16ad9b700c15f`，name=`SU08G`，sectors=`15523840`。
+- `lsblk` 显示 `/dev/mmcblk1p1`（511M ext4）和 `/dev/mmcblk1p2`（6.9G btrfs）均无挂载点，RO=0。
+- `/dev/mmcblk0` 仍为约 29.1G DF4032 eMMC；`/boot` 与 `/` 分别位于 mmcblk0p1/p2。boot0/boot1 显示 RO=1。
+- 当前设备列表未出现 64GB SD64G 对照卡。
+
+结论：已再次确认 SU08G 身份及其分区卸载状态，达到后续镜像写入前置条件之一。该操作仅卸载文件系统，没有执行擦除、分区表修改、格式化或写入。用户虽已授权清空 SU08G，但仍须先取得成功构建的最小系统 artifact，并完成镜像文件、分区布局、启动文件和哈希审查；在此之前不向 TF 卡发出任何破坏性命令。eMMC 与 64GB 对照卡继续保持不写入。
