@@ -280,3 +280,24 @@ PR 作者说明：原有 Panther X2 build 在 U-Boot 层面有问题；测试多
 - 比较 Panther X2 真实 USB 物理端口与 Linux DTS 中 USB host0/PHY0 映射，避免误启用 ROCK3C 特有的 host1/5V GPIO。
 - 检查 DDR TPL v1.21/v1.23 与本机 4GB LPDDR4 的训练参数。版本号更高不等于已验证适配。
 - 继续保持只读研究；未完成候选审计和明确授权前，不改 TF/eMMC 启动区。
+
+
+## 10. 研究二进制集中归档（2026-11-21）
+
+为避免后续反复索取原始文件，Ophub 原版与 JP-TvBox 两套 U-Boot 二进制现已归档到项目仓库：
+
+- Ophub 原版：`docs/research-assets/bootloader/panther-x2/ophub-original/`
+- JP-TvBox 候选：`docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/`
+
+已从 Git tree 核对四个文件均存在，文件大小如下：
+
+| 版本 | 文件 | 大小 | Git blob SHA1 |
+|---|---|---:|---|
+| Ophub 原版 | `idbloader.img` | 305152 | `d22b624fc90c46e656baf98894bee182316e692e` |
+| Ophub 原版 | `u-boot.itb` | 1431552 | `04cd10bddd4e823d2ea495ee95b264cb2bce1f4c` |
+| JP-TvBox | `idbloader.img` | 309248 | `4bf6c334d4bf16b83c4317286907a361de8be489` |
+| JP-TvBox | `u-boot.itb` | 1464832 | `2e453265e2e87e0ebd41897131fa6447dff4c0d1` |
+
+Ophub 两个文件的 Git blob SHA1 与此前确认的公开来源对象相同；JP idbloader SHA1 与本报告§8.1已有记录相同。JP FIT 文件当前完成仓库对象身份归档，但尚未独立完成 FIT 内容解析。Git blob SHA1 是 Git 对象指纹，不代替 SHA256；SHA256 待在可直接读取完整二进制字节的环境中计算。
+
+本次归档只固定研究输入，不代表任何候选固件已获准写入设备。实机实验继续遵守 eMMC 绝不写入的约束。
