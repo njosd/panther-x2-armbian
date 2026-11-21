@@ -103,7 +103,7 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
           sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
           grep -qx 'CONFIG_STATIC=y' .config || { echo "::error::BusyBox static build option missing"; exit 1; }
-          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig </dev/null
           grep -qx 'CONFIG_STATIC=y' .config || { echo "::error::BusyBox static option was not retained"; exit 1; }
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
 
