@@ -71,13 +71,14 @@ jobs:
           fi
           echo "Selected kernel payload: $IMAGE_FILE"
           file "$IMAGE_FILE"
-          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d " \n")"
+          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d " \\n")"
           if [ "$MAGIC" = "41524d64" ]; then
-            else
-            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d " \n")"
+            cp -L "$IMAGE_FILE" work/boot/Image
+          else
+            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d " \\n")"
             if [ "$PREFIX" = "1f8b" ]; then
               gzip -dc "$IMAGE_FILE" > work/boot/Image
-              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d " \n")"
+              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d " \\n")"
               if [ "$MAGIC" != "41524d64" ]; then
                 echo "::error::Decompressed kernel does not have ARM64 Image magic"
                 exit 1
@@ -93,7 +94,6 @@ jobs:
             exit 1
           fi
           mkdir -p work/boot/dtb/rockchip
-          cp -L "$IMAGE_FILE" work/boot/Image
           cp "$DTB_FILE" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
 
           MODEL="$(fdtget -t s work/boot/dtb/rockchip/rk3566-panther-x2.dtb / model)"
