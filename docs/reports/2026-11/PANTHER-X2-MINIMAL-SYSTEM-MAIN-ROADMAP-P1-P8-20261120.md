@@ -1,5 +1,47 @@
 # Panther X2 最小系统与上游融合主线（P1—P8）
 
+> **2026-11-21 执行基线修订：本节优先于本文后续历史记录中与之冲突的旧状态、旧版本和旧目标。历史记录保留作证据，不代表当前仍执行。**
+
+## 当前执行基线（2026-11-21）
+
+### 当前目标与顺序
+
+本阶段是重新搭建并认证 Panther X2 启动系统，不是直接复刻旧 Armbian，也不是先行验证网络故障。按以下顺序推进：
+
+1. **B0 启动资产静态审计**：固定并核验启动入口、U-Boot proper、Kernel、DTB、initramfs、启动参数及哈希。
+2. **B1 最小 RAM Linux 实机启动认证**：串口进入 initramfs 的 `/init` shell；核实 CPU、内存、设备树、UART、MMC 枚举；不挂载任何持久化文件系统。
+3. **B2 网络驱动与硬件识别**：B1 通过后，确认 GMAC/MDIO/PHY probe、接口和 link 状态。
+4. **B3 网络收发认证**：只加入必要网络工具，验证接口配置、路由、单播和定向广播收发，并保留第三方同二层监听证据。
+5. **B4 黄金内核 A/B**：条件满足后，用各自匹配的 Kernel/DTB 做最小环境对照。
+6. **B5 按需逐层加入用户空间**：仅在有明确证据或功能需求时加入 DHCP、DNS、SSH、设备管理、systemd 等。
+7. **后续**：再融合 Ophub/Armbian，最后才评估存储、NPU/RKNN、Immich。
+
+### B1 最小系统严格范围
+
+- Linux Kernel、与 Panther X2 匹配的 DTB、静态 BusyBox、最小 `/init`、必要目录及只读保护程序。
+- BusyBox 只建立启动与交互诊断所需的命令入口；不安装完整 applet 链接树。当前 defconfig 生成的单体二进制仍可能包含额外 applet，构建报告必须列出编译 applet 清单；这不等于加入了额外独立软件包。
+- 不加入 iproute2、ethtool、DHCP、DNS、SSH、NetworkManager、systemd、udev、Docker、NPU/RKNN、Immich 或存储管理服务。
+- 不启动网络配置，不进行网络流量测试。B1 只认证启动和基础硬件枚举。
+- 不挂载 TF/eMMC 文件系统，不把日志写入持久化介质；日志经 UART 获取。
+- `blockro` 仅在 Linux `/init` 已运行后设置 Linux block-layer RO；它不能保护 SPL、BL31、U-Boot 等 pre-Linux 阶段。
+- `mmc-wp-read-last` 是独立审计工具，不进入 initramfs，也不是 B1 启动依赖。
+
+### 启动链声明边界
+
+当前 CI 镜像是临时混合启动验证介质：现有 eMMC SPL → TF 上的 JP-TvBox U-Boot proper → TF 上的 Kernel/DTB/uInitrd → RAM initramfs。它不是 TF 自包含完整启动链，也不是最终启动架构验收。启动前必须单独清除 eMMC pre-Linux 写入风险；Linux block-layer RO 不构成该项保护。当前尚未获得 eMMC 芯片级 WP 操作授权，不得写卡或启动。
+
+### 当前阶段状态
+
+- B0：候选构建输入已固定，CI 构建与产物尚待重新验证。
+- B1：未构建成功确认、未写卡、未实机启动，故未认证。
+- B2/B3：未开始；必须等待 B1 通过后另行构建网络验证层。
+- 8GB SU08G 是唯一获准清空的实验 TF；每次破坏性操作前仍须复核 CID/name/sectors。eMMC 与 64GB 对照卡禁止写入。
+- 任何构建成功都不自动授权写卡或启动。
+
+---
+
+# Panther X2 最小系统与上游融合主线（P1—P8）
+
 - 建立日期：2026-11-20
 - 主线性质：项目长期进度与执行顺序的权威记录
 - 当前阶段：P2 — RK3566 双介质自包含启动链与 eMMC Vendor 数据传递只读架构审计
