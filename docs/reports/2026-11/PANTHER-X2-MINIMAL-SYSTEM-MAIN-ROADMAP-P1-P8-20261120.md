@@ -561,3 +561,13 @@ mmc-utils 默认 `writeprotect user get` 使用向下取整，漏查最后组。
 - 当前尚未触发 Actions 构建、尚未运行 CMD31、尚未写入 8GB 卡、尚未执行任何 eMMC WP 设置、尚未实机启动。
 - 下一步按单卡槽流程：取出 64GB 对照卡 → eMMC 启动 6.1.116 → 插入 8GB 卡并只读识别 → CMD31 查询 → 单独授权 eMMC 临时写保护 → 8GB 卡写入与 UART 测试。
 - 详细记录见最小 RAM 启动安全报告第 16 节。
+
+
+### 8GB TF 测试卡数据可销毁授权与 eMMC 实机基线（2026-11-21）
+
+- 用户明确授权：后续 8GB TF 测试卡上的原有数据不需要保留，确认介质身份后允许全部删除、重分区、格式化及写入测试镜像。
+- 此授权只适用于 8GB 测试卡；64GB 6.12.81 对照卡继续冻结，eMMC 也不因此获得写入授权。
+- 用户提供的 eMMC 启动环境输出确认：Linux 6.1.116-ophub；root=/dev/mmcblk0p2、/boot=/dev/mmcblk0p1；eMMC /dev/mmcblk0 type MMC、name DF4032、CID 450100444634303332010f37d8066500、容量 61,071,360 sectors。
+- boot0/boot1 的 Linux RO=1 仅是块设备层状态，不等于芯片级写保护。8GB 卡尚未插入或识别。
+- 下一步先只读执行 mmc extcsd read /dev/mmcblk0、mmc writeprotect user get /dev/mmcblk0、mmc writeprotect boot get /dev/mmcblk0；严禁误用 set 子命令。再按单卡槽流程识别 8GB 卡 CID/容量，之后才安排格式化与镜像写入。
+- 详细记录见最小 RAM 启动安全报告 §17。
