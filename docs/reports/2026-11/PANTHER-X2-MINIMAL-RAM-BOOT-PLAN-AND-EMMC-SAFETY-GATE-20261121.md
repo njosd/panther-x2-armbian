@@ -314,3 +314,51 @@ cat /sys/block/mmcblkXboot1/force_ro 2>/dev/null
 - 现有 Linux 采集记录显示 eMMC user area 只有 BOOT/ROOTFS 两个 GPT 分区，没有 `misc` 分区；仍须用当前原始 eMMC GPT 再次只读确认。
 - Vendor Storage 的 LAN_MAC 项在此前 eMMC-user-area 镜像解析中有效；仍须确保芯片级 WP 覆盖其实际物理位置。
 - **尚未读取当前 eMMC 的 EXT_CSD/WP group 能力；尚未设置任何 eMMC 写保护；尚未运行 workflow；尚未写 TF；尚未实机启动。**
+
+
+## 12. 实际 eMMC EXT_CSD / 写保护能力预检结果（用户实机输出，2026-11-21）
+
+用户在当前 SD 启动的 Panther X2 Linux 上执行只读预检，结果已回传并归档。
+
+### 12.1 设备映射（已验证）
+
+- 当前根文件系统：`/dev/mmcblk0p2`，ext4 rw。
+- `mmcblk0` CID：`035344534e36344780af5519750159b7`，名称 `SN64G`，容量 124,735,488 sectors（64 GB SD 卡）；对它执行 EXT_CSD 命令返回 timeout，符合 SD 卡不是 eMMC 的情况。
+- `mmcblk1` CID：`450100444634303332010f37d8066500`，名称 `DF4032`，容量 61,071,360 sectors（约 29.1 GiB），为板载 eMMC。
+- eMMC boot0/boot1 各 4 MiB；lsblk 当前 RO=1 是 Linux boot partition 节点状态，不能等同于 eMMC 芯片 EXT_CSD 硬件写保护。
+- 当前 eMMC user area 未挂载；当前系统由 SD 卡启动。
+
+### 12.2 EXT_CSD 能力（已验证）
+
+针对 `/dev/mmcblk1`：
+- EXT_CSD revision 1.8，MMC 5.1。
+- `SEC_COUNT=0x03a3e000=61,071,360` sectors。
+- `HC_ERASE_GRP_SIZE=0x01`，`HC_WP_GRP_SIZE=0x10`，mmc-utils 报告 WP group = 16,384 sectors = 8 MiB。
+- `ERASE_GROUP_DEF=1`。
+- `USER_WP=0x00`：当前 user-area WP 配置未启用。
+- `BOOT_WP=0x00`、`BOOT_WP_STATUS=0x00)：boot0/boot1 当前无芯片级写保护。
+- 工具报告 boot power-on RO locking possible，permanent RO locking possible；boot partition 0/1 not locked。
+- user WP 查询显示 group 0–3726（blocks 0–61,063,167）均为 No Write Protection。
+
+### 12.3 重要边界：user area 尾部存在半个 WP group 的容量余数
+
+计算：
+- 完整 WP groups：`61,071,360 / 16,384 = 3,727 remainder 8,192` sectors。
+- mmc-utils `writeprotect user get` 的源码按整数除法计算 group 数（`dev_sizeblks / wp_sizeblks`），所以只查询并报告 0–3726；最后 8,192 sectors（4 MiB）没有出现在输出中。
+- mmc-utils `writeprotect user set` 要求 start 和 blocks 都是 16,384 sectors 的倍数，并对每个 group start 发 CMD28；其参数校验不允许用 8,192-sector 半组长度。
+
+因此，当前输出只能证明完整的 3,727 个组没有保护；不能据此声称 eMMC user area 全容量已可由 mmc-utils 一条命令完整覆盖。最后 4 MiB 是否能通过对尾部地址发 CMD28 而保护、芯片如何处理最后一个不完整组、以及如何可靠读回验证，必须进一步依据该 eMMC 型号/控制器行为和 MMC 规范确认。**在这个尾部问题解决前，不设置 user WP，也不允许把芯片级 WP 当作全 user-area 的完整保护。**
+
+### 12.4 下一步只读研究与安全决策
+
+1. 识别 DF4032 的完整厂商/型号/容量规格（结合 CID 字段、EXT_CSD 厂商字段及板级资料），查明最后不完整 WP group 的标准行为。
+2. 审查 mmc-utils 的 WP group 查询源码与 CMD28/CMD31 读回机制；明确是否可以单独查询最后一个 group，且不触发写入。
+3. 计算覆盖范围并设计验证方案；若末尾 4 MiB 不能可靠保护，则不能宣称完整芯片级只读，改用硬件断开 eMMC VCC/总线隔离或其他经验证方案。
+4. boot0/boot1 的 Power-on WP 与 user area 分开处理；只有确认 eMMC 当前启动流程无需写 boot partitions，且保护可在当前启动周期维持，才考虑设置。
+5. 所有设置命令仍需用户单独明确授权；严禁 `perm`、`-p`、EXT_CSD 永久锁定或分区配置类命令。
+
+### 12.5 状态修正
+
+- 已验证：eMMC 为 `/dev/mmcblk1`，CID/容量匹配；MMC 5.1；WP group 8 MiB；user area 完整组 0–3726 未保护；boot0/boot1 未芯片级保护；支持 power-on locking。
+- 未验证：尾部 4 MiB 部分组保护方式；设置后 CMD31 读回策略；实际启动过程中 WP 状态是否持续到目标复位/启动序列。
+- 未执行：任何写保护设置、任何 EXT_CSD 写操作、TF 镜像写入或实机启动测试。
