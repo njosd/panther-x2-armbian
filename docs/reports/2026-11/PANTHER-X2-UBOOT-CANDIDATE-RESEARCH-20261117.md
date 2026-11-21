@@ -301,3 +301,53 @@ PR 作者说明：原有 Panther X2 build 在 U-Boot 层面有问题；测试多
 Ophub 两个文件的 Git blob SHA1 与此前确认的公开来源对象相同；JP idbloader SHA1 与本报告§8.1已有记录相同。JP FIT 文件当前完成仓库对象身份归档，但尚未独立完成 FIT 内容解析。Git blob SHA1 是 Git 对象指纹，不代替 SHA256；SHA256 待在可直接读取完整二进制字节的环境中计算。
 
 本次归档只固定研究输入，不代表任何候选固件已获准写入设备。实机实验继续遵守 eMMC 绝不写入的约束。
+
+
+## 11. Armbian PR #9243 对应 Radxa U-Boot 源码审计（2026-11-21）
+
+### 11.1 已锁定实际源码提交
+
+Armbian PR #9243（merge commit `0e2fec109e12e01bf982b3c565dbda17c7279aa4`）修改的是 `config/boards/panther-x2.csc`，将 U-Boot source 指向 Radxa `stable-4.19-rock3`，关闭 U-Boot patch。该分支当前 HEAD 为 `c55987146f4f9b20f7cb2f917ca88300419afe8d`（2023-05-28）。PR 原文称测试多个构建后该分支允许 Panther X2 proper booting。
+
+对应 defconfig `configs/rock-3c-rk3566_defconfig`，核心板级选择：
+- `CONFIG_TARGET_EVB_RK3568=y`
+- `CONFIG_DEFAULT_DEVICE_TREE="rk3566-rock-3c"`
+- `CONFIG_ROCKCHIP_RK3568=y`
+
+即目标宏仍为 EVB RK3568，但 control FDT 实际指定 RK3566 ROCK 3C。不能只看 TARGET 宏判定实际使用 EVB DTS；也不能把 ROCK 3C FDT 当作 Panther X2 专用 FDT。
+
+### 11.2 SPL 启动设备选择与旧实机日志不同
+
+该提交 `arch/arm/mach-rockchip/spl.c` 的 `spl_boot_device()` 默认返回 `BOOT_DEVICE_MMC1`，只有启用 `CONFIG_ROCKCHIP_BACK_TO_BROM` 时才返回 BOOTROM。该源码没有 Panther X2 专用覆盖证据。该提交 `common/spl/spl.c` 的 weak `board_boot_order()` 只将 `spl_boot_device()` 放入第一个候选项，因此默认只尝试一个 MMC boot device。
+
+同提交 `common/spl/spl_mmc.c` 映射：
+- `BOOT_DEVICE_MMC1` -> MMC device index 0
+- `BOOT_DEVICE_MMC2` / `MMC2_2` -> MMC device index 1
+
+这与 Panther X2 原版 UART 曾出现的 `Trying to boot from MMC2` 不同，且原版历史链已通过 ATAGS 映射为 MMC2->SD0、proper mmc1 为 TF。Radxa branch 默认 MMC1 路径的物理介质映射尚未在 Panther X2 实机上验证。**不能把 Armbian PR 的“能启动”理解成已证明它从 TF 启动，也不能据此认定它是 TF-only。**
+
+该分支 `spl_mmc_load_image()` 对指定 MMC 执行初始化并读取 FIT/raw/partition/filesystem；如果当前单个 MMC 设备加载失败，通用 `board_boot_order()` 没有第二候选可回退。这是与原版实机出现 MMC2 失败后尝试 MMC1 的明显行为差异，需实机验证该构建在 Panther X2 的实际表现。
+
+### 11.3 该 defconfig 不适合未经改造直接作为安全 Boot Probe
+
+静态检查 `rock-3c-rk3566_defconfig` 发现：
+- `CONFIG_BOOTDELAY=0`：默认不留交互等待窗口，不能直接满足 UART 人工接管要求。
+- `CONFIG_SPL_MMC_WRITE=y`、`CONFIG_SPL_MTD_WRITE=y`：编译启用 SPL 写入能力。
+- `CONFIG_FASTBOOT_FLASH=y` 且 `CONFIG_FASTBOOT_FLASH_MMC_DEV=0`：启用 Fastboot 存储写入能力，默认目标设备编号为 0。
+- `CONFIG_CMD_TFTP_FLASH=y`、`CONFIG_CMD_GPT=y`、`CONFIG_CMD_MTD=y`、`CONFIG_CMD_MMC=y`：proper 包含多种可修改存储的命令能力。
+
+这些配置项本身不证明启动时必然写 eMMC，但在本项目“eMMC绝不写入”的约束下，未经剥离/禁用和完整调用路径审计，不得将该 defconfig 构建物直接作为探针写入 TF 后上机。
+
+更重要的是，同提交 `arch/arm/mach-rockchip/board.c` 的 `rockchip_set_ethaddr()` 在 `CONFIG_ROCKCHIP_VENDOR_PARTITION` 下先调用 `vendor_storage_read(LAN_MAC_ID,...)`；若读失败或 MAC 无效，会生成随机 MAC 并调用 `vendor_storage_write(LAN_MAC_ID,...)`。该函数由 `board_late_init()` 调用。由于本项目已确认 TF Vendor Storage 与 eMMC Vendor Storage 内容不同，且目标是 eMMC只读、MAC来源固定为eMMC权威Vendor Storage，这段代码存在两个必须先解决的问题：
+1. 必须追清 `vendor_storage_read/write` 的设备选择，确认其是否跟随 bootdev，以及 TF 启动时会不会向 TF 写入；
+2. 必须禁用随机MAC写回路径，并改为明确只读 eMMC 权威Vendor Storage，不能直接采用该通用行为。
+
+在解决上述风险前，Radxa branch 只作为源码研究参考，不作为可直接写卡的探针镜像。
+
+### 11.4 目前结论与下一项验证
+
+已确认：PR #9243 实际切换到 Radxa stable-4.19-rock3；该分支默认 SPL MMC1、默认只尝试一个设备；其 defconfig 的启动延时和存储写入能力不符合本项目探针安全要求；board_late_init 有潜在 Vendor Storage 写回路径。
+
+未确认：MMC1 在 Panther X2 实机对应 eMMC 还是 TF；vendor_storage 的具体设备选择与写入目标；PR 测试构建的确切产物和 SPL/DDR/ATF blob 版本；PR 测试是否专门验证了 Panther X2 TF 启动。
+
+下一步先从该提交追踪 `rockchip_get_bootdev()`、`vendor_storage_read/write()`、vendor storage block device选择和 MMC device enumeration；再对照原版二进制中实际 MMC 映射。若静态代码仍不能确定物理设备编号，制作只读 UART Boot Probe 在 TF 上验证，启动前先对探针构建禁用所有存储写入能力与Vendor写回路径。eMMC保持绝对只读。
