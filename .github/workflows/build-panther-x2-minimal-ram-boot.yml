@@ -11,8 +11,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      KERNEL_VERSION: "6.18.64"
-      KERNEL_PACKAGE_SHA256: "6d7ba9ffee7b84ecb2f9095b3b9441f83bdce8a2e2e7958c18795c8d59eb7812"
+      KERNEL_VERSION: "6.18.63"
+      KERNEL_PACKAGE_SHA256: "47e3f46636594cbf212474a13bac97e1310c3ee51007dee3fa20f93d8659f1ca"
+      DTB_SHA256: "5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82"
       BUSYBOX_VERSION: "1.37.0"
       BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
       JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
@@ -56,7 +57,7 @@ jobs:
           echo "===== BOOT ARCHIVE FILES ====="
           find -L work/kernel-boot -type f -printf '%P (%s bytes)\\n' | sort
           echo "===== ROCKCHIP DTB CANDIDATES ====="
-          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\\n' | grep -i 'panther\\|rk3566' | sort || true
+          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\\n' | grep -Ei 'panther|rk3566' | sort || true
 
           # Ophub may publish the ARM64 kernel as vmlinuz-<version>-ophub.
           # Accept only a raw AArch64 Image (magic 41 52 4d 64 at offset 0x38),
@@ -97,6 +98,7 @@ jobs:
           mkdir -p work/boot/dtb/rockchip
           cp "$DTB_FILE" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
 
+          echo "${DTB_SHA256}  work/boot/dtb/rockchip/rk3566-panther-x2.dtb" | sha256sum -c -
           MODEL="$(fdtget -t s work/boot/dtb/rockchip/rk3566-panther-x2.dtb / model)"
           echo "DTB model: $MODEL"
           echo "$MODEL" | grep -qi "Panther"
@@ -130,7 +132,7 @@ jobs:
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/mmc-wp-read-last.c             -o work/mmc-wp-read-last
           chmod 0755 "$ROOT/sbin/blockro" work/mmc-wp-read-last
           install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
-          printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.64 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
+          printf '%s\n'             'Panther X2 RAM-only minimal boot test'             'Kernel: Linux 6.18.63 stable'             'No persistent root filesystem is mounted.'             'All MMC block devices are set read-only by /init.'             'This does not protect pre-Linux SPL/U-Boot stages.'             > "$ROOT/etc/panther-x2-minimal-test"
           cd "$ROOT"
           find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
           cd "${GITHUB_WORKSPACE}"
@@ -150,10 +152,10 @@ jobs:
           echo "${JP_UBOOT_SHA256}  work/JP-TvBox-u-boot.itb" | sha256sum -c -
           test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
 
-          truncate -s 2G work/panther-x2-minimal-6.18.64-hybrid.img
-          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.64-hybrid.img
+          truncate -s 2G work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk --clear             --new=1:32768:0             --typecode=1:EF00             --change-name=1:PANTHER_BOOT             work/panther-x2-minimal-6.18.63-hybrid.img
 
-          LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.64-hybrid.img)"
+          LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.63-hybrid.img)"
           trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
           sudo partprobe "$LOOP"
           sleep 2
@@ -162,7 +164,7 @@ jobs:
           sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
           sudo mount "$PART" work/mnt
           sudo cp -a work/boot/. work/mnt/
-          printf '%s\n'             'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.64 -> RAM initramfs.'             'No TF IDB/SPL is installed in this image.'             'Do not boot this image until the active eMMC SPL write-path audit is cleared.'             > work/mnt/TEST-INFO.txt
+          printf '%s\n'             'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.'             'No TF IDB/SPL is installed in this image.'             'Do not boot this image until the active eMMC SPL write-path audit is cleared.'             > work/mnt/TEST-INFO.txt
           sync
           sudo umount work/mnt
           sudo e2fsck -fn "$PART"
@@ -171,12 +173,12 @@ jobs:
 
           # JP-TvBox U-Boot proper is placed at LBA 16384 (8 MiB).
           # Partition 1 begins at LBA 32768 (16 MiB), so the raw FIT does not overlap GPT/filesystem.
-          dd if=work/JP-TvBox-u-boot.itb             of=work/panther-x2-minimal-6.18.64-hybrid.img             bs=512 seek=16384 conv=notrunc status=none
-          sgdisk -v work/panther-x2-minimal-6.18.64-hybrid.img
-          sgdisk -i 1 work/panther-x2-minimal-6.18.64-hybrid.img | tee work/partition-1.txt
+          dd if=work/JP-TvBox-u-boot.itb             of=work/panther-x2-minimal-6.18.63-hybrid.img             bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk -i 1 work/panther-x2-minimal-6.18.63-hybrid.img | tee work/partition-1.txt
           grep -q 'EF00' work/partition-1.txt
           SIZE="$(stat -c %s work/JP-TvBox-u-boot.itb)"
-          ACTUAL_SHA="$(dd if=work/panther-x2-minimal-6.18.64-hybrid.img bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          ACTUAL_SHA="$(dd if=work/panther-x2-minimal-6.18.63-hybrid.img bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
           echo "JP proper expected: ${JP_UBOOT_SHA256}"
           echo "JP proper readback: ${ACTUAL_SHA}"
           test "$ACTUAL_SHA" = "$JP_UBOOT_SHA256"
@@ -184,19 +186,19 @@ jobs:
           file work/boot/Image work/boot/uInitrd work/boot/boot.scr
           sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/boot/boot.scr
 
-          zstd -T0 -10 work/panther-x2-minimal-6.18.64-hybrid.img             -o work/panther-x2-minimal-6.18.64-hybrid.img.zst
+          zstd -T0 -10 work/panther-x2-minimal-6.18.63-hybrid.img             -o work/panther-x2-minimal-6.18.63-hybrid.img.zst
           (
             cd work
-            sha256sum panther-x2-minimal-6.18.64-hybrid.img.zst               kernel-6.18.64.tar.gz initramfs.cpio.gz JP-TvBox-u-boot.itb               > SHA256SUMS
+            sha256sum panther-x2-minimal-6.18.63-hybrid.img.zst               kernel-6.18.63.tar.gz initramfs.cpio.gz JP-TvBox-u-boot.itb               > SHA256SUMS
           )
           cat work/SHA256SUMS
 
       - name: Upload preparation artifact (not yet cleared for flashing)
         uses: actions/upload-artifact@v6
         with:
-          name: panther-x2-minimal-6.18.64-hybrid-PREPARE-ONLY
+          name: panther-x2-minimal-6.18.63-hybrid-PREPARE-ONLY
           path: |
-            work/panther-x2-minimal-6.18.64-hybrid.img.zst
+            work/panther-x2-minimal-6.18.63-hybrid.img.zst
             work/SHA256SUMS
             work/boot/boot.cmd
             work/boot/boot.scr
