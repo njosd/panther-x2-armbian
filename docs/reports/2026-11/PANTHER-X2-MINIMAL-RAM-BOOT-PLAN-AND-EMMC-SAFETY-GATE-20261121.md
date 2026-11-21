@@ -611,3 +611,39 @@ mmc writeprotect boot get /dev/mmcblk0
 随后再按单卡槽顺序插入 8GB 卡，先只读识别其 CID/容量/分区/挂载状态。用户已授权该 8GB 卡可格式化，但在身份确认前不运行任何擦除/分区/格式化/镜像写入命令。
 
 当前仍未执行：EXT_CSD/WP 查询、8GB 卡插入识别、eMMC WP 设置、TF 写入和最小系统实机启动。
+
+
+
+## 18. EXT_CSD 读取结果及 mmcblk 编号变化纠正（2026-11-21）
+
+用户上传两份实机记录，必须按各次启动的 CID 区分设备，不能跨启动沿用 mmcblk 编号。
+
+### 18.1 第一份记录：64GB SD 与 eMMC 同时枚举
+
+- /dev/mmcblk0：CID `035344534e36344780af5519750159b7`，name `SD64G`，容量 124,735,488 sectors（约 59.5 GiB），这是 64GB 6.12 对照 TF 卡。
+- /dev/mmcblk1：CID `450100444634303332010f37d8066500`，name `DF4032`，容量 61,071,360 sectors，这是 eMMC。
+- 当时 / 与 /boot 挂载于 /dev/mmcblk0p2、/dev/mmcblk0p1，说明该次运行根系统实际来自 64GB TF，而不是 eMMC。
+- 对 /dev/mmcblk0 执行 mmc extcsd read 及 WP get 均 Connection timed out；该目标是 SD64G，不是 eMMC。不能将这些超时归因于 DF4032。
+- 对 /dev/mmcblk1 的 EXT_CSD 读取开始成功，但上传记录中该段输出不完整。
+
+### 18.2 第二份记录：DF4032 eMMC EXT_CSD 完整读取
+
+第二份记录对当时的 /dev/mmcblk0 成功读取 EXT_CSD；型号、SEC_COUNT 与既有 DF4032 CID/容量相符。读取值：
+- EXT_CSD rev 1.8 / MMC 5.1。
+- SEC_COUNT=0x03a3e000=61,071,360 sectors，与 eMMC sysfs 容量吻合。
+- HC_ERASE_GRP_SIZE=1，即 512 KiB。
+- HC_WP_GRP_SIZE=0x10=16；结合 HC_ERASE_GRP_SIZE，WP group 大小为 8 MiB。
+- ERASE_GROUP_DEF=1。
+- BOOT_WP_STATUS=0x00，BOOT_WP=0x00，USER_WP=0x00。
+- BOOT_CONFIG_PROT=0x00；RO locking 支持，但 ro lock status 为 not locked。
+
+这些寄存器值表明当前未配置 EXT_CSD 所报告的 User Area / Boot Area 写保护，也未锁定 RO locking。它们不能替代 user area 逐组 CMD31/WP 状态查询。boot0/boot1 的 Linux RO=1 仍仅是块设备层只读标志。
+
+### 18.3 重要纠正与下一步
+
+- mmcblk 编号会随启动介质和枚举顺序变化。每次操作前必须按 CID + name + capacity 确认设备，禁止只凭 /dev/mmcblk0。
+- 第一份记录显示 64GB 对照卡当时被插入且承载了根文件系统。该记录未显示对其执行任何写入命令，但后续仍按冻结原则不再操作这张卡。
+- 第二份记录是目前 DF4032 EXT_CSD 的有效读取证据；但尚缺完整的 `mmc writeprotect user get` 和 `mmc writeprotect boot get` 输出。
+- 下一步先通过 sysfs CID 精确查找 DF4032 的当前设备节点，再对该节点执行只读 `mmc writeprotect user get` 与 `mmc writeprotect boot get`。不要沿用历史 mmcblk0/1 编号。
+- WP group 理论大小为 8 MiB。SEC_COUNT 对应容量不是 8 MiB 的整数倍，需以 mmc-utils 的实际逐组查询及 CMD31 返回进一步确认末尾部分组的边界/处理；不可自行把不完整尾组忽略。
+- 尚未执行任何 WP 设置命令，尚未插入/识别 8GB 测试卡，尚未写入 TF 或启动最小系统。
