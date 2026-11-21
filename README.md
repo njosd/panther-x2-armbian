@@ -1,51 +1,37 @@
-# Panther X2 Armbian
+# Panther X2 Armbian / 项目 A
 
-用于 Panther X2（RK3566）家庭照片中心项目的系统构建与硬件能力研究。当前阶段优先让不包含 Immich 的最小系统稳定启动；不自动部署、不操作设备。
+本仓库用于 Panther X2（RK3566）的系统构建、启动架构与硬件能力研究。当前统一执行主线为**项目 A：最小系统与基础网络验证**；不自动部署、不操作设备。
 
-## 当前主线
+## 当前唯一执行基线
 
-- 首选基础系统：Ophub Armbian + RK35xx Linux 6.12.81 + Ubuntu 24.04 Noble Server。
-- 当前重点：分析 6.12.81 从独立 TF 卡启动时，在 MMC/SDXC 已枚举后出现的 EXT4/JBD2 写入 I/O 错误。
-- 先完成基础启动、网络、SSH、存储和稳定性验收，再推进 NPU/RKNN 与 Immich。
-- 不写入 eMMC，不修改 192.168.9.6 当前系统；未经明确授权不安装软件或修改系统配置。
+- [项目 A 总路线图](docs/reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威架构、决策原则、U-Boot 论证、组件边界和阶段总览。
+- [项目 A 分阶段实施计划](docs/reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 及 B0.1、B1.1 等可执行步骤、验收和停止条件。
+- [文档总索引](docs/README.md)：主题文档、证据与历史路线映射。
 
-## 固定选型参考
+## 项目 A 当前方向
 
-- SoC：RK3566；实机内存 4GB；单有线网口。
-- OS：Ubuntu 24.04 LTS（Noble）。
-- 内核主线：Ophub RK35xx 6.12.y；当前重点版本 6.12.81。6.18.63 审计成果保留为备用参考。
-- 文件系统：EXT4；首轮介质为独立 TF 卡。
-- 设备 DTB：`rk3566-panther-x2.dtb`。
-- 启动文件：`idbloader.img`、`u-boot.itb`。
+固定已实机验证的 JP-TvBox U-Boot proper 作为 B1—B3 测试入口，先完成最小 RAM Linux 启动，再验证静态 IP/ARP/ICMP，最后按需做 TCP/UDP。B1—B3 不替换 U-Boot proper，不引入完整发行版服务。eMMC pre-Linux 写入安全门未通过前，不写实验卡、不启动实验固件。
 
-## 长期阶段与介质原则
+项目 A 不包含网卡故障根因调查、GMAC/MDIO/PHY 专项排障；相关历史报告保留为独立专题证据，不作为项目 A 任务或路线。
 
-- [开发阶段与启动介质原则](docs/DEVELOPMENT-STAGES-AND-BOOT-MEDIA-POLICY.md)：当前 TF/eMMC 只读测试约束与最终 eMMC 正式架构的明确边界。该文件是跨对话长期决策基线。
+## 研究与安全原则
 
-## 文档与证据
+- 目标硬件：Panther X2 / RK3566；实机内存 4GB。
+- Kernel、DTB、initramfs 和工具版本必须锁定并记录来源与 SHA-256。
+- 新系统从头构建，上游优先；6.1.116 只作历史正常行为参照，不复刻其用户空间。
+- 不写 eMMC、不修改当前运行系统；未经明确授权不安装软件或修改系统配置。
+- 写卡、固件写入和其他破坏性操作前，必须重新确认设备身份、影响范围和授权。
+- 所有结论区分已验证、静态审计确认、待验证和推测/候选。
 
-- [文档总索引](docs/README.md)：项目状态、主题文档、报告入口和维护约定。
-- [阶段性报告索引](docs/reports/index.md)：按日期归档的测试与调查报告。
-- [原始证据归档规范](evidence/README.md)：UART、硬件和启动日志归档规则。
-- `config/versions.env`：源码版本与构建基线。
+## 其他长期方向
+
+正式用户空间、存储、NPU/RKNN、Immich 与家庭照片中心属于后续独立阶段，不是项目 A 最小验证系统的组成部分。
+
+## 证据与构建
+
+- [阶段性报告索引](docs/reports/index.md)
+- [2026-11 报告索引](docs/reports/2026-11/README.md)
+- [原始证据归档规范](evidence/README.md)
+- `config/versions.env`：版本与构建基线。
 - `manifests/build-manifest.template`：构建记录模板。
-
-## 工作流
-
-仓库包含手动触发的镜像构建、既有镜像验收、Preflight 和专项审计工作流，位于 `.github/workflows/`。是否触发构建必须根据当前任务决定；排查现有镜像问题时优先复用已有 Artifact，不因一般性诊断重新构建。
-
-## 安全边界
-
-- 不在仓库保存密码、令牌、SSH 私钥或其他凭据。
-- 不自动触发构建；工作流按需手动运行。
-- 不写入 Panther X2 eMMC，不修改当前运行系统。
-- 镜像只写入经确认的独立 TF 卡；写卡前必须核对目标设备。
-- 不把网口灯亮、接口 UP 或一次 DHCP 租约当作网络验收通过。
-- 破坏性操作必须先确认设备身份、影响范围和数据备份。
-
-## 研究状态标记
-
-- **已验证**：有可复核的实机测试或明确证据支持。
-- **静态审计确认**：由源码、配置、镜像或离线检查支持，尚不等于实机运行成功。
-- **待验证**：需要补充证据或实机测试。
-- **推测/候选**：尚未被证据证明的解释或方案。
+- 构建和审计 workflow 位于 `.github/workflows/`；按阶段计划决定是否触发，不自动执行。
