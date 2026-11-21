@@ -723,3 +723,30 @@ Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44871804530
 - 插入 8GB 卡后，先只读列出所有 MMC 设备的 CID、name、容量、分区、RO 和 mount 状态，精确识别 8GB 卡；再次核对 DF4032 eMMC CID。严禁仅凭 mmcblk 编号选目标。
 - 只有在 8GB 卡身份唯一确认、确认不是 DF4032、不是 64GB 对照卡，且其所有分区未挂载后，才可按用户授权执行格式化/写入。
 - 本次尚未插入或格式化 8GB 卡，尚未写入 TF 镜像或启动最小系统。
+
+
+## 21. 8GB TF 卡热插拔识别实测（2026-11-21）
+
+用户在 DF4032 eMMC 启动的 Armbian 6.1.116 系统运行期间插入 8GB TF 卡，无需关机，内核成功识别新卡并自动挂载其两个分区。
+
+### 21.1 同次输出中的设备身份
+
+- eMMC：`/dev/mmcblk0`，TYPE=MMC，NAME=DF4032，CID=`450100444634303332010f37d8066500`，sectors=61,071,360（29.1 GiB）。
+- 新插入 TF：`/dev/mmcblk1`，TYPE=SD，NAME=SU08G，CID=`035344535530384780b16ad9b700c15f`，sectors=15,523,840（约 7.4 GiB）。
+- TF 分区：`/dev/mmcblk1p1` 511M ext4，自动挂载到 `/media/devmon/BOOT`；`/dev/mmcblk1p2` 6.9G btrfs，自动挂载到 `/media/devmon/ROOTFS`。
+- eMMC 根系统仍位于 `/dev/mmcblk0p2`；TF 卡不是当前根文件系统。
+
+### 21.2 已验证结论
+
+- 已验证：当前运行的 6.1.116 Linux 能在不关机情况下检测该 8GB TF 卡，识别其 SD 类型、型号、CID、容量及分区。
+- 已验证：插卡后 eMMC 仍保持原设备身份和设备节点；本次枚举为 eMMC mmcblk0、TF mmcblk1。
+- 已验证：系统 automount 服务自动挂载了 TF 卡两个分区。
+- 未验证：拔卡热移除行为、连续插拔稳定性、8GB 卡写入性能及新最小系统的启动能力。
+- 本次仅有识别和自动挂载输出；没有执行格式化、分区、镜像写入或 eMMC 写入。
+
+### 21.3 下一步安全步骤
+
+- 8GB 卡现有内容已由用户明确授权可以清空，但在正式写入镜像前仍需卸载其两个自动挂载分区。
+- 卸载目标必须明确限定为 `/dev/mmcblk1p1` 与 `/dev/mmcblk1p2`，且执行前重新核对 CID/name/sectors，不能只凭历史 mmcblk1 编号。
+- 64GB 对照 TF 与 DF4032 eMMC 继续保持不写入。
+- 只有最小系统镜像构建成功、artifact 可下载并完成内容/哈希检查后，才进入 8GB 卡写入和实机启动测试。
