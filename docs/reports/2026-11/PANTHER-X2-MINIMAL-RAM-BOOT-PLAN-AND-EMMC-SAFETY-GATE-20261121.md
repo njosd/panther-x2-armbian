@@ -692,3 +692,34 @@ Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44871804530
 4. 之后才进入 BusyBox、initramfs、uInitrd、GPT、JP proper 哈希和 artifact 生成。
 
 截至本记录，工作流修正已提交，但尚未由新的 Actions run 验证。无 TF/eMMC 设备写入或实机启动。
+
+
+## 20. DF4032 eMMC WP 查询实测结果（2026-11-21）
+
+用户在 eMMC 启动的 Armbian 6.1.116 环境中，先通过 sysfs 同时核对 CID、型号、容量，再动态确定设备节点。输出：
+- `mmcblk0 name=DF4032`
+- CID=`450100444634303332010f37d8066500`
+- sectors=`61071360`
+- Root source=`/dev/mmcblk0p2`，确认本次根文件系统位于 DF4032 eMMC。
+
+只读查询结果：
+- User Area WP Group size：16384 blocks / 8,388,608 bytes（8 MiB）。
+- 工具报告 Groups 0–3726，覆盖 blocks 0–61,063,167，状态 `No Write Protection`。
+- eMMC user area 总计 61,071,360 sectors；上述报告范围之外尚余 8,192 sectors（4 MiB）。当前 mmc-utils 输出没有为该尾部范围列出独立 group，不能据此声称尾部已逐组验证；需确认芯片/工具对末尾不完整 WP group 的定义。
+- Boot Area：`BOOT_WP_STATUS=0x00`、`BOOT_WP=0x00`，Power-on RO locking possible，Permanent RO locking possible，ro lock status `not locked`。
+
+### 20.1 结论边界
+
+- 已验证：DF4032 身份、容量、当前 root 来源；mmc-utils 报告的 3727 个 User Area WP groups 均为 No Write Protection；Boot Area WP 寄存器为 0，RO lock 未锁定。
+- 未验证：最后 4 MiB 不完整尾部 WP group 的精确保护状态；硬件实际拒绝写入的行为；本阶段是否需要设置临时 WP。
+- 该结果是只读查询，没有执行任何 WP set/clear、分区或写入操作。
+- 不应把“未启用 eMMC WP”解释为 eMMC 有故障；它只表示当前没有启用这些保护配置。
+
+### 20.2 8GB 测试卡后续步骤
+
+- 用户已明确授权：后续测试专用 8GB TF 卡现有内容可以清空并格式化。
+- 64GB TF 卡是 6.12 对照系统，必须保持原样，不得格式化、分区、写入或用于实验。
+- 机器只有一个 TF 卡槽。8GB 卡检查时，需先让设备从 DF4032 eMMC 的 6.1.116 系统启动，再插入/更换为 8GB TF 卡；不能依赖另一张 TF 卡同时存在。
+- 插入 8GB 卡后，先只读列出所有 MMC 设备的 CID、name、容量、分区、RO 和 mount 状态，精确识别 8GB 卡；再次核对 DF4032 eMMC CID。严禁仅凭 mmcblk 编号选目标。
+- 只有在 8GB 卡身份唯一确认、确认不是 DF4032、不是 64GB 对照卡，且其所有分区未挂载后，才可按用户授权执行格式化/写入。
+- 本次尚未插入或格式化 8GB 卡，尚未写入 TF 镜像或启动最小系统。
