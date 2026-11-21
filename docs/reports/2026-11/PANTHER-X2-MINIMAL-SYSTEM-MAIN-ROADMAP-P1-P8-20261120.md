@@ -514,3 +514,12 @@ Hit key to stop autoboot('CTRL+C'):
 - 官方 RK3566 当前 loader profile 为 DDR v1.26 standard + SPL v1.14；BL31 v1.45/v1.46 列为后续候选。Panther X2 的 LPDDR4 4GB 双 CS 拓扑已从旧 UART 日志确认，颗粒料号/PCB template/DQ mapping 仍待证。
 - 详细报告：[P2 U-Boot 与 RK3566 DDR/SPL/BL31 候选审计](PANTHER-X2-P2-UBOOT-RK3566-DDR-SPL-BL31-CANDIDATE-AUDIT-20261121.md)。
 - 下一步唯一研究项：静态确认 DDR v1.26 standard/ultra 与 Panther X2 DRAM 参数适配，以及 BL31 v1.45/v1.46 handoff 兼容；不构建、不写卡、不实机启动。
+
+
+## 最小 RAM 启动实机测试推进（2026-11-21）
+
+- 已冻结第一阶段目标：Ophub stable Linux 6.18.64 + Panther X2 DTB + BusyBox 静态 RAM initramfs；不挂载 eMMC/TF 文件系统，Linux init 后对所有 MMC block devices 执行并验证 block-layer read-only。
+- 已准备构建脚本与 GitHub Actions workflow（PREPARE-ONLY），尚未触发构建、尚未写 TF、尚未实机启动。
+- 重要核对：当前 eMMC 安装的 Panther-X2 U-Boot IDB SHA-256 为 `990afd3e1a96094a1b6ef0b32ea55cb9cb2d6de53bd7e368d6c77fea4eddd91e`，proper SHA-256 为 `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af`；JP-TvBox IDB/proper 是另一套不同二进制。不能混称为同一 SPL。
+- Radxa ROCK 3C defconfig 的 SPL A/B、MMC write、Vendor Storage 等写路径是高相关候选风险，但尚未把当前 eMMC IDB 精确映射到该源码 commit/final .config。当前阶段仍不允许实机启动，需先完成当前 IDB 源码映射及 TF 失败/回退路径的 eMMC 写入目标审计。
+- 详细方案与安全关口：[最小 RAM 启动系统方案与 eMMC 安全关口](PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)。
