@@ -145,10 +145,14 @@ USB、Wi-Fi 等非首阶段必需接口按需评估。
 - 必须使用 Panther X2 专用 `rk3566-panther-x2.dtb`，不得用 E23/E25/ROCK 3C DTB 替代。
 - Kernel、DTB、模块和必要固件必须来自匹配版本。
 - 必须具备 ARM64、initramfs/initrd、所选压缩格式、devtmpfs、必要 MMC/eMMC 和 B2/B3 所需网络支持。
-- 6.18.64 发布包历史检查未找到 Panther X2 DTB，不作为当前已验证 B1 输入。
-- 6.18.63 历史 artifact 曾包含 Panther X2 DTB（历史 DTB SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`），但同名发布包 digest 后续变化为 `67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9`，新包内部内容尚未重新核验。
-- 6.12.81 有历史运行时解包 gzip initramfs 证据，可作能力参照，不自动成为新系统首选。
-- 当前 Kernel 未最终锁版；6.18.63 是优先复核候选，不是已认证输入。
+- 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
+- 按相邻修订顺序审计 6.18.64、6.18.63、6.18.62（必要时 6.18.61），优先选距离 6.18.64 最近且当前发布资产完整合格的版本。
+- 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；旧包检查结论不能直接套用于当前新资产。
+- 6.18.63 历史 artifact 曾包含 Panther X2 DTB（历史 DTB SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`），但同名发布包 digest 后续变化为 `67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9`；历史内部成员证据只适用于旧包，当前包尚未重新核验。
+- 每个候选均须实际下载并独立计算外层 SHA-256，与 Release API digest 比对；检查真实归档成员、唯一 boot/DTB 资产、ARM64 Image、实际 config、Panther X2 DTB 及其哈希。
+- 同时核对 B1 所需配置闭环（ARM64、initramfs、gzip、devtmpfs、IPv4/PACKET、Rockchip STMMAC/DWMAC、Realtek PHY、MMC/eMMC）。
+- 若 6.18.64 当前资产合格则优先使用；否则只向相邻 6.18.y 回退。6.1.116 仅作历史正常行为对照，6.12.81 仅作项目 B 历史证据来源。
+- 当前 Kernel 未最终锁版；只有发布包实物、配置、DTB 和硬件兼容证据闭环后，才锁定 B1 Kernel+DTB。
 
 ### 5.2 Initramfs 与 BusyBox
 
