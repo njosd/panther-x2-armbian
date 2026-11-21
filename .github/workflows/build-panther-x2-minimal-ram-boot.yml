@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=work/initramfs
-          mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
+          mkdir -p "$ROOT"/{proc,sys,dev,run,etc,sbin}
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
           chmod 0755 "$ROOT/sbin/blockro"
@@ -222,7 +222,7 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=work/initramfs
-          mkdir -p "$ROOT"/{proc,sys,dev,run,etc}
+          mkdir -p "$ROOT"/{proc,sys,dev,run,etc,sbin}
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
           aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror             scripts/panther-x2-minimal-initramfs/blockro.c             -o "$ROOT/sbin/blockro"
           install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
@@ -297,5 +297,6 @@ jobs:
             work/boot/boot.cmd
             work/boot/boot.scr
             work/busybox-program-headers.txt
+            work/busybox-compiled-applets.txt
           if-no-files-found: error
           retention-days: 30
