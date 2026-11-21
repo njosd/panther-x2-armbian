@@ -447,3 +447,50 @@ Micron 官方产品目录镜像/产品信息同时列出 LPDDR4 200-ball、1.1V/
 - 未验证：实物完整订货后缀是否与照片中所有 lot/assembly 标记完全一致；MT 7VD77 的含义；本板 PCB template / DQ mapping；该颗粒在本板上实际 CS/rank 映射；最终 DDR BIN 兼容性。
 
 本轮仅分析用户提供的芯片照片并查询 Micron 官方产品资料；未操作硬件、未构建、未写 TF/eMMC。
+
+
+## 12. Micron D9WMH 与 Rockchip DDR Support List 的精确匹配审查（2026-11-21）
+
+在确认 D9WMH → `MT53D1024M32D4DT-046 AAT:D` 后，进一步检查 Rockchip DDR Support List Ver2.61（2024-06-05）和 Ver2.54（2022-08-18）的公开可检索表项，避免把同基础型号、不同 Micron FBGA code 的条目误判为同一颗粒已获 Rockchip 验证。
+
+### 12.1 必须区分两个不同 FBGA code
+
+Micron 官方目录明确：
+- `MT53D1024M32D4DT-046 AAT:D` → FBGA `D9WMH`；
+- 同一基础料号的 `MT53D1024M32D4DT-046 WT:D` → FBGA `D9WQG`。
+
+两者温度/订货变体不同，FBGA code 也不同，不能互相替代作为颗粒标识。
+
+Micron 官方 AAT 页面：https://www.micron.com/products/dram/lpdram/part-catalog/mt53d1024m32d4dt-046-aat
+Micron 官方 WT 页面：https://www.micron.com/products/dram/lpdram/part-catalog/mt53d1024m32d4dt-046-wt
+
+### 12.2 Rockchip Support List 中找到的是 D9WQG，不是 D9WMH
+
+Ver2.61 公开表中有：
+`MT53D1024M32D4DT-046 WT:D (D9WQG)`
+其组织为 1024M×32、32Gbit、LPDDR4/LPDDR4X、200-ball。表格列中对 RK3566 对应项有 T/A 标记及脚注 [11]。
+
+Ver2.54 也列出同一 WT:D / D9WQG 变体。
+
+**目前检索到的这两版 Rockchip Support List 没有列出 AAT:D / D9WMH。** 因此只能说 Rockchip 列表包含同基础料号的 WT:D / D9WQG 变体，不能说本机 AAT:D / D9WMH 已被 Rockchip Support List 明确认证。AAT 与 WT 可能是温度/测试等级变体，但是否电气等价、Rockchip 是否允许按同基础 die 复用该条目，需要 Micron datasheet 与 Rockchip 脚注 [11] / Application Note 支持；当前未证明。
+
+公开资料：
+- Rockchip DDR Support List Ver2.61：https://lo01.g77k.com/aeb/docs/en/Common/AVL/Rockchip_Support_List_DDR_Ver2.61.pdf
+- Rockchip DDR Support List Ver2.54：https://files.kos.org.cn/rockchip/Rockchip_Support_List_DDR_Ver2_54_20220181.pdf
+
+### 12.3 对 DDR BIN 决策的更新
+
+- 已确认实物 D9WMH 属于 Micron `MT53D1024M32D4DT-046 AAT:D`，32Gb、x32、LPDDR4、200-ball。
+- 找到 Rockchip Support List 中相同基础料号的 WT:D / D9WQG 对 RK3566 支持条目。
+- 尚未找到 Rockchip 对 AAT:D / D9WMH 这一精确 FBGA 变体的明确列项。
+- 因此 DDR v1.26 standard 仍可作为通用参考候选，但“该 BIN 对本机颗粒/PCB 已被 Rockchip 认证”不能成立。
+- 在获取 Micron AAT:D 与 WT:D 的完整 datasheet/温度等级等价说明，以及 Rockchip 脚注 [11] 的定义和对应 Application Note 前，不把 WT:D 的 T/A 结果直接外推到 AAT:D。
+- 不据此选择 WDQS、ultra 或 specific mixed-mode BIN；这些仍需各自的颗粒和板级条件证据。
+
+### 12.4 当前最小待查项
+
+1. 获取 Micron `MT53D1024M32D4DT-046` 完整 datasheet，核对 AAT:D 与 WT:D 的电气参数、温度等级、封装/ball map 是否完全一致。
+2. 查清 Rockchip Ver2.61 脚注 [11] 与对应 Application Note，确认该支持标记的限制条件。
+3. 若无法证明 AAT:D 可按 WT:D 支持条目处理，则维持“精确变体未获列表确认”，通过实机 DDR training 与稳定性验证来判定候选，而非宣称已认证。
+
+本轮仅静态检索资料；未运行 DDR 工具、未构建、未操作实机。
