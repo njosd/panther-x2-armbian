@@ -226,5 +226,6 @@ jobs:
         with:
           name: ophub-kernel-${{ inputs.kernel_version }}-read-only-audit
           path: audit/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
+        if: always()
