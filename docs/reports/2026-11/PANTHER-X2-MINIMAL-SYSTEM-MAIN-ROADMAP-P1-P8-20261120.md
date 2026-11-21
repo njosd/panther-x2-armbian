@@ -528,3 +528,12 @@ Hit key to stop autoboot('CTRL+C'):
 ### eMMC 芯片级临时写保护路径（2026-11-21）
 
 为避免仅依赖 Linux initramfs RO，已在最小 RAM 启动方案中新增 eMMC Power-on Write Protect 评估：先只读查询 EXT_CSD、WP group、user-area 和 boot0/boot1 状态；如支持，在单独授权后设置 user-area `pwron` 保护及 boot0/boot1 非永久保护，验证完整覆盖后才执行实机启动。永久写保护一律禁止。详见同一最小 RAM 启动安全报告第 11 节。当前未查询 EXT_CSD、未设置 WP、未写 TF、未启动实机。
+
+
+### DF4032 eMMC 最后一个部分 WP group 的规范分析已纠偏（2026-11-21）
+
+实机 CID 解码与 SanDisk iNAND 7232 DF4032 32GB 数据手册相符：SEC_COUNT=61,071,360 sectors，WP group=16,384 sectors（8 MiB）。因此 user area 是 3,727 个完整组加一个最后有效组；最后组起始 LBA=61,063,168，设备末尾落在该组中间，尾部 4 MiB 是最后有效组的一部分，不是独立半组。
+
+mmc-utils 默认 `writeprotect user get` 使用向下取整，漏查最后组。已修正此前“最后 4 MiB 无法保护”的表述：按 JEDEC CMD28 地址语义，最后组起始 LBA 仍在设备有效范围，理论上可对最后组操作；但需用只读 CMD31 查询实机验证最后组状态，并核对本机 mmc-utils 版本/源码。**尚未执行任何 CMD28 或 WP 设置。** 详见安全报告第 13 节。
+
+当前最小系统测试仍未放行。下一步优先完成只读 CMD31 最后组查询与 mmc-utils 版本核对，再形成受控 Power-on WP 设置步骤；任何设置仍需用户单独明确授权。
