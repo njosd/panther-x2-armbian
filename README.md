@@ -18,6 +18,10 @@
 - 设备 DTB：`rk3566-panther-x2.dtb`。
 - 启动文件：`idbloader.img`、`u-boot.itb`。
 
+## 长期阶段与介质原则
+
+- [开发阶段与启动介质原则](docs/DEVELOPMENT-STAGES-AND-BOOT-MEDIA-POLICY.md)：当前 TF/eMMC 只读测试约束与最终 eMMC 正式架构的明确边界。该文件是跨对话长期决策基线。
+
 ## 文档与证据
 
 - [文档总索引](docs/README.md)：项目状态、主题文档、报告入口和维护约定。
