@@ -843,3 +843,27 @@ CI 使用一个静态 BusyBox 单体二进制，只创建 `/init` 和交互 shel
 ### 24.5 状态
 
 本节记录工作流/文档修订；必须等新的 GitHub Actions run 通过、artifact 检查通过后，才能把 CI 构建标记为已验证。写卡和实机启动仍为未执行。
+
+
+## 25. PREPARE-ONLY 工作流结构损坏修复（2026-11-21）
+
+用户反馈 GitHub Actions 页面没有出现预期的 Run workflow 入口。复核仓库默认分支当前文件后，确认：
+
+- `workflow_dispatch:` 原本存在；触发器声明不是缺失原因。
+- 但 BusyBox 构建步骤在静态配置检查处被截断，导致后续编译命令漂移到文件末尾、位于 artifact 上传步骤之后；read-only initramfs 与镜像准备步骤还出现重复段落。该文件不能运行，之前关于“工作流已修订完成”的判断不成立。
+
+本轮修复已提交：
+
+- Workflow 修复提交：`a7064af364f9d6ce2426d1cda2b64221d695671b`
+- BusyBox oldconfig 管道退出码修正：`19e91f4ccb2c6b168ab11f9e3b9352582bdc96b6`
+- Initramfs devtmpfs 挂载失败改为 fail-closed：`eaa01cad7db5706eacf7ed15a737a8622d8df0bd`
+
+修复后的静态复核：
+- 保留 `workflow_dispatch`。
+- 构建步骤顺序为 Checkout、Install tools、Kernel/DTB、BusyBox、initramfs、hybrid image、Artifact upload。
+- BusyBox 静态配置检查、编译、静态 ELF 检查和必需 applet 检查均回到 BusyBox 步骤内。
+- initramfs、镜像准备和 artifact 上传步骤各出现一次，不再有截断的静态配置命令。
+- Kernel 固定为 6.18.63；未重新引入 6.18.64 或 `mmc-wp-read-last`。
+- `/init` 的 devtmpfs 挂载失败现在停止启动，不再忽略错误。
+
+**验证边界：**以上是仓库文件回读与结构检查，不等于 GitHub Actions YAML/runner 构建已通过。尚未运行 workflow、尚未写入 SU08G、尚未启动设备。即使 CI 成功，eMMC pre-Linux 写入安全门仍未解除；本 artifact 继续仅供 PREPARE-ONLY 检查。
