@@ -136,8 +136,11 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          boot_candidates=(audit/inner/boot-"${VERSION}"-ophub.tar.gz audit/inner/boot-"${VERSION}"*.tar.gz)
-          dtb_candidates=(audit/inner/dtb-rockchip-"${VERSION}"-ophub.tar.gz audit/inner/dtb-rockchip-"${VERSION}"*.tar.gz)
+          # Use one glob per package family. The exact-name pattern is already
+          # included in the wildcard, so combining both patterns double-counts
+          # the same file in Bash arrays.
+          boot_candidates=(audit/inner/boot-"${VERSION}"*.tar.gz)
+          dtb_candidates=(audit/inner/dtb-rockchip-"${VERSION}"*.tar.gz)
           [[ ${#boot_candidates[@]} -ge 1 ]] || { echo "::error::Boot package not found"; exit 1; }
           [[ ${#dtb_candidates[@]} -ge 1 ]] || { echo "::error::Rockchip DTB package not found"; exit 1; }
           [[ ${#boot_candidates[@]} -eq 1 ]] || { echo "::error::Ambiguous boot package candidates"; exit 1; }
