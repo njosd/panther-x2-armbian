@@ -2,8 +2,9 @@
 """Interactive macOS UART terminal for Panther X2.
 
 The Mac terminal is put in raw mode (local echo/canonical buffering disabled).
-All ordinary keyboard bytes are forwarded to UART; UART RX bytes are displayed.
-Ctrl+C is passed to the target. Press Ctrl+] (one key chord) to exit locally.
+Keyboard bytes are forwarded to UART after removing terminal bracketed-paste
+wrappers. UART RX bytes are displayed. Ctrl+C is passed to the target.
+Press Ctrl+] (one key chord) to exit locally.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ DEFAULT_PORT = "/dev/cu.usbserial-1460"
 DEFAULT_BAUD = 1500000
 BRACKETED_PASTE_OFF = b"\x1b[?2004l"
 BRACKETED_PASTE_ON = b"\x1b[?2004h"
+PASTE_START = b"\x1b[200~"
+PASTE_END = b"\x1b[201~"
+PASTE_MARKERS = (PASTE_START, PASTE_END)
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +47,22 @@ def write_terminal(fd: int, data: bytes) -> None:
         view = view[written:]
 
 
+def strip_paste_markers(data: bytes, pending: bytearray) -> bytes:
+    """Remove bracketed-paste delimiters, including when split across reads."""
+    pending.extend(data)
+    output = bytearray()
+    while pending:
+        if any(pending.startswith(marker) for marker in PASTE_MARKERS):
+            marker = next(marker for marker in PASTE_MARKERS if pending.startswith(marker))
+            del pending[: len(marker)]
+            continue
+        if any(marker.startswith(pending) for marker in PASTE_MARKERS):
+            break
+        output.append(pending[0])
+        del pending[0]
+    return bytes(output)
+
+
 def main() -> int:
     args = parse_args()
     tty_fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
@@ -52,6 +72,7 @@ def main() -> int:
     tx_log = None
     raw_enabled = False
     result = 0
+    paste_pending = bytearray()
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_base = f"{args.log_prefix}-{stamp}-{os.getpid()}"
@@ -95,8 +116,9 @@ def main() -> int:
                 if not data:
                     break
 
+                filtered = strip_paste_markers(data, paste_pending)
                 outgoing = bytearray()
-                for byte in data:
+                for byte in filtered:
                     if byte == 0x1D:
                         exit_requested = True
                         break
@@ -112,6 +134,11 @@ def main() -> int:
                 if incoming:
                     rx_log.write(incoming)
                     write_terminal(tty_fd, incoming)
+
+        if paste_pending:
+            pending_bytes = bytes(paste_pending)
+            ser.write(pending_bytes)
+            tx_log.write(pending_bytes)
 
     except Exception as exc:
         result = 1
