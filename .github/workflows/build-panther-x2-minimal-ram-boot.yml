@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 45
     env:
       KERNEL_VERSION: "6.18.63"
-      KERNEL_PACKAGE_SHA256: "47e3f46636594cbf212474a13bac97e1310c3ee51007dee3fa20f93d8659f1ca"
+      KERNEL_PACKAGE_SHA256: "67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9"
       DTB_SHA256: "5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82"
       BUSYBOX_VERSION: "1.37.0"
       BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
@@ -53,6 +53,213 @@ jobs:
 
           tar -xzf "$BOOT_ARCHIVE" -C work/kernel-boot
           tar -xzf "$DTB_ARCHIVE" -C work/kernel-dtb
+
+          CONFIG_FILE="$(find -L work/kernel-boot -type f -name "config-${KERNEL_VERSION}-ophub" -print -quit)"
+          test -n "$CONFIG_FILE" || { echo "::error::Kernel config file not found in boot archive"; exit 1; }
+          cp "$CONFIG_FILE" work/kernel-config.txt
+          for option in CONFIG_DEVTMPFS CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_MMC CONFIG_MMC_BLOCK CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP; do
+            grep -qx "${option}=y" work/kernel-config.txt || {
+              echo "::error::Required built-in kernel option missing: ${option}=y"
+              exit 1
+            }
+          done
+          echo "Required minimal-RAM/MMC kernel options verified:"
+          grep -E '^CONFIG_(DEVTMPFS|BLK_DEV_INITRD|RD_GZIP|MMC|MMC_BLOCK|MMC_DW|MMC_DW_ROCKCHIP)=y          find -L work/kernel-boot -type f -printf '%P (%s bytes)\n' | sort | tee work/kernel-boot-files.txt
+          find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\n' | grep -Ei 'panther|rk3566' | sort | tee work/rockchip-dtb-candidates.txt
+
+          IMAGE_FILE="$(find -L work/kernel-boot -type f -name Image -print -quit)"
+          if [ -z "$IMAGE_FILE" ]; then
+            IMAGE_FILE="$(find -L work/kernel-boot -type f -name "vmlinuz-${KERNEL_VERSION}-ophub" -print -quit)"
+          fi
+          test -n "$IMAGE_FILE" || { echo "::error::Kernel Image payload not found"; exit 1; }
+          echo "Selected kernel payload: $IMAGE_FILE"
+          file "$IMAGE_FILE"
+
+          MAGIC="$(od -An -tx1 -j56 -N4 "$IMAGE_FILE" | tr -d ' \n')"
+          if [ "$MAGIC" = "41524d64" ]; then
+            cp -L "$IMAGE_FILE" work/boot/Image
+          else
+            PREFIX="$(od -An -tx1 -N2 "$IMAGE_FILE" | tr -d ' \n')"
+            if [ "$PREFIX" = "1f8b" ]; then
+              gzip -dc "$IMAGE_FILE" > work/boot/Image
+              MAGIC="$(od -An -tx1 -j56 -N4 work/boot/Image | tr -d ' \n')"
+              test "$MAGIC" = "41524d64" || { echo "::error::Decompressed payload is not ARM64 Image"; exit 1; }
+            else
+              echo "::error::Unsupported kernel payload format"
+              exit 1
+            fi
+          fi
+
+          DTB_FILE="$(find -L work/kernel-dtb -type f -path '*/rockchip/rk3566-panther-x2.dtb' -print -quit)"
+          test -n "$DTB_FILE" || { echo "::error::Panther X2 DTB not found"; exit 1; }
+          mkdir -p work/boot/dtb/rockchip
+          cp "$DTB_FILE" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          echo "${DTB_SHA256}  work/boot/dtb/rockchip/rk3566-panther-x2.dtb" | sha256sum -c -
+          MODEL="$(fdtget -t s work/boot/dtb/rockchip/rk3566-panther-x2.dtb / model)"
+          echo "DTB model: $MODEL"
+          echo "$MODEL" | grep -qi Panther
+          file work/boot/Image
+          sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+
+      - name: Build static ARM64 BusyBox
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            "https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2" \
+            -o "work/busybox-${BUSYBOX_VERSION}.tar.bz2"
+          echo "${BUSYBOX_SHA256}  work/busybox-${BUSYBOX_VERSION}.tar.bz2" | sha256sum -c -
+          tar -xjf "work/busybox-${BUSYBOX_VERSION}.tar.bz2" -C work
+          cd "work/busybox-${BUSYBOX_VERSION}"
+
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          sed -i 's/^# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+          grep -qx 'CONFIG_STATIC=y' .config || { echo "::error::BusyBox static build option missing"; exit 1; }
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig </dev/null
+          grep -qx 'CONFIG_STATIC=y' .config || { echo "::error::BusyBox static option was not retained"; exit 1; }
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2
+
+          mkdir -p "${GITHUB_WORKSPACE}/work/initramfs/bin"
+          install -m 0755 busybox "${GITHUB_WORKSPACE}/work/initramfs/bin/busybox"
+          cd "${GITHUB_WORKSPACE}"
+          readelf -l work/initramfs/bin/busybox | tee work/busybox-program-headers.txt
+          ! grep -q 'INTERP' work/busybox-program-headers.txt
+          work/initramfs/bin/busybox --list | sort > work/busybox-compiled-applets.txt
+
+          for applet in sh mount mkdir cat uname sleep dmesg tail; do
+            grep -qx "$applet" work/busybox-compiled-applets.txt || {
+              echo "::error::Required BusyBox applet missing: $applet"
+              exit 1
+            }
+            ln -s busybox "work/initramfs/bin/$applet"
+          done
+
+      - name: Build read-only guard and initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT"/{proc,sys,dev,run,etc,sbin}
+          install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
+          aarch64-linux-gnu-gcc -static -Os -Wall -Wextra -Werror \
+            scripts/panther-x2-minimal-initramfs/blockro.c -o "$ROOT/sbin/blockro"
+          install -m 0644 /dev/null "$ROOT/etc/panther-x2-minimal-test"
+          printf '%s\n' \
+            'Panther X2 RAM-only minimal boot test' \
+            'Kernel: Linux 6.18.63 stable' \
+            'No persistent root filesystem is mounted.' \
+            'MMC block devices are set read-only by /init.' \
+            'This does not protect pre-Linux SPL/U-Boot stages.' \
+            > "$ROOT/etc/panther-x2-minimal-test"
+
+          cd "$ROOT"
+          find . -print0 | sort -z | cpio --null -o --format=newc | gzip -n -9 > "${GITHUB_WORKSPACE}/work/initramfs.cpio.gz"
+          cd "${GITHUB_WORKSPACE}"
+          mkimage -A arm64 -O linux -T ramdisk -C gzip \
+            -n "Panther X2 minimal RAM initramfs" \
+            -d work/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/uinitrd-header.txt
+          grep -qi AArch64 work/uinitrd-header.txt
+          sha256sum work/initramfs.cpio.gz work/boot/uInitrd
+
+      - name: Prepare U-Boot script and hybrid TF image
+        run: |
+          set -euo pipefail
+          mkdir -p work/mnt
+          install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/boot/boot.cmd
+          mkimage -A arm -O linux -T script -C none \
+            -n "Panther X2 minimal RAM boot" \
+            -d work/boot/boot.cmd work/boot/boot.scr
+
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb" \
+            -o work/JP-TvBox-u-boot.itb
+          echo "${JP_UBOOT_SHA256}  work/JP-TvBox-u-boot.itb" | sha256sum -c -
+          test "$(stat -c %s work/JP-TvBox-u-boot.itb)" -eq 1464832
+
+          truncate -s 2G work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk --clear \
+            --new=1:32768:0 \
+            --typecode=1:EF00 \
+            --change-name=1:PANTHER_BOOT \
+            work/panther-x2-minimal-6.18.63-hybrid.img
+
+          LOOP="$(sudo losetup --find --show --partscan work/panther-x2-minimal-6.18.63-hybrid.img)"
+          trap 'sudo umount work/mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true' EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/mnt
+          sudo cp -a work/boot/. work/mnt/
+          printf '%s\n' \
+            'Hybrid test image: eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
+            'No TF IDB/SPL is installed in this image.' \
+            'Do not boot until the active eMMC SPL write-path audit and hardware write-protection gate are cleared.' \
+            > work/mnt/TEST-INFO.txt
+          sync
+          sudo umount work/mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          # JP proper FIT at LBA 16384 (8 MiB); partition 1 starts at LBA 32768 (16 MiB).
+          dd if=work/JP-TvBox-u-boot.itb \
+            of=work/panther-x2-minimal-6.18.63-hybrid.img \
+            bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v work/panther-x2-minimal-6.18.63-hybrid.img
+          sgdisk -i 1 work/panther-x2-minimal-6.18.63-hybrid.img | tee work/partition-1.txt
+          grep -q EF00 work/partition-1.txt
+
+          SIZE="$(stat -c %s work/JP-TvBox-u-boot.itb)"
+          ACTUAL_SHA="$(dd if=work/panther-x2-minimal-6.18.63-hybrid.img bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          echo "JP proper expected: ${JP_UBOOT_SHA256}"
+          echo "JP proper readback: ${ACTUAL_SHA}"
+          test "$ACTUAL_SHA" = "${JP_UBOOT_SHA256}"
+
+          mkimage -l work/boot/boot.scr
+          file work/boot/Image work/boot/uInitrd work/boot/boot.scr
+          sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/boot/boot.scr
+          zstd -T0 -10 work/panther-x2-minimal-6.18.63-hybrid.img -o work/panther-x2-minimal-6.18.63-hybrid.img.zst
+
+          (
+            cd work
+            sha256sum \
+              panther-x2-minimal-6.18.63-hybrid.img.zst \
+              initramfs.cpio.gz \
+              boot/Image \
+              boot/uInitrd \
+              boot/boot.scr \
+              boot/dtb/rockchip/rk3566-panther-x2.dtb \
+              JP-TvBox-u-boot.itb > SHA256SUMS
+          )
+          cat work/SHA256SUMS
+
+      - name: Upload preparation artifact (not yet cleared for flashing)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-minimal-6.18.63-hybrid-PREPARE-ONLY
+          path: |
+            work/panther-x2-minimal-6.18.63-hybrid.img.zst
+            work/SHA256SUMS
+            work/boot/Image
+            work/boot/uInitrd
+            work/boot/boot.cmd
+            work/boot/boot.scr
+            work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+            work/initramfs.cpio.gz
+            work/JP-TvBox-u-boot.itb
+            work/busybox-program-headers.txt
+            work/busybox-compiled-applets.txt
+            work/kernel-package-members.txt
+            work/kernel-config.txt
+            work/kernel-required-config.txt
+            work/kernel-boot-files.txt
+            work/rockchip-dtb-candidates.txt
+            work/partition-1.txt
+            work/uinitrd-header.txt
+          if-no-files-found: error
+          retention-days: 30
+ work/kernel-config.txt | sort | tee work/kernel-required-config.txt
           find -L work/kernel-boot -type f -printf '%P (%s bytes)\n' | sort | tee work/kernel-boot-files.txt
           find -L work/kernel-dtb -type f -name '*.dtb' -printf '%P\n' | grep -Ei 'panther|rk3566' | sort | tee work/rockchip-dtb-candidates.txt
 
