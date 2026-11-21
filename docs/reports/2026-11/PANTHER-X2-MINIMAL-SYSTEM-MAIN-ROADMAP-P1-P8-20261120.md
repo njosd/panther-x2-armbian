@@ -607,3 +607,13 @@ Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44873044571
 6. 只有最小网络 initramfs 通过静态验收、启动链方案获得批准、用户明确授权写卡和启动后，才使用经 CID 确认的 8GB SU08G 测试卡。64GB 对照卡和 eMMC 继续不动。
 
 本节是对近期执行偏差的纠正记录，不修改原有 P1—P8 目标和验收条件。
+
+
+
+## P2 公开板级资料复核补充（2026-11-21）
+
+- 新增回读 BROWAN H1GW V04 公开拆机资料：另一台同型号设备的作者报告普通 SD 镜像启动后仍进入 eMMC 系统，且未找到外部按钮/菜单/短接点强制 SD 启动；该记录是外部单机观察，不是本机电路级证明。
+- Crankk Panther X2 资料把 Pair Button 定义为 ADC 配对输入，没有启动源选择证据；不能将其当作 eMMC 隔离开关。
+- yjdwbj / Crankk 的 SD 运行记录缺少完整 BootROM→SPL→proper 来源日志，不能证明 TF 自包含启动，也不能证明存在 eMMC 隔离电路。
+- 目前仍未找到可与 H1GW V04 PCB revision 一一对应的原理图、PCB netlist 或 BOM；因此 eMMC 电源/复位/总线隔离和 BootROM strap 均保持“未验证”，不得短接、拆焊或探测未知焊盘。
+- 详见 P2 报告 §29。下一步需要精确匹配 H1GW V04 revision 的原厂设计资料，或可辨识 PCB revision 的正反面清晰照片；继续泛搜其他 RK3566 板卡的原理图没有足够证据价值。
