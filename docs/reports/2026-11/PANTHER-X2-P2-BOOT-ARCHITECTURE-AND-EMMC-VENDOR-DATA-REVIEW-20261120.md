@@ -1759,3 +1759,72 @@ RST_n 已启用，意味着该 eMMC 具备接受硬件复位输入的配置条�
 | 可否据此实现 TF-only 冷启动 | 尚不能得出结论 |
 
 本节只推进 BootROM 启动源可行性所需的 eMMC reset 线索，没有讨论与启动无关的存储性能、电源优化或其他板级功能。
+
+
+## 33. RK3566 启动配置输入与 Panther X2 存储控制器 DTS 交叉核验（2026-11-21）
+
+本节只研究与 BootROM 可否访问 eMMC/TF 有直接关系的 SoC 启动配置输入及对应存储接口，不重复 BootROM 优先级/source ID/IDB 偏移结论。
+
+### 33.1 RK3566 官方硬件设计指南：两个复位释放前配置输入
+
+《RK3566 Hardware Design Guide V1.1》§2.1.6、Table 2-3 明确列出两个在系统复位释放时采样、必须预先稳定的硬件配置输入：
+
+1. FLASH_VOL_SEL（GPIO0_A7_u）：配置 VCCIO2/FLASH 电源域 IO 电平。0 对应 3.3V；1 对应 1.8V。
+2. SDMMC0_DET：控制 SDMMC0 与 JTAG/UART 复用。低电平表示 SD 卡插入状态，选择 SDMMC 功能；高电平选择 JTAG/UART 功能。
+
+官方指南说明，这些配置必须在上电/复位释放前完成；SDMMC0_DET 高电平时 SDMMC0 输出功能被切换到 JTAG/UART，因此会影响 SDMMC boot 所需引脚是否可用。
+
+来源：
+- RK3566 Hardware Design Guide V1.1 英文版 §2.1.5–2.1.6：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_EN.pdf
+- 中文版 §2.1.5–2.1.6：https://dl.xkwy2018.com/downloads/RK3568/RK356X/Hardware/Rockchip_RK3566_Hardware_Design_Guide_V1.1_CN.pdf
+
+### 33.2 Panther X2 DTS 对照：TF 卡确实使用 SDMMC0
+
+回读固定源码 ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c 的 rk3566-panther-x2.dts，以及旧版 unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e 同名 DTS，两者对应配置一致：
+
+- aliases：mmc0 = &sdmmc0、mmc1 = &sdhci、mmc2 = &sdmmc1。
+- &sdmmc0：bus-width = <4>、broken-cd，启用 sdmmc0_bus4/clk/cmd/det pinctrl；这是板上 TF/SD 卡控制器。
+- &sdhci：8-bit、non-removable、HS200 1.8V，vmmc-supply = <&vcc_3v3>、vqmmc-supply = <&vcc_1v8>；这是 eMMC 控制器。
+- &pmu_io_domains：DTS 配置 vccio2-supply = <&vcc_1v8>，vccio3-supply = <&vccio_sd>。
+
+这说明该板级软件描述预期 eMMC VCCIO2 接口域为 1.8V，故依 RK3566 官方指南，硬件 FLASH_VOL_SEL 在复位采样时应为高电平。**这是由板级 DTS 供电配置推导出的设计预期，不是对 H1GW V04 实物 strap 电平的直接测量。**
+
+TF 卡使用 SDMMC0，因此 SDMMC0_DET 必须在复位释放时选择 SDMMC 功能（低电平）才能使对应引脚组处于 SDMMC 模式。DTS 中 pinctrl 的 sdmmc0_det 配置属于 Linux 接管后的引脚配置，不能单独证明 BootROM 采样时该引脚电平；实物硬件 strap/卡槽检测连接仍需板级证据。
+
+源码：
+- https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
+- https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts
+
+### 33.3 对 TF-only BootROM 启动可行性的意义
+
+- SDMMC0_DET 不是介质优先级选择 strap；它决定 TF 所用 SDMMC0/JTAG 复用引脚的功能状态。
+- FLASH_VOL_SEL 不是启动介质选择 strap；它决定 VCCIO2/FLASH IO 电平模式，必须与 eMMC 接口电压相匹配。
+- 两者都属于启动前硬件配置，可能决定 BootROM 是否能正确访问相应接口，但没有证据表明它们能把 eMMC 优先级改为 SD 优先级。
+- RK3566 官方普通启动顺序仍为 eMMC 优先于 SDMMC；本机既有 BootROM source ID=2 仍证明已记录启动来自 eMMC。
+- eMMC RST_N_FUNCTION=0x01 仅证明 eMMC 硬件复位功能启用；尚无官方/实测证据证明在 BootROM 采样窗口保持 RST_n 有效就会跳过 eMMC 并继续 SDMMC0。
+
+### 33.4 eMMC RST_n 的 SoC 侧候选连接
+
+RK3566 参考硬件资料将 SoC 侧 EMMC_RSTn 与 GPIO1_C7 / FSPI_D2 / FLASH_WPn 复用。该信息说明 SoC 具有相应复用 pad，但不证明 H1GW V04 实际把该 pad 接到 SanDisk eMMC K5，也不证明 Linux DTS 使用 GPIO 控制它。
+
+在当前回读的 Panther X2 DTS &sdhci 节点中，仅看到 bus-width、HS200、non-removable、VMMC/VQMMC 和 status；没有看到显式 reset-gpios 或 cap-mmc-hw-reset 属性。此为 DTS 静态内容事实；不能据此断言硬件 RST_n 未连接，因为 SoC 可能通过专用 EMMC_RSTn 功能连接，且控制方式可能不由该 DTS 属性表达。
+
+### 33.5 当前启动相关证据表
+
+| 信号/接口 | 已知信息 | 实物板级状态 |
+|---|---|---|
+| SanDisk eMMC RST_n | eMMC ball K5；EXT_CSD RST_N_FUNCTION=0x01 | K5 是否连到 RK3566 EMMC_RSTn/GPIO1_C7，未验证 |
+| RK3566 EMMC_RSTn | SoC 侧复用 pad GPIO1_C7/FSPI_D2/FLASH_WPn | H1GW V04 实际走线未验证 |
+| FLASH_VOL_SEL | 0=3.3V、1=1.8V；DTS 预期 VCCIO2=1.8V | 实物 strap 电平/电阻配置未验证 |
+| SDMMC0_DET | 低=SDMMC，高=JTAG/UART | 实物复位采样电平及卡槽连接未验证 |
+| TF 控制器 | Panther DTS &sdmmc0 | 已由 DTS 确认 |
+| eMMC 控制器 | Panther DTS &sdhci | 已由 DTS确认 |
+
+### 33.6 下一步收敛
+
+继续研究仅保留两项静态目标：
+
+1. 从 H1GW V04 PCB 可辨识的 SoC/eMMC 封装方向和可见电阻/测试点，寻找 FLASH_VOL_SEL（GPIO0_A7）、SDMMC0_DET、EMMC_RSTn（GPIO1_C7）相关板级网络；若照片无法追踪到网络，停止从照片推断。
+2. 寻找与 BROWAN H1GW V04 revision 精确匹配的原理图/PCB layout/netlist/BOM。其他 RK3566 开发板参考原理图只用于理解 SoC 信号，不可外推为 Panther X2 电路。
+
+不安排短接、拆焊、飞线、改变 strap、电源或复位电平，也不安排启动试验。TF/eMMC 均保持不动。
