@@ -453,3 +453,11 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 因此它是 Panther X2 命名的构建配方及 DDR/BL31 配套证据，但尚不能证明 TF/eMMC 各自自包含启动。`BACK_TO_BROM` 必须结合确切 U-Boot source 版本追踪，不能凭选项名推断行为。
 - Radxa ROCK 3C 家族 DTS 的 `u-boot,spl-boot-order` 只能作为通用 SPL proper loader 顺序参考；不能与 NixOS 专用 defconfig 混为一套板级固件，也不能改变 BootROM 首阶段选源。
 - 详见 P2 报告 §26。下一步固定 Nix 配方真正使用的 U-Boot source revision，静态追踪 `CONFIG_SPL_ROCKCHIP_BACK_TO_BROM` 与最终 SPL DTB。
+
+
+## P2 补充：RK3566 BACK_TO_BROM 机制边界（2026-11-21）
+
+- U-Boot v2026.10 源码调用链已闭环：启用选项后 SPL 返回 BOOT_DEVICE_BOOTROM，BOOTROM loader 调用 Rockchip board_return_to_bootrom，再以 BROM_BOOT_NEXTSTAGE 将控制权交还 BootROM。
+- 该命令的软件注释只承诺继续启动序列，不承诺沿用原介质。RK3566 官方硬件设计指南确认冷启动优先级为 SPI NOR、SPI NAND、NAND、eMMC、SDMMC；没有公开证据说明回交后的 ROM 是否锁定首次 source 或重新扫描。
+- 因此 BACK_TO_BROM 仍是未验证候选，不可作为 TF→TF/eMMC→eMMC 已可实现的依据；不移植 NixOS defconfig、不启用选项。
+- 详见 P2 报告 §27。当前唯一执行项：继续只读查证 RK3566 BootROM NEXTSTAGE 的状态续接语义；若公开资料无法闭环，再评估离线二进制静态分析。禁止重复实机测试、构建、写卡或刷机。
