@@ -655,3 +655,40 @@ mmc writeprotect boot get /dev/mmcblk0
 - SEC_COUNT=61,071,360 与已知 DF4032 容量完全一致，强烈符合 DF4032 的身份；
 - 但仅凭该输出不能严格证明该次命令目标的 CID 就是 DF4032；
 - 在执行任何后续 WP 查询前，必须在同一次终端会话中先打印 CID/name/sectors，并按 DF4032 的已知 CID 精确匹配，再使用动态确定的设备节点。
+
+
+## 19. GitHub Actions run 44871804530 失败根因与工作流修正（2026-11-21）
+
+Run: https://github.com/njosd/panther-x2-armbian/actions/runs/44871804530
+
+### 19.1 已由日志确认的事实
+
+- 外层 kernel package 下载成功，SHA-256 校验通过。
+- 外层包实际包含：
+  - `6.18.64/dtb-allwinner-6.18.64-ophub.tar.gz`
+  - `6.18.64/dtb-amlogic-6.18.64-ophub.tar.gz`
+  - `6.18.64/dtb-rockchip-6.18.64-ophub.tar.gz`
+  - `6.18.64/boot-6.18.64-ophub.tar.gz`
+  - `modules`、`header` 与 `sha256sums`
+- 上一轮宽泛 `dtb*-${KERNEL_VERSION}-ophub.tar.gz` 查找按文件系统枚举顺序错误选中了 Allwinner DTB 包。这是工作流逻辑缺陷，不是上游包缺少 Rockchip DTB。
+- boot archive 实际列出 `vmlinuz-6.18.64-ophub`、`uInitrd-6.18.64-ophub`、`initrd.img-6.18.64-ophub` 等；没有名为 `Image` 的文件。
+- 失败日志显示原步骤在查找 `Image` 时退出。因此本次尚未真正检查 Rockchip DTB 包内容，也未构建 BusyBox/initramfs/TF image；无 artifact。
+- 日志列出 vmlinuz 文件大小 43,878,912 bytes，但日志未运行 `file` 或检查 ARM64 Image magic，故其实际格式仍未验证。
+
+### 19.2 工作流修正
+
+- DTB archive 查找改为精确选择 `dtb-rockchip-6.18.64-ophub.tar.gz`，不再使用无区分的 dtb* 通配符。
+- kernel payload 先找 `Image`，否则找版本化 `vmlinuz-6.18.64-ophub`。
+- 不盲目把 vmlinuz 改名为 Image：工作流检查 ARM64 Image magic（文件偏移 0x38 的字节 `41 52 4d 64`）；若为 raw Image 则复制；若为 gzip 则解压后再次检查 magic；其他格式明确失败。
+- 经审查修正该分支，确保 raw 分支和 gzip 解压分支都实际生成 `work/boot/Image`，并移除后续会覆盖解压结果的无条件复制。
+- 相关提交：`d0292c3a860b559cc9d646b74a042311b04bc49e`。此前精确 DTB 归档与 vmlinuz 选择修正提交：`388266afac791e2b6af6353bf16dc2535ad9bc58`。
+
+### 19.3 下一轮验证目标与当前状态
+
+下一次 Actions 应依次验证：
+1. 选择到 Rockchip DTB archive，并打印 Panther X2/RK3566 候选。
+2. `vmlinuz` 是否为 raw ARM64 Image 或 gzip 压缩的 ARM64 Image；不符合则停下，不生成假 Image。
+3. 找到确切的 `rk3566-panther-x2.dtb` 并通过 model 检查。
+4. 之后才进入 BusyBox、initramfs、uInitrd、GPT、JP proper 哈希和 artifact 生成。
+
+截至本记录，工作流修正已提交，但尚未由新的 Actions run 验证。无 TF/eMMC 设备写入或实机启动。
