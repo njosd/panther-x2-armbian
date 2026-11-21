@@ -478,3 +478,11 @@ GMAC probe/setup、普通 STMMAC TX、RGMII delay、JL2xx1 workaround、U-Boot �
 - 先做零写入板级核查，确认有无可逆、非破坏性的 eMMC 硬件隔离方式；不能假定 RECOVERY/MaskROM/软件命令能禁用 eMMC。若无可靠隔离方式，不做 TF 独立启动实测，不擦除 eMMC。
 - 通过标准必须排除 eMMC SPL→TF proper 混合链，且记录各阶段独特标记与 UART 全日志。
 - 详见 P2 报告 §27.8。当前只研究隔离与救援条件，不制作镜像、不写 TF/eMMC、不进行物理改造。
+
+
+## P2 补充：RK3566 SD Boot Card 机制与 TF 测试镜像设计（2026-11-21）
+
+- Rockchip《SD Card Boot Reference》显示传统 SD Boot Card 使用 LBA64 IDBLOCK flag；RK3566/RK3568 对该旧式 flag 无支持标记。RK3566 支持的 Android BCB 标记用于 SD upgrade/recovery，不等于改变 BootROM 的 eMMC 优先级。
+- 已运行的 pre-loader/SPL 可检测 SD 卡启动标志并提升 SD 后续启动优先级；这与 BootROM 冷启动选首阶段是不同层次。不能用通用 SD Boot Card 或 u-boot,spl-boot-order 直接证明 TF-only。
+- 第一轮测试镜像仅设计为分阶段独特标记：TF LBA64 loader/SPL token、proper/FIT token、UART 日志；首轮止于 proper，不先引入 Linux。proper 偏移须先按所选 BACK_TO_BROM 方案核实，不能机械套用通用 0x4000。
+- 下一步只读静态审计现有 eMMC LBA64 SPL/IDB 是否含 SD boot flag 检测/切换及 BACK_TO_BROM；不向 eMMC 写入。详见 P2 §27.9–§27.10。
