@@ -505,3 +505,12 @@ Hit key to stop autoboot('CTRL+C'):
 该验证目前只适用于此前实测的原版 U-Boot 2017.09-armbian。JP-TvBox / Radxa 候选版本是否具有相同提示和时序，仍需分别核实。此机制只证明 proper 阶段的自动接管，不证明 BootROM/SPL 的启动介质来源。
 
 详细记录见 P2 报告 §27.11。脚本具体文件路径、串口参数及源码尚待从既有项目资产中追溯，本条不臆造名称或参数。
+
+
+## P2 更新：NixOS 配方与 RK3566 固件候选第一轮审计（2026-11-21）
+
+- 已追溯 NixOS Panther X2 配方当前 U-Boot v2026.10 来源、历史 Radxa 分支迁移、DDR v1.10 / BL31 v1.29 输入及 EVB control DTS 继承情况。
+- 发现该 defconfig 启用未经 RK3566/Panther X2 验证的 BACK_TO_BROM，且未显式启用 SPL_PINCTRL；不能直接作为探针构建输入。
+- 官方 RK3566 当前 loader profile 为 DDR v1.26 standard + SPL v1.14；BL31 v1.45/v1.46 列为后续候选。Panther X2 的 LPDDR4 4GB 双 CS 拓扑已从旧 UART 日志确认，颗粒料号/PCB template/DQ mapping 仍待证。
+- 详细报告：[P2 U-Boot 与 RK3566 DDR/SPL/BL31 候选审计](PANTHER-X2-P2-UBOOT-RK3566-DDR-SPL-BL31-CANDIDATE-AUDIT-20261121.md)。
+- 下一步唯一研究项：静态确认 DDR v1.26 standard/ultra 与 Panther X2 DRAM 参数适配，以及 BL31 v1.45/v1.46 handoff 兼容；不构建、不写卡、不实机启动。
