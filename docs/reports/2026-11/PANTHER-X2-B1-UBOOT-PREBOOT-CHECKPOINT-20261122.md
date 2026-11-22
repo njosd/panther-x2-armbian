@@ -127,3 +127,21 @@
 该启动过程不应写入 TF 或 eMMC；Linux B1 不含 MMC/block 驱动，预期以 initramfs 作为 RAM 根文件系统运行。执行后会离开 U-Boot 提示符，进入内核启动日志和 initramfs shell 验证阶段。若出现启动失败，应保留完整 UART 原始日志，不在同一轮同时修改 Kernel、DTB、initramfs 或 U-Boot 环境。
 
 本报告记录的时间点：boot.scr 已加载，`help source` 已确认；boot.scr header 尚未检查；`source` 尚未执行；B1 尚未启动。
+
+
+## 9. U-Boot 网络基准审计进展（2026-11-22）
+
+用户明确将 U-Boot 网络基准提升至 B1 clean RAM Linux 实机启动之前：历史版本已证明 Linux 可以启动，当前关键未知是网络链路能力。本轮只在当前已运行的 U-Boot proper 提示符下进行，不重启、不切换启动链、不写 TF/eMMC、不保存环境变量。
+
+- 当前 U-Boot proper：U-Boot 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000)。
+- help dhcp：命令存在，描述为 DHCP/TFTP boot，语法 dhcp [loadAddress] [[hostIPaddr:]bootfilename]。没有显式 DHCP-only 参数；审计 autoload 前不得执行。
+- help mii：只读 device/info/read/dump；write/modify 禁止。
+- help mdio：只读 list/read/rx；write/wx 禁止。
+- mdio list 实际输出 ethernet@fe010000:。这证明至少一个 MDIO bus 已注册；不证明 PHY 已探测、地址/型号已确认或 Link Up。
+- 完整 help 清单含 ping；尚未执行。
+
+用户已授权当前会话的板载有线网口初始化、DHCP 和基本连通性测试。禁止 PHY 寄存器写入、save/saveenv、fatwrite、tftpflash、tftpput、download、fastboot、rockusb、ums、任何 MMC/eMMC 写入，以及 boot/bootd/source/booti/reset。必要 setenv 只可临时存在 RAM，不保存。本轮不重新运行 BootROM/SPL；未来重新启动或写卡仍须遵守 B0.4 安全门。
+
+下一步一次一条命令：mii device；确认 PHY 地址/型号和只读 link；审计 autoload 与 DHCP 实现；确认不会触发 TFTP 后再执行 DHCP；随后分别 ping LAN 网关和已知外部 IP。当前 PHY、link、DHCP、ping 均未验证。
+
+详见 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md。
