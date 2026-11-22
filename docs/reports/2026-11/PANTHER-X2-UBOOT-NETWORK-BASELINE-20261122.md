@@ -197,3 +197,16 @@ PHY at address 1:
 结果：地址 1 的寄存器 1 同样返回 `0xffff`。因此，当前两个明确指定的 PHY 地址（0、1）在原生 MDIO 路径下均未返回可识别的 BMSR 值；与此前 MII 地址 0–4 的读取结果一致。不能据此判定 PHY 不存在或损坏，也不能区分 PHY 无响应、MDIO 电气/时序问题或控制器底层访问异常。
 
 下一步不进行无目的地址扫描。应先审查当前 U-Boot proper 的源码/构建配置，确认该以太网设备的 MDIO bus 注册、PHY 探测和地址映射路径，再决定是否存在有依据的只读验证步骤。继续禁止任何 MDIO/MII 写入操作。
+
+
+### 当前 U-Boot proper 的源码/配置审计进展（2026-11-22）
+
+本轮先核对仓库中已有的启动链与候选固件证据，避免把不同阶段的 FDT 或不同构建源码混为一谈：
+
+1. 当前实机 proper banner 为 `U-Boot 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000)`，历史 UART 日志显示其板型字符串为 Radxa ROCK3 Model C；本轮启动链是 eMMC 前级 SPL 加 TF 上 JP-TvBox proper 的混合链。
+2. 仓库已归档 JP-TvBox 的 `idbloader.img` 与 `u-boot.itb` 二进制，但对应 Ophub 仓库历史提交只加入二进制资产；尚无该 proper 的精确源码提交、构建脚本、defconfig 或最终 `.config`。不能将较新的 Radxa U-Boot 参考源码当作该二进制的确切构建来源。
+3. 已知 JP-TvBox SPL 内嵌 FDT 的 GMAC1 节点为 `status = "okay"`，但它是 SPL 阶段 FDT，不是已确认的 proper FIT control FDT。不能据此直接推断 proper 的 PHY/MDIO probe 配置。
+4. 既有报告明确记录 JP proper 的真实 control FDT / 精确源码 provenance 尚未确证。因此当前不能仅靠静态源码断言其 MDIO bus 注册后为何对地址 0、1 返回 `0xffff`，也不能断言 PHY 地址映射或驱动 probe 失败原因。
+5. 实机已直接确认 proper 枚举 `ethernet@fe010000`，注册同名 MDIO bus；但地址 0、1 的原生 MDIO BMSR 均为 `0xffff`，MII 地址 0–4 亦均为 `0xffff`。这组事实证明管理接口/总线对象存在，不证明 PHY 响应。
+
+**审计结论：** 当前源码证据不足以进行版本精确的驱动路径归因。下一步不引用其他版本源码作结论，改先查看当前 U-Boot Driver Model 的只读诊断命令是否可用，以核实 Ethernet/MDIO/PHY 设备实际绑定情况。先执行 `help dm`；只查看帮助，不执行任何设备修改命令。
