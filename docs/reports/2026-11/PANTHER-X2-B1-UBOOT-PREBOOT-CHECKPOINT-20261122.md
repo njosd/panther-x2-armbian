@@ -145,3 +145,5 @@
 下一步一次一条命令：mii device；确认 PHY 地址/型号和只读 link；审计 autoload 与 DHCP 实现；确认不会触发 TFTP 后再执行 DHCP；随后分别 ping LAN 网关和已知外部 IP。当前 PHY、link、DHCP、ping 均未验证。
 
 详见 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md。
+
+- 追加实测：`mii device` 枚举出 `ethernet@fe010000`，且 Current device 为同一设备。与 `mdio list` 结果相互印证；PHY 地址、型号和 Link 状态仍未验证。
