@@ -248,3 +248,25 @@ ebd51b40 eth_phy_ge [ + ]  eth_phy_generic_drv |   `-- phy@0 **
 dm uclass
 ```
 只读列出，不执行设备修改。
+
+
+### Driver Model uclass 清单实测（2026-11-22）
+
+用户执行 `dm uclass`，关键结果：
+```
+uclass 21: ethernet
+    [ + ] ethernet@fe010000 @ ebd51a00, seq 1, (req 1)
+
+uclass 90: eth_phy_generic
+    [ + ] phy@0 @ ebd51b40, seq 0, (req -1)
+```
+
+解释边界：
+- Ethernet 与 generic Ethernet PHY 设备均已 probe（`[ + ]`）。
+- 两条记录前均无独立的活动标记 `*`；因此当前证据不支持称其处于 activated 状态。
+- 输出未列出独立 MDIO uclass 实例；这不推翻此前 `mdio list` 已列出 `ethernet@fe010000` 总线的现场事实。
+- `eth_phy_generic` 是 Ethernet PHY uclass，不应与通用 PHY（`phy`）uclass 混为一谈。
+- `phy@0` 的设备模型存在及 probe 不证明 PHY ID 已有效读取，也不证明 link up。
+
+下一步仅读取 PHY 地址 0 的 PHY Identifier 1（Clause 22 寄存器 2），以验证其是否能返回有效 ID：
+`mdio read ethernet@fe010000 0 2`。
