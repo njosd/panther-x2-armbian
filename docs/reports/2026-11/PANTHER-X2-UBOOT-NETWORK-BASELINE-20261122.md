@@ -270,3 +270,17 @@ uclass 90: eth_phy_generic
 
 下一步仅读取 PHY 地址 0 的 PHY Identifier 1（Clause 22 寄存器 2），以验证其是否能返回有效 ID：
 `mdio read ethernet@fe010000 0 2`。
+
+
+### PHY Identifier 1 只读结果（2026-11-22）
+
+用户执行：
+```
+mdio read ethernet@fe010000 0 2
+
+Reading from bus ethernet@fe010000
+PHY at address 0:
+2 - 0x0
+```
+
+记录：PHY 地址 0 的 Clause 22 寄存器 2（PHYID1）读数为 `0x0000`。此前同地址寄存器 1（BMSR）为 `0xffff`。当前读数尚不足以构成有效、可识别的 PHY 标识；不能据此认定 PHY 已响应，也不能直接判定 PHY 损坏。下一步只读 Clause 22 寄存器 3（PHYID2），查看 ID 组合是否可识别。
