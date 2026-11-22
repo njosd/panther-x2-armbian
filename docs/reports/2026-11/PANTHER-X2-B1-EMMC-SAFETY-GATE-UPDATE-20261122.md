@@ -130,3 +130,28 @@ mmc-utils 上游源码定义：
 3. 完成 U-Boot 地址变量的安全核验。不得在未知 load address 时执行 boot.cmd。
 4. 单独取得用户对 DF4032 全 user-area Power-on WP 的明确授权；未经授权不设置。
 5. WP 逐组读回完整通过后，再写唯一 8GB SU08G 测试 TF；64GB 对照卡保持冻结。
+
+
+## 11. 实机 mmc-utils 旧版源码核对（2026-11-22）
+
+用户实机输出：
+- 包：`mmc-utils 0+git20191004.73d6c59-2`
+- 二进制：`/usr/bin/mmc`
+- SHA-256：`93a71a0c8a05403e205e0b1be3455e8f104f645f5f21e167a488b66fadf654d0`
+- `mmc --version` 不支持；程序显示 `0.1`，不是可靠源码版本标识。
+- help 列出 `pwron`，未列出 `perm`，但仍需对安装二进制做 dpkg 完整性核对。
+
+对应 Ubuntu 源包版本明确指向上游 Git commit `73d6c59`。该 commit 的 `mmc_cmds.c` 已静态检查：
+- `do_writeprotect_user_set()` 参数顺序是独立 argv：type、start block、blocks、device；需要 nargs=5。
+- `pwron` 设定 `USER_WP_US_PWR_WP_EN`，不走 `perm` 分支。
+- 先通过 CMD6/EXT_CSD 写 USER_WP power-on enable，再循环调用 `set_write_protect()`。
+- `set_write_protect()` 使用 CMD28（`MMC_SET_WRITE_PROT`），write_flag=1。
+- 完成后再通过 CMD6 恢复原 USER_WP 值。
+- 代码未检查 blk_start/blk_cnt 是否超过实际设备容量；blocks 作为循环上限，地址按 blk_start+x 逐组递增。
+- 代码中 blk_start/blk_cnt 为 signed int；本设备计划参数均小于 INT_MAX。
+- 最后一条 CMD28 地址按实测组大小计算为 LBA 61,063,168，低于 SEC_COUNT 61,071,360；该命令寻址的是最后有效 WP group 的起点。
+- 该实现对最后一个 4 MiB 尾段的保护依赖 eMMC 对最后有效 WP group 的定义；CMD31 实测已确认该组可寻址。
+
+**关键风险解释：** 此旧版实现与此前审查的循环控制流一致，但其无容量上限检查意味着命令参数绝不能照抄未经复核。按本设备参数，完整覆盖 3728 组所需 blocks=61,079,552；循环最后一次发 CMD28 的地址仍是 61,063,168，不会向设备发送 61,079,552 作为 CMD28 地址。执行前仍需完成本机 dpkg 文件完整性核验，并再次核对命令的目标设备 CID。
+
+**本轮没有执行任何写保护设置命令。**
