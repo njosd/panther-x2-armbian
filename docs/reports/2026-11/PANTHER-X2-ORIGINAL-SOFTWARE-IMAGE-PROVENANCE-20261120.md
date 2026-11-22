@@ -933,3 +933,20 @@ Workflow 默认输入为 board=all、kernel_repo=ophub/kernel、kernel_usage=sta
 3. 对 `unifreq/linux-6.1.y` 的 `f16bd...` 至 `4428...` 版本窗口做 stmmac、Rockchip clock/reset、PHY、Kconfig 依赖的定向源码差异审计；只保留命中 Panther X2 实际 RGMII/RTL8211F 路径的变化。
 
 本轮未启动 Linux、未刷写 eMMC/TF、未改写 U-Boot/FDT、未进行网络实机测试。
+
+
+## 27. 公开 Armbian Panther X2 历史归档交叉检查（2026-11-22）
+
+本轮另外检查了 Armbian 官方历史归档目录与社区发行资料，以判断用户原始 6.1.65 是否存在可恢复的公开镜像副本。
+
+- Armbian archive 的 Panther X2 历史目录当前可见 2023-08-31 的 6.1.50 Jammy 镜像及其 checksum/签名相关文件；该目录未显示用户的 2023-12-07 6.1.65 原始镜像。
+- `lintao1890/panther-x2-armbian` 公开 Release 可见 2024-01-22 的 6.1.74 镜像，但未见 6.1.65。
+- 因此公开可见的 6.1.50 和 6.1.74 只能作为相邻发行样本，不能替代用户原件，也不能用于校验原始 6.1.65 的压缩包哈希。
+- Armbian Community Forum 对 Panther X2 的说明指出该板属于 Community Maintained、没有正式板级 maintainer，自动构建并不等于对目标硬件完成验证。这进一步说明不能把“镜像能够构建/发布”视为网络已验收。
+
+参考链接：
+- Armbian Panther X2 archive：https://k-space.ee.armbian.com/archive/panther-x2/archive/
+- Panther X2 Armbian fork：https://github.com/lintao1890/panther-x2-armbian
+- Panther X2 community-maintained status：https://forum.armbian.com/topic/44102-panther-x2-not-booting/
+
+本轮没有找到 6.1.65 的公开同哈希副本或官方 checksum；用户保存的原件仍是唯一权威镜像样本。
