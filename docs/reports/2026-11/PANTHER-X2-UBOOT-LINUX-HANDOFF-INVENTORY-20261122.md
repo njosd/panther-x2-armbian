@@ -204,3 +204,39 @@ fdt_blob = 00000000eb9f63c0
 ### 10.4 当前阶段判断
 
 地址起点与当前 DRAM bank 边界已核实；镜像实际长度、Kernel 运行/解压地址需求、U-Boot relocation/栈/控制 FDT保留范围、最终 Linux FDT memory/reserved-memory 尚未闭环。PRE-HANDOFF READY 仍未通过。本轮没有装载镜像、执行 FDT 修改命令、启动 Linux 或写入任何介质。
+
+
+## 11. 当前 U-Boot working FDT 身份核对（2026-11-22）
+
+只读命令 `fdt header` 返回：
+
+```
+No FDT memory address configured. Default at 0xeb9f63c0
+magic:              0xd00dfeed
+totalsize:          0x8908 (35080)
+off_dt_struct:      0x48
+off_dt_strings:     0x56ec
+off_mem_rsvmap:     0x28
+version:            17
+last_comp_version:  16
+boot_cpuid_phys:    0x0
+size_dt_strings:    0x8db
+size_dt_struct:     0x56a4
+number mem_rsv:     0x1
+```
+
+只读命令 `fdt print / model` 返回：
+
+```
+model = "Radxa ROCK3 Model C"
+```
+
+判定：
+- 当前 working FDT 默认地址为 `0xEB9F63C0`，与本轮 `bdinfo` 的 `fdt_blob` 一致。
+- FDT magic 有效，头部报告总长度 35,080 bytes、版本 17、一个 memory-reserve 项。
+- 当前 U-Boot control FDT 的 model 是 Radxa ROCK3 Model C，**不是 Panther X2 专用 FDT**。
+- 该结论只针对当前 U-Boot control FDT；不代表 TF 上 Linux 目标 DTB 的身份，也不证明最终传给 Linux 的 FDT内容。
+- 只读查询，没有设置/移动/修改 FDT，没有执行加载或启动。
+- 当前 control FDT 与 Panther X2 目标硬件身份不匹配，不能将其直接作为 Linux 启动 DTB。最终 Linux DTB 必须独立核实来源、哈希、model/compatible及硬件资源描述，并验证启动前 fixup 后副本。
+
+阶段门：PRE-HANDOFF READY 仍未通过。
