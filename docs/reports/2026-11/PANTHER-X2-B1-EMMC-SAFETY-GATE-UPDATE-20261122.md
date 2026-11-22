@@ -237,3 +237,52 @@ lsblk:
 ## 16. Actions #36 状态（2026-11-22）
 
 查询 GitHub Actions API 时，run 44978969701（commit 078a33eec2da56300356e1e87634cef8b4e82542）仍为 `in_progress`，尚无最终结论。不得把镜像打包修复标记为通过。
+
+
+## 17. B1 镜像 CI #36 失败原因及 #37 修复
+
+### #36 日志结论
+- Run ID：44978969701，commit `078a33eec2da56300356e1e87634cef8b4e82542`。
+- GPT 分区类型正确显示为 Linux filesystem，分区 LBA 32768–4192255。
+- ext4 创建、卸载及 `e2fsck -fn` 均通过。
+- JP proper raw LBA 16384 写入后 SHA-256 与预期完全一致：`a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。
+- 最后生成 ext4 文件清单时，runner 用户对 `lost+found` 目录没有读取权限，`find` 返回 Permission denied；在 `set -euo pipefail` 下导致 job 失败。
+- 因此 #36 失败点是清单扫描误将 ext4 自动目录纳入普通文件清单，不是镜像、GPT、文件系统或 JP proper 内容错误。
+
+### #37 修复
+- Commit：`3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`
+- 文件：`.github/workflows/build-panther-x2-b1-clean-ram.yml`
+- 将清单命令改为对 `./lost+found` 使用 prune，只哈希实际部署文件。
+- 记录时 Actions run #37（ID `44979808662`）为 in_progress；结果待核验。
+- 该修复没有放宽文件权限、没有更改分区布局、没有修改内核/DTB/initramfs，也没有触碰实体 TF/eMMC。
+
+## 18. B1 clean kernel 与 eMMC rescue 的功能边界
+
+本轮重新核对仓库实际配置和 init：
+
+### B1 clean kernel（保持原样）
+- `kernel.config.fragment` 明确关闭 `CONFIG_BLOCK`、`CONFIG_MMC`、SCSI/ATA/NVMe/MTD。
+- Panther X2 B1 clean DTB 禁用 MMC/eMMC/TF 节点。
+- BusyBox applet 白名单不包含 `mmc` 或其他存储管理工具。
+- `/init` 由 initramfs 作为根运行，挂载 proc/sysfs，输出内核/DTB/内存/挂载信息，然后进入交互 shell；不 pivot 到 eMMC，不挂载持久化分区。
+- 该配置适合验证最小 RAM Linux 是否独立启动，但**不能枚举 eMMC，也不能在 Linux 内设置/读取 eMMC WP**。
+
+### Rescue kernel（必须独立设计，不修改 B1）
+- 若要从 Linux 读取/设置 eMMC WP，必须另建独立 rescue kernel 配置，启用最小必要的 BLOCK/MMC host/controller/SDHCI 或 DW-MMC Rockchip/EXT_CSD ioctl 支持，并在对应 DTB 中启用 eMMC 控制器。
+- Rescue initramfs 必须自己作为 PID 1 根文件系统，禁止挂载、fsck、swap、pivot_root 到 eMMC；日志仅输出串口或 RAM。
+- rescue 还需要经过审查的静态 mmc-utils/只读查询 helper；在实际操作前应证明没有自动 mount/udisks/systemd 存储服务。
+- Rescue 内核支持 MMC 会增加驱动和初始化范围，不能与 B1 最小基线混为一个产物；必须独立配置、独立 artifact、独立验证。
+
+### 启动链前置风险尚未解决
+- 当前 eMMC SPL / U-Boot proper 在 Linux 启动前执行。即使 rescue Linux 后续将 user area 设为 Power-on WP，也不能保护同一次启动中已经发生的 SPL/U-Boot 写操作。
+- 当前活动 SPL 的精确源码/最终配置仍未证明；候选源码存在 SPL A/B metadata 与 Vendor Storage 写入路径。
+- 因此，单纯“先从 TF 启动 rescue，再由 Linux 设置 WP”并不能自动满足“保护启动链本身”的安全目标。必须先研究 Boot ROM 启动介质选择、TF 启动时是否仍执行 eMMC SPL、当前 SPL 的写入触发条件，以及是否存在可在 SPL 执行前建立硬件/芯片级保护的可行路径。
+- 在该前置问题解决前，不安排 rescue 启动、WP 设置或 B1 实机启动。
+
+## 19. 当前状态
+
+- B1 clean-RAM 组件构建：#34 已通过。
+- B1 hybrid TF image：#35/#36 因 CI 清单/验证脚本问题失败；#37 正在验证修复。
+- eMMC user WP 全部 3728 组均通过只读查询确认当前未保护。
+- 当前 Armbian 根分区和 /boot 均读写挂载于目标 eMMC；禁止当前系统在线设置整片 user-area WP。
+- Rescue kernel/initramfs 尚未创建；没有写 TF，没有设置 WP，没有启动 B1。
