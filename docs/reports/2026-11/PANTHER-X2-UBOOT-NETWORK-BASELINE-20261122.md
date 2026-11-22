@@ -382,3 +382,13 @@ ethaddr=16:70:f6:c8:b2:95
 - `bootfile`
 
 因此当前 U0 环境中这些变量均未定义；后续若为 DHCP 安全控制而临时设置 `autoload=no`，必须先确认当前构建 DHCP 命令实现确实遵循该变量，并在测试结束时恢复为未定义状态（不能留下 `autoload=no`）。当前尚未执行 DHCP。下一步继续只读检查 U-Boot 网络相关命令帮助，确认是否存在独立的 DHCP/网络初始化控制入口；仍不运行网络命令。
+
+
+### 网络命令组检查（2026-11-22）
+
+用户执行 `help net`，U-Boot 返回：
+```
+Unknown command 'net' - try 'help' without arguments for list of all known commands
+```
+
+结论：当前构建没有名为 `net` 的命令组入口；这不表示没有网络子系统命令，`dhcp`、`ping`、`mii`、`mdio` 已分别存在。DHCP 自动加载安全性仍未核实，因此不执行 DHCP。
