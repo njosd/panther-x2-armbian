@@ -1,5 +1,6 @@
 # Panther X2 B1: static ash and only the applets used by /init.
 CONFIG_STATIC=y
+CONFIG_BUSYBOX=y
 CONFIG_ASH=y
 CONFIG_SH_IS_ASH=y
 CONFIG_CAT=y
