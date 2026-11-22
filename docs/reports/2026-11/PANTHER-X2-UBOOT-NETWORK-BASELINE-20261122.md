@@ -226,3 +226,25 @@ dm aliases    Dump list of aliases
 ```
 
 结论：当前 proper 提供 Driver Model 只读诊断命令。下一步使用 `dm tree` 查看设备层级和激活状态；输出中的 `*` 按该版本帮助定义表示 activated。此命令只列出设备模型状态，不修改设备。重点核对 `ethernet@fe010000` 及其 MDIO/PHY 子设备，不能把总线注册等同于 PHY 已绑定或链路已建立。
+
+
+### Driver Model 设备树实测：Ethernet 与 PHY 均已 probe（2026-11-22）
+
+用户执行 `dm tree`，关键原始输出：
+```
+ebd51a00 ethernet  [ + ]   gmac_rockchip       |-- ethernet@fe010000 **
+ebd51b40 eth_phy_ge [ + ]  eth_phy_generic_drv |   `-- phy@0 **
+```
+
+按该表的 `Probed` 列，Ethernet 设备和其子级 PHY 设备均显示 `[ + ]`。由此可确认：
+- `ethernet@fe010000` 由 `gmac_rockchip` 驱动绑定并已 probe；
+- 设备模型下存在 `phy@0`，由 `eth_phy_generic_drv` 绑定并已 probe；
+- 这比仅确认 MDIO bus 注册更进一步，但仍不等于真实 PHY 芯片 ID 已成功读取、PHY 型号已识别或物理 link 已建立。
+
+与此前 `mii read` 地址 0–4 以及原生 `mdio read` 地址 0、1 的 BMSR 均为 `0xffff` 形成待解释的证据差异。不得把 generic PHY 设备节点当成已识别的具体 PHY 芯片，也不得据此判断链路状态。
+
+下一步查看各 uclass 的实例清单：
+```
+dm uclass
+```
+只读列出，不执行设备修改。
