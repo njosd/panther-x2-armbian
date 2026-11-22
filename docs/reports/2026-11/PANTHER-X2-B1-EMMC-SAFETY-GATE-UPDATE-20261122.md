@@ -339,3 +339,41 @@ Run ID `44979808662`，commit `3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`：
 - Kernel、DTB、BusyBox、initramfs、JP proper 等步骤全部成功。
 - 正在执行 `Package PREPARE-ONLY hybrid TF image and verify layout`。
 - 镜像打包步骤尚未结束，artifact 上传待执行；暂不标记通过。
+
+
+## 24. B1 hybrid TF image CI #37 成功（2026-11-22）
+
+- Run ID：`44979808662`
+- Commit：`3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`
+- 结论：success；全部 12 个步骤成功。
+- artifact ID：`14737222318`
+- 名称：`panther-x2-b1-clean-ram-prepare-only`
+- 大小：5,916,095 bytes；expires 2026-12-06T03:19:38Z。
+- artifact ZIP SHA-256：`888bd4b5030b03d85693815b815b38e38d4d522b7ef70be2891ab8d5442896fc`（已下载并核验与 GitHub artifact digest 一致）。
+- 压缩 TF image：`panther-x2-b1-hybrid-PREPARE-ONLY.img.zst`。
+- 压缩 image SHA-256：`856fce763baea0e38a49ff38a519cb3373f5ae37f4a18eb32b763f8effcec92d`。
+- 未压缩 2 GiB image SHA-256：`d4a40621a6e144735f6b3cbd564cf567552c89ff5878890a8a164f3239084a11`。
+- GPT partition 1：Linux filesystem，first sector 32768，last sector 4192255，ext4，label PANTHER_BOOT。
+- JP proper FIT 位于 raw LBA 16384，构建步骤内回读 SHA-256 与已知值一致。
+- 分区内六个文件均生成 SHA-256 清单：Image、uInitrd、boot.scr、boot.cmd、DTB、TEST-INFO。
+- ZIP 内 `SHA256SUMS` 全部通过校验。
+- 此为 PREPARE-ONLY 镜像 artifact；没有写入实体 TF/eMMC，没有执行实机启动。
+
+### Manifest 文案更正
+
+下载检查发现 `BUILD-MANIFEST.txt` 的旧文案仍写着“no disk image”，与新 workflow 已生成 PREPARE-ONLY hybrid image 的事实不一致。已提交更正：
+- Commit：`793d26b5e955eb53fddb418015dccb68827950b7`
+- manifest 现说明：只生成 PREPARE-ONLY hybrid TF image artifact，不写实体 TF/eMMC。
+- 该提交触发后续 Actions 构建；本节所列 #37 artifact 本身功能验证成功，manifest 文案更正的后续 artifact 仍待构建验证。
+
+## 25. 用户决策后的当前执行计划
+
+1. eMMC 全面写保护/Rescue/早期 bootloader 写路径研究停止作为 B1 阻塞项。
+2. 先确认专用 8GB TF 的准确设备身份和容量；不触碰 64GB 对照卡。
+3. 下载并核验 #37 或更新的 CI artifact；将压缩镜像解压到本地临时文件，核对 SHA-256。
+4. 写入前必须以设备型号/容量/设备节点三项交叉确认 8GB TF，确认目标设备不是 eMMC 或 64GB 对照卡。
+5. 写入后回读 raw LBA 16384 的 JP proper 区域及 GPT/分区文件，核对哈希。
+6. 插卡后先停在 U-Boot 交互提示符，只读获取 devtype/devnum、kernel_addr_r、ramdisk_addr_r、fdt_addr_r 和 DRAM bank 信息；确认无地址重叠后再运行 B1 boot script。
+7. 实机串口验证目标是确认 Kernel、DTB、initramfs、BusyBox shell；Linux 网络/存储设备保持刻意关闭。
+
+当前唯一实机阻塞转为：8GB TF 的目标设备确认、实体卡写入、U-Boot 地址现场核对。eMMC WP 不再是前置条件。
