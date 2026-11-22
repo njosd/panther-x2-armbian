@@ -89,3 +89,17 @@ U-Boot DHCP、网关和外部 IP ping 均成功，表示当前启动链在本次
 结论：MII 子系统实际枚举到一个设备，名称为 `ethernet@fe010000`，且当前设备已选定为该设备。与此前 `mdio list` 列出的总线名称一致，进一步确认 MII/MDIO 管理接口均关联目标 Ethernet 控制器。此结果仍不证明 PHY 地址/型号已识别、PHY link 已建立或 MAC 数据收发正常。
 
 下一步只读扫描 PHY 地址范围，禁止 MII/MDIO 写操作。建议命令：`mii info 0-31`。
+
+### PHY 查询与 MAC 环境变量检查（2026-11-22）
+
+#### MII PHY 查询语法反馈
+尝试 `mii info 0-31`，U-Boot 返回 `Incorrect PHY address. Range should be 0-31`，随后又提示 `No such device: 0-31`。本次命令没有完成 PHY 扫描，不能据此判定地址范围内没有 PHY。后续改为逐个合法 PHY 地址查询，先从地址 0 开始；不执行任何写寄存器操作。
+
+#### U-Boot MAC 环境变量
+现场执行 `printenv ethaddr`，输出：
+
+    ethaddr=16:70:f6:c8:b2:95
+
+结论：当前 U-Boot 环境中存在 `ethaddr`，其值为 `16:70:f6:c8:b2:95`。首字节 0x16 的 I/G 位为 0（单播），U/L 位为 1（本地管理地址）。因此这是一个本地管理型单播 MAC，不能仅凭该环境变量认定它就是板载厂商写入的原始 MAC，也不能证明 Ethernet 驱动已经将其配置到 MAC 控制器或实际用于发包。仍需核对 eth1addr/其他接口变量、设备驱动当前 MAC，以及 Panther X2 实际 MAC 存储来源。此次仅 printenv 读取，没有修改环境变量。
+
+当前已知：U-Boot 有 ethaddr 环境变量；板载原始 MAC 是否已正确读取、驱动是否采用该值，仍未确认。
