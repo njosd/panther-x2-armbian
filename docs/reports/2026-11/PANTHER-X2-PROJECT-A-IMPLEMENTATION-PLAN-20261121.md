@@ -2,7 +2,7 @@
 
 - 日期：2026-11-21
 - 从属文档：[项目 A 总路线图](PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)
-- 当前状态：B0 收尾；B1 构建准备；未获准写卡或启动实验系统
+- 当前状态：B1 干净 RAM 构建流程已写入仓库，尚未运行 CI；eMMC pre-Linux 安全门未通过，未获准写卡或实机启动
 
 ## 执行纪律
 
@@ -11,7 +11,7 @@
 1. 每次开始先回读总路线图、本计划和相关阶段最新报告。
 2. 复用仓库已有证据和 artifact；不得重复已完成测试。
 3. 每个子步骤只设一个目标和一个待验证变量；B1—B3 固定 JP-TvBox U-Boot proper，并尽量固定 Kernel、DTB、initramfs、BusyBox 与工具版本。
-4. B1 镜像可预置 B2/B3 所需的最小工具，但工具在当前阶段不自动启用；B1 不配置网络、不启动监听、不做网络收发验收。
+4. B1 第一份基线不预置任何网络工具、网络协议栈、Ethernet 驱动、存储驱动、USB 驱动、模块或固件；Linux 只从 RAM initramfs 运行。
 5. 每次试验前写明目标、固定条件、唯一变量、预期结果和停止条件；试验后记录命令、退出码、操作前后状态、日志和原始结果。
 6. 按启动/设备识别、接口/link、ARP、静态 IPv4/路由、ICMP、TCP、UDP 分层推进；上一层失败即停止，不叠加变量、不越级测试。
 7. 失败先界定故障层级并分析现有证据；不得同时更换内核、DTB、驱动、工具和网络配置来碰运气。
@@ -55,13 +55,14 @@
 - 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；必须核验当前新资产，不能沿用旧包结论。
 - 6.18.63 历史 artifact 的 DTB 证据只适用于旧包；当前同名资产 digest 已变化，必须重新核验内部成员。
 - 每个候选均须实际下载并独立计算外层 SHA-256，与 Release API digest 比对；检查真实归档成员、唯一 boot/DTB 资产、ARM64 Image、实际 config、Panther X2 DTB 及其哈希。
-- 核对干净基线所需配置闭环（ARM64、initramfs、gzip、devtmpfs、串口、必要 MMC/eMMC）；网络协议栈、STMMAC/DWMAC、MDIO/PHY 及其他网络专用驱动不作为干净基线必需项。
+- B1 不再把 Ophub 预编译 Image 作为构建输入。第一轮源码候选锁定为 `ophub/linux-6.18.y` commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`（Makefile 确认为 6.18.63）；CI 从该 commit 自建 Kernel，最终 .config 必须证明网络、无线、蓝牙、USB、MMC/块设备和模块均未启用。
+- 该 commit 仅为首轮可复现构建候选；CI 配置、编译、DTB 与 artifact 审查通过前，不视为已锁定可用内核。
 - 审计范围仅限板载有线千兆 Ethernet 所需 Kconfig：网络基础协议、MAC/GMAC、MDIO/PHY/PCS，以及共享总线/中断/DMA/时钟/复位依赖；明确干净基线必须关闭的项目和后续可逐项引入的最小依赖闭包。
 - Wi-Fi/无线网络、蓝牙及其控制器/驱动/固件/协议/用户空间组件永久排除，不开展 Kconfig 依赖研究、不构建、不测试、不作为后续引入项；USB/PCIe 外接网络适配器同样排除。
 - 若 6.18.64 当前资产合格则优先使用；否则只向相邻 6.18.y 回退。6.1.116 仅作历史正常行为对照，6.12.81 仅作项目 B 历史证据来源。
 - 只有发布包实物、配置、DTB 和硬件兼容证据闭环后，才锁定 B1 Kernel+DTB。
 
-验收：固定一个 B1 Kernel+DTB 组合，记录当前发布包哈希、内部文件哈希、配置证据及 DTB model/compatible，并明确哪些项目仍未验证。
+验收：固定源码 commit、交叉工具链、最终 .config、Kernel Image、从同一源码构建的 clean-test DTB、initramfs 和 BusyBox 的哈希；记录 DTB model/compatible、禁用节点和未验证边界。
 
 ### B0.4 eMMC pre-Linux 写入安全审计
 - 确认当前实际 eMMC IDB/SPL 身份，不用 JP IDB 哈希替代。
@@ -86,7 +87,7 @@
 
 ### B1.1 组件清单
 
-B1 构建一套贯穿 B1—Bn 的最小网络验证系统。组件可以为后续阶段预置，但当前阶段只启用和验收当前目标；阶段推进不要求每次重建镜像。
+B1 只构建一个纯 RAM 的最小启动底座。网络、存储和 USB 组件均不预置；后续只在 B2 为板载有线千兆 Ethernet 按单变量计划重新构建并引入。
 
 必须包含：
 - 固定版本 ARM64 Kernel；
@@ -96,24 +97,24 @@ B1 构建一套贯穿 B1—Bn 的最小网络验证系统。组件可以为后�
 - 简洁、可审计的 `/init`；
 - UART console/earlycon；
 - 必要 procfs、sysfs、devtmpfs、tmpfs；
-- 必要 MMC/eMMC 驱动内建支持；
-- B1 初始干净基线不包含网络工具、网络协议功能或网络设备驱动；这些均作为后续独立变量审查和引入。
-- B1 初始干净基线必须隔离 GMAC/STMMAC/DWMAC、MDIO/PHY/PCS 及其他未经审查的网络专用驱动，并禁用 Panther X2 DTB 中对应网络设备节点；具体隔离项以依赖审计清单为准。
+- Linux B1 不启用 MMC/eMMC/SD/SDIO、块设备、USB 或模块；TF 仅由启动前的 JP U-Boot proper 读取 Image、uInitrd 和 DTB，Linux 启动后不再访问任何存储设备。
+- Kernel 从源码以独立 allnoconfig + 最小 fragment 构建；网络栈及 Ethernet MAC/GMAC、MDIO、PHY/PCS 驱动必须未编入内核，而不只是模块未加载。
+- B1 clean-test DTB 必须禁用 GMAC/MDIO/PHY、MMC/eMMC/SDIO、USB host/PHY 和蓝牙 UART 节点；删除 Wi-Fi/蓝牙相关板级节点与 GPIO/power-sequence 描述，保留 UART2 console、必要 SoC 时钟与 pinctrl。
 - 网络工具（ip、ARP/ICMP、TCP/UDP）仅在网络子系统及对应设备驱动按序通过验证后逐项加入，不得为了减少重建次数预置到第一份干净基线。
 
 不包含：
-- DHCP、DNS、SSH；
-- ethtool（除非后续出现明确只读信息缺口并单独批准引入）；
-- NetworkManager、systemd、udev；
-- Docker、存储管理、NPU/RKNN、Immich；
-- 包管理器、无关常驻服务和不必要辅助工具。
+- 任何网络用户空间工具、DHCP/DNS/SSH；
+- Wi-Fi/无线网络、蓝牙及其驱动/固件/协议；
+- USB、MMC/eMMC/SD、块设备驱动、文件系统驱动和模块；
+- ethtool、NetworkManager、systemd、udev；
+- Docker、存储管理、NPU/RKNN、Immich、包管理器和无关服务。
 
 ### B1.2 `/init` 行为
 - 作为 PID 1，输出启动标识、Kernel/DTB/构建版本。
 - 挂载必要虚拟文件系统；devtmpfs 失败即停止。
-- 输出 CPU、内存、设备树 model、MMC 设备枚举和 block 节点。
-- 不挂载 TF/eMMC 文件系统，不自动挂载，不写持久化日志。
-- 如启用 block-layer RO helper，明确它仅在 Linux init 后生效；目标节点逐一设置并回读，失败即停止。
+- 输出 CPU、内存、设备树 model、Kernel command line 和挂载表；确认 `/` 为 initramfs/RAM，且没有 MMC、block、USB 或网络设备被枚举。
+- 只挂载 procfs、sysfs；devtmpfs 由内核自动挂载。不得挂载任何 TF/eMMC 文件系统，不自动挂载，不写持久化日志。
+- B1 不编译、不调用 `blockro`：Linux 根文件系统完全在 RAM，内核也不包含 MMC/block 驱动。该设计不替代 eMMC SPL/BootROM/U-Boot 的 pre-Linux 写入安全门。
 - 提供交互 ash shell；异常时打印原因并停留在诊断状态，不自动重启循环。
 - B1 干净基线不得加载或 probe 网络设备/驱动；不得配置接口地址、添加路由、触发 ARP/ICMP/TCP/UDP 测试或启动监听服务。
 - 必须从启动日志、Kernel config、模块清单、sysfs/设备树状态等证据确认网络专用组件未进入初始基线；若发现未计划的网络驱动或设备被 probe，B1 干净基线验收失败。
@@ -121,15 +122,16 @@ B1 构建一套贯穿 B1—Bn 的最小网络验证系统。组件可以为后�
 ### B1.3 构建输入与复现
 - 固定 Kernel/DTB/BusyBox/交叉工具链版本和哈希。
 - BusyBox 选择正式稳定版；核验 Kconfig、静态链接、实际 applet 清单和许可证。
-- CI 只构建 B1 必需文件，不构建完整 rootfs 或无关镜像。
+- CI 从锁定的 Linux 源码 commit 构建 Kernel Image 和 clean-test DTB；从固定 BusyBox 1.37.0 源码构建静态 ash，并按 applet 白名单生成 initramfs。
+- CI 只输出 Kernel、DTB、uInitrd、initramfs、boot.scr、JP proper 参考文件、manifest 和审计证据；不制作 raw/hybrid 磁盘镜像，不写 TF/eMMC。
 - 保存 manifest、下载校验、构建日志、ELF 架构/静态依赖、initramfs 文件清单、权限和 SHA-256。
 - 对 workflow YAML、shell、init 脚本执行静态语法检查。
 
 ### B1.4 静态验收
-- Kernel 为 ARM64 Linux Image。
-- DTB 的 model/compatible 对应 Panther X2/RK3566。
+- Kernel 为 ARM64 Linux Image；最终 .config 中网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block 和 MODULES 均未启用，且无 `.ko`。
+- DTB 的 model/compatible 对应 Panther X2/RK3566；GMAC/MDIO/PHY、MMC/eMMC/SDIO、USB 和 Bluetooth UART 节点全部禁用，Wi-Fi/蓝牙板级节点不存在。
 - `/init` 存在且可执行。
-- BusyBox 为 ARM64 静态 ELF，脚本调用的 applet 全部存在。
+- BusyBox 为 ARM64 静态 ELF；`/init` 所需 `ash/sh/cat/dmesg/mkdir/mount/tail/uname` 全部存在；网络 applet 不存在，实际 applet 清单不超过最小白名单范围。
 - initramfs 可解包，目录/权限正确，压缩格式与启动脚本兼容。
 - boot script 对 Kernel、DTB、uInitrd 加载逐项检查。
 - 输入和产物摘要齐全。
@@ -144,7 +146,7 @@ B1 构建一套贯穿 B1—Bn 的最小网络验证系统。组件可以为后�
 5. UART 完整采集 SPL 到 Linux shell 日志；
 6. 不执行 eMMC 写入命令，不挂载持久化 rootfs。
 
-B1 通过标准：Linux 执行 `/init`；UART shell 可交互；设备树/CPU/内存/UART/MMC 枚举合理；无 panic、解包错误或重启循环；未挂载 TF/eMMC 文件系统；保护检查符合设计；日志和哈希归档完整。
+B1 通过标准：Linux 执行 `/init` 并进入 UART ash shell；Panther X2/RK3566 model、CPU、内存和 UART2 正常；Kernel/DTB/initramfs 与 BusyBox 均为本轮锁定资产；没有 MMC/block、USB、网络或无线/蓝牙设备 probe；未挂载持久化文件系统；无 panic、解包错误或重启循环。实机启动仍须先通过 B0.4 eMMC pre-Linux 安全门并取得本次授权。
 
 
 ### B1.6 组件级分批验收与故障隔离门
@@ -271,10 +273,11 @@ Panther X2/Ophub 原版、JP-TvBox、Rockchip 官方 RK3566 DDR/SPL/BL31、NixOS
 - [x] 区分 eMMC SPL 与 JP proper 的混合链；
 - [x] 明确从头构建、上游优先、版本锁定；
 - [x] 明确 B1/B2/B3 分层边界；
-- [ ] B0.3 复核 Kernel/DTB 发布资产并锁定 B1 输入；
+- [x] B0.3 已锁定首轮源码候选 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`（6.18.63），并新增干净内核/BusyBox配置、DTB隔离脚本与独立 B1 workflow；
+- [ ] 静态审查新 workflow、Kconfig fragment、DTB 派生脚本与 initramfs；
+- [ ] 运行 B1 clean RAM workflow；
+- [ ] 审查 B1 artifact 中的最终 config、Image、DTB、BusyBox applet 清单、initramfs 和哈希；
 - [ ] B0.4 完成 eMMC pre-Linux 写入安全门；
-- [ ] B1 workflow 静态审计并运行 CI；
-- [ ] 审查 B1 artifact；
 - [ ] 安全门通过且获本次授权后，写入 SU08G 并完成实机启动；
 - [ ] B1 通过后执行 B2；
 - [ ] B2 通过后执行 B3；
