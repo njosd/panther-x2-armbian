@@ -369,3 +369,16 @@ ethaddr=16:70:f6:c8:b2:95
 - MAC 首字节 `0x16` 表明该地址为单播、本地管理地址；其来源和驱动是否实际采用仍未由当前输出证明。
 
 下一步先只读检查 DHCP 相关网络环境变量（`autoload`、`ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile`），以确定当前值/未定义状态；在源码确认 DHCP 命令的自动加载行为之前，不执行 DHCP。
+
+
+### DHCP 相关环境变量初始状态（2026-11-22）
+
+用户执行 `printenv autoload ipaddr serverip gatewayip netmask bootfile`，所有六项均返回 `not defined`：
+- `autoload`
+- `ipaddr`
+- `serverip`
+- `gatewayip`
+- `netmask`
+- `bootfile`
+
+因此当前 U0 环境中这些变量均未定义；后续若为 DHCP 安全控制而临时设置 `autoload=no`，必须先确认当前构建 DHCP 命令实现确实遵循该变量，并在测试结束时恢复为未定义状态（不能留下 `autoload=no`）。当前尚未执行 DHCP。下一步继续只读检查 U-Boot 网络相关命令帮助，确认是否存在独立的 DHCP/网络初始化控制入口；仍不运行网络命令。
