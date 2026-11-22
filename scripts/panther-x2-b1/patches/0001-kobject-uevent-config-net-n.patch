@@ -1,0 +1,15 @@
+diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
+--- a/lib/kobject_uevent.c
++++ b/lib/kobject_uevent.c
+@@ -729,7 +729,9 @@ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+ 		     gfp_t allocation)
+ {
+-	kfree_skb(skb);
++	/*
++	 * The CONFIG_NET=n stub only disposes of an unused skb. Avoid the
++	 * network-only drop-reason wrapper in this no-network build.
++	 */
++	__kfree_skb(skb);
+ 	return 0;
+ }
+ #endif
