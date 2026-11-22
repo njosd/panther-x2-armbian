@@ -89,12 +89,13 @@ NixOS 配方仅作为研究样本；其曾出现 ROCK 3C EVB control FDT/target 
 
 ### 4.1 最小化、分层启用与单变量试验
 
-- 先构建一套贯穿 B1—Bn 的最小网络验证系统，不先构建完整 Ubuntu/Armbian rootfs。
-- B1 镜像可以预置后续 B2/B3 所需的最小网络工具；但“存在于镜像”不等于“当前阶段启用或验收”。
-- B1 第一份可启动基线必须是干净基线：只保留启动、RAM initramfs、串口、必要存储读取/枚举和最小用户空间所必需的组件；不编入或启用 GMAC/STMMAC/DWMAC、MDIO/PHY 网络驱动及其他未经审查的网络设备驱动，不启用网络协议栈、网络服务或网络用户空间工具，不让相关网络设备节点参与 probe。
-- 对板载有线千兆网口链路可能影响结果的组件做依赖审查和隔离清单，范围限于 Ethernet MAC/GMAC、MDIO、PHY、PCS、相关 pinctrl/clock/reset/regulator/DMA/interrupt、必要网络协议和用户空间工具。共享于 UART、TF/eMMC、PMIC 等启动必需硬件的基础设施不得盲目全局关闭，必须按设备节点/依赖关系精确处理。
-- Wi-Fi/无线网络、蓝牙及其 SDIO/USB/PCIe 控制器、驱动、固件、协议和用户空间组件是项目 A 的永久排除项，不进行依赖追踪或逐项引入；仅在 clean-test DTB/镜像准入检查中确认其设备节点、驱动、固件和用户空间内容未进入/未启用即可。
-- 干净基线通过后，网络相关组件才按单变量实验逐项加入；每次加入一个组件或一个不可再拆分的最小依赖闭包，完成构建审计和目标硬件验证后再继续。
+- 先构建一个纯 RAM 的最小 Linux 启动底座，不构建完整 Ubuntu/Armbian rootfs。
+- B1 不预置任何 B2/B3 网络工具、网络协议、Ethernet 驱动、存储驱动、USB 驱动、模块或固件。
+- Linux B1 从 initramfs/RAM 运行；TF 只由启动前的 JP U-Boot proper 读取 Image、uInitrd 和 DTB。Linux 阶段不启用 MMC/eMMC/SD/SDIO、块设备、USB、网络协议栈或网络设备驱动。
+- B1 保留 ARM64、RK3566 SoC 启动支持、UART2 console、必要时钟/pinctrl、initramfs/gzip、devtmpfs/procfs/sysfs/tmpfs 和静态 BusyBox ash；不加载或 probe GMAC/STMMAC/DWMAC、MDIO/PHY/PCS。
+- 有线千兆网口链路的后续依赖审查范围仅限 Ethernet MAC/GMAC、MDIO、PHY、PCS 及相关 pinctrl/clock/reset/regulator/DMA/interrupt；共享于 UART/SoC 启动的基础设施不得盲目关闭，必须按设备节点/依赖关系精确处理。
+- Wi-Fi/无线网络、蓝牙及其控制器、驱动、固件、协议和用户空间组件永久排除，不进行依赖追踪或逐项引入；只在 clean-test DTB/镜像准入检查中确认相关节点、驱动、固件和用户空间内容未混入。
+- USB 与 USB/PCIe 外接网卡不属于项目 A；B1 禁用 USB host/PHY。干净基线通过后，只围绕板载有线千兆 Ethernet 按单变量实验逐项加入最小依赖闭包，完成构建审计和目标硬件验证后再继续。
 - B2、B3 只在相应网络组件已逐项放行后，按层次验证接口/link、静态地址、ARP、ICMP、TCP/UDP；不把多项组件、配置或测试捆绑为一次试验。
 - 同一轮 B1—B3 尽量固定 Kernel、DTB、initramfs、BusyBox、工具版本和启动链。只有当前证据明确要求时才变更其中一项，并将变更作为独立试验。
 - 不因完整发行版通常包含某组件，就提前加入它；不为追求“最小体积”而删除后续阶段明确需要、且不会干扰当前阶段的工具。
@@ -112,12 +113,11 @@ NixOS 配方仅作为研究样本；其曾出现 ROCK 3C EVB control FDT/target 
 唯一目标硬件为 Panther X2 / RK3566，不建立其他 SoC/板型兼容矩阵。硬件相关组件优先采用明确支持 RK3566 的 Rockchip 资料/代码及 Panther X2 板级资产；通用用户空间组件使用各自上游项目，不为单板 fork 通用工具。
 
 必须保留或验证：
-- UART 串口控制台及跨启动阶段日志；
-- TF/SD 读取能力；
-- 必要 MMC/eMMC 识别；
+- UART2 串口控制台及跨启动阶段日志；
+- TF/SD 读取由启动前 U-Boot proper 完成；Linux B1 不启用 MMC/eMMC/SD/SDIO 控制器；
 - Panther X2 板载有线千兆以太网口（仅在 B1 干净基线通过后，按阶段引入并验证）；
 - 原有硬件复位功能，不凭外观猜测 GPIO 或改变按键语义；
-- RK809 PMIC 与现有 PWRKEY 软件支持，除非板级证据证明不适用。
+- RK809/PMIC 电源由启动固件完成必要初始化；B1 不为此引入非启动必需的 PMIC 用户空间或存储组件。
 
 Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线千兆网口网络设备全部排除，不列为项目 A 候选或后续任务。
 
@@ -147,24 +147,24 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 
 - 必须使用 Panther X2 专用 `rk3566-panther-x2.dtb`，不得用 E23/E25/ROCK 3C DTB 替代。
 - Kernel、DTB、模块和必要固件必须来自匹配版本。
-- 干净基线内核必须具备 ARM64、initramfs/initrd、所选压缩格式、devtmpfs、串口及必要 MMC/eMMC 启动支持；网络驱动、PHY/MDIO、网络协议栈和其他网络功能不得因为候选发行版默认启用就自动带入。
+- 干净基线内核必须具备 ARM64、RK3566 SoC、initramfs/initrd、gzip、devtmpfs、UART2 console、必要时钟和 pinctrl 支持；Linux B1 不启用 BLOCK/MMC/eMMC/SD/SDIO、USB、网络协议栈、Ethernet/GMAC、MDIO/PHY、无线/蓝牙或模块。TF 文件由 U-Boot 在 Linux 启动前读取。
 - 有线千兆以太网相关 Kconfig 必须建立分类清单，区分启动必需、共享依赖和 Ethernet 专用项。干净基线不编入网络栈及 Ethernet 驱动；后续只对板载 Ethernet 所需依赖闭包逐项审查、引入并记录配置差异。
 - Wi-Fi/无线网络、蓝牙及其他非目标网络设备配置一律列入永久排除清单，不进入后续逐项引入计划。
 - 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
-- 按相邻修订顺序审计 6.18.64、6.18.63、6.18.62（必要时 6.18.61），优先选距离 6.18.64 最近且当前发布资产完整合格的版本。
+- B1 第一轮源码构建候选锁定为 `ophub/linux-6.18.y` commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，该提交 Makefile 明确为 Linux 6.18.63；该源码 commit 作为首轮可复现输入，不等于已通过构建或实机验收。
 - 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；旧包检查结论不能直接套用于当前新资产。
 - 6.18.63 历史 artifact 曾包含 Panther X2 DTB（历史 DTB SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`），但同名发布包 digest 后续变化为 `67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9`；历史内部成员证据只适用于旧包，当前包尚未重新核验。
-- 每个候选均须实际下载并独立计算外层 SHA-256，与 Release API digest 比对；检查真实归档成员、唯一 boot/DTB 资产、ARM64 Image、实际 config、Panther X2 DTB 及其哈希。
-- 同时核对 B1 所需配置闭环（ARM64、initramfs、gzip、devtmpfs、IPv4/PACKET、Rockchip STMMAC/DWMAC、Realtek PHY、MMC/eMMC）。
-- 若 6.18.64 当前资产合格则优先使用；否则只向相邻 6.18.y 回退。6.1.116 仅作历史正常行为对照，6.12.81 仅作项目 B 历史证据来源。
-- 当前 Kernel 未最终锁版；只有发布包实物、配置、DTB 和硬件兼容证据闭环后，才锁定 B1 Kernel+DTB。
+- Ophub 6.18.63/6.18.64 预编译包只作历史对照和审计证据，不作为 B1 Kernel 输入；已审计的 6.18.64 config 含网络栈与 built-in GMAC/MDIO/PHY，不能用于干净基线。
+- 新 B1 workflow 从精确源码 commit 自建 Kernel；以独立 allnoconfig + 最小 config fragment 生成最终 .config，并以自动门确认网络、USB、MMC/block、无线/蓝牙、MODULES 均未启用。
+- 同一源码 commit 中的 Panther X2 DTS 派生 clean-test DTS/DTB；保留原始 DTS，不覆盖上游文件；自动核验 model/compatible 和 Ethernet、MMC、USB、Bluetooth 节点状态。
+- 首轮构建通过 CI、artifact 和实机安全门后，才考虑将该 Kernel+DTB 锁定为 B1 版本。
 
 ### 5.2 Initramfs 与 BusyBox
 
-- 使用小型 initramfs；首选静态 BusyBox 提供 ash 和必要基础命令。
-- BusyBox 必须选官方正式稳定版，核实发布状态、源码包哈希、配置、许可证和实际 applet 清单；不把 unstable/development 当正式稳定版。
-- B1 只建立 `/init` 实际调用的命令链接，不建立完整 applet 链接树。
-- `/init` 短小、可读、可审计、fail-closed；启动失败明确输出原因。
+- 使用小型 gzip initramfs；静态 BusyBox 提供 ash 和最小命令集。
+- 首轮 BusyBox 固定为 1.37.0，源码包 SHA-256 `3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4`；构建使用 allnoconfig + 明确 applet fragment，并在 QEMU 下核验 ARM64 静态二进制及实际 applet 清单。
+- B1 只建立 `/init` 实际调用的 ash/sh/cat/dmesg/mkdir/mount/tail/uname 命令链接，不建立完整 applet 链接树；网络 applet 必须不存在。
+- `/init` 短小、可读、可审计；只挂载 procfs/sysfs，不探测或挂载持久化存储。
 - BusyBox 不是正式系统用来替代 Debian/Ubuntu 用户空间的决定。
 
 ### 5.3 板载有线千兆以太网工具按阶段引入（干净基线不预置）
@@ -187,10 +187,10 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 
 ### 5.4 构建与打包
 
-- 使用独立手动触发 CI workflow，不覆盖现有完整 Armbian 构建流程。
-- 首先只生成 RAM initramfs 及必要启动文件，不生成无关完整 rootfs/hybrid 镜像。
-- 产物包括 Kernel、DTB、initramfs/uInitrd、启动脚本、manifest、文件清单、SHA-256 和构建日志。
-- 不把完整 BusyBox applet、存储管理工具、写保护辅助程序或无关服务塞入第一版。
+- 使用独立手动触发 workflow `.github/workflows/build-panther-x2-b1-clean-ram.yml`，不覆盖完整 Armbian 构建流程。
+- workflow 从锁定源码构建 Kernel、派生 clean-test DTB、构建静态 BusyBox 和 gzip initramfs；旧的预编译包/hybrid workflow 已禁用并仅留作历史记录。
+- 产物仅包括 Kernel、DTB、initramfs/uInitrd、boot.scr、JP proper 参考文件、manifest、文件清单、SHA-256 和构建日志；不生成 raw/hybrid 磁盘镜像，不写 TF/eMMC。
+- eMMC pre-Linux 安全门未通过前，CI artifact 只能标记 PREPARE-ONLY，不得写卡或实机启动。
 
 ## 6. 启动介质、Vendor 数据与安全边界
 
@@ -222,7 +222,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 | 阶段 | 名称 | 目标 | 当前状态 |
 |---|---|---|---|
 | B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和 eMMC 安全边界 | 部分完成；安全门未通过 |
-| B1 | 最小 RAM Linux 干净基线 | 进入 `/init`，UART shell 可交互，启动设备识别正确；不含网络栈、板载 Ethernet 驱动/工具及无线/蓝牙组件 | 未完成 |
+| B1 | 最小 RAM Linux 干净基线 | 进入 `/init`，UART shell 可交互；Linux 不启用网络、Ethernet、MMC/block、USB、无线/蓝牙和模块，根文件系统完全在 RAM | 构建流程已提交；CI/实机未验证 |
 | B2 | 板载有线千兆网口分层验证 | 仅对板载 Ethernet 的内核网络基础、MAC、MDIO/PHY 依赖按单项引入；再验证 link、静态地址、ARP、同网段与网关 ICMP | 未开始 |
 | B3 | 板载有线千兆网口 TCP/UDP 验证 | 仅通过板载有线千兆网口进行 TCP 与 UDP 双向端到端验证，分开测试且结果可重复 | 未开始 |
 | B4 | 网络组件按需扩展 | 根据明确需求加入 DHCP/DNS/SSH 等 | 条件触发 |
@@ -242,18 +242,19 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 ### 静态审计确认
 - eMMC Vendor Storage 存在 LAN_MAC ID=3、12-byte 双 MAC 项；真实 MAC 不公开。
 - Rockchip 参考实现 Vendor Storage 起点为 eMMC user area LBA 7168，4 份 64 KiB 副本。
-- 6.18.64 对应 DTB 包历史检查未找到 Panther X2 DTB；6.18.63 有历史 artifact，但新发布包内容待复核。
+- 6.18.64 预编译包的实际 config 含 `CONFIG_NET=y`、`CONFIG_STMMAC_ETH=y`、`CONFIG_DWMAC_ROCKCHIP=y`、`CONFIG_PHYLIB=y`、`CONFIG_REALTEK_PHY=y`，不能作为 B1 干净 Kernel。
+- 首轮 B1 源码候选为 6.18.63 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`；尚待 clean config/build/DTB/artifact 验证。
 - Linux block-layer RO 与 pre-Linux 写保护属于不同保护层。
 
 ### 尚未验证
-- 最小 initramfs 是否能成功构建；
-- 新 Kernel/DTB/initramfs 组合能否在 Panther X2 启动；
+- B1 clean Kernel/DTB/BusyBox/initramfs workflow 能否成功构建；
+- clean Kernel/DTB/initramfs 组合能否在 Panther X2 启动；
 - B2/B3 静态网络与 TCP/UDP 连通性；
 - eMMC 芯片级写保护能力和完整覆盖；
 - JP proper 新系统重复启动稳定性；
 - 长期 U-Boot 候选完整板级适配。
 
-**当前唯一优先事项：** 收尾 B0 的启动资产与 eMMC pre-Linux 写入安全审计，并收敛 B1 构建输入。安全门未通过前，不写 SU08G、不启动实验固件、不修改 Panther X2 现有系统。
+**当前唯一优先事项：** 静态审查并运行新 B1 clean RAM workflow，审查构建 artifact；同时独立完成 B0.4 eMMC pre-Linux 写入安全门。安全门未通过前，不写 SU08G、不启动实验固件、不进行 Panther X2 实机启动。
 
 ## 9. 关联文档与维护
 
@@ -287,10 +288,9 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 ### 11.1 干净基线与网络组件隔离（强制前置门）
 
-- B1 第一阶段先构建不含网络功能变量的干净 RAM 启动基线。初始镜像不预置网络设备驱动、MAC/MDIO/PHY/PCS 专用驱动、网络协议功能、网络用户空间工具或网络服务。
-- 至少明确隔离并核验 GMAC/STMMAC/DWMAC 相关驱动与 Panther X2 对应设备树节点；同时审查其他可能影响网络行为的驱动和依赖，不得把关闭 GMAC 误当成所有网络变量已隔离。
-- 初始 Kernel 配置、最终二进制和 DTB 必须分别提供证据：Kconfig/最终 .config 证明网络专用驱动未编入；DTB 反编译与结构检查证明目标网络设备节点已禁用或从测试 DTB 中排除；不得用仅禁用 DTB 节点冒充驱动代码已移除。
-- 共享时钟、复位、pinctrl、regulator、DMA、interrupt 等基础设施按依赖关系处理；不得为隔离网络而误关闭 UART、MMC/eMMC、PMIC 或其他启动必需设备。
+- B1 第一阶段构建纯 RAM 启动基线：Kernel 网络栈、Ethernet/GMAC/MDIO/PHY 驱动、MMC/block、USB、无线/蓝牙和模块全部关闭；不预置网络用户空间工具、固件或服务。
+- Kernel 最终 .config 必须证明网络专用代码未编入；DTB 反编译与结构检查证明 GMAC/MDIO/PHY、MMC/SDIO、USB 和 Bluetooth UART 节点已禁用或从 clean-test DTB 移除；不得用仅禁用 DTB 节点冒充驱动代码已移除。
+- Linux B1 只保留 UART2 console、SoC 时钟/pinctrl 和 initramfs 必需支持；不得为了隔离网络而误关闭 UART/SoC 启动依赖。TF 只由 U-Boot 在 Linux 启动前读取，Linux 不启用任何 MMC/block 设备。
 - 干净基线通过后，才按组件清单逐项引入网络子系统、设备驱动及最小依赖闭包、用户空间工具。每次只改变一个组件/最小依赖闭包，失败即停并回到最近已验证基线。
 - DHCP、DNS、SSH、NetworkManager、systemd、udev、Docker、NPU/RKNN、GPU、Immich、数据库和存储服务继续排除，除非后续有独立需求与批准。
 
