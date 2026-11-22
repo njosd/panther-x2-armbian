@@ -30,7 +30,7 @@ jobs:
             bc bison build-essential cpio curl device-tree-compiler \
             file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
             libncurses-dev libssl-dev make perl python3 qemu-user-static \
-            readelf binutils u-boot-tools
+            binutils u-boot-tools
 
       - name: Fetch exact Linux source commit
         run: |
@@ -64,9 +64,6 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
           cp "$OUT/.config" work/kernel.config
-          bash scripts/panther-x2-b1/verify-b1-config.sh \
-            work/kernel.config /dev/null /bin/true aarch64-linux-gnu- 2>/dev/null || true
-
           for option in \
             CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_OF CONFIG_OF_FLATTREE \
             CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT \
