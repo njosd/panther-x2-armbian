@@ -101,3 +101,12 @@
 - B1 实机启动前仍必须通过独立的 PRE-HANDOFF READY 清单；本方案不绕过 U-Boot 发送端核查阶段门。
 - 当前 U-Boot DHCP 已挂起，不再尝试；U0 在断电重启后只完成部分快照恢复，需补核对必要设备枚举并归档异常。
 - 下一步不是修改 GMAC 参数，也不是直接启动 Linux；先把本轮 U-Boot 异常、重启后环境快照、6.1.116 正向对照和分层方法归档，再继续 PRE-HANDOFF 静态审计。
+
+
+## 8. B1 启动脚本安全门补充
+
+静态审查发现，原仓库版 `boot.cmd` 在 Kernel、initramfs 或 DTB 加载失败时调用 `reset`，与禁止脚本触发复位的操作边界冲突。已修订仓库版脚本：失败分支只输出错误并结束，不调用 reset。提交：`b3e7177d3cafc62c55948d5cbc3fe76b991cea65`。
+
+**重要：该修订只存在于 Git 仓库，不代表已更新到 TF。** 既有 B1 启动前检查记录显示 TF 上曾读取到旧 `boot.scr`（1,130 bytes）和旧 `boot.cmd`（1,058 bytes），旧脚本包含 reset 分支；对应文件哈希未在该记录中闭环。不得直接执行 TF 上旧 `boot.scr` 的 `source`。必须等待最新构建 artifact 生成，检查新 boot.cmd/boot.scr 内容和 SHA-256，再通过独立安全门及明确授权更新测试 TF。
+
+既有启动前检查记录中的地址快照（Kernel 0x00280000、FDT 0x0A100000、initramfs 0x0A200000）来自较早 U-Boot 会话。当前 DHCP 异常后已断电重启，尚未在当前会话重新核对地址变量；且旧 TF 镜像中的 Kernel/uInitrd 身份哈希未闭环。故这些地址只能作历史线索，不得直接用于当前 PRE-HANDOFF READY 签核。
