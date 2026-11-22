@@ -202,7 +202,13 @@ jobs:
 
           KCONFIG_ALLCONFIG="$GITHUB_WORKSPACE/scripts/panther-x2-b1/busybox.config.fragment" \
             make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
+          # BusyBox oldconfig reads defaults until configuration is complete.
+          # "yes" may then receive SIGPIPE; do not let pipefail mistake that
+          # expected producer exit for a failed Kconfig run. The make exit
+          # status remains the pipeline status and is still checked by set -e.
+          set +o pipefail
           yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig >/dev/null
+          set -o pipefail
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee "$GITHUB_WORKSPACE/work/logs/busybox-build.log"
 
           install -m 0755 busybox "$GITHUB_WORKSPACE/work/output/busybox"
