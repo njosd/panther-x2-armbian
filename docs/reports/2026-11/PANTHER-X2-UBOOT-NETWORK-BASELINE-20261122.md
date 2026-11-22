@@ -174,3 +174,26 @@ PHY at address 0:
 mdio read ethernet@fe010000 1 1
 ```
 不得执行 mdio write/wx 或 mii write/modify。
+
+
+### MDIO 原生命令交叉验证：地址 1（2026-11-22）
+
+在地址 0 的原生 MDIO 读取返回 `0xffff` 后，保持同一总线和寄存器，仅将 PHY 地址改为 1：
+
+命令：
+```
+mdio read ethernet@fe010000 1 1
+```
+
+现场输出：
+```
+Reading from bus ethernet@fe010000
+
+PHY at address 1:
+
+1 - 0xffff
+```
+
+结果：地址 1 的寄存器 1 同样返回 `0xffff`。因此，当前两个明确指定的 PHY 地址（0、1）在原生 MDIO 路径下均未返回可识别的 BMSR 值；与此前 MII 地址 0–4 的读取结果一致。不能据此判定 PHY 不存在或损坏，也不能区分 PHY 无响应、MDIO 电气/时序问题或控制器底层访问异常。
+
+下一步不进行无目的地址扫描。应先审查当前 U-Boot proper 的源码/构建配置，确认该以太网设备的 MDIO bus 注册、PHY 探测和地址映射路径，再决定是否存在有依据的只读验证步骤。继续禁止任何 MDIO/MII 写入操作。
