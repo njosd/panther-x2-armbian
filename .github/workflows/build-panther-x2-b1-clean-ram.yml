@@ -332,8 +332,8 @@ jobs:
           IMAGE=work/output/panther-x2-b1-hybrid-PREPARE-ONLY.img
           truncate -s 2G "$IMAGE"
           sgdisk --clear \
-            --new=1:32768:0 \
-            --typecode=1:EF00 \
+            --new=1:32768:4192255 \
+            --typecode=1:8300 \
             --change-name=1:PANTHER_BOOT \
             "$IMAGE"
 
@@ -371,7 +371,7 @@ jobs:
           dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
           sgdisk -v "$IMAGE"
           sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
-          grep -q EF00 work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
 
           SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
           ACTUAL_SHA="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
