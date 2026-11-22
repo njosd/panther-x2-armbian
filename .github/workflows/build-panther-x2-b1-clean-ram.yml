@@ -200,15 +200,58 @@ jobs:
           tar -xjf "work/busybox-${BUSYBOX_VERSION}.tar.bz2" -C work
           cd "work/busybox-${BUSYBOX_VERSION}"
 
-          KCONFIG_ALLCONFIG="$GITHUB_WORKSPACE/scripts/panther-x2-b1/busybox.config.fragment" \
-            make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
-          # BusyBox oldconfig reads defaults until configuration is complete.
-          # "yes" may then receive SIGPIPE; do not let pipefail mistake that
-          # expected producer exit for a failed Kconfig run. The make exit
-          # status remains the pipeline status and is still checked by set -e.
+          # BusyBox 1.37.0's bundled Kconfig does not reliably honor
+          # KCONFIG_ALLCONFIG during allnoconfig. Start from a clean all-no
+          # config, then merge the reviewed fragment as explicit user choices.
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          config = Path(".config")
+          fragment = Path("$GITHUB_WORKSPACE/scripts/panther-x2-b1/busybox.config.fragment")
+          current = config.read_text().splitlines()
+          updates = {}
+          for line in fragment.read_text().splitlines():
+              match = re.match(r"^(CONFIG_[A-Z0-9_]+)=(.*)$", line)
+              if match:
+                  updates[match.group(1)] = line
+                  continue
+              match = re.match(r"^# (CONFIG_[A-Z0-9_]+) is not set$", line)
+              if match:
+                  updates[match.group(1)] = line
+
+          seen = set()
+          merged = []
+          for line in current:
+              match = re.match(r"^(CONFIG_[A-Z0-9_]+)=", line)
+              if not match:
+                  match = re.match(r"^# (CONFIG_[A-Z0-9_]+) is not set$", line)
+              if match and match.group(1) in updates:
+                  key = match.group(1)
+                  if key not in seen:
+                      merged.append(updates[key])
+                      seen.add(key)
+                  continue
+              merged.append(line)
+          for key, line in updates.items():
+              if key not in seen:
+                  merged.append(line)
+          config.write_text("\\n".join(merged) + "\\n")
+          PY
+          grep -qx 'CONFIG_STATIC=y' .config || {
+            echo "::error::BusyBox fragment merge did not enable CONFIG_STATIC"
+            exit 1
+          }
+          # Resolve Kconfig dependencies and any new symbols. The make exit
+          # status is authoritative; yes may legitimately receive SIGPIPE.
           set +o pipefail
           yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig >/dev/null
           set -o pipefail
+          grep -qx 'CONFIG_STATIC=y' .config || {
+            echo "::error::BusyBox oldconfig dropped CONFIG_STATIC"
+            exit 1
+          }
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee "$GITHUB_WORKSPACE/work/logs/busybox-build.log"
 
           install -m 0755 busybox "$GITHUB_WORKSPACE/work/output/busybox"
