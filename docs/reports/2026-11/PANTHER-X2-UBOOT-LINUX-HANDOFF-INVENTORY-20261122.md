@@ -159,3 +159,48 @@
 - `POST-HANDOFF VERIFIED`：Linux已实际接收并正确解析，且与冻结的交接内容一致。
 
 在`PRE-HANDOFF READY`之前，不得正式启动Linux。U0和U-Boot网络基准测试的清理/回归仍按既定要求执行；该清理不能代替本交接阶段门。
+
+
+## 10. 2026-11-22 断电重启后地址变量与 bdinfo 快照
+
+本节记录 DHCP/Data Abort 后断电重启、重新进入当前 U-Boot proper 后的只读输出。用户在同一会话中依次执行 `printenv kernel_addr_r ramdisk_addr_r fdt_addr_r` 与 `bdinfo`。终端重复回显按同一次输出处理，不计为重复独立试验。
+
+### 10.1 当前环境变量
+
+```
+kernel_addr_r=0x00280000
+ramdisk_addr_r=0x0a200000
+fdt_addr_r=0x0a100000
+```
+
+### 10.2 当前 bdinfo
+
+```
+arch_number = 0x00000000
+boot_params = 0x00000000
+DRAM bank   = 0x00000000
+-> start    = 0x00200000
+-> size     = 0xEFE00000
+baudrate    = 1500000 bps
+TLB addr    = 0xEFFF0000
+relocaddr   = 0xEDD4A000
+reloc off   = 0xED34A000
+irq_sp      = 0xEB9F63B0
+sp start    = 0xEB9F63B0
+FB base     = 0x00000000
+Early malloc usage: 5758 / 80000
+fdt_blob = 00000000eb9f63c0
+```
+
+### 10.3 可直接计算的范围与限制
+
+- 当前 U-Boot 报告一个 DRAM bank：起始 `0x00200000`，长度 `0xEFE00000`，按半开区间计算结束地址为 `0xF0000000`（不包含）。
+- 三个环境变量指定的装载起始地址均落在该 DRAM bank 内。
+- U-Boot relocation 地址 `0xEDD4A000`、TLB 地址 `0xEFFF0000`、IRQ/stack 地址约 `0xEB9F63B0` 均位于该 bank 高端区域；`fdt_blob=0xEB9F63C0` 是当前 U-Boot control FDT 指针，不是 `fdt_addr_r=0x0A100000` 的 Linux 目标 FDT。
+- 当前输出只提供地址，不提供 Kernel、DTB、initramfs 的实际文件长度/装载长度，也没有给出 U-Boot 所有保留区间的完整清单。因此现在只能确认起始地址位于 DRAM 范围内，不能签署镜像区间无重叠或装载安全。
+- 旧历史记录中的 Kernel/FDT/initramfs 地址与本轮当前环境值一致；本轮首次将这些地址与断电重启后的当前 `bdinfo` 绑定。但历史镜像身份/长度不能由地址一致性补足。
+- DRAM 单 bank 结果与历史日志的两个 bank 描述并不相同；必须以当前 `bdinfo` 实测为当前 U-Boot 视角，后续仍需核实最终 FDT 的 memory/reserved-memory 是否与当前实际内存映射一致，不能把历史两个 bank 直接复制进当前交接结论。
+
+### 10.4 当前阶段判断
+
+地址起点与当前 DRAM bank 边界已核实；镜像实际长度、Kernel 运行/解压地址需求、U-Boot relocation/栈/控制 FDT保留范围、最终 Linux FDT memory/reserved-memory 尚未闭环。PRE-HANDOFF READY 仍未通过。本轮没有装载镜像、执行 FDT 修改命令、启动 Linux 或写入任何介质。
