@@ -1,6 +1,14 @@
 name: Build Panther X2 B1 clean RAM baseline (prepare only)
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-panther-x2-b1-clean-ram.yml
+      - scripts/panther-x2-b1/**
+      - scripts/panther-x2-minimal-initramfs/init
+      - scripts/panther-x2-minimal-initramfs/boot.cmd
   workflow_dispatch:
 
 permissions:
