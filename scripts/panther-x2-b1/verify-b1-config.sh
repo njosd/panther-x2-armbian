@@ -9,8 +9,9 @@ fi
 KERNEL_CONFIG="$1"
 BUSYBOX_CONFIG="$2"
 BUSYBOX_BIN="$3"
-CROSS_PREFIX="$4"
-if [[ -z "$CROSS_PREFIX" ]]; then
+if [[ "$#" -ge 4 ]]; then
+  CROSS_PREFIX="$4"
+else
   CROSS_PREFIX="aarch64-linux-gnu-"
 fi
 
