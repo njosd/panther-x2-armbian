@@ -6,6 +6,7 @@
 
 - [项目 A 总路线图](docs/reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威架构、决策原则、U-Boot 论证、组件边界和阶段总览。
 - [项目 A 分阶段实施计划](docs/reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 及 B0.1、B1.1 等可执行步骤、验收和停止条件。
+- [B1 纯 RAM 干净基线构建实施记录](docs/reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、workflow 和未验证事项。
 - [文档总索引](docs/README.md)：主题文档、证据与历史路线映射。
 
 ## 项目 A 当前方向
