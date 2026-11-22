@@ -1,80 +1,44 @@
 #!/bin/sh
+# Panther X2 B1: RAM-only userspace, intentionally no network or storage stack.
 PATH=/bin:/sbin
-export PATH
-export HOME=/
-export PS1='(panther-x2-minimal) # '
+HOME=/
+PS1='(panther-x2-b1-clean) # '
+export PATH HOME PS1
 
-fail_closed() {
-    echo
-    echo "[FATAL] MMC read-only protection could not be verified."
-    echo "[FATAL] This test image will not start an interactive shell."
-    echo "[FATAL] Inspect the serial log, then power-cycle the board."
-    while :; do /bin/busybox sleep 3600; done
-}
+printf '\n=== Panther X2 B1 clean RAM baseline ===\n'
+printf 'Network stack and network devices: intentionally absent.\n'
+printf 'Linux MMC/eMMC/TF and USB: intentionally absent.\n'
+printf 'Root filesystem: initramfs in RAM; no persistent filesystem is mounted.\n'
 
-mkdir -p /proc /sys /dev /run
-/bin/busybox mount -t proc proc /proc 2>/dev/null || fail_closed
-/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || fail_closed
-/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || fail_closed
-/bin/busybox mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run 2>/dev/null || fail_closed
+mkdir -p /proc /sys
 
-echo
-echo "=============================================="
-echo " Panther X2 minimal RAM-only boot environment"
-echo " Kernel: 6.18.63 stable"
-echo " Root: initramfs in RAM; no persistent rootfs"
-echo "=============================================="
-echo
-
-echo "[1] Device identity"
-if [ -r /proc/device-tree/model ]; then
-    /bin/busybox cat /proc/device-tree/model
+if ! mount -t proc proc /proc; then
+    printf 'WARNING: could not mount procfs\n'
 fi
-echo
-/bin/busybox uname -a
-echo
-/bin/busybox cat /proc/cmdline
-echo
+if ! mount -t sysfs sysfs /sys; then
+    printf 'WARNING: could not mount sysfs\n'
+fi
 
-echo "[2] Enforcing Linux block-layer read-only on every MMC block device"
-mmc_count=0
-for node in /sys/class/block/mmcblk*; do
-    [ -e "$node" ] || continue
-    name=${node##*/}
-    [ -b "/dev/$name" ] || fail_closed
-    /sbin/blockro "/dev/$name" || fail_closed
-    ro=$(/bin/busybox cat "$node/ro" 2>/dev/null) || fail_closed
-    [ "$ro" = "1" ] || fail_closed
-    echo "  $name: read-only=$ro"
-    mmc_count=$((mmc_count + 1))
-done
-[ "$mmc_count" -gt 0 ] || fail_closed
-echo "  Verified MMC block devices: $mmc_count"
-echo
+printf '\n--- Kernel ---\n'
+uname -a
+printf '\n--- Device model ---\n'
+if [ -r /proc/device-tree/model ]; then
+    cat /proc/device-tree/model
+    printf '\n'
+else
+    printf 'Device-tree model unavailable\n'
+fi
 
-echo "[3] CPU and memory"
- /bin/busybox cat /proc/cpuinfo
-echo
-/bin/busybox cat /proc/meminfo
-echo
+printf '\n--- Kernel command line ---\n'
+cat /proc/cmdline
+printf '\n--- CPU ---\n'
+cat /proc/cpuinfo
+printf '\n--- Memory ---\n'
+cat /proc/meminfo
+printf '\n--- Mounts (no persistent storage expected) ---\n'
+mount
+printf '\n--- Last 120 kernel messages ---\n'
+dmesg | tail -n 120
 
-echo "[4] Block devices (enumeration only; nothing is mounted)"
-/bin/busybox cat /proc/partitions
-echo
-
-echo "[5] Mount table"
- /bin/busybox mount
-echo
-
-echo "[6] Recent kernel log"
- /bin/busybox dmesg | /bin/busybox tail -n 120
-echo
-
-echo "MMC block devices are read-only at the Linux block layer."
-echo "No eMMC/TF filesystem is mounted by this initramfs."
-echo "No network configuration or GMAC traffic test is started."
-echo
-echo "WARNING: this protection starts only after Linux init runs."
-echo "It does not prove that the earlier eMMC SPL/U-Boot stages are write-free."
-echo
+printf '\nB1 baseline ready. Interactive shell follows.\n'
 exec /bin/sh -i
