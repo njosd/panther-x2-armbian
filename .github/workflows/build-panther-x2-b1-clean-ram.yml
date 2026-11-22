@@ -393,7 +393,7 @@ jobs:
           done
           (
             cd work/tf-mnt
-            find . -type f -print0 | sort -z | xargs -0 sha256sum
+            find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum
           ) | tee work/output/tf-files.sha256
           sudo umount work/tf-mnt
           sudo losetup -d "$LOOP"
