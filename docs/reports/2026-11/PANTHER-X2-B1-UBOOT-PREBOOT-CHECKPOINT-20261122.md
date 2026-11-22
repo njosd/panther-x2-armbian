@@ -152,3 +152,19 @@
 将当前 U-Boot proper 启动完成、停留在 => 提示符且尚未进行 DHCP/连通性测试的状态正式定义为 U0。当前只做过帮助、环境变量和 MII/MDIO 枚举查询；尚未执行 DHCP、下载、存储写入、环境修改或启动新镜像，也没有添加测试组件。当前可确认的快照及网络测试后回归要求，详见 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md 的 U0 节。
 
 后续 U-Boot 网络测试必须先记录将被临时改变的环境变量，再以 RAM 临时状态执行；测试结束恢复原值/未定义状态、清理本轮临时网络参数，并核对启动链、提示符和身份变量未变。无法无重启地恢复的运行时状态必须明确记录，不得声称已回到 U0。当前禁止 reset/reboot 和任何存储写入。
+
+
+## 11. 2026-11-22 DHCP异常后的现场状态修订
+
+本节覆盖本检查点中“U-Boot网络基准尚未执行DHCP”的旧状态描述；保留此前历史检查记录，不覆盖旧证据。
+
+- 用户已在旧 U-Boot 会话中确认 `autoload=no` 后执行 `dhcp`。
+- 实测先出现 `EQOS_DMA_MODE_SWR stuck`，随后 AArch64 Data Abort，U-Boot 停在 `Please RESET the board`，旧会话失效。
+- 实体 Reset 短按未恢复；断电重启后通过 UART 自动 Ctrl-C 截停自动启动，重新进入同一 U-Boot proper。
+- 重启后 proper 版本、ethaddr、临时环境变量未定义状态及启动环境关键变量已重新核对；bootdelay=0，boot_targets包含 pxe/dhcp，相关自动启动命令含 DHCP、source、TFTP 和潜在 bootefi。
+- 重启后尚未重核 mdio list / mii device，因此 U0 仅部分恢复；不得宣布完整 U0 回归。
+- 当前 U-Boot DHCP 测试暂停，不再重试；无 DHCP成功、报文往返、TFTP下载或存储写入证据。
+
+6.1.116 正向控制：既有归档确认 Panther X2 Linux 6.1.116 使用 rk_gmac-dwmac、RTL8211F（PHY ID 0x001cc916）、RGMII，千兆全双工；用户确认 DHCP、hEX及iMac ping正常。原版 U-Boot曾输出 `Net: No ethernet found.`，而Linux后续仍能独立初始化并使用网卡。此历史对照支持Linux不依赖U-Boot网络初始化，但不证明当前JP proper DMA异常对同一启动周期交接绝无影响。
+
+后续网络验证以《PANTHER-X2-NETWORK-LAYERED-VALIDATION-PLAN-20261122.md》为方法基线：B1无网络；B2按最小依赖闭包逐层引入；ARP/ICMP/TCP/UDP必须使用两端报文证据。PRE-HANDOFF READY阶段门仍不可跳过。
