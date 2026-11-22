@@ -437,3 +437,23 @@ tftpput   - TFTP put command, for uploading files to a server
 4. 本轮通过 GitHub 文件读取接口尝试获取 JP-TvBox 二进制原始字节，接口未返回二进制内容（base64 内容为空）；因此尚未完成该文件的 strings、反汇编或指令级控制流审计。没有伪称已检查到 JP 二进制内的 `autoload` 字符串或调用路径。
 
 **当前操作决策：** DHCP 暂停。由于现场 `autoload` 未定义，而上游 v2017.09 参考实现的未定义行为会进入 TFTP，当前绝不能直接运行 `dhcp`。只有在 JP proper 二进制审计或其他针对该二进制的可靠证据确认 `autoload=no` 的确切行为后，才重新评估。若最终仍无法闭环，保留 U0，不做 DHCP/TFTP 组合测试；改走不触发下载的独立 DHCP-only 方案或将网络基准标记为受限未完成。
+
+
+### JP-TvBox proper 专项静态审计工作流已建立（2026-11-22）
+
+新增独立 GitHub Actions 工作流：`.github/workflows/audit-panther-x2-jp-uboot-proper.yml`。
+
+工作流目标严格限定为当前实机 JP-TvBox `u-boot.itb`，并在 runner 上：
+
+1. 校验归档文件 SHA-256 `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce` 和大小 `1464832` bytes；
+2. 列出 FIT 内容，解析 FDT image/hash 节点并校验提取 payload 的 SHA-256；
+3. 对 U-Boot proper 执行 `file`、`strings` 和 AArch64 raw-binary 反汇编；
+4. 生成 DHCP/TFTP/autoload、Ethernet/GMAC/MDIO/PHY、Vendor Storage/MAC 相关字符串索引；
+5. 做保守的 ADR / ADRP+ADD 直接字符串引用扫描，保留完整反汇编供后续人工/脚本深入追踪；
+6. 上传完整审计材料为 Actions artifact。
+
+工作流提交：`02ae24432187a2061c466fa4bf1db651f5e20d9f`。
+
+**执行状态：** 工作流文件已提交，但本轮没有可用的 GitHub workflow-dispatch 操作，因此尚未触发 runner；不能把“工作流已建立”写成“二进制已审计”。当前审计结果仍为待执行。执行后必须检查 job 日志、FIT payload hash 和 artifact，再更新证据结论。
+
+**安全边界：** 该工作流仅在 GitHub-hosted runner 上读取仓库归档并做离线静态分析，不连接 Panther X2，不访问或修改 TF/eMMC，不改变当前 U-Boot U0 会话。
