@@ -90,7 +90,8 @@ jobs:
 
           install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
           file work/output/Image | tee work/kernel-image-file.txt
-          readelf -h work/output/Image 2>&1 | head -n 20 || true
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
+          test "$IMAGE_MAGIC" = "41524d64" || { echo "::error::Kernel payload is not an ARM64 Image"; exit 1; }
           cp work/kernel.config work/output/kernel.config
           cp "$FRAGMENT" work/output/kernel.config.fragment
 
@@ -125,8 +126,10 @@ jobs:
           for node in \
             /ethernet@fe010000 /ethernet@fe010000/mdio \
             /mmc@fe310000 /mmc@fe2b0000 /mmc@fe2c0000 \
-            /serial@fe650000 /usb@fcc00000 /usb@fd800000 /usb@fd840000 \
-            /usb2phy@fe8a0000 /usb2phy@fe8b0000; do
+            /serial@fe650000 /usb@fcc00000 /usb@fd000000 \
+            /usb@fd800000 /usb@fd840000 /usb@fd880000 /usb@fd8c0000 \
+            /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port \
+            /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
             STATUS="$(fdtget -t s "$DTB" "$node" status)"
             test "$STATUS" = "disabled" || {
               echo "::error::B1 DTB node not disabled: $node status=$STATUS"
@@ -151,7 +154,7 @@ jobs:
           } | tee work/dtb-verification.txt
           cp work/dtb-verification.txt work/output/
 
-      - name: Build static BusyBox with exact applet allowlist
+      - name: Build static BusyBox with minimal applet allowlist
         run: |
           set -euo pipefail
           curl -fL --retry 3 \
