@@ -62,6 +62,7 @@ jobs:
           # source calls kfree_skb(), whose inline drop accounting references
           # sk_skb_reason_drop() from the absent networking core. The stub
           # only frees an unused skb, so use the always-built __kfree_skb().
+          git -C work/linux apply --check "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
           git -C work/linux apply "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
           git -C work/linux diff --check
           git -C work/linux diff -- lib/kobject_uevent.c | tee work/logs/config-net-off-uevent-patch.diff
