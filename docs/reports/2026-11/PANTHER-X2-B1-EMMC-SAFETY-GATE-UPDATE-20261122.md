@@ -106,3 +106,27 @@ mmc-utils 上游源码定义：
 - 不写 64GB 6.12 对照 TF。
 - 不在 eMMC Power-on WP 完整读回验证前启动当前混合启动链。
 - 不将 #34 组件 artifact 描述为已写卡或已启动。
+
+
+## 9. B1 TF 镜像打包步骤已加入 CI（2026-11-22）
+
+提交：`3c8bfe97999adbe2ed1d1539384ba9cf8f70db33`
+
+在当前 B1 clean-RAM workflow 的 Kernel/DTB/BusyBox/initramfs 组件构建后，新增 PREPARE-ONLY TF 镜像打包与结构验证步骤：
+- 生成 2 GiB 镜像文件；
+- GPT 分区 1 从 LBA 32768 开始，类型 EF00，ext4 文件系统；
+- 已校验 SHA-256 的 JP-TvBox U-Boot proper FIT 写入 raw LBA 16384；
+- 分区根目录放置 Image、uInitrd、boot.scr、boot.cmd 和 Panther X2 专用 DTB；
+- 写入 TEST-INFO，明确这是现有 eMMC SPL → TF JP proper 的混合启动，尚未清除 eMMC 安全门；
+- 检查 GPT、分区类型、JP proper 写入后哈希、ext4 文件系统和分区内启动文件；
+- 生成压缩镜像及 SHA-256 清单，随 B1 artifact 上传。
+
+此提交只修改 GitHub Actions workflow；尚无该提交对应的 Actions 运行结果，故不能声称 TF 镜像已构建成功。未写实体 TF、未设置 eMMC WP、未启动设备。
+
+## 10. 当前最短推进路径
+
+1. 等待并核验提交 `3c8bfe9` 对应 B1 Actions 构建结果及新镜像 artifact。
+2. 从当前 Armbian root shell 只读采集 mmc-utils 包版本、`mmc` 二进制路径及 SHA-256，核对 Power-on WP 命令实现。
+3. 完成 U-Boot 地址变量的安全核验。不得在未知 load address 时执行 boot.cmd。
+4. 单独取得用户对 DF4032 全 user-area Power-on WP 的明确授权；未经授权不设置。
+5. WP 逐组读回完整通过后，再写唯一 8GB SU08G 测试 TF；64GB 对照卡保持冻结。
