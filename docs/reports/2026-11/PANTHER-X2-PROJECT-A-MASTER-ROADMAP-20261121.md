@@ -310,3 +310,16 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 若一次试验同时改变多个变量，或缺少足够记录以区分变量影响，则该试验不能作为可靠的故障定位证据；应先恢复或重新建立已知基线，再设计单变量验证。不得把相关性直接写成根因。
 
+
+
+## 12. 2026-11-22 优先级修订：先建立 U-Boot 网络基准
+
+用户明确调整项目 A 当前优先级：历史版本已证明 Linux 可以启动，当前最重要的未知项是 U-Boot 能否独立打通板载有线千兆网口。**先在当前运行的 U-Boot 会话中完成网络基准实测，再继续 B1 clean RAM Linux；不再要求 B1 通过后才允许 U-Boot 网络验证。** 本修订覆盖第 2 节原先的先后顺序，但不取消 B1 的隔离价值。
+
+新顺序：U-Boot 只读识别 Ethernet/MDIO/PHY → 确认 link → DHCP → ping LAN 网关 → ping 已知外部 IP；随后 B1 无网络 RAM Linux；再到 B2 单变量引入 Linux 网络组件；最后 B3 分开验证 TCP/UDP。
+
+用户已明确授权当前 U-Boot 会话的板载有线网口初始化、DHCP 和基本连通性实测。授权不包含重启、换 U-Boot/SPL、启动新镜像、写 TF/eMMC、持久化环境修改或 MII/MDIO 寄存器写入。禁止 save/saveenv/fatwrite/tftpflash/tftpput/download/fastboot/rockusb/ums、任何存储写入及 boot/source/reset。DHCP help 显示 DHCP/TFTP 组合命令，必须先审计 autoload=no 是否能阻止 TFTP 自动下载；确认前不执行 DHCP。
+
+现场初步证据：help dhcp、help mii、help mdio 已核对；mdio list 实际输出 ethernet@fe010000:，证明一个 MDIO bus 已注册，但 PHY、link、DHCP、IP 连通尚未验证。完整过程见 [U-Boot 网络基准实测记录](PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md)。
+
+本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来重新启动和写介质仍受 B0.4 安全门约束。
