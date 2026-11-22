@@ -42,7 +42,7 @@ jobs:
             bc bison build-essential cpio curl device-tree-compiler \
             file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
             libncurses-dev libssl-dev make perl python3 qemu-user-static \
-            binutils u-boot-tools
+            binutils e2fsprogs gdisk zstd u-boot-tools
 
       - name: Fetch exact Linux source commit
         run: |
@@ -318,6 +318,91 @@ jobs:
             find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           )
           cat work/output/SHA256SUMS
+
+      - name: Package PREPARE-ONLY hybrid TF image and verify layout
+        run: |
+          set -euo pipefail
+          mkdir -p work/tf-mnt
+          test -s work/output/Image
+          test -s work/output/uInitrd
+          test -s work/output/boot.scr
+          test -s work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/output/JP-TvBox-u-boot.itb
+
+          IMAGE=work/output/panther-x2-b1-hybrid-PREPARE-ONLY.img
+          truncate -s 2G "$IMAGE"
+          sgdisk --clear \
+            --new=1:32768:0 \
+            --typecode=1:EF00 \
+            --change-name=1:PANTHER_BOOT \
+            "$IMAGE"
+
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo cp -a work/output/Image work/tf-mnt/Image
+          sudo cp -a work/output/uInitrd work/tf-mnt/uInitrd
+          sudo cp -a work/output/boot.scr work/tf-mnt/boot.scr
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo cp -a work/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/
+          sudo cp -a work/output/boot.cmd work/tf-mnt/boot.cmd
+          printf '%s\\n' \
+            'Panther X2 B1 clean RAM test image; PREPARE-ONLY.' \
+            'Boot chain: existing eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
+            'No TF IDB/SPL is installed; Linux B1 disables MMC, USB and network.' \
+            'Do not flash or boot until eMMC hardware write-protection and U-Boot address safety gates are cleared.' \
+            | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          # Place the verified JP U-Boot proper FIT at raw LBA 16384 (8 MiB).
+          dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q EF00 work/output/tf-partition-1.txt
+
+          SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
+          ACTUAL_SHA="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$JP_UBOOT_SHA256"
+          echo "JP proper expected=$JP_UBOOT_SHA256 readback=$ACTUAL_SHA"
+
+          # Reopen the completed image read-only and verify the ext4 payload.
+          LOOP="$(sudo losetup --find --show --partscan --read-only "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          sudo mount -o ro "${LOOP}p1" work/tf-mnt
+          for p in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do
+            test -s "work/tf-mnt/$p"
+          done
+          (
+            cd work/tf-mnt
+            find . -type f -print0 | sort -z | xargs -0 sha256sum
+          ) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          zstd -T0 -10 "$IMAGE" -o "${IMAGE}.zst"
+          sha256sum "$IMAGE" "${IMAGE}.zst" > work/output/tf-image-sha256.txt
+          rm -f "$IMAGE"
+          cat work/output/tf-image-sha256.txt
 
       - name: Upload B1 clean RAM components (prepare only)
         uses: actions/upload-artifact@v6
