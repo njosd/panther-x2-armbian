@@ -323,3 +323,9 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 现场初步证据：help dhcp、help mii、help mdio 已核对；mdio list 实际输出 ethernet@fe010000:，证明一个 MDIO bus 已注册，但 PHY、link、DHCP、IP 连通尚未验证。完整过程见 [U-Boot 网络基准实测记录](PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md)。
 
 本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来重新启动和写介质仍受 B0.4 安全门约束。
+
+## 13. 新增 U0：U-Boot proper 启动完成后的恢复检查点
+
+在当前 U-Boot 网络基准测试前，正式建立 U0（U-Boot post-startup baseline）：当前 proper 已启动并停留在 => 提示符、尚未执行 DHCP/网络连通性测试的状态。当前只完成帮助、环境变量、MII/MDIO 枚举查询；没有 DHCP、下载、存储写入、环境修改或新增测试组件。具体快照见 U-Boot 网络基准实测记录 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md 的 U0 节。
+
+U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生的临时网络参数，核对启动链、U-Boot proper、提示符及身份变量未改变，再宣布回到 U0。不得把 DHCP 后的环境状态直接带入 B1。无法在不重启/不写存储的条件下恢复的内部运行时状态要如实记录；不允许为了清理而擅自 reset/reboot。U0 回归核对通过后，才继续 B1 clean RAM Linux。
