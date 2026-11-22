@@ -433,3 +433,55 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 | 日期 | 变更 |
 |---|---|
 | 2026-11-22 | 将 Ophub 6.18.y 明确列为待审计对象而非正确基线；以 6.1.116 实机正向行为作为对照，要求定位 6.18.y 首个失败边界，禁止照搬整套配置、盲目复制旧参数或先叠加 workaround。 |
+
+
+## 17. 2026-11-22 基线优先级修订：原始 6.1.65 是首要黄金基线
+
+用户指出：当前机器运行的 6.1.116 是经过多个版本升级后形成的环境，不能将其视为原始出厂/首次安装软件状态；网上另找一台运行 6.1.116 的 Panther X2，也不能替代用户自己保存的原始刷机包。该判断成立，项目 A 的基线优先级据此修订。
+
+### 17.1 基线层级
+
+1. **第一黄金基线：用户持有的原始 6.1.65 完整 Armbian IMG。** 这是本机最早刷机软件的直接原件，也是后续重建软件来源和原始行为的首要参照。镜像 SHA256：`0326e757a72182b5e60b112000ceef808bcb3a2bfd954448bbb6c9b16eb6f3ea`；gzip 内部 IMG 名 `Armbian_24.2.0_rockchip_panther-x2_jammy_6.1.65_server_2023.12.07.img`；解压长度 2,969,567,232 bytes。用户称其为原始刷机包，并已确认当年采用 RKDevTool Boot + System 流程安装到 eMMC。
+2. **第二黄金基线：用户设备当前保存的 6.1.116 相关原始归档与实机记录。** 它证明同一台物理设备在后期某个状态下曾实现端到端网络正常，但经历多个版本升级，可能包含 kernel、modules、DTB、rootfs、boot config、U-Boot/SPL 的历史变化。不得把它称为原始系统状态，也不得默认它与 6.1.65 的启动链相同。
+3. **第三类参考：网络上其他设备的 6.1.116 或 Ophub 6.18.y 发布资产。** 只作为外部源码/配置/行为比较样本，不可替代用户原件或本机实测。
+
+### 17.2 原始 6.1.65 目前已闭环的事实
+
+- 原始压缩镜像本体 SHA256 和 gzip 内部 IMG 名、时间、大小已由用户 iMac 只读核验；gzip 完整性通过。
+- 原始镜像 GPT 和 BOOT ext4 分区结构已读取。
+- BOOT 内含 `Image`、`vmlinuz-6.1.65-ophub`、`uInitrd`、`uInitrd-6.1.65-ophub`、Panther X2 专用 `rk3566-panther-x2.dtb`、`armbianEnv.txt`、`boot.cmd`、`boot.scr`。
+- `armbianEnv.txt` 的 `fdtfile` 指向 `rockchip/rk3566-panther-x2.dtb`；`boot.scr` legacy header 与 CRC 通过，payload 与 `boot.cmd` 正文一致。
+- 原始 Panther X2 Linux DTB 根节点声明 `model = "Panther X2"`、`compatible = "panther,x2", "rockchip,rk3566"`；GMAC1 节点 `fe010000` 启用，RGMII、clock input、TX/RX delay `0x30/0x10`、PHY 地址0、GMAC1 M0 pinctrl、外部 125MHz 时钟设计及 PHY 供电/reset 引用均已静态解析。
+- 已有 6.1.65 原始 DTB 与 6.1.116 正常基线的 GMAC 专项交叉核对：两者的 GMAC 主节点语义、M0 pinmux、电气 drive/pull 配置和 125MHz clock-parent 设计高度一致。当前没有证据支持先替换 Panther X2 GMAC DTB。
+- 原始镜像内偏移 `0x800000` 处的 FIT 默认配置包含 Radxa E25 / RK3568 的 U-Boot FDT payload；此对象是 FIT 中 U-Boot proper 所用 FDT，不是 Linux 启动脚本实际指定的 Panther X2 Linux DTB。两者不可混为一谈。
+
+### 17.3 仍未闭环的原始来源链
+
+- 尚未找到用户 6.1.65 IMG 的可验证公开原始下载 URL/发布页/发布者 checksum。公开可见的同项目相邻版本为 6.1.74，不可冒充 6.1.65 原件。
+- `lintao1890/panther-x2-armbian` 是 Ophub fork/衍生项目，README 说明 kernel 更新机制接入 `ophub/kernel`；但不能据此证明 2023-12-07 的具体 6.1.65 Image、U-Boot、SPL 都由某个 Ophub commit 原样构建。
+- 原始镜像 rootfs 中 `/lib/modules/6.1.65-ophub`、`modules.dep`、`modules.builtin`、内核 IKCONFIG/外置 config 尚未完整索引，Image/modules/config 对应关系未闭环。
+- 原始 FIT 默认配置中的 U-Boot FDT 身份已知，但当年 RKDevTool Boot 栏实际选择的 Loader 文件无法回忆；现存三个 Loader 候选不能仅凭名称/DDR 字符串推定哪一个曾刷入。用户已确认 RKDevTool Boot + System 流程，但 Loader 精确身份、写入地址/介质和当年完整刷写配置仍未知。
+- 当前 eMMC 在本次研究中曾进行过实验性 IDB 替换；当前 U-Boot 版本和 control FDT 不能自动代表 6.1.65 原始启动链。
+
+### 17.4 项目 A 的研究顺序调整
+
+1. 先完整恢复原始 6.1.65 镜像内部所有可验证来源：BOOT 文件、Kernel Image、DTB、initramfs、rootfs、modules、config、network userspace、FIT/Loader 元数据；建立文件哈希与版本对应关系。
+2. 追踪 `lintao1890/panther-x2-armbian` 在 2023-12-07 前后的源码、workflow、构建脚本、release/Actions、依赖仓库和 `armbian-update` 版本；对 kernel 二进制来源必须追到确切 commit/build inputs，否则明确标为 unknown。
+3. 查明原始 6.1.65 rootfs 中网络管理方案和服务配置，判断原始网络行为依赖哪些 userspace 服务/配置；不能将 6.1.116 后期系统中的 NetworkManager/netplan/interfaces 等状态倒推到原始系统。
+4. 对照 6.1.65 原始内核源码/配置与当前候选 6.18.y，先做静态差异和依赖矩阵；6.1.116 只用于同一硬件曾正常工作的补充行为参照。
+5. 只有在原始资产身份和 PRE-HANDOFF 安全门闭环后，才考虑恢复原始 6.1.65 软件栈进行实机复测。当前不因“黄金基线”定义而自动授权重刷 eMMC。
+6. B1/B2 的最终实验仍遵循最小 RAM 系统、逐层单变量与双端抓包；原始 6.1.65 是软件/板级来源和正向行为的主要参照，不意味着把旧系统整体复制为项目 A 最终镜像。
+
+### 17.5 证据标签
+
+- **已确认：** 用户持有的 6.1.65 IMG 是其明确指定的最早原始刷机包；镜像本体哈希、BOOT 分区、启动配置和 Panther X2 Linux DTB 的关键属性已读取。
+- **已确认：** 用户当前机器的 6.1.116 是后期升级状态；它不能单独代表首次安装状态。
+- **已确认：** 6.1.65 与 6.1.116 的 GMAC DTB 核心配置高度一致；目前不把 GMAC DTB 当作首要故障差异。
+- **未确认：** 原始镜像官方发布 URL/checksum、确切 build commit、原始 Loader 身份、rootfs modules/config/network service 完整清单、原始 eMMC 最终启动链。
+- **强制约束：** 后续报告、实验矩阵和结论中，6.1.65 原始镜像列为第一黄金基线；6.1.116 标注为同机后期正常运行参照；外部 6.1.116 标注为第三方样本。
+
+### 17.6 变更记录
+
+| 日期 | 变更 |
+|---|---|
+| 2026-11-22 | 根据用户指出的版本升级历史，正式将用户原始 6.1.65 完整镜像设为第一黄金基线；将本机 6.1.116 降为后期同机正常参照；将网络上其他 6.1.116 降为外部样本。 |
