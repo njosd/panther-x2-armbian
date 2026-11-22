@@ -69,7 +69,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           source = Path("work/linux/lib/kobject_uevent.c").read_text()
-          start = source.index("#else\\nint broadcast_uevent")
+          start = source.index("#else" + chr(10) + "int broadcast_uevent")
           end = source.index("#endif", start)
           stub = source[start:end]
           assert "if (skb)" in stub
