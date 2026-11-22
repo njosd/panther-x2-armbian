@@ -457,3 +457,25 @@ tftpput   - TFTP put command, for uploading files to a server
 **执行状态：** 工作流文件已提交，但本轮没有可用的 GitHub workflow-dispatch 操作，因此尚未触发 runner；不能把“工作流已建立”写成“二进制已审计”。当前审计结果仍为待执行。执行后必须检查 job 日志、FIT payload hash 和 artifact，再更新证据结论。
 
 **安全边界：** 该工作流仅在 GitHub-hosted runner 上读取仓库归档并做离线静态分析，不连接 Panther X2，不访问或修改 TF/eMMC，不改变当前 U-Boot U0 会话。
+
+
+### JP-TvBox U-Boot proper 静态审计结果（Actions run 45015430386，2026-11-22）
+
+**执行结果：** GitHub Actions job `inspect-jp-proper`（job ID `137186601292`）成功完成全部步骤。审计产物 `panther-x2-jp-tvbox-uboot-static-audit`（artifact ID `14750814074`，20 个文件，3,622,990 bytes）已上传。Artifact ZIP SHA-256：`14e084e255e17bd83f3405460cf65263da8ec5cb9fe4a6f9da660dea2a5bc35a`。
+
+**输入与 payload 身份核验：**
+- 输入：`docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb`
+- FIT 大小：1,464,832 bytes；SHA-256：`a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`，与预期一致。
+- U-Boot proper payload：1,238,776 bytes；SHA-256：`753e0cb3f4411a9afa2a0e847f5477da39db40f9e15447dec7db01b64252e15d`，FIT hash 验证通过。
+- FIT 默认配置名为 `conf`，描述 `rk3566-rock-3c`；FDT image SHA-256：`3ccee0dc5389f7cd02e949f95248a6ddf70de77de0b3eeb66c819a79f1fa29c1`。
+
+**关键板级差异：** 提取的 FDT 根节点明确为 `model = "Radxa ROCK3 Model C"`、`compatible = "radxa,rock3c", "rockchip,rk3566"`，不是 Panther X2 专用 FDT。该 FDT 同时定义 `ethernet@fe010000` 与 `ethernet@fe2a0000` 两个 GMAC 节点；前者含 `phy@0`（reg=0）。这与当前 U-Boot 运行时 DM tree 中 `ethernet@fe010000` 及 `phy@0` 对象相符，但不证明 FDT 的 pinmux、供电、时钟、PHY 连接描述适用于 Panther X2。不得将此 FDT 当作 Panther X2 板级配置正确性的证据。
+
+**与现场 MDIO 证据合并：** 当前会话中，GMAC 与 generic PHY 对象均显示为已 probe；但对 PHY 地址 0 的 MDIO 读取，寄存器 0 返回 `0x0000`、寄存器 1 返回 `0xFFFF`、寄存器 2 返回 `0x0000`、寄存器 3 返回 `0xFFFF`。因此目前只能说驱动模型对象已建立/探测，MDIO 读数尚未形成可信的 PHY 标识或链路状态。不能据此断言 PHY 不存在、损坏或硬件故障。
+
+**DHCP/autoload 静态线索：** proper 字符串中存在 `autoload`、DHCP bound/invalid-state 提示、TFTP 错误和网络启动命令。保守 ADRP+ADD 扫描在代码地址约 `0xbd624` 处发现对 `autoload` 字符串的引用，并显示随后与另一个字符串比较及条件分支。当前静态扫描报告明确声明其不是完整反编译，也没有可靠函数边界；因此本次结果尚不足以单凭字符串索引/局部片段签发“`autoload=no` 必然禁止所有 TFTP 自动下载”的安全结论。DHCP-only 执行仍须等待该分支及调用上下文的进一步人工核验；在此之前不运行 DHCP。
+
+**审计边界与未决项：** 本次为离线静态分析；无 ELF 符号或可信函数边界，未证明字符串对应代码在当前启动路径中实际执行，也未证明本次运行时 FDT 就是 FIT 中提取的 FDT。工作流成功不等于 DHCP 行为已验证。当前 U0 会话未执行 DHCP/TFTP、未写存储、未启动其他镜像。
+
+Actions run：https://github.com/njosd/panther-x2-armbian/actions/runs/45015430386
+Artifact：https://github.com/njosd/panther-x2-armbian/actions/runs/45015430386/artifacts/14750814074
