@@ -423,3 +423,87 @@ mmcblk1: type=SD name=SU08G CID=035344535530384780b16ad9b700c15f
 - 下一步执行前仍须在写卡现场再次自动核对 SD 类型、型号、CID、容量、挂载状态和目标设备节点。
 - 写入后对整张 2 GiB 镜像区域回读 SHA-256，与 `8bbb57ecb169bd9da28f16ee9f5995e5c3a569252f4f09e732f5384f74d993df` 比较；再核对 GPT 与分区文件。
 - 写卡和回读尚未发生；不得记录为已完成。
+
+
+## 27. B1 专用 8GB TF 实际写入、回读与 GPT 修复完成（2026-11-22）
+
+### 写入目标与源镜像
+
+现场再次核对目标设备：
+- 设备：`/dev/mmcblk1`
+- 类型：SD
+- 型号：`SU08G`
+- CID：`035344535530384780b16ad9b700c15f`
+- 容量：7,948,206,080 bytes（约 7.4 GiB）
+- eMMC `/dev/mmcblk0` 未作为写入目标；64GB 对照卡未触碰。
+- 写入前 TF 分区已卸载，自动挂载服务 `devmon@devmon.service` 已临时停止。
+
+本次实际使用的是 #37 镜像，不是 #38：
+- 文件：`/tmp/panther-x2-b1-hybrid-PREPARE-ONLY.img.zst`
+- 压缩文件 SHA-256：`856fce763baea0e38a49ff38a519cb3373f5ae37f4a18eb32b763f8effcec92d`
+- zstd 完整性检查：PASS
+- 解压长度：2,147,483,648 bytes
+- 解压后镜像 SHA-256：`d4a40621a6e144735f6b3cbd564cf567552c89ff5878890a8a164f3239084a11`
+
+### 首次写入后的自动挂载干扰及纠正
+
+首次写入后，Armbian 的 devmon/udevil 自动挂载了新镜像的 ext4 分区；内核日志出现 `EXT4-fs (mmcblk1p1): recovery complete`。随后回读 SHA-256 不匹配。对比源镜像与 TF 首批差异，首个差异位于字节偏移 16,778,285，处于 GPT 分区起点之后的 ext4 超级块区域。该证据与自动挂载时发生 ext4 journal recovery 相符。
+
+处理过程：
+1. 临时停止 `devmon@devmon.service`。
+2. 卸载 `/dev/mmcblk1p1`（p2 不存在/未挂载）。
+3. 确认 devmon 为 inactive，p1/p2 均无挂载记录。
+4. 在自动挂载保持停止的情况下重新写入完整 2 GiB 镜像。
+5. 写入后立即回读前 512 个 4 MiB block（共 2,147,483,648 bytes）并计算 SHA-256。
+
+第二次写入后回读 SHA-256：
+`d4a40621a6e144735f6b3cbd564cf567552c89ff5878890a8a164f3239084a11`
+
+与源镜像解压 SHA-256 完全一致，证明 TF 上完整 2 GiB 镜像区域与 #37 源镜像逐字节一致。自动挂载服务保持临时停止，避免再次改写 ext4 元数据。
+
+### GPT 备份表位置修复
+
+2 GiB 镜像写入 7.4 GiB TF 后，内核提示备份 GPT header 仍位于镜像末尾 LBA 4194303，而非实体卡末尾 LBA 15523839。这是镜像容量小于 TF 卡容量导致的预期 GPT 位置不匹配。
+
+现场使用系统已有 GNU Parted：
+- 执行 `parted /dev/mmcblk1 unit s print`；
+- 在明确显示可将 GPT 扩展使用剩余磁盘空间的提示下选择 `Fix`；
+- Parted 将备份 GPT 结构修复到实体卡末尾；没有扩展 p1，也没有扩展 ext4 文件系统。
+
+修复后只读复核：
+- `parted -s /dev/mmcblk1 unit s print`：正常，无 GPT 修复警告；
+- `fdisk -l /dev/mmcblk1`：Disklabel type=gpt，单一 Linux filesystem 分区；
+- 实体卡容量：15,523,840 sectors；
+- p1 起始 LBA：32768；
+- p1 结束 LBA：4192255；
+- p1 大小：4,159,488 sectors（2 GiB）；
+- 文件系统：ext4，label `PANTHER_BOOT`。
+- `sgdisk` 未安装；未安装软件，改用系统已有 Parted 完成修复。
+
+### 当前状态与边界
+
+- #37 PREPARE-ONLY 镜像已实际写入唯一获授权的 SU08G 8GB TF。
+- 2 GiB 写入区域回读 SHA-256 完全一致。
+- GPT 备份表位置已修复并通过 Parted/fdisk 只读复核。
+- p1 保持原始镜像定义的 LBA 范围；没有扩容。
+- devmon 自动挂载服务目前为临时停止状态；TF 分区未挂载。
+- 未写入 eMMC；未修改 eMMC GPT、IDB、SPL、U-Boot proper、Vendor Storage 或 boot area。
+- 未写入 64GB 对照卡。
+- 尚未启动 B1；尚未执行任何 U-Boot boot 命令。
+
+### 下一步：U-Boot 只读启动前检查
+
+设备仍运行当前 Armbian（根文件系统位于 eMMC）。准备阶段完成后，下一步为正常关机并进入 JP U-Boot proper 的交互提示符，先只读采集：
+
+```text
+printenv devtype devnum kernel_addr_r ramdisk_addr_r fdt_addr_r
+bdinfo
+mmc list
+```
+
+根据现场输出核对：
+- TF 的 U-Boot 设备类型与设备编号；
+- `kernel_addr_r`、`ramdisk_addr_r`、`fdt_addr_r` 是否有效且互不重叠；
+- DRAM bank 范围与各加载地址/镜像大小是否兼容。
+
+地址核验通过前，不执行 `booti`，不运行 boot script。该阶段仍只验证 B1 Kernel、Panther X2 DTB、RAM initramfs 与静态 BusyBox；B1 内核中刻意关闭的网络、存储、无线等功能不纳入本轮测试。
