@@ -147,3 +147,30 @@ U-Boot DHCP、网关和外部 IP ping 均成功，表示当前启动链在本次
 **当前解释边界：** 连续多个地址返回全 1，说明本轮 MII 读取尚未获得可识别的 PHY 状态响应；可能涉及 PHY 地址无响应，也可能涉及 MDIO 控制器/总线访问路径。不能仅凭这些结果认定 PHY 不存在、损坏或整个 MDIO 总线故障。此前 `mdio list` / `mii device` 只证明管理总线/设备已注册，不证明 MDIO 实际事务成功。
 
 **操作决定：** 暂停无差别逐地址扫描。下一步先读取当前 U-Boot 的 `help mdio`，核对 MDIO 原生命令的只读 read/rx 参数格式，再判断是否可用另一条只读接口交叉验证。不得执行 write/wx、MII write/modify 或任何 PHY 寄存器写入。当前 DHCP 仍未执行；必须先审计 autoload/TFTP 行为。
+
+
+### MDIO 原生命令交叉验证：地址 0（2026-11-22）
+
+用户提供的 `help mdio` 确认本构建支持只读命令 `mdio read <phydev> [<devad>.]<reg>`，且 `<phydev>` 可显式指定 `<busname> <addr>`。因此使用明确总线名进行交叉验证：
+
+命令：
+```
+mdio read ethernet@fe010000 0 1
+```
+
+现场输出：
+```
+Reading from bus ethernet@fe010000
+
+PHY at address 0:
+
+1 - 0xffff
+```
+
+结果：原生 MDIO 命令明确选择了 `ethernet@fe010000` 总线并报告 PHY 地址 0，但寄存器 1 仍返回 `0xffff`。这与此前 `mii read 0 1` 的结果一致，降低了“仅 MII 命令前端导致异常”的可能性；但仍不能区分 PHY 无响应、MDIO 电气/时序问题或控制器底层访问异常，也不能据此判定 PHY 损坏。
+
+下一步只读交叉验证地址 1，保持总线和寄存器完全相同：
+```
+mdio read ethernet@fe010000 1 1
+```
+不得执行 mdio write/wx 或 mii write/modify。
