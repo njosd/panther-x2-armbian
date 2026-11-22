@@ -77,16 +77,19 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 
 新 workflow 在固定源码 commit 上应用一项最小构建兼容补丁：6.18.63 的 lib/kobject_uevent.c 无网络 stub 仍调用 kfree_skb()，但该释放路径依赖 CONFIG_NET 下的 skb drop-reason 符号。源码中的 alloc_uevent_skb() 本身只在 CONFIG_NET 下编译，因此 CONFIG_NET=n 时无有效网络 skb 可交给该 stub。补丁将无网络 stub 改为：收到非空 skb 时返回 -EOPNOTSUPP，空指针时直接返回 0；不再引用任何 skb 网络释放函数。该补丁不启用 CONFIG_NET、不启用任何网络协议/设备/驱动，也不修改 Ethernet 代码。补丁文件和 SHA-256 纳入 artifact。
 
-新 workflow 只上传：
+新 workflow 在 GitHub Actions runner 的临时工作目录中生成并验证 PREPARE-ONLY 的 2 GiB hybrid TF 镜像（包含 GPT/ext4 分区、Image/uInitrd/boot.scr/Panther X2 DTB，以及 LBA 16384 处的 JP proper FIT），随后压缩为 `.img.zst` 作为构建 artifact 上传。**这只是 CI runner 内的文件生成，不会写入用户的 TF/eMMC，也不会连接或启动 Panther X2。** 同一 artifact 还包含独立组件、配置、manifest、SHA-256 和日志。不得把该 artifact 描述成已经写卡或可直接启动认证通过。
+
+新 workflow 上传的内容包括：
 - ARM64 Kernel Image；
 - clean-test Panther X2 DTB；
 - gzip initramfs 和 legacy uInitrd；
+- PREPARE-ONLY hybrid TF image 压缩包（仅 CI runner 生成）；
 - boot.cmd / boot.scr；
 - 静态 BusyBox、BusyBox config 和 applet 清单；
 - Kernel config/fragment、clean-test DTS、manifest、SHA-256、构建日志；
 - 已验证 JP U-Boot proper 参考文件。
 
-不生成 raw/hybrid 磁盘镜像，不向 TF/eMMC 写入任何数据，不触发实机启动。Artifact 名称为 panther-x2-b1-clean-ram-prepare-only，准备阶段产物，不代表 B1 实机通过。
+不会向物理 TF/eMMC 写入任何数据，也不触发实机启动。Artifact 名称为 panther-x2-b1-clean-ram-prepare-only；其中 hybrid 镜像是 runner 生成的待审查文件，不代表已写卡或 B1 实机通过。
 
 旧 .github/workflows/build-panther-x2-minimal-ram-boot.yml 使用 Ophub 预编译 Kernel、MMC/blockro 和 hybrid image 设计，现已标记为 deprecated 并禁用，保留作历史记录，不得再用于项目 A B1。
 
@@ -99,6 +102,7 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 - 新的 B1 clean RAM workflow；
 - CONFIG_NET=n 下 kobject_uevent 的最小兼容补丁；
 - /init 与 U-Boot boot script 更新；
+- 2026-11-22 安全修订：boot.cmd 的文件加载失败分支不再调用 `reset`，仅输出错误并结束脚本，避免脚本在失败时触发未授权复位；
 - 旧预编译 Kernel/hybrid workflow 禁用；
 - 项目 A 总路线图、实施计划和旧启动方案状态同步。
 
@@ -132,3 +136,10 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 - CI 构建通过：Actions run 与 artifact。
 - Panther X2 B1 启动通过：UART 原始日志及设备运行证据。
 - B1 通过不等于有线千兆网口已通；有线 Ethernet 验证只在 B2 开始。
+
+
+## 9. 2026-11-22 启动脚本安全修订与产物描述校正
+
+静态审查发现旧版 `scripts/panther-x2-minimal-initramfs/boot.cmd` 在 Kernel、uInitrd 或 DTB 任一加载失败时会调用 `reset`。这与当前禁止脚本触发 reset/reboot 的安全边界冲突。现已改为嵌套条件：只有前一文件加载成功才继续下一步；任一加载失败只打印错误并停止，不主动复位。提交：`b3e7177d3cafc62c55948d5cbc3fe76b991cea65`。
+
+同时纠正本报告此前对 workflow 产物的描述：当前 workflow 会在 GitHub Actions runner 临时环境中生成 2 GiB PREPARE-ONLY hybrid TF image，并上传压缩包；这不是物理 TF/eMMC 写入，也不连接或启动设备。后续仍须审查镜像分区布局、文件哈希和启动地址，再通过 eMMC pre-Linux 安全门及单独授权，才可考虑写入测试 TF。
