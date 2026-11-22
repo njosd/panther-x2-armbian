@@ -392,3 +392,28 @@ Unknown command 'net' - try 'help' without arguments for list of all known comma
 ```
 
 结论：当前构建没有名为 `net` 的命令组入口；这不表示没有网络子系统命令，`dhcp`、`ping`、`mii`、`mdio` 已分别存在。DHCP 自动加载安全性仍未核实，因此不执行 DHCP。
+
+
+### 完整 U-Boot 命令表与 DHCP/TFTP 风险审计（2026-11-22）
+
+用户执行完整 `help`。网络相关命令包括：
+```
+bootp     - boot image via network using BOOTP/TFTP protocol
+dhcp      - boot image via network using DHCP/TFTP protocol
+nfs       - boot image via network using NFS protocol
+ping      - send ICMP ECHO_REQUEST to network host
+tftp      - download image via network using TFTP protocol
+tftpbootm - tftpbootm aosp/uImage/FIT image via network using TFTP protocol
+tftpflash - flash image via network using TFTP protocol
+tftpput   - TFTP put command, for uploading files to a server
+```
+其余命令表中还出现 `download`、`fastboot`、`rockusb`、`ums`、`save`、`fatwrite` 等；这些命令仍属于明确禁止操作范围，本轮不执行。
+
+重要结论：
+1. 当前构建的 `dhcp` 帮助文本明确把命令描述为 DHCP/TFTP boot，不是明确的 DHCP-only 命令。不能直接运行 `dhcp` 来做纯地址获取测试。
+2. `autoload` 当前未定义。不能将“未定义”视为 `autoload=no`。
+3. 通用 U-Boot 网络实现中常见 `autoload=no` 用于禁止 BOOTP/DHCP 完成后自动 TFTP，但这只是通用实现线索，不是当前 JP proper 精确二进制的源码证明。
+4. 当前实机 proper banner 为 `U-Boot 2017.09-armbian (Nov 12 2023)`。仓库已归档 `u-boot.itb` 二进制，但已知来源文档明确指出尚未取得足以确认该二进制精确上游构建 commit、构建脚本、defconfig 和最终 `.config` 的闭环。仓库内未找到该版本的 `net/bootp.c` 源码。因此目前不能声称已完成精确版本 DHCP/autoload 源码审计。
+5. 安全决策：暂停 DHCP。下一阶段应先从已归档 `u-boot.itb` 做静态二进制审计，尝试确认其 `autoload` 字符串/处理路径及 DHCP->TFTP 分支；若无法对实际运行二进制形成可靠证据，则不执行 DHCP/TFTP 组合命令，改用有独立 DHCP-only 能力且经审计的替代测试路径，或将 U-Boot 网络基准标记为受限/未完成。
+
+本次完整 `help` 输出本身没有执行任何网络或存储操作，没有改变 U0。
