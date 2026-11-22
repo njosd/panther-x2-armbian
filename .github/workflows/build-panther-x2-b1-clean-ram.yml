@@ -66,6 +66,12 @@ jobs:
           git -C work/linux apply "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
           git -C work/linux diff --check
           git -C work/linux diff -- lib/kobject_uevent.c | tee work/logs/config-net-off-uevent-patch.diff
+          grep -Fq 'if (skb)' work/linux/lib/kobject_uevent.c
+          grep -Fq 'return -EOPNOTSUPP;' work/linux/lib/kobject_uevent.c
+          if grep -Fq 'kfree_skb(skb)' work/linux/lib/kobject_uevent.c; then
+            echo "::error::No-NET uevent stub still calls kfree_skb"
+            exit 1
+          fi
           PATCH_SHA256="$(sha256sum scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch | awk '{print $1}')"
           {
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
