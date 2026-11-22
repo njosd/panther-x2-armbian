@@ -168,3 +168,12 @@
 6.1.116 正向控制：既有归档确认 Panther X2 Linux 6.1.116 使用 rk_gmac-dwmac、RTL8211F（PHY ID 0x001cc916）、RGMII，千兆全双工；用户确认 DHCP、hEX及iMac ping正常。原版 U-Boot曾输出 `Net: No ethernet found.`，而Linux后续仍能独立初始化并使用网卡。此历史对照支持Linux不依赖U-Boot网络初始化，但不证明当前JP proper DMA异常对同一启动周期交接绝无影响。
 
 后续网络验证以《PANTHER-X2-NETWORK-LAYERED-VALIDATION-PLAN-20261122.md》为方法基线：B1无网络；B2按最小依赖闭包逐层引入；ARP/ICMP/TCP/UDP必须使用两端报文证据。PRE-HANDOFF READY阶段门仍不可跳过。
+
+
+## 12. 2026-11-22 仓库 boot.cmd 修订与 TF 旧脚本隔离
+
+对照本检查点第 5 节记录的旧 TF 文件内容，发现旧 `boot.cmd` 的三个加载失败分支都会执行 `reset`。仓库版脚本已修订为失败时只输出错误并结束，不调用 reset；修订提交为 `b3e7177d3cafc62c55948d5cbc3fe76b991cea65`。
+
+**该提交不会自动修改 TF。** 本检查点此前记录的 TF 文件仍是旧版本：`boot.scr` 1,130 bytes、`boot.cmd` 1,058 bytes，且旧脚本包含 reset。对应旧文件哈希未归档。不得执行 TF 上旧 `boot.scr`，不得假设仓库脚本已同步到卡上。需等待新的 PREPARE-ONLY artifact，核对 boot.cmd/boot.scr 与哈希，并通过独立安全门和明确授权后才可更新测试 TF。
+
+此前地址快照 `kernel_addr_r=0x00280000`、`fdt_addr_r=0x0a100000`、`ramdisk_addr_r=0x0a200000` 来自旧 U-Boot 会话；DHCP异常后断电重启，当前会话尚未重新核对这三个地址。它们仅作为历史参考，不能直接签署当前 PRE-HANDOFF。
