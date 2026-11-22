@@ -299,7 +299,7 @@ jobs:
           echo "${JP_UBOOT_SHA256}  work/output/JP-TvBox-u-boot.itb" | sha256sum -c -
 
           {
-            echo "purpose=PREPARE-ONLY; no disk image; no TF/eMMC writes"
+            echo "purpose=PREPARE-ONLY; hybrid TF image artifact only; no physical TF/eMMC writes"
             echo "kernel_version=${KERNEL_VERSION}"
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
             echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
