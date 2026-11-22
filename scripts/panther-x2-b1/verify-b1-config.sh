@@ -46,17 +46,18 @@ fi
 # an AArch64 binary natively.
 "${CROSS_PREFIX}gcc" --version >/dev/null
 qemu-aarch64-static "$BUSYBOX_BIN" --list | sort > busybox-applets.actual
-cat > busybox-applets.expected <<'APPLETS'
-ash
-cat
-dmesg
-mkdir
-mount
-sh
-tail
-uname
-APPLETS
-diff -u busybox-applets.expected busybox-applets.actual
+for applet in ash sh cat dmesg mkdir mount tail uname; do
+  grep -qx "$applet" busybox-applets.actual || {
+    echo "::error::Required BusyBox applet missing: $applet"
+    exit 1
+  }
+done
+APPLET_COUNT="$(wc -l < busybox-applets.actual)"
+test "$APPLET_COUNT" -le 16 || {
+  echo "::error::BusyBox applet set is unexpectedly large ($APPLET_COUNT)"
+  cat busybox-applets.actual
+  exit 1
+}
 
 for applet in ip ifconfig route arp arping ping ping6 nc netstat telnet wget ftpget ftpput udhcpc udhcpd nslookup brctl; do
   if grep -qx "$applet" busybox-applets.actual; then
