@@ -188,6 +188,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 
 - 使用独立手动触发 workflow `.github/workflows/build-panther-x2-b1-clean-ram.yml`，不覆盖完整 Armbian 构建流程。
 - workflow 从锁定源码构建 Kernel、派生 clean-test DTB、构建静态 BusyBox 和 gzip initramfs；旧的预编译包/hybrid workflow 已禁用并仅留作历史记录。
+- 6.18.63 在 CONFIG_NET=n 下的 kobject_uevent stub 需应用一项最小 skb 释放兼容补丁；该补丁仅处理无网络分支，不启用网络栈或修改 Ethernet 驱动，必须随构建输入和哈希一起审计。
 - 产物仅包括 Kernel、DTB、initramfs/uInitrd、boot.scr、JP proper 参考文件、manifest、文件清单、SHA-256 和构建日志；不生成 raw/hybrid 磁盘镜像，不写 TF/eMMC。
 - eMMC pre-Linux 安全门未通过前，CI artifact 只能标记 PREPARE-ONLY，不得写卡或实机启动。
 
