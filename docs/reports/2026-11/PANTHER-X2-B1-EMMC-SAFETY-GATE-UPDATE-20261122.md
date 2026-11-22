@@ -377,3 +377,49 @@ Run ID `44979808662`，commit `3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`：
 7. 实机串口验证目标是确认 Kernel、DTB、initramfs、BusyBox shell；Linux 网络/存储设备保持刻意关闭。
 
 当前唯一实机阻塞转为：8GB TF 的目标设备确认、实体卡写入、U-Boot 地址现场核对。eMMC WP 不再是前置条件。
+
+
+## 26. #38 最终 artifact 验证、8GB TF 识别及写卡授权（2026-11-22）
+
+### #38 CI
+- Run #38，ID：`44980223119`
+- Commit：`793d26b5e955eb53fddb418015dccb68827950b7`
+- 状态：completed / success。
+- Artifact ID：`14737920711`
+- Artifact ZIP：`panther-x2-b1-clean-ram-prepare-only.zip`
+- ZIP 大小：5,916,079 bytes
+- ZIP SHA-256：`e00439d7dcab26a041bb93f389bd292fca7feeccc19d0ad5bfd5c6697030ffc6`
+- ZIP integrity test：PASS。
+- Artifact `output/SHA256SUMS` 全部 16 项 PASS。
+- Manifest 已更正：`purpose=PREPARE-ONLY; hybrid TF image artifact only; no physical TF/eMMC writes`。
+
+### #38 最终 TF image
+- 文件：`panther-x2-b1-hybrid-PREPARE-ONLY.img.zst`
+- 压缩文件大小：2,465,875 bytes
+- 压缩文件 SHA-256：`b1fb1168a40cec3d4afa19a3431239a20a83ee154ebb40097a48643da193bf62`
+- `zstd -t`：PASS，解压长度 2,147,483,648 bytes（2 GiB）。
+- 未压缩镜像 SHA-256：`8bbb57ecb169bd9da28f16ee9f5995e5c3a569252f4f09e732f5384f74d993df`
+- GPT：单一 Linux filesystem 分区，起始 LBA 32768，结束 LBA 4192255，ext4，label `PANTHER_BOOT`。
+- JP proper FIT 位于 raw LBA 16384；构建阶段回读 SHA-256：`a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。
+- 该镜像仍为 PREPARE-ONLY artifact；尚未写入实体卡。
+
+### 现场识别的专用 8GB TF
+用户在 Armbian root shell 现场输出：
+```text
+mmcblk0: type=MMC name=DF4032 CID=450100444634303332010f37d8066500
+mmcblk1: type=SD name=SU08G CID=035344535530384780b16ad9b700c15f
+/dev/mmcblk1 size=7.4G
+  mmcblk1p1 511M ext4 (not mounted)
+  mmcblk1p2 6.9G btrfs (not mounted)
+```
+- 目标卡唯一识别为 `/dev/mmcblk1`，型号 `SU08G`，CID 如上。
+- eMMC `/dev/mmcblk0` 为当前运行系统根设备，明确禁止作为写入目标。
+- 64GB 对照卡不在本次目标内。
+- 8GB TF 原有分区 p1/p2 及数据将在整卡写入后被覆盖。
+
+### 用户授权
+用户明确回复“相关内容和进展同步仓库，确认”，确认允许将已识别的 SU08G 8GB TF（`/dev/mmcblk1`，CID `035344535530384780b16ad9b700c15f`）整卡覆盖为 B1 测试镜像。
+- 授权仅针对该 SD 卡，不包含 eMMC、boot0/boot1 或 64GB 对照卡。
+- 下一步执行前仍须在写卡现场再次自动核对 SD 类型、型号、CID、容量、挂载状态和目标设备节点。
+- 写入后对整张 2 GiB 镜像区域回读 SHA-256，与 `8bbb57ecb169bd9da28f16ee9f5995e5c3a569252f4f09e732f5384f74d993df` 比较；再核对 GPT 与分区文件。
+- 写卡和回读尚未发生；不得记录为已完成。
