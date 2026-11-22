@@ -324,3 +324,16 @@ PHY at address 0:
 这不是一致且可识别的 PHY 管理寄存器响应。尤其不能将 BMCR 的 `0x0000` 当作正常 PHY 默认配置，也不能将 BMSR/PHYID2 的 `0xffff` 当作有效值。结合设备模型中的 generic `phy@0` 已 probe，当前更准确的结论是：DM 设备对象存在并 probe，但 Clause 22 读通路未证明真实 PHY 可通信。可能涉及设备树/PHY 地址绑定、MDIO 控制器访问、时钟/复位/引脚复用或板级连接；现有证据不能区分这些可能性。
 
 下一步不继续试读更多 PHY 地址或寄存器，也不运行 DHCP。改用 `dm devres` 只读查看 Ethernet 设备已申请的资源，核对 probe 时资源状态；该输出不能替代硬件寄存器测量，但可帮助确认设备模型资源路径。
+
+
+### Driver Model devres 查询（2026-11-22）
+
+用户执行 `dm devres`，终端仅返回提示符，没有任何设备/资源条目：
+```
+=> dm devres
+=>
+```
+
+记录边界：本次命令没有输出可供核对的 devres 资源清单。不能据此推断 Ethernet 驱动没有申请任何硬件资源，也不能推断资源申请失败；可能只是该构建的 devres 跟踪/输出没有可列项目。该命令没有改变启动状态。
+
+当前证据仍为：Ethernet DM 设备与 `phy@0` 已 probe；MDIO 地址 0 的 Reg 0/1/2/3 分别读得 `0x0000`/`0xffff`/`0x0000`/`0xffff`；devres 查询无输出。暂不运行 DHCP，也不将无输出解释成硬件故障。下一步回到 U-Boot 网络设备只读状态查询，执行 `mii device` 核对当前 MII 设备选择。
