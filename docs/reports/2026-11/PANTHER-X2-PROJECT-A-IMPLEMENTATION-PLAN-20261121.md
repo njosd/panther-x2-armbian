@@ -54,6 +54,7 @@
 - Ophub 6.18.64 预编译包只作历史对照；实际 config 含网络栈和 built-in GMAC/MDIO/PHY 驱动，明确不合格，不得作为 B1 输入。
 - B1 不使用任何 Ophub 预编译 Image/DTB。首轮源码候选锁定为 ophub/linux-6.18.y commit aee4e352a15d636cbc484f56819c6e59474dfd9f（Makefile 确认为 6.18.63）。
 - CI 必须从该精确 commit 自建 Kernel；以独立 allnoconfig + 最小 fragment 生成最终 .config，并证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用。
+- 该 6.18.63 源码在 CONFIG_NET=n 下暴露 kobject_uevent stub 对 sk_skb_reason_drop 的链接依赖；B1 使用 scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch，仅在无网络 stub 中改用 __kfree_skb 释放未使用 skb。补丁不启用网络栈，不修改任何网卡驱动；必须纳入构建输入哈希和审计。
 - clean-test DTB 从同一 commit 的 Panther X2 DTS 派生；保留原始 DTS，不覆盖上游文件。必须核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 的禁用状态和 Wi-Fi/BT 节点移除情况。
 - 有线千兆 Ethernet Kconfig 依赖审查只为 B2 服务：网络基础协议、MAC/GMAC、MDIO/PHY/PCS 及共享总线/中断/DMA/时钟/复位依赖。B1 中全部隔离。
 - Wi-Fi/无线网络、蓝牙及其控制器/驱动/固件/协议/用户空间组件永久排除，不开展 Kconfig 依赖研究、不构建、不测试、不作为后续引入项；USB/PCIe 外接网络适配器同样排除。
