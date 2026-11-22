@@ -337,3 +337,16 @@ PHY at address 0:
 记录边界：本次命令没有输出可供核对的 devres 资源清单。不能据此推断 Ethernet 驱动没有申请任何硬件资源，也不能推断资源申请失败；可能只是该构建的 devres 跟踪/输出没有可列项目。该命令没有改变启动状态。
 
 当前证据仍为：Ethernet DM 设备与 `phy@0` 已 probe；MDIO 地址 0 的 Reg 0/1/2/3 分别读得 `0x0000`/`0xffff`/`0x0000`/`0xffff`；devres 查询无输出。暂不运行 DHCP，也不将无输出解释成硬件故障。下一步回到 U-Boot 网络设备只读状态查询，执行 `mii device` 核对当前 MII 设备选择。
+
+
+### MII 当前设备选择复核（2026-11-22）
+
+用户执行 `mii device`，输出：
+```
+MII devices: 'ethernet@fe010000'
+Current device: 'ethernet@fe010000'
+```
+
+确认：当前唯一列出的 MII 设备及当前选中设备均为 `ethernet@fe010000`。因此此前通过该总线执行的 MDIO/MII 只读访问没有明显的“误选另一条 MII 总线”问题；但这不能证明总线电气通信正常，也不能证明 PHY 地址 0 的绑定正确。
+
+下一步只读检查 U-Boot 当前 Ethernet 活动设备环境变量（`ethact`、`ethprime`），并再次记录 MAC 环境变量；不修改变量。
