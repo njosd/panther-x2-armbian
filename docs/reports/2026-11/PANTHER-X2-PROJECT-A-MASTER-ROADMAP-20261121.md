@@ -151,13 +151,12 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 - 有线千兆以太网相关 Kconfig 必须建立分类清单，区分启动必需、共享依赖和 Ethernet 专用项。干净基线不编入网络栈及 Ethernet 驱动；后续只对板载 Ethernet 所需依赖闭包逐项审查、引入并记录配置差异。
 - Wi-Fi/无线网络、蓝牙及其他非目标网络设备配置一律列入永久排除清单，不进入后续逐项引入计划。
 - 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
-- B1 第一轮源码构建候选锁定为 `ophub/linux-6.18.y` commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，该提交 Makefile 明确为 Linux 6.18.63；该源码 commit 作为首轮可复现输入，不等于已通过构建或实机验收。
-- 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；旧包检查结论不能直接套用于当前新资产。
-- 6.18.63 历史 artifact 曾包含 Panther X2 DTB（历史 DTB SHA-256：`5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`），但同名发布包 digest 后续变化为 `67d2d78a570cb6128ec2c9546bd11f1ca2f32305325c146cd724d856654e51e9`；历史内部成员证据只适用于旧包，当前包尚未重新核验。
-- Ophub 6.18.63/6.18.64 预编译包只作历史对照和审计证据，不作为 B1 Kernel 输入；已审计的 6.18.64 config 含网络栈与 built-in GMAC/MDIO/PHY，不能用于干净基线。
-- 新 B1 workflow 从精确源码 commit 自建 Kernel；以独立 allnoconfig + 最小 config fragment 生成最终 .config，并以自动门确认网络、USB、MMC/block、无线/蓝牙、MODULES 均未启用。
-- 同一源码 commit 中的 Panther X2 DTS 派生 clean-test DTS/DTB；保留原始 DTS，不覆盖上游文件；自动核验 model/compatible 和 Ethernet、MMC、USB、Bluetooth 节点状态。
-- 首轮构建通过 CI、artifact 和实机安全门后，才考虑将该 Kernel+DTB 锁定为 B1 版本。
+- 首轮源码构建候选为 ophub/linux-6.18.y commit aee4e352a15d636cbc484f56819c6e59474dfd9f（Makefile 明确为 6.18.63）；这是精确源码输入候选，不等于 CI 构建或 Panther X2 实机验收通过。
+- Ophub 6.18.64 预编译包已完成只读审计，其 config 含 CONFIG_NET=y、CONFIG_STMMAC_ETH=y、CONFIG_DWMAC_ROCKCHIP=y、CONFIG_PHYLIB=y、CONFIG_REALTEK_PHY=y，不能作为 B1 干净 Kernel。
+- B1 不使用预编译 Image/DTB；必须从锁定源码自建 Kernel，并以独立 allnoconfig + 最小 fragment 生成最终 config。
+- clean-test DTB 从同一源码 commit 的 Panther X2 DTS 派生；自动核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 节点隔离状态。
+- 最终 config 必须证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用；最终二进制与 DTB 需分别提供证据。
+- 首轮源码候选只有在 CI 构建、artifact 审查和目标硬件启动安全门完成后，才可锁定为 B1 Kernel+DTB。
 
 ### 5.2 Initramfs 与 BusyBox
 
