@@ -417,3 +417,23 @@ tftpput   - TFTP put command, for uploading files to a server
 5. 安全决策：暂停 DHCP。下一阶段应先从已归档 `u-boot.itb` 做静态二进制审计，尝试确认其 `autoload` 字符串/处理路径及 DHCP->TFTP 分支；若无法对实际运行二进制形成可靠证据，则不执行 DHCP/TFTP 组合命令，改用有独立 DHCP-only 能力且经审计的替代测试路径，或将 U-Boot 网络基准标记为受限/未完成。
 
 本次完整 `help` 输出本身没有执行任何网络或存储操作，没有改变 U0。
+
+
+### DHCP 自动加载机制：U-Boot v2017.09 上游源码对照（2026-11-22）
+
+本轮只读取得并检查了 U-Boot 官方 v2017.09 上游源码（不是 JP-TvBox 实际二进制的源码闭环）：
+
+- `cmd/net.c`：`dhcp` 命令调用 `netboot_common(DHCP, ...)`；命令描述正是 `boot image via network using DHCP/TFTP protocol`。
+- `net/bootp.c`：DHCP 收到 ACK、设置地址参数后调用 `net_auto_load()`。
+- `net/net.c`：`net_auto_load()` 先检查 `autoload`；当 `env_get_yesno("autoload") == 0` 时以成功状态结束，不调用 TFTP；否则调用 `tftp_start(TFTPGET)`。若配置了 NFS 且 `autoload=NFS`，则走 NFS。
+- `env/common.c`：`env_get_yesno()` 对不存在的变量明确返回 `-1`；只有变量存在且首字符为 `1/y/Y/t/T` 时返回 1，其他已定义值返回 0。
+
+由以上上游源码可严格推出：在这套 v2017.09 代码路径中，`autoload` 未定义时返回 -1，不等于 0，故不会被“禁止自动加载”分支拦截，而会继续进入 TFTP；显式设置 `autoload=no` 才会使 `env_get_yesno` 返回 0 并阻止自动 TFTP。
+
+**重要证据边界及文件身份纠正：**
+1. 实机 proper 是 `U-Boot 2017.09-armbian (Nov 12 2023)`，但尚未证明 JP-TvBox 二进制与官方 v2017.09 的网络源文件逐字节/补丁级一致。因此上述源码只能作为强参考，不是实机最终证明。
+2. 当前实机对应的 JP-TvBox 归档对象是 `docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb`，大小 1,464,832 bytes，Git blob SHA-1 `2e453265e2e87e0ebd41897131fa6447dff4c0d1`；B1 输入清单记录的该 proper SHA-256 为 `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。
+3. 仓库已有 `.github/workflows/audit-panther-x2-uboot-fit.yml` 审计的是另一份 Ophub Panther X2/eMMC 镜像 `evidence/boot/panther-x2-u-boot.itb`，大小 1,431,552 bytes、SHA-256 `3a662accda44a1efcb7822972f701dc95ef07a81830f7679440de04d916ab0af`。该 workflow 的既有结果不能冒充当前 JP-TvBox proper 的二进制审计。
+4. 本轮通过 GitHub 文件读取接口尝试获取 JP-TvBox 二进制原始字节，接口未返回二进制内容（base64 内容为空）；因此尚未完成该文件的 strings、反汇编或指令级控制流审计。没有伪称已检查到 JP 二进制内的 `autoload` 字符串或调用路径。
+
+**当前操作决策：** DHCP 暂停。由于现场 `autoload` 未定义，而上游 v2017.09 参考实现的未定义行为会进入 TFTP，当前绝不能直接运行 `dhcp`。只有在 JP proper 二进制审计或其他针对该二进制的可靠证据确认 `autoload=no` 的确切行为后，才重新评估。若最终仍无法闭环，保留 U0，不做 DHCP/TFTP 组合测试；改走不触发下载的独立 DHCP-only 方案或将网络基准标记为受限未完成。
