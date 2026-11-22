@@ -6,7 +6,7 @@ diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
  {
 -	kfree_skb(skb);
 +	/* No skb can be allocated when CONFIG_NET is disabled. */
-+	if (WARN_ON_ONCE(skb))
++\tif (skb)
 +		return -EOPNOTSUPP;
  	return 0;
  }
