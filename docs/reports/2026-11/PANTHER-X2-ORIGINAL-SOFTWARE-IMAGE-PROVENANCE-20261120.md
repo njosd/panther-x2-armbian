@@ -818,3 +818,118 @@ GMAC的 `pinctrl-0` 指向以下六个节点，节点中的 `rockchip,pins` 每�
 **尚未验证：** drive-strength数值的物理含义与板级适配性；clock parent phandle `0x47`；GMAC相关clock ID在该内核版本中的实际定义、父时钟和运行频率。
 
 **故障归因：** 本轮没有证据足以将上述配置认定为TX故障根因。
+
+## 26. 原始 6.1.65 镜像的构建来源链追踪（2026-11-22）
+
+本轮从原始 IMG 的时间戳、当前 eMMC 保留的 /etc/ophub-release 元数据、Panther X2 Armbian fork 的历史 Git tree、Ophub kernel 构建 workflow，以及 unifreq 6.1.y 源码历史交叉追踪。未修改设备或镜像。
+
+### 26.1 镜像自身保留的构建元数据
+
+当前 eMMC 的 /etc/ophub-release 仍保留原始镜像构建信息。虽然 KERNEL_VERSION 已被后续升级覆盖为 6.1.192，但以下字段仍显示原始构建来源：
+
+- PLATFORM=rockchip
+- MODEL_ID=r301；MODEL_NAME=Panther-X2；SOC=rk3566
+- FDTFILE=rk3566-panther-x2.dtb；FAMILY=rk3566；BOARD=panther-x2
+- KERNEL_REPO=ophub/kernel；KERNEL_TAGS=stable
+- BOOT_CONF=armbianEnv.txt；ROOTFS_TYPE=ext4
+- BUILD_REPOSITORY=github.com/armbian/build
+- REBUILD_REPOSITORY=github.com/ophub/amlogic-s9xxx-armbian
+- CONTRIBUTORS=tdleiyao；BUILDER_NAME=ophub
+- PACKAGED_DATE=2023-12-07
+- MAINLINE_UBOOT=/usr/lib/u-boot/u-boot.itb；BOOTLOADER_IMG=/usr/lib/u-boot/idbloader.img
+
+其中 KERNEL_VERSION=6.1.192 是升级后的当前值，不能用来反推原始 IMG 的内核版本；原始 6.1.65 身份来自用户原件文件名和原始 IMG 内容核验。上述元数据与此前已核验的 gzip header 时间 2023-12-07 05:18:54 UTC 相互吻合。
+
+### 26.2 镜像生成项目与构建流程快照
+
+公开项目：`lintao1890/panther-x2-armbian`。其在镜像时间点前最近可见的源码快照为：
+
+- `31b1b96f258a6d66ecaf8a719145860b533100f6`，2023-12-07 03:28:08 UTC。
+- 下一提交 `96fce8d0e059ab9e7ead3c27a922c9bd0f9da896`，2023-12-07 06:07:11 UTC，晚于 gzip header 时间。
+- 因此 31b1... 是当前最接近镜像生成时间的公开源码候选快照，但不是已证明的实际 Actions checkout SHA。原始 Actions run/input 未找到，不能将时间相关性写成构建证明。
+
+该快照中的 `.github/workflows/build-armbian.yml` 显示两阶段构建：
+
+1. `git clone --depth=1 --branch=main https://github.com/armbian/build.git`，从 Armbian build 的浮动 main 分支获取基础系统。
+2. 执行 `./compile.sh RELEASE=jammy BOARD=odroidn2 BRANCH=current BUILD_MINIMAL=no BUILD_ONLY=default ...`，先生成通用 Jammy 基础镜像。
+3. 再调用 `ophub/amlogic-s9xxx-armbian@main` 的 Rebuild Armbian action，将基础镜像重构为 Panther X2 镜像。
+
+Workflow 默认输入为 board=all、kernel_repo=ophub/kernel、kernel_usage=stable、auto_kernel=true、builder_name=ophub；但本次具体 dispatch inputs 未被保存。原件名称、/etc/ophub-release 字段和 Panther X2 输出共同证明实际目标是 Panther X2/Jammy/stable，具体输入仍以未保存的 Actions run 为准。
+
+### 26.3 Panther X2 model_database 记录
+
+在 31b1... 快照的 `model_database.conf` 中，Panther X2 对应行是：
+
+`r301 : Panther-X2 : rk3566 : rk3566-panther-x2.dtb : NA : u-boot.itb : idbloader.img : 4GB-LPDDR4,32G-eMMC,64G-TF,2x1Gb-Nic : 6.1.y : rockchip : rk3566 : armbianEnv.txt : tdleiyao : panther-x2 : yes`
+
+该行把 Panther X2 的 KERNEL_TAGS 指定为 `6.1.y`，而不是 `rk35xx` 专用 tag。Rebuild 脚本把 `6.1.y` 归一化为 6.1.1 查询基准，并在 auto_kernel=true 时通过 `ophub/kernel/releases/expanded_assets/kernel_stable` 查询当时最新的 6.1.x 版本；下载 URL 模式为 `https://github.com/ophub/kernel/releases/download/kernel_stable/<version>.tar.gz`。原始镜像内核为 6.1.65，与该机制一致。
+
+注意：model_database 的 DESCRIPTION 文本写有 `2x1Gb-Nic`，与用户当前确认的外部单 RJ45 接口描述不一致。该说明字段不能用来推断 Panther X2 实际网口数量；项目 A 仍按用户确认的板载目标接口范围执行。
+
+### 26.4 6.1.65 Kernel 的最可能来源链
+
+当前能重建出的最可能链条如下：
+
+- kernel release 仓库：`ophub/kernel`，tag `kernel_stable`。
+- kernel workflow：`compile-release-general-kernel.yml`，workflow 默认 kernel_source=`unifreq`、kernel_version=`6.1.1`、kernel_auto=true、kernel_config=`kernel-config/release/general`、kernel_toolchain=`gcc`，产物上传到 `kernel_stable`。
+- kernel source repo：`unifreq/linux-6.1.y`。
+- 与原始镜像时间相邻的源码提交：`4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`，2023-12-03 08:14:01 UTC，提交说明 `up to 6.1.65`。按 GitHub commits API 查询，该分支在 2023-12-03 至 2023-12-08 之间没有更新提交；因此它是 2023-12-07 镜像时点的强候选源码快照。
+- `ophub/kernel` 的通用 `config-6.1` 在 2023-11-25 的仓库快照中标记为 Linux/arm64 6.1.63；下一次更新该配置的提交 `b9a683f280b647ad13cda07dcf4dbf9485de046f` 于 2023-12-08 12:11:15 UTC 将其更新为 6.1.66，晚于原始镜像时间。因此原始 6.1.65 构建很可能使用当时的 6.1.63 config template，再由构建流程对 6.1.65 源码执行配置更新。实际 Image 的完整 .config 尚未从原始镜像抽取，不能把模板等同于最终 .config。
+
+以上是高置信度候选链，不是二进制构建证明。当前没有原始 6.1.65 package tarball、Actions run log、artifact checksum 或 Image build-id/source hash 可以把 Image 与 4428... commit 唯一绑定。
+
+### 26.5 原始通用 6.1 config 的网络相关选项
+
+2023-11-25 的 `ophub/kernel` `kernel-config/release/general/config-6.1`（Git blob `95c2dab061b2f37a04e2ce38c9f46515edacf086`）包含：
+
+- `CONFIG_INET=y`、`CONFIG_IPV6=y`
+- `CONFIG_NETDEVICES=y`、`CONFIG_ETHERNET=y`
+- `CONFIG_STMMAC_ETH=y`、`CONFIG_STMMAC_PLATFORM=y`
+- `CONFIG_DWMAC_ROCKCHIP=y`
+- `CONFIG_PHYLINK=y`、`CONFIG_PHYLIB=y`
+- `CONFIG_REALTEK_PHY=y`、`CONFIG_ROCKCHIP_PHY=y`
+
+这些选项表明该通用配置把 STMMAC/Rockchip DWMAC/PHYLIB/Realtek PHY 路径编入内核。它们只证明 config template 的设置，不证明原始 6.1.65 最终 .config 每一项完全相同，也不证明驱动真实收发正确。
+
+### 26.6 6.1.65 源码中的 Panther X2 DTS 与网络驱动历史
+
+`unifreq/linux-6.1.y` 在 2023-12-03 的 6.1.65 候选提交 `4428...` 已包含 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`。该 DTS 的根节点是 Panther X2/RK3566，GMAC1 使用 fe010000、RGMII、PHY 地址0、专用 M0 pinctrl、reset GPIO、125MHz 外部时钟及 TX/RX delay 0x30/0x10。其板级 DTS 最初于 2023-07-07 添加，2023-07-11 更新 USB host/GPU 项。
+
+对 `drivers/net/ethernet/stmicro/stmmac` 历史的路径级检查发现：
+
+- `dwmac-rk.c` 在 2023-12-07 前的可见历史，主要是 2020 年 RK3568 SGMII/QSGMII 支持及 2023-05-13 的相关 revert；没有发现 6.1.65 版本窗口内新增 Panther X2 专用 dwmac-rk 修复。
+- `stmmac_main.c` 最近一次相关提交为 `f16bd66434d30e9bf910d92b4db599cf55c8d371`（2023-11-29，up to 6.1.64）。该提交包含 RX poll 限制：`limit = min(priv->dma_conf.dma_rx_size - 1, (unsigned int)limit);`，并调整 `read_again` 标签位置。
+- 6.1.65 的版本提升提交 `4428...` 没有进一步修改 stmmac 主驱动文件；路径级提交查询也没有发现 2023-12-03 至 2023-12-07 对 `dwmac-rk.c` 或 `stmmac_main.c` 的新提交。
+
+这只是源码时间线事实。11 月 29 日的 RX poll 修改值得保留为原始版本代码审计点，但目前没有证据证明它造成 Panther X2 网络故障；不能据此先行回退或打补丁。
+
+### 26.7 原始镜像中的 DTB、启动配置与 bootloader 的生成关系
+
+- Panther X2 model_database 选择 `rk3566-panther-x2.dtb`，BOOT_CONF=`armbianEnv.txt`。
+- Panther X2 `armbianEnv.txt` 模板选择 `fdtfile=rockchip/rk3566-panther-x2.dtb`，console 为 `ttyS02,1500000`，并包含 `net.ifnames=0`。该参数只影响接口命名，不配置 IP、路由或 DHCP。
+- 模板中的 `overlay_prefix=rk3568` 会被 Rebuild 脚本的 `refactor_bootfs()` 按 model_database 的 FAMILY=`rk3566` 重写为 `rk3566`；不能把未处理模板值误认为最终镜像值。
+- `replace_kernel()` 从同一 kernel release tarball 中分别提取 boot、dtb、modules、header 四类包；Rockchip 启动文件使用 `Image`/`uInitrd` 符号链接指向版本化文件，DTB 包展开到 `/boot/dtb/rockchip`。因此原始 Image、DTB、modules 预期来自同一个 kernel release package，但尚未用原始 package hash 完成闭环。
+- Rebuild 的 Rockchip bootloader 逻辑从 `ophub/u-boot` 的浮动 `main` 分支获取板级文件；model_database 指定 `idbloader.img` 与 `u-boot.itb`，脚本将它们分别写入镜像 LBA 64 和 LBA 16384，并复制到 rootfs `/usr/lib/u-boot`。`ophub/u-boot@main` 没有固定 commit，精确二进制来源仍未闭环。
+- 同一 Rebuild 还从 `ophub/firmware@main` 获取 firmware；Armbian base build、Ophub Rebuild action、U-Boot、firmware 都使用浮动 main 引用，无法仅凭 Panther 项目 commit 完整复现当时所有依赖版本。
+- 用户确认当年通过 RKDevTool 的 Boot + System 流程安装到 eMMC。镜像内部 bootloader sectors 和 `/usr/lib/u-boot` 文件不自动证明 RKDevTool Boot 栏实际选用的 Loader 就是该镜像的 `idbloader.img`/`u-boot.itb`；当年 Boot 栏输入及写入目标仍待确认。
+
+### 26.8 目前来源链结论分级
+
+| 层级 | 结论 | 状态 |
+|---|---|---|
+| 原始 IMG | 用户原件哈希、时间、内部文件名、分区结构已核验 | 已确认 |
+| 镜像项目 | Panther X2 fork、model_database 行、重构流程和原始元数据相互吻合 | 已确认 |
+| kernel package family | Panther X2 使用 `ophub/kernel` 的 `kernel_stable` 通用 6.1.y 路线，而不是 model_database 指定的 rk35xx 专用路线 | 高置信度，需原始 tarball复核 |
+| kernel source | `unifreq/linux-6.1.y` commit `4428...` 是 build timestamp 时点强候选 | 高置信度候选，非二进制证明 |
+| kernel config | 当时通用 config template 为 6.1.63，包含 STMMAC/DWMAC_ROCKCHIP/PHYLIB/REALTEK_PHY built-in 选项 | 模板已确认，最终 .config 未确认 |
+| Panther X2 DTS | 6.1.65 源码候选包含 Panther X2 专用 DTS | 源码已确认，原始 DTB binary provenance 未闭环 |
+| U-Boot/Loader | Rebuild 指向 ophub/u-boot main，写镜像 LBA64/LBA16384；RKDevTool Boot 栏实际 Loader 未知 | 部分确认 |
+| Rootfs/network userspace | 基础 rootfs 来自当时 Armbian build main 的 Odroid N2 Jammy 构建，再经 Rebuild 通用化；Panther 专用目录当前仅见 bootfs 内容 | 构建逻辑已确认，原始 rootfs 网络服务仍待实物检查 |
+
+### 26.9 下一步只做三件事
+
+1. 从用户原始 6.1.65 IMG 提取 `config-6.1.65-ophub`、`System.map`、`modules.dep`、`modules.builtin`、`/lib/modules/6.1.65-ophub` 目录清单、`/etc/ophub-release`、网络服务/配置文件；与候选 config template 和源码进行 hash/配置闭环。
+2. 若用户原始 IMG 可在本地工作目录重新提供或挂载，直接对其中 `Image`、DTB、boot scripts、uInitrd、FIT、rootfs 文件做只读 hash/元数据检查；不写入 TF/eMMC、不启动。
+3. 对 `unifreq/linux-6.1.y` 的 `f16bd...` 至 `4428...` 版本窗口做 stmmac、Rockchip clock/reset、PHY、Kconfig 依赖的定向源码差异审计；只保留命中 Panther X2 实际 RGMII/RTL8211F 路径的变化。
+
+本轮未启动 Linux、未刷写 eMMC/TF、未改写 U-Boot/FDT、未进行网络实机测试。
