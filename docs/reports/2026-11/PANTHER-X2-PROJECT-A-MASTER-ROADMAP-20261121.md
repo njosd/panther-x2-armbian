@@ -485,3 +485,20 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 | 日期 | 变更 |
 |---|---|
 | 2026-11-22 | 根据用户指出的版本升级历史，正式将用户原始 6.1.65 完整镜像设为第一黄金基线；将本机 6.1.116 降为后期同机正常参照；将网络上其他 6.1.116 降为外部样本。 |
+
+
+## 18. 2026-11-22 原始 6.1.65 来源链阶段性闭环
+
+原始 6.1.65 的来源追踪取得进展，详见 `PANTHER-X2-ORIGINAL-SOFTWARE-IMAGE-PROVENANCE-20261120.md` 第26—27节。
+
+- 用户原始 IMG 的构建元数据指向 `ophub/kernel`、`kernel_stable`、`stable`，Panther X2 model_database 将内核 family/tag 设为通用 `6.1.y`，不是 `rk35xx` 专用内核包线。
+- 2023-12-07 前最近的 Panther X2 Armbian fork 源码候选为 `31b1b96f258a6d66ecaf8a719145860b533100f6`；它的 workflow 先以 Armbian build 的 `odroidn2` Jammy 基础镜像构建，再调用 Ophub Rebuild action 生成 Panther X2 镜像。
+- 对应 kernel source 的强候选为 `unifreq/linux-6.1.y` commit `4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`（2023-12-03，up to 6.1.65）。同一时间窗口没有发现 stmmac/DWMAC Panther X2 专用新改动。
+- 当时可见的通用 `config-6.1` 模板标记 6.1.63；2023-12-08 才更新为 6.1.66。模板包含 STMMAC、DWMAC_ROCKCHIP、PHYLIB、REALTEK_PHY 等 built-in 选项，但原始 6.1.65 最终 `.config` 尚未直接抽取，不能将模板等同最终配置。
+- Panther X2 的专用 DTS 在候选源码快照中存在，GMAC1 fe010000/RGMII/PHY0/125MHz/pinctrl/reset/delay 配置与已核验原始 DTB一致。
+- 公开 Armbian Panther X2 archive 目前只见 6.1.50；同项目公开 Release 只见 2024-01-22 的 6.1.74。均不是用户 6.1.65 原件。尚未找到 6.1.65 同哈希公开副本、Actions run 或官方 checksum。
+- Rebuild workflow 的 Armbian build、Ophub action、U-Boot、firmware 多处引用浮动 `main`，所以仅凭项目 commit 仍无法完整复现当日所有构建输入；U-Boot/Loader 精确身份仍未知。
+
+**当前基线判断：** 6.1.65 已有较强的源码/配置/板级 DTS 候选来源链，但 Image 二进制与具体构建 commit/config 尚未实现密码学级绑定。它仍是项目 A 第一黄金基线；6.1.116 只作后期同机正向行为参照。
+
+**下一步：** 从用户原始 IMG 本体直接提取 `config-6.1.65-ophub`、modules 清单、`System.map`、rootfs 网络服务/配置文件与 U-Boot 文件 hash；并审计 `f16bd...` 到 `4428...` 之间 stmmac/Rockchip clock/reset/PHY 的实际差异。未完成前不启动 Linux、不刷写介质。
