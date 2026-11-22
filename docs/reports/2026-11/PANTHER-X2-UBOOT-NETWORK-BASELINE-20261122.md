@@ -284,3 +284,21 @@ PHY at address 0:
 ```
 
 记录：PHY 地址 0 的 Clause 22 寄存器 2（PHYID1）读数为 `0x0000`。此前同地址寄存器 1（BMSR）为 `0xffff`。当前读数尚不足以构成有效、可识别的 PHY 标识；不能据此认定 PHY 已响应，也不能直接判定 PHY 损坏。下一步只读 Clause 22 寄存器 3（PHYID2），查看 ID 组合是否可识别。
+
+
+### PHY Identifier 2 只读结果（2026-11-22）
+
+用户执行：
+```
+mdio read ethernet@fe010000 0 3
+
+Reading from bus ethernet@fe010000
+PHY at address 0:
+3 - 0xffff
+```
+
+地址 0 的 Clause 22 PHY ID 组合当前为：
+- Reg 2 / PHYID1 = `0x0000`
+- Reg 3 / PHYID2 = `0xffff`
+
+该组合不是可用的有效 PHY 标识。结合 BMSR Reg 1 = `0xffff`，当前尚未从地址 0 读到一致、有效的 PHY 管理寄存器响应。不能仅凭单次读数认定 PHY 硬件损坏或缺失；需继续核实 MDIO 读通路及 PHY 地址。下一步读取地址 0 的 BMCR（Clause 22 Reg 0），作为另一项只读交叉检查。
