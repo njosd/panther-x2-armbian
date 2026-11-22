@@ -237,7 +237,7 @@ jobs:
           for key, line in updates.items():
               if key not in seen:
                   merged.append(line)
-          config.write_text("\\n".join(merged) + "\\n")
+          config.write_text("\n".join(merged) + "\n")
           PY
           grep -qx 'CONFIG_STATIC=y' .config || {
             echo "::error::BusyBox fragment merge did not enable CONFIG_STATIC"
