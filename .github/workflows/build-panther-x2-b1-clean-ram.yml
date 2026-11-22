@@ -209,7 +209,7 @@ jobs:
           import re
 
           config = Path(".config")
-          fragment = Path("$GITHUB_WORKSPACE/scripts/panther-x2-b1/busybox.config.fragment")
+          fragment = Path("../../scripts/panther-x2-b1/busybox.config.fragment")
           current = config.read_text().splitlines()
           updates = {}
           for line in fragment.read_text().splitlines():
