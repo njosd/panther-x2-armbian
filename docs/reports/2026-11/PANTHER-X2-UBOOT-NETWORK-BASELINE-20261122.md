@@ -78,3 +78,14 @@ U-Boot DHCP、网关和外部 IP ping 均成功，表示当前启动链在本次
 目前只能确认当前 U-Boot 有 DHCP/MII/MDIO/ping 命令入口，且实机注册了 ethernet@fe010000 MDIO bus。PHY、link、DHCP、ICMP 均未验证。下一条待执行命令：mii device。本报告不代表网络已经打通。
 
 关联文档：项目 A 总路线图、分阶段实施计划、B1 U-Boot 启动前检查记录及 U-Boot 候选研究报告。
+
+### MII 设备枚举补充（2026-11-22）
+
+现场执行 `mii device`，输出：
+
+    MII devices: 'ethernet@fe010000'
+    Current device: 'ethernet@fe010000'
+
+结论：MII 子系统实际枚举到一个设备，名称为 `ethernet@fe010000`，且当前设备已选定为该设备。与此前 `mdio list` 列出的总线名称一致，进一步确认 MII/MDIO 管理接口均关联目标 Ethernet 控制器。此结果仍不证明 PHY 地址/型号已识别、PHY link 已建立或 MAC 数据收发正常。
+
+下一步只读扫描 PHY 地址范围，禁止 MII/MDIO 写操作。建议命令：`mii info 0-31`。
