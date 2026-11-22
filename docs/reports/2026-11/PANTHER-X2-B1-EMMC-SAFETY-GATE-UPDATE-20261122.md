@@ -155,3 +155,26 @@ mmc-utils 上游源码定义：
 **关键风险解释：** 此旧版实现与此前审查的循环控制流一致，但其无容量上限检查意味着命令参数绝不能照抄未经复核。按本设备参数，完整覆盖 3728 组所需 blocks=61,079,552；循环最后一次发 CMD28 的地址仍是 61,063,168，不会向设备发送 61,079,552 作为 CMD28 地址。执行前仍需完成本机 dpkg 文件完整性核验，并再次核对命令的目标设备 CID。
 
 **本轮没有执行任何写保护设置命令。**
+
+
+## 12. 实机 mmc-utils 包完整性核验通过（2026-11-22）
+
+用户实机执行：
+```text
+dpkg -V mmc-utils
+DPKG_VERIFY_EXIT=0
+Package: mmc-utils
+Version: 0+git20191004.73d6c59-2
+Architecture: arm64
+Status: install ok installed
+APT Installed: 0+git20191004.73d6c59-2
+APT Candidate: 0+git20191004.73d6c59-2
+Source: http://ports.ubuntu.com jammy/universe arm64
+```
+
+结论：
+- `dpkg -V` 无输出且退出码为 0，安装包登记文件通过 dpkg 完整性校验。
+- Installed 与 Candidate 版本一致。
+- 结合第11节，实机二进制可按 Ubuntu Jammy 的 mmc-utils 源包版本 `0+git20191004.73d6c59-2` / 上游 commit `73d6c59` 审计。
+- 这完成了写保护命令实现核验，但不代表用户已授权执行，也不代表已设置任何 WP。
+- 当前仍未执行 CMD6/CMD28 写保护设置，未写 TF，未启动设备。
