@@ -57,10 +57,21 @@ jobs:
           grep -qx 'VERSION = 6' work/linux/Makefile
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
           grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+
+          # CONFIG_NET=n build compatibility: the no-NET uevent stub in this
+          # source calls kfree_skb(), whose inline drop accounting references
+          # sk_skb_reason_drop() from the absent networking core. The stub
+          # only frees an unused skb, so use the always-built __kfree_skb().
+          git -C work/linux apply "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
+          git -C work/linux diff --check
+          git -C work/linux diff -- lib/kobject_uevent.c | tee work/logs/config-net-off-uevent-patch.diff
+          PATCH_SHA256="$(sha256sum scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch | awk '{print $1}')"
           {
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
             echo "kernel_commit=$ACTUAL_COMMIT"
             echo "kernel_version=${KERNEL_VERSION}"
+            echo "source_patch=scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
+            echo "source_patch_sha256=$PATCH_SHA256"
           } | tee work/source-lock.txt
 
       - name: Configure and build clean ARM64 kernel
@@ -106,6 +117,7 @@ jobs:
           test "$IMAGE_MAGIC" = "41524d64" || { echo "::error::Kernel payload is not an ARM64 Image"; exit 1; }
           cp work/kernel.config work/output/kernel.config
           cp "$FRAGMENT" work/output/kernel.config.fragment
+          cp scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch work/output/
 
       - name: Derive and compile isolated Panther X2 DTB
         run: |
@@ -230,6 +242,7 @@ jobs:
             echo "kernel_version=${KERNEL_VERSION}"
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
             echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "kernel_patch_sha256=$(sha256sum scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch | awk '{print $1}')"
             echo "busybox_version=${BUSYBOX_VERSION}"
             echo "busybox_archive_sha256=${BUSYBOX_SHA256}"
             echo "jp_uboot_sha256=${JP_UBOOT_SHA256}"
