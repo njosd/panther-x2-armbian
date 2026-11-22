@@ -345,3 +345,29 @@ Panther X2/Ophub 原版、JP-TvBox、Rockchip 官方 RK3566 DDR/SPL/BL31、NixOS
 
 **放行与停止：** 静态审计通过仅允许提出一次独立实机测试计划，不自动授权启动或写卡。实测成功后，将其作为 U-Boot 对照证据归档，再按既定 B2 顺序验证 Linux；实测失败或不可执行时，不阻塞 B1 结项，也不改变 Linux 分层验证顺序。项目 A 只记录边界证据，不据此恢复项目 B 的 GMAC/MDIO/PHY 根因调查。
 
+
+
+## 2026-11-22 决策修订：U-Boot 有线网络基准提前
+
+**本节覆盖此前“B1 完成后再做 U-Boot DHCP 辅助验证”的顺序。** 用户明确指出历史版本已经证明 Linux 可以启动，当前最关键的未知项是 U-Boot 能否独立打通板载有线千兆网口。因此当前优先完成 U-Boot 网络基准，再继续 B1；B1 仍保留为无网络 RAM-only 隔离基线，但不再阻挡本轮网络实测。
+
+新顺序：
+1. 当前已运行 U-Boot：只读识别 Ethernet/MDIO/PHY、确认 link，再安全执行 DHCP、网关及外部 IP ping。
+2. B1：无网络、无 Ethernet 驱动、无存储驱动的 RAM-only Linux。
+3. B2：以 U-Boot 结果为对照，逐项引入板载 Ethernet 所需 Linux 网络栈、MAC/GMAC、MDIO/PHY 及最小依赖闭包。
+4. B3：基础 IP 连通后分开验证 TCP/UDP 双向通信。
+
+用户已明确授权在当前 U-Boot 会话中执行板载有线网口初始化、DHCP 和基本连通性测试。授权不包括重启、替换 SPL/U-Boot、启动其他镜像、写 TF/eMMC、持久化环境修改、PHY 寄存器写入或恢复 GMAC 根因排障。当前禁止 save/saveenv/fatwrite/tftpflash/tftpput/download/fastboot/rockusb/ums、任何存储写入，以及 boot/bootd/bootcmd/source/booti/reset。必要 setenv 只能是 RAM 临时变量，绝不保存。
+
+DHCP help 显示 DHCP/TFTP 组合命令，未给出显式 DHCP-only 参数。必须先审计本构建 autoload 行为，确认 autoload=no 能阻止 TFTP 下载后才执行 DHCP；确认前不运行 DHCP，不猜测 bootfile。本轮不重启，不重新触发 BootROM/SPL；未来任何重启、写卡仍受 B0.4 安全门和逐次授权约束。
+
+现场已确认：
+- help dhcp：命令存在，描述为 DHCP/TFTP boot；语法 dhcp [loadAddress] [[hostIPaddr:]bootfilename]。
+- help mii：只读 device/info/read/dump 可用；write/modify 禁止。
+- help mdio：只读 list/read/rx 可用；write/wx 禁止。
+- mdio list 实际输出 ethernet@fe010000:，证明该以太网控制器对应的 MDIO bus 已注册；不证明 PHY 已识别、link 已建立或 DHCP 成功。
+- 完整 help 清单包含 ping；尚未执行 ping。
+
+下一步严格一次一条命令：mii device → 识别 PHY 地址/型号 → 只读确认 link → 审计 autoload/DHCP 实现 → DHCP → LAN 网关 ping → 已知外部 IP ping。失败即停在当前层，不同时更换线缆、端口、固件或网络参数。
+
+完整现场记录见 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md。
