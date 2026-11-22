@@ -92,7 +92,7 @@ NixOS 配方仅作为研究样本；其曾出现 ROCK 3C EVB control FDT/target 
 - 先构建一个纯 RAM 的最小 Linux 启动底座，不构建完整 Ubuntu/Armbian rootfs。
 - B1 不预置任何 B2/B3 网络工具、网络协议、Ethernet 驱动、存储驱动、USB 驱动、模块或固件。
 - Linux B1 从 initramfs/RAM 运行；TF 只由启动前的 JP U-Boot proper 读取 Image、uInitrd 和 DTB。Linux 阶段不启用 MMC/eMMC/SD/SDIO、块设备、USB、网络协议栈或网络设备驱动。
-- B1 保留 ARM64、RK3566 SoC 启动支持、UART2 console、必要时钟/pinctrl、initramfs/gzip、devtmpfs/procfs/sysfs/tmpfs 和静态 BusyBox ash；不加载或 probe GMAC/STMMAC/DWMAC、MDIO/PHY/PCS。
+- B1 保留 ARM64、RK3566 SoC 启动支持、UART2 console、必要时钟/pinctrl、initramfs/gzip、devtmpfs/procfs/sysfs 和静态 BusyBox ash；不加载或 probe GMAC/STMMAC/DWMAC、MDIO/PHY/PCS。
 - 有线千兆网口链路的后续依赖审查范围仅限 Ethernet MAC/GMAC、MDIO、PHY、PCS 及相关 pinctrl/clock/reset/regulator/DMA/interrupt；共享于 UART/SoC 启动的基础设施不得盲目关闭，必须按设备节点/依赖关系精确处理。
 - Wi-Fi/无线网络、蓝牙及其控制器、驱动、固件、协议和用户空间组件永久排除，不进行依赖追踪或逐项引入；只在 clean-test DTB/镜像准入检查中确认相关节点、驱动、固件和用户空间内容未混入。
 - USB 与 USB/PCIe 外接网卡不属于项目 A；B1 禁用 USB host/PHY。干净基线通过后，只围绕板载有线千兆 Ethernet 按单变量实验逐项加入最小依赖闭包，完成构建审计和目标硬件验证后再继续。
