@@ -178,3 +178,31 @@ Source: http://ports.ubuntu.com jammy/universe arm64
 - 结合第11节，实机二进制可按 Ubuntu Jammy 的 mmc-utils 源包版本 `0+git20191004.73d6c59-2` / 上游 commit `73d6c59` 审计。
 - 这完成了写保护命令实现核验，但不代表用户已授权执行，也不代表已设置任何 WP。
 - 当前仍未执行 CMD6/CMD28 写保护设置，未写 TF，未启动设备。
+
+
+## 13. B1 hybrid TF 镜像 CI #35 失败及修复（2026-11-22）
+
+### #35 实际结果
+
+- Run ID：44978363614
+- Commit：`3c8bfe97999adbe2ed1d1539384ba9cf8f70db33`
+- Kernel、DTB、BusyBox、initramfs、JP U-Boot proper 等步骤均成功。
+- 镜像步骤成功创建 2 GiB GPT 镜像、ext4 文件系统，`e2fsck -fn` 无文件系统问题。
+- GPT 检查输出明确显示分区类型为 EFI System Partition；原 workflow 错误地用 `grep EF00` 匹配 `sgdisk -i` 的人类可读输出，导致步骤退出码 1。失败不是内核/DTB/ramdisk 构建问题。
+
+### #36 修复提交
+
+- Commit：`078a33eec2da56300356e1e87634cef8b4e82542`
+- 将 GPT 分区类型改为 Linux filesystem（8300），与 ext4 实际用途一致。
+- 将分区结束 LBA 显式对齐到 2048-sector 边界（4192255）。
+- 验证条件改为匹配 `sgdisk -i` 输出中的 `Linux filesystem` 类型描述。
+- 修复提交触发 Actions run #36，Run ID：44978969701；记录时状态为 in_progress，结果待定。
+- 尚未声称新镜像已通过 CI；等待 #36 完成后检查 job logs 与 artifact。
+
+## 14. 写保护操作授权状态
+
+截至本报告更新时，用户仅授权持续推进项目，没有明确批准向 eMMC 发送 CMD6/CMD28 设置 Power-on write protection。故：
+- 未执行 `mmc writeprotect user set`；
+- 未执行 boot-area WP 设置；
+- 未设置临时或永久写保护；
+- 未写 TF、未启动实机。
