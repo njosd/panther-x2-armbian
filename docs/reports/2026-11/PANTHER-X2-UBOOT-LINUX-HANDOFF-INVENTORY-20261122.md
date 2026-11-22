@@ -240,3 +240,14 @@ model = "Radxa ROCK3 Model C"
 - 当前 control FDT 与 Panther X2 目标硬件身份不匹配，不能将其直接作为 Linux 启动 DTB。最终 Linux DTB 必须独立核实来源、哈希、model/compatible及硬件资源描述，并验证启动前 fixup 后副本。
 
 阶段门：PRE-HANDOFF READY 仍未通过。
+
+
+### 11.1 当前 U-Boot control FDT 的 compatible
+
+只读命令 `fdt print / compatible` 返回：
+
+```
+compatible = "radxa,rock3c", "rockchip,rk3566"
+```
+
+与本节已核实的 model `Radxa ROCK3 Model C` 一致。当前 U-Boot control FDT 明确声明为 Radxa ROCK3C / Rockchip RK3566 兼容设备，不是 Panther X2 的目标硬件描述。此处不推断 SoC/板级资源是否可部分共用；该 FDT 不得未经独立核验直接作为 Panther X2 Linux 最终 DTB。
