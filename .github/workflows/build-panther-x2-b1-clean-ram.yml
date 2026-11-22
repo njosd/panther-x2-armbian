@@ -148,6 +148,7 @@ jobs:
             -I "$SRC/include" \
             -I "$SRC/arch/arm64/boot/dts" \
             -I "$SRC/arch/arm64/boot/dts/include" \
+            -I "$SRC/arch/arm64/boot/dts/rockchip" \
             -undef -D__DTS__ -x assembler-with-cpp \
             "$CLEAN_DTS" > "$PREPROCESSED"
           dtc -@ -I dts -O dtb -o "$DTB" "$PREPROCESSED" 2>&1 | tee work/logs/dtb-build.log
