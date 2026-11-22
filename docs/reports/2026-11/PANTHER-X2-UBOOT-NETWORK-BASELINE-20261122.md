@@ -302,3 +302,25 @@ PHY at address 0:
 - Reg 3 / PHYID2 = `0xffff`
 
 该组合不是可用的有效 PHY 标识。结合 BMSR Reg 1 = `0xffff`，当前尚未从地址 0 读到一致、有效的 PHY 管理寄存器响应。不能仅凭单次读数认定 PHY 硬件损坏或缺失；需继续核实 MDIO 读通路及 PHY 地址。下一步读取地址 0 的 BMCR（Clause 22 Reg 0），作为另一项只读交叉检查。
+
+
+### PHY Basic Mode Control Register 只读结果（2026-11-22）
+
+用户执行：
+```
+mdio read ethernet@fe010000 0 0
+
+Reading from bus ethernet@fe010000
+PHY at address 0:
+0 - 0x0
+```
+
+地址 0 的 Clause 22 读数汇总：
+- Reg 0 / BMCR = `0x0000`
+- Reg 1 / BMSR = `0xffff`
+- Reg 2 / PHYID1 = `0x0000`
+- Reg 3 / PHYID2 = `0xffff`
+
+这不是一致且可识别的 PHY 管理寄存器响应。尤其不能将 BMCR 的 `0x0000` 当作正常 PHY 默认配置，也不能将 BMSR/PHYID2 的 `0xffff` 当作有效值。结合设备模型中的 generic `phy@0` 已 probe，当前更准确的结论是：DM 设备对象存在并 probe，但 Clause 22 读通路未证明真实 PHY 可通信。可能涉及设备树/PHY 地址绑定、MDIO 控制器访问、时钟/复位/引脚复用或板级连接；现有证据不能区分这些可能性。
+
+下一步不继续试读更多 PHY 地址或寄存器，也不运行 DHCP。改用 `dm devres` 只读查看 Ethernet 设备已申请的资源，核对 probe 时资源状态；该输出不能替代硬件寄存器测量，但可帮助确认设备模型资源路径。
