@@ -98,8 +98,6 @@ def main() -> None:
         "gmac1_clkin: external-gmac1-clock",
         "sdio_pwrseq: sdio-pwrseq",
         "sdio-pwrseq {",
-        "wifi_enable_h: wifi-enable-h",
-        "wifi_host_wake_irq: wifi-host-wake-irq",
         "wireless-wlan {",
         "\tbt {",
         "led_wifi: led-wifi",
