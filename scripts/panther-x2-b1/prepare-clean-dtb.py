@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Derive the Panther X2 B1 DTB with all non-target I/O disabled.
-
-The Linux B1 kernel runs entirely from RAM. U-Boot reads Image/uInitrd/DTB
-from TF before Linux starts; Linux itself must not probe MMC, USB, Ethernet,
-Wi-Fi, or Bluetooth devices.
-"""
+"""Derive a Panther X2 B1 DTB with all non-target I/O disabled."""
 from __future__ import annotations
 
 import re
@@ -32,25 +27,21 @@ def block_span(text: str, marker: str) -> tuple[int, int]:
             if ch == "\n":
                 state = "normal"
             i += 1
-            continue
-        if state == "block":
+        elif state == "block":
             if ch == "*" and nxt == "/":
                 state = "normal"
                 i += 2
             else:
                 i += 1
-            continue
-        if state == "string":
-            if ch == "\\\\":
+        elif state == "string":
+            if ch == "\\":
                 i += 2
             elif ch == '"':
                 state = "normal"
                 i += 1
             else:
                 i += 1
-            continue
-
-        if ch == "/" and nxt == "/":
+        elif ch == "/" and nxt == "/":
             state = "line"
             i += 2
         elif ch == "/" and nxt == "*":
@@ -86,7 +77,8 @@ def remove_block(text: str, marker: str) -> str:
 
 def replace_block(text: str, marker: str, replacement: str) -> str:
     start, end = block_span(text, marker)
-    indent = text[start:text.find(marker, start)]
+    marker_pos = text.find(marker, start)
+    indent = text[start:marker_pos]
     rendered = indent + replacement.replace("\n", "\n" + indent)
     return text[:start] + rendered + text[end:]
 
@@ -100,18 +92,26 @@ def main() -> None:
         raise SystemExit("refusing to patch a DTS that is not the Panther X2 board file")
 
     text = original
-    # Remove board-specific Wi-Fi/BT support descriptions and indicators.
-    for marker in (
+
+    # Remove board-specific Wi-Fi/BT support descriptions, GPIOs and LEDs.
+    remove_markers = (
         "gmac1_clkin: external-gmac1-clock",
         "sdio_pwrseq: sdio-pwrseq",
+        "sdio-pwrseq {",
+        "wifi_enable_h: wifi-enable-h",
+        "wifi_host_wake_irq: wifi-host-wake-irq",
+        "wireless-wlan {",
+        "\tbt {",
         "led_wifi: led-wifi",
         "led_eth: led-eth",
-        "wireless-wlan {",
-        "\\tbt {",
-    ):
+        "led_wifi_enable_h: led-wifi-enable-h",
+        "led_eth_enable_h: led-eth-enable-h",
+    )
+    for marker in remove_markers:
         text = remove_block(text, marker)
 
-    # No Linux-side Ethernet, MMC/eMMC/TF, UART-Bluetooth, or USB probing in B1.
+    # Linux B1 is RAM-only. TF is read by U-Boot before Linux starts.
+    # Keep UART2 (ttyS02) enabled for the only console.
     disabled = (
         ("&gmac1 {", '&gmac1 {\n\tstatus = "disabled";\n};'),
         ("&mdio1 {", '&mdio1 {\n\tstatus = "disabled";\n};'),
@@ -125,44 +125,34 @@ def main() -> None:
         ("&usb2phy0 {", '&usb2phy0 {\n\tstatus = "disabled";\n};'),
         ("&usb2phy0_host {", '&usb2phy0_host {\n\tstatus = "disabled";\n};'),
         ("&usb2phy0_otg {", '&usb2phy0_otg {\n\tstatus = "disabled";\n};'),
-        ("&usb2phy1 {", '&usb2phy1 {\n\tstatus = "disabled";\n};'),
-        ("&usb2phy1_host {", '&usb2phy1_host {\n\tstatus = "disabled";\n};'),
-        ("&usb2phy1_otg {", '&usb2phy1_otg {\n\tstatus = "disabled";\n};'),
     )
     for marker, replacement in disabled:
         text = replace_block(text, marker, replacement)
 
-    # These aliases are meaningless in a Linux kernel with no network or MMC.
-    text = re.sub(
-        r"(?m)^[ \\t]*(?:ethernet0|mmc0|mmc1|mmc2)\\s*=\\s*&[A-Za-z0-9_]+;[ \\t]*\\n",
-        "",
-        text,
-    )
+    # All board aliases in the original DTS point to MMC or Ethernet.
     text = remove_block(text, "aliases {")
 
-    if re.search(
-        r"\\b(?:wifi|wireless|bluetooth|bt_enable_h|bt_host_wake_l|bt_wake_l|"
-        r"sdio_pwrseq|gmac1_clkin|ethernet-phy|ethernet0)\\b",
-        text,
+    forbidden_residue = re.compile(
+        r"\b(?:wifi|wireless|bluetooth|bt_enable_h|bt_host_wake_l|bt_wake_l|"
+        r"sdio_pwrseq|gmac1_clkin|ethernet-phy|ethernet0|mmc0|mmc1|mmc2)\b",
         re.IGNORECASE,
-    ):
-        raise SystemExit("wireless/BT/active Ethernet residue remains in derived board DTS")
+    )
+    if forbidden_residue.search(text):
+        raise SystemExit("Wi-Fi/BT/MMC/Ethernet residue remains in derived board DTS")
 
     for marker in (
         "&gmac1 {", "&mdio1 {", "&sdhci {", "&sdmmc0 {", "&sdmmc1 {",
         "&uart1 {", "&usb_host0_xhci {", "&usb_host0_ohci {", "&usb_host0_ehci {",
         "&usb2phy0 {", "&usb2phy0_host {", "&usb2phy0_otg {",
-        "&usb2phy1 {", "&usb2phy1_host {", "&usb2phy1_otg {",
     ):
         start, end = block_span(text, marker)
-        block = text[start:end]
-        if not re.search(r'status\\s*=\\s*"disabled"', block):
+        if not re.search(r'status\s*=\s*"disabled"', text[start:end]):
             raise SystemExit(f"{marker} is not explicitly disabled")
 
     path.write_text(text)
     print(f"Prepared B1 clean-test DTB source: {path}")
     print("Disabled: GMAC/MDIO/PHY, eMMC/TF/SDIO, Bluetooth UART, USB host/PHY")
-    print("Removed: Wi-Fi/BT pinctrl and power-sequence nodes, Wi-Fi/Ethernet LEDs, aliases")
+    print("Removed: Wi-Fi/BT GPIO/power-sequence nodes, Wi-Fi/Ethernet LEDs, aliases")
 
 
 if __name__ == "__main__":
