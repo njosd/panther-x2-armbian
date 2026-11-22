@@ -329,3 +329,11 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 在当前 U-Boot 网络基准测试前，正式建立 U0（U-Boot post-startup baseline）：当前 proper 已启动并停留在 => 提示符、尚未执行 DHCP/网络连通性测试的状态。当前只完成帮助、环境变量、MII/MDIO 枚举查询；没有 DHCP、下载、存储写入、环境修改或新增测试组件。具体快照见 U-Boot 网络基准实测记录 PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md 的 U0 节。
 
 U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生的临时网络参数，核对启动链、U-Boot proper、提示符及身份变量未改变，再宣布回到 U0。不得把 DHCP 后的环境状态直接带入 B1。无法在不重启/不写存储的条件下恢复的内部运行时状态要如实记录；不允许为了清理而擅自 reset/reboot。U0 回归核对通过后，才继续 B1 clean RAM Linux。
+
+## 14. Linux 首次启动前的 U-Boot 交接强制阶段门
+
+项目 A 正式进入 Linux 前，必须先完成 `PANTHER-X2-UBOOT-LINUX-HANDOFF-INVENTORY-20261122.md` 中所有适用信息项的发送端核查。未核实项不得留空带过；须明确归类为已核实、已核实不适用、Linux重新初始化、有意缺省/已知限制或未核实。存在未核实项、地址冲突、镜像身份不明、最终FDT/bootargs未冻结时，不允许启动Linux。
+
+通过该门后签署 `PRE-HANDOFF READY`，归档同一启动链的固件身份、Kernel/DTB/initramfs哈希与地址长度、最终FDT副本及哈希、bootargs、内存布局、固件接口、硬件资源责任归属和UART证据。首次进入Linux后，再执行独立的 `POST-HANDOFF VERIFIED` 接收端核验。不能在Linux启动前声称Linux已正确接收。
+
+当前U0与U-Boot网络测试完成后的清理/回归要求仍然有效；完成U0回归后，继续交接审计，不得直接跳过阶段门进入Linux。
