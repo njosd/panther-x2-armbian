@@ -350,3 +350,22 @@ Current device: 'ethernet@fe010000'
 确认：当前唯一列出的 MII 设备及当前选中设备均为 `ethernet@fe010000`。因此此前通过该总线执行的 MDIO/MII 只读访问没有明显的“误选另一条 MII 总线”问题；但这不能证明总线电气通信正常，也不能证明 PHY 地址 0 的绑定正确。
 
 下一步只读检查 U-Boot 当前 Ethernet 活动设备环境变量（`ethact`、`ethprime`），并再次记录 MAC 环境变量；不修改变量。
+
+
+### Ethernet 活动设备环境变量只读核对（2026-11-22）
+
+用户执行 `printenv ethact ethprime ethaddr`，输出：
+```
+## Error: "ethact" not defined
+## Error: "ethprime" not defined
+ethaddr=16:70:f6:c8:b2:95
+```
+
+记录：
+- `ethact` 未定义。
+- `ethprime` 未定义。
+- `ethaddr` 已定义为 `16:70:f6:c8:b2:95`。
+- `ethact`/`ethprime` 未定义不等于 Ethernet DM 设备未 probe，也不推翻 `mii device` 已确认唯一 MII 设备且当前选择为 `ethernet@fe010000` 的结果。
+- MAC 首字节 `0x16` 表明该地址为单播、本地管理地址；其来源和驱动是否实际采用仍未由当前输出证明。
+
+下一步先只读检查 DHCP 相关网络环境变量（`autoload`、`ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile`），以确定当前值/未定义状态；在源码确认 DHCP 命令的自动加载行为之前，不执行 DHCP。
