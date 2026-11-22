@@ -286,3 +286,32 @@ lsblk:
 - eMMC user WP 全部 3728 组均通过只读查询确认当前未保护。
 - 当前 Armbian 根分区和 /boot 均读写挂载于目标 eMMC；禁止当前系统在线设置整片 user-area WP。
 - Rescue kernel/initramfs 尚未创建；没有写 TF，没有设置 WP，没有启动 B1。
+
+
+## 20. Rescue 启动路径与既有 BootROM 结论对照（2026-11-22）
+
+重新回溯 P2-BOOT 架构报告后，确认 BootROM 介质选择问题已经有专项审计，不应重复做一般性 BootROM 优先级搜索：
+
+- RK3566 Hardware Design Guide 的自动启动顺序把 eMMC 排在 SDMMC 之前；
+- Panther X2 2026-11-18 现场 source tag 为 eMMC source ID 2；
+- eMMC user-area LBA64 有有效 IDB；
+- 2026-11-19 已实测混合启动：BootROM/eMMC IDB → eMMC SPL → TF U-Boot proper；
+- SDMMC0_DET 不是 eMMC/SD 启动优先级选择脚；
+- RK3566 SD Boot Card/BCB 升级标记不能作为普通冷启动跳过 eMMC SPL 的方法；
+- 既有报告认为在 eMMC 有效 IDB 保持可被 BootROM 读取时，仅向 TF 写入完整 idbloader + proper 不能让 BootROM 直接执行 TF SPL。
+
+因此，TF 上的 RAM Rescue Linux 仍会先经过当前 eMMC SPL。它可以让 Linux 用户空间不依赖 eMMC，但**不能保护同一次启动中更早执行的 eMMC SPL/BL31/U-Boot 阶段写入**。本项目不能把“RAM rootfs”误写成“整个启动链已隔离 eMMC”。
+
+当前真正未闭环的不是 BootROM 一般优先级，而是：
+1. Panther X2 板级是否存在原厂 eMMC 上电隔离/复位/供电控制机制；
+2. 当前活动 eMMC SPL/proper 二进制与可审计源码、最终配置的精确对应关系；
+3. 是否能通过不改写 eMMC IDB 的可恢复方式，在启动前阻断其写路径。
+
+此前专项报告明确禁止清除 eMMC IDB、改写 boot area/EXT_CSD、短接信号或改变板级硬件。没有新的原理图/PCB证据或用户授权前，不实施任何此类尝试。
+
+## 21. B1 #37 当前运行状态
+
+- Run ID：44979808662
+- Commit：`3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`
+- 截至本次查询，#37 正在执行 kernel build；此前 source fetch/checkout 成功。
+- 镜像打包步骤尚未运行，因此尚无 #37 最终结果或镜像 artifact。
