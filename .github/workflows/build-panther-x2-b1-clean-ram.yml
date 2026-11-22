@@ -261,7 +261,7 @@ jobs:
             work/kernel.config work/output/busybox.config work/output/busybox
 
           qemu-aarch64-static work/output/busybox --list | sort | tee work/busybox-applets.txt
-          cp work/busybox-applets.actual work/output/busybox-applets.txt
+          cp busybox-applets.actual work/output/busybox-applets.txt
 
       - name: Assemble RAM initramfs and U-Boot boot script
         run: |
