@@ -315,3 +315,27 @@ lsblk:
 - Commit：`3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`
 - 截至本次查询，#37 正在执行 kernel build；此前 source fetch/checkout 成功。
 - 镜像打包步骤尚未运行，因此尚无 #37 最终结果或镜像 artifact。
+
+
+## 22. 用户明确收敛 eMMC 风险研究范围，优先实机 B1（2026-11-22）
+
+用户明确指出 eMMC 已有备份，必要时可以恢复；不接受无限扩大 eMMC 保护研究导致 B1 长期无法推进。自本节起调整项目执行边界：
+
+- B1 唯一核心目标：使用 TF 启动 Panther X2 最小 RAM Linux，验证 Kernel、目标 DTB、initramfs、静态 BusyBox 的实机启动链。
+- 停止扩展“证明 eMMC 所有 SPL/BL31/U-Boot 写路径绝对安全”的研究。
+- eMMC 全盘 WP、Power-on WP、永久 WP、专用 Rescue kernel、板级硬件隔离不再是 B1 启动前置条件；不再主动展开这些专题。
+- 保留现有 eMMC 备份和已知启动链证据；不主动改写 eMMC IDB、SPL、U-Boot proper、GPT 或 Vendor Storage。
+- 测试优先写入专用 8GB TF，不触碰 64GB 对照卡。
+- 对 TF 写入仍严格识别目标盘、核对容量/型号、写前确认和写后哈希验证，防止误写 eMMC。
+- 若测试确实需要修改 eMMC，先说明对象、原因、恢复方式和风险，再由用户明确批准。
+- 允许按已验证混合启动链（eMMC SPL → TF JP proper → TF B1 Kernel/initramfs）进行可恢复测试，不因未证明所有早期 bootloader 写路径绝对无写而无限期阻塞。
+- B1 clean kernel/DTB/initramfs 保持原样，不把 MMC/网络/无线功能混入 B1。
+
+本决策替代此前“必须先完成全面 eMMC 写保护或 Rescue 隔离才能推进 B1”的门槛。历史分析保留作背景，不再作为当前 B1 阻塞项。
+
+## 23. #37 CI 当前状态
+
+Run ID `44979808662`，commit `3d9abd4d1c1bdb44a2153fe0bd4225403bad4a45`：
+- Kernel、DTB、BusyBox、initramfs、JP proper 等步骤全部成功。
+- 正在执行 `Package PREPARE-ONLY hybrid TF image and verify layout`。
+- 镜像打包步骤尚未结束，artifact 上传待执行；暂不标记通过。
