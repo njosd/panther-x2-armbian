@@ -479,3 +479,57 @@ tftpput   - TFTP put command, for uploading files to a server
 
 Actions run：https://github.com/njosd/panther-x2-armbian/actions/runs/45015430386
 Artifact：https://github.com/njosd/panther-x2-armbian/actions/runs/45015430386/artifacts/14750814074
+
+
+## 11. 2026-11-22 DHCP异常与断电恢复记录
+
+### 11.1 DHCP 实测结果
+
+在当前 U-Boot proper 会话中，用户执行 `setenv autoload no`，并以 `printenv autoload` 确认 `autoload=no`。随后执行 `dhcp`，UART 记录按顺序出现：
+```
+EQOS_DMA_MODE_SWR stuck
+FAILED: 0
+"Synchronous Abort" handler, esr 0x96000004
+* Reason: Exception from a Data abort, from current exception level
+* PC = 0000000000ab9484
+* LR = 0000000000a3a84c
+...
+Resetting CPU ...
+### ERROR ### Please RESET the board ###
+```
+结果：当前 U-Boot 会话失效，未完成 DHCP；没有证据证明 DHCP Discover/Offer 往返成功，没有 TFTP 下载或存储写入证据。不能将此记录为 DHCP 服务器拒绝、PHY 损坏或 Linux 网络失败。
+
+### 11.2 恢复过程及重启后环境快照
+
+实体 Reset 按钮短按未恢复；用户随后断电重启，重新进入 U-Boot proper。重新核对：
+- `version`：仍为 U-Boot 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000)。
+- `ethaddr=16:70:f6:c8:b2:95` 保持不变。
+- `ethact`、`ethprime`、`autoload` 均未定义。
+- `ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile` 均未定义。
+- `bootcmd=run distro_bootcmd;boot_fit;boot_android ${devtype} ${devnum};`
+- `bootdelay=0`。
+- `distro_bootcmd=for target in ${boot_targets}; do run bootcmd_${target}; done`
+- `boot_targets=nvme mmc1 mmc0 usb0 pxe dhcp`。
+- `bootcmd_nvme=pci enum;nvme scan;setenv devnum 0;run nvme_boot;`
+- `bootcmd_mmc1=setenv devnum 1; run mmc_boot`
+- `bootcmd_mmc0=setenv devnum 0; run mmc_boot`
+- `bootcmd_usb0=setenv devnum 0; run usb_boot`
+- `bootcmd_pxe=run boot_net_usb_start; run boot_net_pci_enum; dhcp; if pxe get; then pxe boot; fi`
+- `bootcmd_dhcp` 包含 DHCP 获取启动脚本并 source、再次 DHCP 获取 kernel、TFTP 获取 DTB，最后可能 bootefi。
+- 当前启动延时为0，自动启动路径含 PXE/DHCP。后续上电必须先启动已验证 UART 自动中断脚本，不能依赖人工抢按。
+- 本轮只读取上述启动变量，没有执行其内容。
+
+当前 U0 状态：proper身份和环境变量快照已恢复；但断电重启后尚未重新执行 MDIO/MII 枚举查询，因此只记为“U0 部分恢复”，不得宣称所有设备枚举状态已重核。
+
+### 11.3 当前行动限制
+
+- 不再执行 `dhcp`，不再通过 PXE/DHCP 自动启动入口测试网络。
+- 不修改 U-Boot、SPL、FDT、环境变量，不写 TF/eMMC，不保存环境。
+- U-Boot 网络基准标记为“因 EQOS DMA 初始化异常暂停，实际网络连通性未验证”。
+- 继续项目 A 时优先利用 6.1.116 Linux 正向基线与分层网络方法；不将当前 U-Boot 异常升级为新的 GMAC 根因专项。
+
+## 12. 6.1.116 正向对照的解释
+
+仓库既有 6.1.116 记录确认：Panther X2 Linux 6.1.116 的 eth0/fe010000.ethernet 使用 rk_gmac-dwmac，PHY RTL8211F（ID 0x001cc916），RGMII，曾达到 1000Mbps Full Duplex；用户确认 DHCP 获取 LAN IPv4，ping hEX 和 iMac 0% 丢包。原版 U-Boot 日志 `Net: No ethernet found.` 与 Linux 6.1.116 后续正常使用网口的历史事实相结合，支持 Linux 会独立初始化 Ethernet、不依赖 U-Boot 已完成网络初始化。
+
+但这不能证明当前 JP proper 的 DMA Data Abort 对同一启动周期的 Linux 接管绝无影响；本次通过断电重启恢复，不构成同一启动周期的连续交接实验。6.1.116 既有运行时 FDT、磁盘 DTB、kernel config、dmesg 和脱敏网络采集文本是正向控制证据，不应重复执行已经完成的泛化网络测试。具体分层方法见项目 A《分层网络验证方案》。
