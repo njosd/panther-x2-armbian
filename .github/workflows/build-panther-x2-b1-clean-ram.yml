@@ -1,0 +1,251 @@
+name: Build Panther X2 B1 clean RAM baseline (prepare only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-b1-clean-ram:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      KERNEL_VERSION: "6.18.63"
+      KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+      KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+      BUSYBOX_VERSION: "1.37.0"
+      BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
+      JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install isolated build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential cpio curl device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
+            libncurses-dev libssl-dev make perl python3 qemu-user-static \
+            readelf binutils u-boot-tools
+
+      - name: Fetch exact Linux source commit
+        run: |
+          set -euo pipefail
+          mkdir -p work/logs work/output work/initramfs
+          git init work/linux
+          git -C work/linux remote add origin "${KERNEL_SOURCE_REPO}"
+          git -C work/linux fetch --depth=1 origin "${KERNEL_SOURCE_COMMIT}"
+          git -C work/linux checkout --detach FETCH_HEAD
+          ACTUAL_COMMIT="$(git -C work/linux rev-parse HEAD)"
+          test "$ACTUAL_COMMIT" = "${KERNEL_SOURCE_COMMIT}"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          {
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=$ACTUAL_COMMIT"
+            echo "kernel_version=${KERNEL_VERSION}"
+          } | tee work/source-lock.txt
+
+      - name: Configure and build clean ARM64 kernel
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
+
+          KCONFIG_ALLCONFIG="$FRAGMENT" make -C "$SRC" O="$OUT" \
+            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
+          make -C "$SRC" O="$OUT" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+          cp "$OUT/.config" work/kernel.config
+          bash scripts/panther-x2-b1/verify-b1-config.sh \
+            work/kernel.config /dev/null /bin/true aarch64-linux-gnu- 2>/dev/null || true
+
+          for option in \
+            CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_OF CONFIG_OF_FLATTREE \
+            CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT \
+            CONFIG_PROC_FS CONFIG_SYSFS CONFIG_TMPFS CONFIG_PRINTK \
+            CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE CONFIG_SERIAL_8250_DW \
+            CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON \
+            CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 CONFIG_PINCTRL_ROCKCHIP; do
+            grep -qx "${option}=y" work/kernel.config || {
+              echo "::error::Required kernel option missing: ${option}=y"
+              exit 1
+            }
+          done
+
+          if grep -Eq '^CONFIG_(NET|PACKET|INET|IPV6|STMMAC|DWMAC|MDIO|PHYLIB|REALTEK_PHY|CAN|PPP|TUN|BT|WLAN|WIRELESS|CFG80211|MAC80211|RFKILL|USB|MMC|SCSI|ATA|NVME|MTD|BLOCK|MODULES)(_[A-Z0-9_]+)?=[ym]$' work/kernel.config; then
+            echo "::error::Network/USB/storage/module Kconfig residue found"
+            grep -E '^CONFIG_(NET|PACKET|INET|IPV6|STMMAC|DWMAC|MDIO|PHYLIB|REALTEK_PHY|CAN|PPP|TUN|BT|WLAN|WIRELESS|CFG80211|MAC80211|RFKILL|USB|MMC|SCSI|ATA|NVME|MTD|BLOCK|MODULES)(_[A-Z0-9_]+)?=[ym]$' work/kernel.config
+            exit 1
+          fi
+
+          make -C "$SRC" O="$OUT" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- -j2 Image 2>&1 | tee work/logs/kernel-build.log
+
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          file work/output/Image | tee work/kernel-image-file.txt
+          readelf -h work/output/Image 2>&1 | head -n 20 || true
+          cp work/kernel.config work/output/kernel.config
+          cp "$FRAGMENT" work/output/kernel.config.fragment
+
+      - name: Derive and compile isolated Panther X2 DTB
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          DTS="$SRC/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
+          CLEAN_DTS="$GITHUB_WORKSPACE/work/panther-x2-b1-clean.dts"
+          PREPROCESSED="$GITHUB_WORKSPACE/work/panther-x2-b1-clean.pp.dts"
+          DTB="$GITHUB_WORKSPACE/work/output/dtb/rockchip/rk3566-panther-x2.dtb"
+          mkdir -p "$(dirname "$DTB")"
+
+          cp "$DTS" "$CLEAN_DTS"
+          python3 scripts/panther-x2-b1/prepare-clean-dtb.py "$CLEAN_DTS"
+          cp "$CLEAN_DTS" work/output/panther-x2-b1-clean.dts
+
+          cpp -nostdinc \
+            -I "$SRC/include" \
+            -I "$SRC/arch/arm64/boot/dts" \
+            -I "$SRC/arch/arm64/boot/dts/include" \
+            -undef -D__DTS__ -x assembler-with-cpp \
+            "$CLEAN_DTS" > "$PREPROCESSED"
+          dtc -@ -I dts -O dtb -o "$DTB" "$PREPROCESSED" 2>&1 | tee work/logs/dtb-build.log
+
+          MODEL="$(fdtget -t s "$DTB" / model)"
+          COMPATIBLE="$(fdtget -t s "$DTB" / compatible)"
+          test "$MODEL" = "Panther X2"
+          echo "$COMPATIBLE" | grep -q 'panther,x2'
+          echo "$COMPATIBLE" | grep -q 'rockchip,rk3566'
+
+          for node in \
+            /ethernet@fe010000 /ethernet@fe010000/mdio \
+            /mmc@fe310000 /mmc@fe2b0000 /mmc@fe2c0000 \
+            /serial@fe650000 /usb@fcc00000 /usb@fd800000 /usb@fd840000 \
+            /usb2phy@fe8a0000 /usb2phy@fe8b0000; do
+            STATUS="$(fdtget -t s "$DTB" "$node" status)"
+            test "$STATUS" = "disabled" || {
+              echo "::error::B1 DTB node not disabled: $node status=$STATUS"
+              exit 1
+            }
+          done
+
+          STDOUT_PATH="$(fdtget -t s "$DTB" /chosen stdout-path)"
+          echo "$STDOUT_PATH" | grep -q '^serial2:'
+          dtc -I dtb -O dts "$DTB" > work/clean-dtb-decoded.dts
+          if grep -Eiq 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts; then
+            echo "::error::Wi-Fi/BT/PHY residue remains in B1 DTB"
+            grep -Ein 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts || true
+            exit 1
+          fi
+
+          cp "$DTB" work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          {
+            echo "model=$MODEL"
+            echo "compatible=$COMPATIBLE"
+            echo "stdout-path=$STDOUT_PATH"
+            sha256sum "$DTB"
+          } | tee work/dtb-verification.txt
+          cp work/dtb-verification.txt work/output/
+
+      - name: Build static BusyBox with exact applet allowlist
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            "https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2" \
+            -o "work/busybox-${BUSYBOX_VERSION}.tar.bz2"
+          echo "${BUSYBOX_SHA256}  work/busybox-${BUSYBOX_VERSION}.tar.bz2" | sha256sum -c -
+          tar -xjf "work/busybox-${BUSYBOX_VERSION}.tar.bz2" -C work
+          cd "work/busybox-${BUSYBOX_VERSION}"
+
+          KCONFIG_ALLCONFIG="$GITHUB_WORKSPACE/scripts/panther-x2-b1/busybox.config.fragment" \
+            make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
+          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig >/dev/null
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee "$GITHUB_WORKSPACE/work/logs/busybox-build.log"
+
+          install -m 0755 busybox "$GITHUB_WORKSPACE/work/output/busybox"
+          cp .config "$GITHUB_WORKSPACE/work/output/busybox.config"
+          cd "$GITHUB_WORKSPACE"
+          bash scripts/panther-x2-b1/verify-b1-config.sh \
+            work/kernel.config work/output/busybox.config work/output/busybox
+
+          qemu-aarch64-static work/output/busybox --list | sort | tee work/busybox-applets.txt
+          cp work/busybox-applets.actual work/output/busybox-applets.txt
+
+      - name: Assemble RAM initramfs and U-Boot boot script
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
+          install -m 0755 work/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname dmesg tail; do
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
+
+          (
+            cd "$ROOT"
+            find . -print0 | sort -z | cpio --null -o --format=newc
+          ) | gzip -n -9 > work/output/initramfs.cpio.gz
+
+          mkimage -A arm64 -O linux -T ramdisk -C gzip \
+            -n "Panther X2 B1 clean RAM initramfs" \
+            -d work/output/initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/uinitrd-header.txt
+
+          install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/output/boot.cmd
+          mkimage -A arm -O linux -T script -C none \
+            -n "Panther X2 B1 clean RAM boot" \
+            -d work/output/boot.cmd work/output/boot.scr
+          mkimage -l work/output/boot.scr | tee work/bootscr-header.txt
+
+      - name: Include verified JP U-Boot proper and create manifest
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb" \
+            -o work/output/JP-TvBox-u-boot.itb
+          echo "${JP_UBOOT_SHA256}  work/output/JP-TvBox-u-boot.itb" | sha256sum -c -
+
+          {
+            echo "purpose=PREPARE-ONLY; no disk image; no TF/eMMC writes"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "busybox_version=${BUSYBOX_VERSION}"
+            echo "busybox_archive_sha256=${BUSYBOX_SHA256}"
+            echo "jp_uboot_sha256=${JP_UBOOT_SHA256}"
+            echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "busybox_config_sha256=$(sha256sum work/output/busybox.config | awk '{print $1}')"
+            echo "dtb_sha256=$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')"
+            echo "toolchain=$(aarch64-linux-gnu-gcc --version | head -n 1)"
+          } | tee work/output/BUILD-MANIFEST.txt
+
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          cat work/output/SHA256SUMS
+
+      - name: Upload B1 clean RAM components (prepare only)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/kernel-image-file.txt
+            work/dtb-verification.txt
+            work/uinitrd-header.txt
+            work/bootscr-header.txt
+            work/busybox-applets.txt
+          if-no-files-found: error
+          retention-days: 14
