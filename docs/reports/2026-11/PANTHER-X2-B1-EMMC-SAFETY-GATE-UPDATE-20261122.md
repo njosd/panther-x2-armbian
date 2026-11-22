@@ -206,3 +206,34 @@ Source: http://ports.ubuntu.com jammy/universe arm64
 - 未执行 boot-area WP 设置；
 - 未设置临时或永久写保护；
 - 未写 TF、未启动实机。
+
+
+## 15. 当前运行系统位于目标 eMMC：禁止在线设置整盘 WP（2026-11-22）
+
+用户在当前 Armbian root shell 只读采集：
+
+```text
+ROOT:
+ /dev/mmcblk0p2 ext4 rw
+MMC0 mounts:
+ /dev/mmcblk0p2 -> /
+ /dev/mmcblk0p1 -> /boot
+ /dev/mmcblk0p2[/var/log] -> /var/log.hdd
+lsblk:
+ mmcblk0 29.1G RO=0
+ ├─mmcblk0p1 255M ext4 /boot RO=0
+ └─mmcblk0p2 28.9G ext4 / and /var/log.hdd RO=0
+```
+
+结论：
+- 当前运行系统根分区和 /boot 均位于目标 eMMC user area，且为读写挂载。
+- 禁止在当前系统中对完整 user area 设置 Power-on WP；否则会阻断当前根文件系统、/boot、日志等后续写入，可能导致运行异常或文件系统损坏。
+- 不得尝试通过简单 remount-ro / umount 规避：根文件系统仍被内核、服务、日志和其他进程使用，且全盘 WP 会影响 eMMC 上其他运行时写入。
+- 下一阶段必须先建立独立于 eMMC 的临时运行环境（优先评估可从 TF 启动、完全驻留 RAM 的 rescue Linux；或经验证的 initramfs rescue 路径），确认根文件系统、日志、swap、服务状态均不依赖 mmcblk0 后，才考虑设置 WP。
+- 需特别区分：从 TF 加载 kernel/initramfs 不等于 Linux 根文件系统已脱离 eMMC；必须由独立 initramfs 接管 PID 1，且不 pivot 到 eMMC。
+- 在独立 rescue 环境中设置 WP 前，仍须先核对当前启动链写入风险与 WP 保护覆盖；任何设置都需用户单独明确授权。
+- 当前没有设置 WP，没有写 TF，没有启动 B1。
+
+## 16. Actions #36 状态（2026-11-22）
+
+查询 GitHub Actions API 时，run 44978969701（commit 078a33eec2da56300356e1e87634cef8b4e82542）仍为 `in_progress`，尚无最终结论。不得把镜像打包修复标记为通过。
