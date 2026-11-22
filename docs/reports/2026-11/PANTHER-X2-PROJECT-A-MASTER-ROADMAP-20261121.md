@@ -337,3 +337,37 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 通过该门后签署 `PRE-HANDOFF READY`，归档同一启动链的固件身份、Kernel/DTB/initramfs哈希与地址长度、最终FDT副本及哈希、bootargs、内存布局、固件接口、硬件资源责任归属和UART证据。首次进入Linux后，再执行独立的 `POST-HANDOFF VERIFIED` 接收端核验。不能在Linux启动前声称Linux已正确接收。
 
 当前U0与U-Boot网络测试完成后的清理/回归要求仍然有效；完成U0回归后，继续交接审计，不得直接跳过阶段门进入Linux。
+
+
+## 15. 2026-11-22 网络验证策略纠偏：以 6.1.116 正向对照和双端报文为依据
+
+用户指出：若项目 A 仍然依赖源码对照和猜测参数，可能重演项目 B 未能最终定位故障的教训。自本节起，项目 A 的网络验证方法以实机可重复实验、逐层输入/输出证据和双端报文为主，源码/Kconfig/设备树分析只用于确定最小依赖和参数来源，不作为网络成功的替代证明。具体方案见 [分层网络验证方案](PANTHER-X2-NETWORK-LAYERED-VALIDATION-PLAN-20261122.md)。
+
+### 15.1 6.1.116 正向控制
+
+仓库既有 6.1.116 记录确认：Panther X2 的 eth0 / fe010000.ethernet 使用 rk_gmac-dwmac，PHY 为 RTL8211F（PHY ID 0x001cc916），RGMII，曾验证 1000Mbps Full Duplex；用户确认 DHCP 获得 LAN IPv4，ping hEX 和 iMac 均 0% 丢包，错误/丢弃计数为 0。原始脱敏网络采集文本、内核配置、dmesg、运行时 FDT 和磁盘 DTB 已归档。该结果是 Linux 正向控制，禁止重复采集/重复跑已完成的泛化网络测试。
+
+原版 U-Boot 曾输出 `Net: No ethernet found.`，而后续 Linux 6.1.116 能独立初始化网卡并正常通信。这支持 U-Boot 不枚举/不初始化网卡不必然阻止 Linux 自行初始化。历史前级 SPL/proper 二进制身份未完全闭环，因此不得称为与当前混合启动链同条件对照。
+
+### 15.2 当前 JP proper 的 DHCP 异常及证据边界
+
+2026-11-22 用户在 `autoload=no` 已读回确认的情况下执行 `dhcp`，首先出现 `EQOS_DMA_MODE_SWR stuck`，随后发生 AArch64 Data Abort 并停在 `Please RESET the board`。没有 DHCP 成功结果、DHCP 报文往返、TFTP 下载或存储写入证据。该结果只证明本次 U-Boot 网络初始化/命令路径在 EQOS DMA 软件复位等待阶段附近异常退出；不能判定 PHY/GMAC 硬件损坏、DHCP 服务器故障或 Linux 网络必然受影响。禁止重试 DHCP，不恢复 U-Boot GMAC 根因专项。
+
+异常后实体 Reset 未恢复；断电重启恢复 U-Boot proper。重启后重新核对：proper 版本与原基线一致；ethaddr 不变；ethact/ethprime/autoload 及 ipaddr/serverip/gatewayip/netmask/bootfile 均未定义；bootcmd/bootdelay/distro_bootcmd/boot_targets 与 PXE/DHCP 自动启动入口已读取。当前 U0 为“身份和环境快照部分恢复”，尚未重核 MDIO/MII 设备枚举，不宣布完整 U0 回归。bootdelay=0 且 boot_targets 包含 pxe/dhcp，后续启动必须先运行已验证的 UART 自动 Ctrl-C 脚本，再上电；不能人工抢按。
+
+### 15.3 对 Linux 独立初始化的含义
+
+6.1.116 正向对照表明 Linux 曾在原版 U-Boot 不枚举 Ethernet 的情况下自行初始化并正常通信；因此 U-Boot 网络功能不是 Linux 网络可用的必要条件。当前 JP proper 的 DMA 异常与原版 U-Boot 的“未枚举网卡”不是同一现象。断电重启会重新启动硬件/启动链，冷启动后 Linux 成功只能证明该启动组合下 Linux 能独立初始化，不能证明 U-Boot DMA 异常后同一启动周期内的硬件残留状态无影响。项目 A 不为证明这一点重试崩溃路径。
+
+### 15.4 B1/B2/B3 实际网络验证方法
+
+- B1：纯 RAM、无网络基线，只验证启动、UART、内存和 BusyBox/initramfs；不预置网络工具/服务。
+- B2：依据目标源码 Kconfig/Makefile 实际依赖，逐个引入最小依赖闭包；从网络核心、Ethernet MAC/stmmac-Rockchip、MDIO/PHYLIB/目标 PHY、板级 Panther X2 DTB资源，到 Link、静态 IPv4、ARP、ICMP，逐层推进。每层未通过不进入下一层。
+- B3：TCP、UDP分别验证双向 payload。
+- 参数必须有 Panther X2 板级 DTB、6.1.116 正向基线、目标驱动资源和实机日志来源；不得从 ROCK3C FDT 猜参数。
+- 每个网络测试均需 Panther X2 端、LAN 对端和返回方向的证据；驱动 probe、carrier、TX/RX计数增长不能单独作为成功判据。ARP/ICMP/TCP/UDP 的报文到达/响应/接收要分别证实。
+- DHCP、DNS等高层服务推迟到静态 IPv4、ARP、ICMP验证通过后。
+
+### 15.5 阶段顺序与当前门槛
+
+当前 JP proper U-Boot DHCP 测试因异常挂起，不再阻挡或替代 Linux 分层网络验证；但 Linux 首次启动仍必须先通过第14节 PRE-HANDOFF READY。先完成本轮异常和重启后快照归档、6.1.116正向对照整理及交接发送端审计，再启动 B1。B1通过后再进入 B2/B3，不提前启用网络组件。
