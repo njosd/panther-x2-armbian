@@ -371,3 +371,10 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 ### 15.5 阶段顺序与当前门槛
 
 当前 JP proper U-Boot DHCP 测试因异常挂起，不再阻挡或替代 Linux 分层网络验证；但 Linux 首次启动仍必须先通过第14节 PRE-HANDOFF READY。先完成本轮异常和重启后快照归档、6.1.116正向对照整理及交接发送端审计，再启动 B1。B1通过后再进入 B2/B3，不提前启用网络组件。
+
+
+### 15.6 B1 启动脚本与 TF 旧版本隔离（2026-11-22）
+
+静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定，且不能绕过 eMMC pre-Linux 写入安全门和单独授权。
+
+旧 U-Boot 会话记录的 Kernel/FDT/initramfs 地址在 DHCP异常后断电重启，尚未绑定当前会话；旧 TF Kernel/uInitrd 的文件身份哈希也未闭环。因此 PRE-HANDOFF READY 仍未通过。B1 首次启动保持暂停，先完成新 artifact 与当前启动地址/内存布局审计。
