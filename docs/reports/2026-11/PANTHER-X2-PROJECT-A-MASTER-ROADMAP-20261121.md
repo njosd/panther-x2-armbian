@@ -378,3 +378,58 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定，且不能绕过 eMMC pre-Linux 写入安全门和单独授权。
 
 旧 U-Boot 会话记录的 Kernel/FDT/initramfs 地址在 DHCP异常后断电重启，尚未绑定当前会话；旧 TF Kernel/uInitrd 的文件身份哈希也未闭环。因此 PRE-HANDOFF READY 仍未通过。B1 首次启动保持暂停，先完成新 artifact 与当前启动地址/内存布局审计。
+
+
+## 16. 2026-11-22 6.18.y 网络配置不得作为正确基线：正向对照与故障归因策略
+
+用户明确提醒：如果项目 A 直接沿用 Ophub 现有 6.18.y 的完整配置，Panther X2 网络很可能仍然不通；这也是启动项目 A 的原因。该提醒作为**风险前提和审计约束**记录，不将“6.18.y 必然故障”升级为已完成的根因结论；当前尚无一份在同一启动链、同一硬件条件下完成的 6.18.y 实机端到端失败报告。
+
+### 16.1 禁止把 Ophub 6.18.y 当作正确答案
+
+- Ophub 6.18.y 的 Kernel config、Panther X2 DTB、DTS、驱动和 patch 集只能作为待审计对象，不是可直接复用的已验证配置。
+- CONFIG_STMMAC_ETH=y、CONFIG_DWMAC_ROCKCHIP=y、CONFIG_PHYLIB=y、CONFIG_REALTEK_PHY=y 或成功 probe/识别 PHY/Link Up 均不构成网络正确性证明。
+- 不允许因 6.1.116 成功就把其全部旧配置、补丁或参数原样复制到 6.18.y；也不允许因 Ophub 6.18.y 是当前发行配置就默认它正确。
+- 6.1.116 是行为正向基线；Ophub 6.18.y 是风险审计对象；Panther X2 原始板级 DTS/原厂资料用于确认板级连接。三类证据不可互相替代。
+- SoC/板级硬件参数必须来自 Panther X2 专用 DTS、历史成功运行时 FDT、磁盘 DTB和有来源的实测，不得从 ROCK3C 等其他 RK3566 板级配置推断。
+
+### 16.2 新增审计的核心问题
+
+审计不以“找一套看起来正确的配置”为目标，而要确定 6.18.y 里**第一个与已知正常行为发生实质分歧的边界**。依次检查：
+
+1. **资产身份：** 目标 6.18.y 的确切源码 commit、实际发布包、Image、最终 .config、Panther X2 DTB、patch 集和构建日志能否一一对应。Release asset 未下载、哈希未闭环的版本不得作为实测对象。
+2. **板级设备树：** 历史 6.1.116 running FDT 与磁盘 DTB差异；6.18 Panther X2 DTB与之的结构差异；只比较目标相关节点和属性，不将全树差异误当故障。
+3. **内核配置与依赖：** STMMAC/DWMAC Rockchip、PHYLIB/Realtek、phylink、DMA、clock/reset/pinctrl/regulator、网络核心及相关 Kconfig 依赖的 built-in/module/disabled 状态；配置存在不等于运行时路径正确。
+4. **驱动行为变化：** 对照确切版本的 dwmac-rk.c、stmmac_main.c、stmmac_platform.c、stmmac_mdio.c、DWMAC4 DMA/descriptor、realtek.c 及相关 Rockchip clock/reset/GRF 代码；只把命中 Panther X2 实际 RGMII/RTL8211F/fe010000 路径的差异列为高优先级。
+5. **初始化时序与硬件状态：** probe、MDIO PHY attach、PHY reset/power、RGMII clock/delay、DMA reset、DMA ring、MAC enable、link-up 回调和接口 open 的实际先后关系；不凭单条日志推断整个链条。
+6. **真实报文边界：** 只有在 B1/B2 准入后，才能通过分层实机试验判断报文从协议栈、DMA descriptor、MAC、RGMII、PHY、网线、交换机到对端，以及响应返回的第一个失败边界。TX 统计、tcpdump 本机可见、carrier、DHCP timeout均不能单独定位物理边界。
+
+### 16.3 6.1.116 正向基线的使用方式
+
+6.1.116 只作为“相同 Panther X2 曾实现过何种行为”的参照：
+- 固定其历史 Image/DTB/running-FDT/config/dmesg 与网络实测证据；
+- 把可观察行为转化为 B2 的分层验收预期；
+- 逐项比较目标 6.18 的实现与正向基线，找出候选差异；
+- 每个候选差异必须说明它是否进入当前 Panther X2 实际执行路径，以及怎样通过单变量实验验证；
+- 不复制未证明必要的历史补丁、驱动、配置或用户空间组件。
+
+### 16.4 B1/B2 实施原则
+
+- B1 仍是无网络的纯 RAM 启动基线。可按最新路线预置后续验证需要的最小工具，但 B1 不启用网络栈、接口、地址/路由，不发送网络流量。
+- B2 从已通过的 B1 镜像出发，逐个加入网络协议核心、板载 GMAC 驱动与最小共享依赖、MDIO/PHY、目标 DTB 节点；每轮只有一个明确变量或一个源码/Kconfig 证明不可再拆的最小依赖闭包。
+- B2 先验证接口和 PHY/link，再用静态 IPv4、ARP、ICMP建立可观测边界；不以 DHCP 作为首个网络测试。
+- B3 单独验证 TCP 与 UDP双向 payload；不能以 ping、link up 或计数器增长替代。
+- 失败后停在第一个失败边界，保留全部原始日志与两端抓包，回到最近通过检查点；禁止同时改 DTB delay、reset、clock、DMA 参数或叠加 workaround。
+- 任何 workaround 只能在根因证据形成后，作为单独假设、单独 patch、单独试验；不得先加补丁再把结果当成根因证明。
+
+### 16.5 本轮结论状态
+
+- **已确认：** 6.1.116 Panther X2 有线网络曾端到端正常；项目 B 已有多个版本网络异常的历史证据；Ophub 6.18.y 的现有配置尚未通过 Panther X2 B2/B3 端到端验收。
+- **用户提供的强风险判断：** 直接照搬 Ophub 6.18.y 配置，大概率无法打通网络。作为本项目的审计前提，不改写成已证实的具体故障根因。
+- **未确认：** 6.18.y 究竟是哪一项板级 DT 属性、Kconfig、驱动代码、patch/config 组合、初始化顺序或硬件交接状态导致网络失败。
+- **执行要求：** 先完成 6.1.116 正向基线与候选 6.18 发布资产的静态差异矩阵，再按 PRE-HANDOFF 安全门启动 B1，之后才允许 B2 的单变量实机归因。不得将 Ophub 6.18.y 原样配置直接作为 B2 终态。
+
+### 16.6 变更记录
+
+| 日期 | 变更 |
+|---|---|
+| 2026-11-22 | 将 Ophub 6.18.y 明确列为待审计对象而非正确基线；以 6.1.116 实机正向行为作为对照，要求定位 6.18.y 首个失败边界，禁止照搬整套配置、盲目复制旧参数或先叠加 workaround。 |
