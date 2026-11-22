@@ -143,7 +143,6 @@ jobs:
             exit 1
           fi
 
-          cp "$DTB" work/output/dtb/rockchip/rk3566-panther-x2.dtb
           {
             echo "model=$MODEL"
             echo "compatible=$COMPATIBLE"
