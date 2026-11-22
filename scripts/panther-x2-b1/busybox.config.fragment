@@ -1,0 +1,27 @@
+# Panther X2 B1: static ash and only the applets used by /init.
+CONFIG_STATIC=y
+CONFIG_ASH=y
+CONFIG_SH_IS_ASH=y
+CONFIG_CAT=y
+CONFIG_DMESG=y
+CONFIG_MKDIR=y
+CONFIG_MOUNT=y
+CONFIG_TAIL=y
+CONFIG_UNAME=y
+
+# Keep the image small and do not compile networking or storage utilities.
+# CONFIG_FEATURE_INSTALLER is not set
+# CONFIG_IP is not set
+# CONFIG_IFCONFIG is not set
+# CONFIG_ROUTE is not set
+# CONFIG_ARP is not set
+# CONFIG_PING is not set
+# CONFIG_NC is not set
+# CONFIG_NETSTAT is not set
+# CONFIG_TELNET is not set
+# CONFIG_WGET is not set
+# CONFIG_FTPGET is not set
+# CONFIG_FTPPUT is not set
+# CONFIG_UDHCPC is not set
+# CONFIG_UDHCPD is not set
+# CONFIG_NSLOOKUP is not set
