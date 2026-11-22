@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: panther-x2-b1-clean-ram
+  cancel-in-progress: true
+
 jobs:
   build-b1-clean-ram:
     runs-on: ubuntu-24.04
