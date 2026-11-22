@@ -210,3 +210,19 @@ PHY at address 1:
 5. 实机已直接确认 proper 枚举 `ethernet@fe010000`，注册同名 MDIO bus；但地址 0、1 的原生 MDIO BMSR 均为 `0xffff`，MII 地址 0–4 亦均为 `0xffff`。这组事实证明管理接口/总线对象存在，不证明 PHY 响应。
 
 **审计结论：** 当前源码证据不足以进行版本精确的驱动路径归因。下一步不引用其他版本源码作结论，改先查看当前 U-Boot Driver Model 的只读诊断命令是否可用，以核实 Ethernet/MDIO/PHY 设备实际绑定情况。先执行 `help dm`；只查看帮助，不执行任何设备修改命令。
+
+
+### Driver Model 诊断命令可用性确认（2026-11-22）
+
+现场执行 `help dm`，U-Boot 返回：
+```
+dm - Driver model low level access
+
+Usage:
+dm tree       Dump driver model tree ('*' = activated)
+dm uclass     Dump list of instances for each uclass
+dm devres     Dump list of device resources for each device
+dm aliases    Dump list of aliases
+```
+
+结论：当前 proper 提供 Driver Model 只读诊断命令。下一步使用 `dm tree` 查看设备层级和激活状态；输出中的 `*` 按该版本帮助定义表示 activated。此命令只列出设备模型状态，不修改设备。重点核对 `ethernet@fe010000` 及其 MDIO/PHY 子设备，不能把总线注册等同于 PHY 已绑定或链路已建立。
