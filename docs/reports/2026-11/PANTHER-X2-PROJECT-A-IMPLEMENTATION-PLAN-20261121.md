@@ -51,16 +51,13 @@
 
 ### B0.3 Kernel 与 Panther X2 DTB 复核
 - 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
-- 按相邻修订顺序审计 6.18.64、6.18.63、6.18.62（必要时 6.18.61），优先选距离 6.18.64 最近且当前发布资产完整合格的版本。
-- 6.18.64 曾有一个历史发布包未找到 Panther X2 DTB，但同名 Release asset 后续更新；必须核验当前新资产，不能沿用旧包结论。
-- 6.18.63 历史 artifact 的 DTB 证据只适用于旧包；当前同名资产 digest 已变化，必须重新核验内部成员。
-- 每个候选均须实际下载并独立计算外层 SHA-256，与 Release API digest 比对；检查真实归档成员、唯一 boot/DTB 资产、ARM64 Image、实际 config、Panther X2 DTB 及其哈希。
-- B1 不再把 Ophub 预编译 Image 作为构建输入。第一轮源码候选锁定为 `ophub/linux-6.18.y` commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`（Makefile 确认为 6.18.63）；CI 从该 commit 自建 Kernel，最终 .config 必须证明网络、无线、蓝牙、USB、MMC/块设备和模块均未启用。
-- 该 commit 仅为首轮可复现构建候选；CI 配置、编译、DTB 与 artifact 审查通过前，不视为已锁定可用内核。
-- 审计范围仅限板载有线千兆 Ethernet 所需 Kconfig：网络基础协议、MAC/GMAC、MDIO/PHY/PCS，以及共享总线/中断/DMA/时钟/复位依赖；明确干净基线必须关闭的项目和后续可逐项引入的最小依赖闭包。
+- Ophub 6.18.64 预编译包只作历史对照；实际 config 含网络栈和 built-in GMAC/MDIO/PHY 驱动，明确不合格，不得作为 B1 输入。
+- B1 不使用任何 Ophub 预编译 Image/DTB。首轮源码候选锁定为 ophub/linux-6.18.y commit aee4e352a15d636cbc484f56819c6e59474dfd9f（Makefile 确认为 6.18.63）。
+- CI 必须从该精确 commit 自建 Kernel；以独立 allnoconfig + 最小 fragment 生成最终 .config，并证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用。
+- clean-test DTB 从同一 commit 的 Panther X2 DTS 派生；保留原始 DTS，不覆盖上游文件。必须核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 的禁用状态和 Wi-Fi/BT 节点移除情况。
+- 有线千兆 Ethernet Kconfig 依赖审查只为 B2 服务：网络基础协议、MAC/GMAC、MDIO/PHY/PCS 及共享总线/中断/DMA/时钟/复位依赖。B1 中全部隔离。
 - Wi-Fi/无线网络、蓝牙及其控制器/驱动/固件/协议/用户空间组件永久排除，不开展 Kconfig 依赖研究、不构建、不测试、不作为后续引入项；USB/PCIe 外接网络适配器同样排除。
-- 若 6.18.64 当前资产合格则优先使用；否则只向相邻 6.18.y 回退。6.1.116 仅作历史正常行为对照，6.12.81 仅作项目 B 历史证据来源。
-- 只有发布包实物、配置、DTB 和硬件兼容证据闭环后，才锁定 B1 Kernel+DTB。
+- 该 commit 仅为首轮可复现构建候选；CI 配置、编译、DTB 与 artifact 审查通过前，不视为已锁定可用内核。
 
 验收：固定源码 commit、交叉工具链、最终 .config、Kernel Image、从同一源码构建的 clean-test DTB、initramfs 和 BusyBox 的哈希；记录 DTB model/compatible、禁用节点和未验证边界。
 
