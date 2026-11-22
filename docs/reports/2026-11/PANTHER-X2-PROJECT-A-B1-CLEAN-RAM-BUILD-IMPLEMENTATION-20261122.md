@@ -75,7 +75,7 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 
 ## 6. 构建产物边界
 
-新 workflow 在固定源码 commit 上应用一项最小构建兼容补丁：6.18.63 的 lib/kobject_uevent.c 无网络 stub 调用 kfree_skb()，其 inline drop-reason 路径引用了仅由网络核心提供的 sk_skb_reason_drop()。在 CONFIG_NET=n 时，该符号不可用。补丁只把该 stub 中释放未使用 skb 的调用改为始终存在的 __kfree_skb()；net/core/skbuff.o 在此配置下仍编译，且 __kfree_skb() 负责释放 skb 及其附属资源。该补丁不启用 CONFIG_NET、不启用任何网络协议/设备/驱动，也不修改 Ethernet 代码。补丁文件和 SHA-256 纳入 artifact。
+新 workflow 在固定源码 commit 上应用一项最小构建兼容补丁：6.18.63 的 lib/kobject_uevent.c 无网络 stub 仍调用 kfree_skb()，但该释放路径依赖 CONFIG_NET 下的 skb drop-reason 符号。源码中的 alloc_uevent_skb() 本身只在 CONFIG_NET 下编译，因此 CONFIG_NET=n 时无有效网络 skb 可交给该 stub。补丁将无网络 stub 改为：收到非空 skb 时返回 -EOPNOTSUPP，空指针时直接返回 0；不再引用任何 skb 网络释放函数。该补丁不启用 CONFIG_NET、不启用任何网络协议/设备/驱动，也不修改 Ethernet 代码。补丁文件和 SHA-256 纳入 artifact。
 
 新 workflow 只上传：
 - ARM64 Kernel Image；
