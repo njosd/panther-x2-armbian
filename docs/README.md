@@ -8,6 +8,7 @@
 - [项目 A 分阶段实施计划](reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 细化为可执行子步骤、验收标准和停止条件。
 - [B1 最小 RAM 启动与 eMMC 安全关口审计](reports/2026-11/PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)：B1 的专项技术证据与安全审计。
 - [项目 A 干净基线与网络组件隔离决策（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：项目 A 总目标修订、B1 网络变量隔离门和逐项引入规则。
+- [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、CI workflow 和当前未验证项。
 - [2026-11 报告索引](reports/2026-11/README.md)：项目 A 文件及独立历史专题索引。
 
 新对话、新任务和仓库更新必须先回读项目 A 总路线图及实施计划。历史路线文件如与其冲突，以项目 A 文档为准。
