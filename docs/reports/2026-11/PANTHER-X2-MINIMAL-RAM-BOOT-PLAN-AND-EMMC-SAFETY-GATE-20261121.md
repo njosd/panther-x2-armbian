@@ -1,18 +1,28 @@
 # Panther X2 最小 RAM 启动系统方案与实机测试关口
 
-> 日期：2026-11-21  
-> 状态：方案冻结候选 + 构建流程准备；尚未运行 CI 构建、尚未写 TF、尚未实机启动。  
-> 本阶段 eMMC 绝对只读；正式交付版本目标仍是安装在 eMMC 并从 eMMC 启动。
+> 日期：2026-11-21（2026-11-22 B1 方案更正）  
+> 状态：本报告原 B1 设计为历史草案，存储枚举与 blockro 路线已被新 B1 纯 RAM 方案取代；尚未运行新 CI、尚未写 TF、尚未实机启动。  
+> eMMC pre-Linux 写入安全门仍有效，尚未通过。
+
+## 0. 重要更正：B1 纯 RAM 方案取代本报告旧存储设计（2026-11-22）
+
+本报告早期版本曾计划让 Linux 枚举 MMC/eMMC/TF，并通过 `blockro` 在 Linux init 后设置 block-layer 只读。该设计不符合“最小 initramfs 独立于存储系统”的项目 A 原始目标，现已正式废止，不得作为当前 B1 的构建或验收依据。
+
+当前 B1 唯一方案：Linux Kernel 不启用 BLOCK/MMC/eMMC/SD/SDIO、USB、网络栈、Ethernet/GMAC/MDIO/PHY、无线/蓝牙或模块；Kernel、DTB、gzip initramfs 和静态 BusyBox 全部在 RAM 中运行。TF 只由启动前 JP U-Boot proper 读取 Image、uInitrd 和 DTB；Linux 启动后不再访问 TF/eMMC。`blockro.c` 保留为历史文件，但新 B1 不编译、不调用它。
+
+当前新构建入口为 `.github/workflows/build-panther-x2-b1-clean-ram.yml`；旧 `.github/workflows/build-panther-x2-minimal-ram-boot.yml` 已禁用。首轮源码候选为 Linux 6.18.63 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，BusyBox 1.37.0。新 workflow 只产出组件 artifact，不制作 raw/hybrid 镜像、不写 TF/eMMC。
+
+**重要：** 这只是 B1 构建方案更正，不代表 CI 已成功，也不代表目标硬件已启动。eMMC SPL/BootROM/U-Boot pre-Linux 写入安全门仍是实机测试的独立阻断条件。
 
 ## 1. 本轮目标与边界
 
 本轮不再继续扩展 GMAC TX/RX 故障研究。目标是用最少的可变因素，验证 Panther X2 能否从现有启动链进入一个可交互的 ARM64 Linux 最小系统。
 
-第一阶段采用 RAM initramfs，而不是完整 Ubuntu/Armbian rootfs：
-- 验证 SPL/U-Boot 到 Linux 6.18.64 的交接；
-- 验证 Panther X2 DTB、串口、CPU、内存、MMC/eMMC 控制器和基础内核初始化；
-- 不挂载 eMMC 或 TF 文件系统；
-- Linux init 运行后，将所有 MMC block devices（含分区及 eMMC boot partitions）设置为 block-layer read-only；
+第一阶段采用完全独立于存储系统的 RAM initramfs，而不是完整 Ubuntu/Armbian rootfs：
+- 验证现有 SPL/JP U-Boot proper 到自建 ARM64 Kernel 的交接；
+- 验证 Panther X2 clean-test DTB、UART2、CPU、内存和最小内核初始化；
+- Linux B1 不启用 MMC/eMMC/TF/SD/SDIO、BLOCK、USB、网络协议栈、Ethernet/GMAC/MDIO/PHY、Wi-Fi/蓝牙或模块；
+- Linux 不枚举、不挂载、不读写任何持久化存储；根文件系统仅为 RAM initramfs；
 - 不启动网络配置，不做 GMAC 数据收发测试；
 - 不安装服务或应用，不修改 eMMC。
 
@@ -22,15 +32,9 @@ RAM initramfs 是最小启动验收，不是最终服务器系统。通过后再
 
 ### 2.1 Kernel
 
-选用 Ophub 主线 stable kernel **6.18.64**：
-- Release asset：`https://github.com/ophub/kernel/releases/download/kernel_stable/6.18.64.tar.gz`
-- SHA-256：`6d7ba9ffee7b84ecb2f9095b3b9441f83bdce8a2e2e7958c18795c8d59eb7812`
-- 包大小：124,458,864 bytes
-- Release asset 更新时间：2026-11-20 10:32:35 UTC
-- Panther X2 设备数据库使用 `stable/6.18.y` 分支路线。
-- 主线源码中存在 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`。
+B1 不使用 Ophub 预编译 Kernel Image。首轮从 `ophub/linux-6.18.y` 精确源码 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f` 自建 Linux 6.18.63 Kernel；该 commit 的 Makefile 已核对为 `VERSION=6, PATCHLEVEL=18, SUBLEVEL=63`。CI 以 allnoconfig + 项目 A 最小 config fragment 构建，最终 .config 必须证明网络、存储、USB、无线/蓝牙和模块均未启用。
 
-注意：release 元数据没有给出该二进制包对应的精确 Linux source commit。2026-11-20 源码树 HEAD `aa69b89ea54f1ec5b9cfc67a0ef429f202d258a1` 是时间上相邻的源码参考，不能在没有构建元数据时声称它就是该包的精确构建 commit。测试使用的是已发布且 SHA-256 固定的二进制包；构建时还要验证包内实际 `Image` 和 Panther X2 DTB 文件。
+Ophub 6.18.64 预编译包仅作为对照：此前只读审计确认它含 `CONFIG_NET=y`、`CONFIG_STMMAC_ETH=y`、`CONFIG_DWMAC_ROCKCHIP=y`、`CONFIG_PHYLIB=y`、`CONFIG_REALTEK_PHY=y`，不符合 B1 干净基线。源码 commit 是首轮候选，不代表已经构建或验证通过。
 
 ### 2.2 Kernel config 依据
 
@@ -48,14 +52,13 @@ Ophub stable `config-6.18` 文件 Git blob：
 - `CONFIG_DEVTMPFS=y`
 - `CONFIG_DEVTMPFS_MOUNT=y`
 
-这说明相邻稳定配置具备 initramfs、gzip、Rockchip MMC、SDHCI 和 devtmpfs 支持；仍需从 6.18.64 发布包中提取实际 config（若包内提供）核验，不把 6.18.63 config 当作 6.18.64 的精确证明。
+该通用发行版配置不是当前 B1 配置输入。B1 从独立最小 fragment 生成最终 config；不启用 MMC/SDHCI，也不把任何发行版默认配置带入。
 
 ### 2.3 DTB
 
-使用 kernel 发布包内的：
-`dtb/rockchip/rk3566-panther-x2.dtb`
+使用同一锁定 Kernel 源码 commit 中的 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`，由 CI 派生独立 clean-test DTS/DTB；原始 DTS 不覆盖。
 
-构建时必须用 `fdtget` 验证根节点 model 含 Panther，并记录 DTB SHA-256。不得以 E25、E23、ROCK 3C 的 DTB 替代。
+clean-test DTB 禁用 GMAC/MDIO/PHY、MMC/eMMC/SDIO、USB host/PHY、Bluetooth UART，移除 Wi-Fi/蓝牙相关板级节点与 GPIO/power-sequence 描述。构建时使用 `fdtget` 核验 Panther X2/RK3566 model/compatible、UART2 stdout-path 和所有隔离节点状态，并记录 SHA-256。不得以 E25、E23、ROCK 3C 的 DTB 替代。
 
 ### 2.4 Initramfs
 
@@ -65,9 +68,7 @@ Ophub stable `config-6.18` 文件 Git blob：
 - ARM64 静态构建。
 - 该 BusyBox 只服务于 RAM initramfs 调试环境，不代表正式系统采用 BusyBox 替代完整用户空间。
 
-附加 `blockro` 小工具使用 Linux `BLKROSET/BLKROGET` ioctl，在 Linux init 启动后将所有 MMC block devices 设置并验证为只读。任何一个设备无法设置或验证只读，initramfs 就 fail-closed，不进入交互 shell。
-
-重要限制：该只读保护从 Linux init 开始生效，**不能保护此前运行的 SPL、BL31 和 U-Boot proper**。
+当前 B1 不包含 `blockro`。Linux config 直接关闭 BLOCK/MMC/eMMC/SD/SDIO，且 DTB 禁用对应设备；因此 Linux 不会创建 block device。此举只说明 Linux 阶段没有存储驱动，不构成对此前 SPL/BL31/U-Boot proper 的写入保护证明。pre-Linux eMMC 安全门仍必须独立完成。
 
 ## 3. 当前已验证的混合启动链
 
