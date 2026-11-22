@@ -1,4 +1,5 @@
-name: Build Panther X2 minimal RAM boot TF image
+# DEPRECATED: This legacy workflow packages an Ophub prebuilt kernel with active network/MMC support. It is NOT Project A B1 and must not be run. Use build-panther-x2-b1-clean-ram.yml instead.
+name: DEPRECATED - legacy prebuilt-kernel hybrid TF image (NOT B1)
 
 on:
   workflow_dispatch:
@@ -8,6 +9,7 @@ permissions:
 
 jobs:
   build-minimal-ram-boot:
+    if: ${{ false }} # permanently disabled: historical workflow is not a clean B1 build
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
