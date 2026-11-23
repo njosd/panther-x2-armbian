@@ -13,20 +13,13 @@
 
 ## 2. 新 B1 原则
 
-**保留正常 RK35xx 非网络基础配置，只隔离网络相关功能。**
-
-保留 ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB host/PHY、常规文件系统、MODULES、UART1/2、时钟/复位/pinctrl/regulator/PMIC/DMA/中断等正常基础能力。
+**保留正常 RK35xx 非网络基础配置，只隔离网络相关功能。** 保留 ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB host/PHY、常规文件系统、MODULES、UART1/2、时钟/复位/pinctrl/regulator/PMIC/DMA/中断等正常基础能力。
 
 只隔离网络协议栈、网络设备、Ethernet/GMAC/STMMAC/DWMAC、MDIO、PHY/PCS、Wi-Fi/无线和 Bluetooth。Wi-Fi/无线、Bluetooth 永久排除；USB/PCIe 外接网卡不属于项目 A。板载有线千兆 Ethernet 是最终目标，但 B1 先隔离，B2 再按层引入。
 
 ## 3. Kernel 配置来源与流程
 
-配置种子：
-- 仓库：`ophub/kernel`
-- 文件：`kernel-config/release/rk35xx/config-6.12`
-- 来源 commit：`ba00be60d59300bd93633218a8905829d6cabd72`
-- Git blob SHA：`dee127c6c644f38426eeb28000d73536084d34a3`
-- 本仓库副本：`scripts/panther-x2-b1/kernel.config.seed`
+配置种子：`ophub/kernel` 的 `kernel-config/release/rk35xx/config-6.12`，来源 commit `ba00be60d59300bd93633218a8905829d6cabd72`，Git blob `dee127c6c644f38426eeb28000d73536084d34a3`，本仓库副本 `scripts/panther-x2-b1/kernel.config.seed`。
 
 生成流程：完整 seed → Linux 6.18.63 `olddefconfig` → 网络隔离 fragment → 再次 `olddefconfig` → 最终 .config 检查 → 构建 Image 与 modules → modules_install → 模块独立打包。禁止 Kernel 使用 `allnoconfig` 起步。
 
@@ -38,13 +31,9 @@
 
 ## 5. Panther X2 DTB 边界
 
-从同一 6.18.63 commit 的原始 `rk3566-panther-x2.dts` 派生，不覆盖上游原文件。
+从同一 6.18.63 commit 的原始 `rk3566-panther-x2.dts` 派生，不覆盖上游原文件。禁用 GMAC1、MDIO1、RTL8211F PHY 和 Wi-Fi 专用 SDIO host `sdmmc1`；移除 Wi-Fi/BT 专用 power-sequence、pinctrl、GPIO、Bluetooth 子节点和 Wi-Fi LED。
 
-禁用 GMAC1、MDIO1、RTL8211F PHY 和 Wi-Fi 专用 SDIO host `sdmmc1`；移除 Wi-Fi/BT 专用 power-sequence、pinctrl、GPIO、Bluetooth 子节点和 Wi-Fi LED。
-
-保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1 通用功能、UART2、完整 aliases（ethernet0/mmc0/mmc1/mmc2 与继承串口 aliases）、Ethernet LED、GMAC 外部时钟及 PMIC/regulator/clock/reset/pinctrl/DMA/中断共享资源。
-
-CI 必须同时验证“网络节点已禁用”和“存储/USB/通用 UART 仍启用”，不能只验证前者。
+保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1 通用功能、UART2、完整 aliases（ethernet0/mmc0/mmc1/mmc2 与继承串口 aliases）、Ethernet LED、GMAC 外部时钟及 PMIC/regulator/clock/reset/pinctrl/DMA/中断共享资源。CI 必须同时验证网络节点已禁用、存储/USB/通用 UART 仍启用。
 
 ## 6. RAM initramfs 与 eMMC 安全
 
@@ -54,8 +43,6 @@ CI 必须同时验证“网络节点已禁用”和“存储/USB/通用 UART 仍
 
 ## 7. B2 路线
 
-
-
 | 子阶段 | 唯一目标 | 验收重点 |
 |---|---|---|
 | B2-1 | 恢复 NET/INET/NETDEVICES 最小网络核心，暂不启用 Panther GMAC | 网络核心初始化、loopback |
@@ -64,13 +51,10 @@ CI 必须同时验证“网络节点已禁用”和“存储/USB/通用 UART 仍
 | B2-4 | 验证 RGMII、时钟方向/频率、TX/RX delay 和 PHY 协商 | 物理链路、1000 Mbps Full Duplex |
 | B2-5 | 验证 MAC DMA 与真实数据收发 | TX/RX、ARP、ICMP、TCP/UDP、持续传输和稳定性 |
 
-每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。不得将 GMAC probe 成功等同网络打通。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。B2 属于项目 A 的分层功能验证，不是恢复项目 B 的历史故障根因调查。
-
+每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。
 
 ## 8. 当前状态
 
-已完成仓库文件：完整 seed、网络 fragment、配置验证脚本、DTB 派生脚本、/init、workflow 与旧补丁说明；权威路线、实施计划、决策记录和索引正在同步。
+仓库已包含完整 seed、网络 fragment、配置验证脚本、DTB 派生脚本、/init、workflow 与旧补丁说明。尚未验证 merge_config/olddefconfig 最终配置、Image/modules 编译、模块清单、DTB 派生与编译、BusyBox/initramfs/uInitrd/boot.scr、CI artifact、eMMC 安全门和 Panther X2 实机启动。
 
-尚未验证：merge_config/olddefconfig 最终配置、Image/modules 编译、模块清单、DTB 派生与编译、BusyBox/initramfs/uInitrd/boot.scr、CI artifact、eMMC 安全门和 Panther X2 实机启动。
-
-本次授权仅涉及 GitHub 独立分支；未运行 CI、未写 TF/eMMC、未操作设备。
+本次仅修改 GitHub 独立分支；未运行 CI、未写 TF/eMMC、未操作设备。

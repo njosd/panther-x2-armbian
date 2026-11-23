@@ -143,3 +143,19 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 静态审查发现旧版 `scripts/panther-x2-minimal-initramfs/boot.cmd` 在 Kernel、uInitrd 或 DTB 任一加载失败时会调用 `reset`。这与当前禁止脚本触发 reset/reboot 的安全边界冲突。现已改为嵌套条件：只有前一文件加载成功才继续下一步；任一加载失败只打印错误并停止，不主动复位。提交：`b3e7177d3cafc62c55948d5cbc3fe76b991cea65`。
 
 同时纠正本报告此前对 workflow 产物的描述：当前 workflow 会在 GitHub Actions runner 临时环境中生成 2 GiB PREPARE-ONLY hybrid TF image，并上传压缩包；这不是物理 TF/eMMC 写入，也不连接或启动设备。后续仍须审查镜像分区布局、文件哈希和启动地址，再通过 eMMC pre-Linux 安全门及单独授权，才可考虑写入测试 TF。
+
+
+## 2026-11-23 B1 基线纠偏（覆盖旧裁剪规则）
+
+本节与 `PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md` 一致；较早章节中“B1 关闭 MMC/USB/模块”等旧表述不再作为执行指令。
+
+- **配置种子：** `ophub/kernel` 的 `kernel-config/release/rk35xx/config-6.12`，来源 commit `ba00be60d59300bd93633218a8905829d6cabd72`，Git blob `dee127c6c644f38426eeb28000d73536084d34a3`。
+- **配置流程：** 完整 seed → Linux 6.18.63 `olddefconfig` 适配 → 网络隔离 fragment → 再次 `olddefconfig`；禁止从 `allnoconfig` 起步。
+- **保留：** ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB、文件系统、MODULES，以及 UART、时钟、复位、pinctrl、regulator、PMIC、DMA 和中断基础支持。
+- **隔离：** 网络协议栈、网络设备、板载 Ethernet/GMAC/STMMAC/DWMAC、MDIO/PHY/PCS、Wi-Fi/无线和 Bluetooth。Wi-Fi/无线与 Bluetooth 永久排除；USB/PCIe 外接网卡也不属于项目 A。
+- **DTB：** 保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1（仅移除 Bluetooth 子节点）、UART2、完整 aliases、Ethernet LED、GMAC 时钟节点及共享资源；禁用 GMAC1/MDIO1/PHY 和 Wi-Fi 专用 `sdmmc1`，移除 Wi-Fi/BT 专用节点。
+- **模块：** 构建 Image 与 modules，安装并单独打包；不由 `/init` 自动加载。
+- **RAM init：** 只挂载 procfs/sysfs，不自动挂载持久化文件系统、不主动写入存储。MMC 恢复后 Linux 仍可能枚举 eMMC；eMMC pre-Linux 安全门继续是实机启动的必要前置条件。
+- **uevent：** 旧 kobject_uevent 补丁不再应用，仅保留历史审计；B1 使用未修改的锁定上游源码。
+
+当前仅完成仓库分支中的实现和静态文件审查；CI、artifact、eMMC 安全门和 Panther X2 实机结果均未验证。

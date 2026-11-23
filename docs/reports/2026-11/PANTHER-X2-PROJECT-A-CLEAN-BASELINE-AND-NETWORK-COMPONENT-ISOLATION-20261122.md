@@ -142,3 +142,19 @@ Kernel 代码隔离与 DTB 设备隔离是两个不同条件，必须同时满�
 - docs/reports/2026-11/README.md
 
 后续如旧文档与本决策冲突，以本报告和两份项目 A 权威文件的最新内容为准。
+
+
+## 2026-11-23 B1 基线纠偏（覆盖旧裁剪规则）
+
+本节与 `PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md` 一致；较早章节中“B1 关闭 MMC/USB/模块”等旧表述不再作为执行指令。
+
+- **配置种子：** `ophub/kernel` 的 `kernel-config/release/rk35xx/config-6.12`，来源 commit `ba00be60d59300bd93633218a8905829d6cabd72`，Git blob `dee127c6c644f38426eeb28000d73536084d34a3`。
+- **配置流程：** 完整 seed → Linux 6.18.63 `olddefconfig` 适配 → 网络隔离 fragment → 再次 `olddefconfig`；禁止从 `allnoconfig` 起步。
+- **保留：** ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB、文件系统、MODULES，以及 UART、时钟、复位、pinctrl、regulator、PMIC、DMA 和中断基础支持。
+- **隔离：** 网络协议栈、网络设备、板载 Ethernet/GMAC/STMMAC/DWMAC、MDIO/PHY/PCS、Wi-Fi/无线和 Bluetooth。Wi-Fi/无线与 Bluetooth 永久排除；USB/PCIe 外接网卡也不属于项目 A。
+- **DTB：** 保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1（仅移除 Bluetooth 子节点）、UART2、完整 aliases、Ethernet LED、GMAC 时钟节点及共享资源；禁用 GMAC1/MDIO1/PHY 和 Wi-Fi 专用 `sdmmc1`，移除 Wi-Fi/BT 专用节点。
+- **模块：** 构建 Image 与 modules，安装并单独打包；不由 `/init` 自动加载。
+- **RAM init：** 只挂载 procfs/sysfs，不自动挂载持久化文件系统、不主动写入存储。MMC 恢复后 Linux 仍可能枚举 eMMC；eMMC pre-Linux 安全门继续是实机启动的必要前置条件。
+- **uevent：** 旧 kobject_uevent 补丁不再应用，仅保留历史审计；B1 使用未修改的锁定上游源码。
+
+当前仅完成仓库分支中的实现和静态文件审查；CI、artifact、eMMC 安全门和 Panther X2 实机结果均未验证。

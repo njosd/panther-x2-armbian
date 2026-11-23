@@ -6,6 +6,8 @@
 
 - [B1 完整基础配置与网络隔离基线纠偏（2026-11-23）](./PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md)：覆盖旧 B1 过度裁剪规则的新决策，包含配置 seed、DTB、模块、安全边界与 B2 分层路线。
 
+- [B1 完整基础配置与网络隔离基线纠偏（2026-11-23）](./PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md)：覆盖旧 B1 过度裁剪规则的新决策，包含配置 seed、DTB、模块、安全边界与 B2 分层路线。
+
 - [项目 A 总路线图](docs/reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威架构、决策原则、U-Boot 论证、组件边界和阶段总览。
 - [项目 A 分阶段实施计划](docs/reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 及 B0.1、B1.1 等可执行步骤、验收和停止条件。
 - [B1 纯 RAM 干净基线构建实施记录](docs/reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、workflow 和未验证事项。

@@ -21,7 +21,7 @@ concurrency:
 jobs:
   build-b1-clean-ram:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       KERNEL_VERSION: "6.18.63"
       KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
@@ -29,6 +29,7 @@ jobs:
       BUSYBOX_VERSION: "1.37.0"
       BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
       JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+      KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
 
     steps:
       - name: Checkout project
@@ -42,7 +43,7 @@ jobs:
             bc bison build-essential cpio curl device-tree-compiler \
             file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
             libncurses-dev libssl-dev make perl python3 qemu-user-static \
-            binutils e2fsprogs gdisk zstd u-boot-tools
+            binutils e2fsprogs gdisk kmod zstd u-boot-tools
 
       - name: Fetch exact Linux source commit
         run: |
@@ -58,77 +59,57 @@ jobs:
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
           grep -qx 'SUBLEVEL = 63' work/linux/Makefile
 
-          # CONFIG_NET=n build compatibility: the no-NET uevent stub in this
-          # source calls kfree_skb(), whose inline drop accounting references
-          # sk_skb_reason_drop() from the absent networking core. The stub
-          # only frees an unused skb, so use the always-built __kfree_skb().
-          git -C work/linux apply --check "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
-          git -C work/linux apply "$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
-          git -C work/linux diff --check
-          git -C work/linux diff -- lib/kobject_uevent.c | tee work/logs/config-net-off-uevent-patch.diff
-          python3 - <<'PY'
-          from pathlib import Path
-          source = Path("work/linux/lib/kobject_uevent.c").read_text()
-          start = source.index("#else" + chr(10) + "int broadcast_uevent")
-          end = source.index("#endif", start)
-          stub = source[start:end]
-          assert "if (skb)" in stub
-          assert "return -EOPNOTSUPP;" in stub
-          assert "kfree_skb" not in stub
-          PY
-          PATCH_SHA256="$(sha256sum scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch | awk '{print $1}')"
+          git diff --check
+          SEED="scripts/panther-x2-b1/kernel.config.seed"
+          SEED_BLOB="$(git hash-object "$SEED")"
+          test "$SEED_BLOB" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
           {
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
             echo "kernel_commit=$ACTUAL_COMMIT"
             echo "kernel_version=${KERNEL_VERSION}"
-            echo "source_patch=scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
-            echo "source_patch_sha256=$PATCH_SHA256"
+            echo "kernel_config_seed=$SEED"
+            echo "kernel_config_seed_blob_sha=$SEED_BLOB"
+            echo "kernel_config_seed_origin=ophub/kernel@ba00be60d59300bd93633218a8905829d6cabd72:kernel-config/release/rk35xx/config-6.12"
           } | tee work/source-lock.txt
 
-      - name: Configure and build clean ARM64 kernel
+      - name: Configure from full RK35xx seed and build kernel plus modules
         run: |
           set -euo pipefail
           SRC="$GITHUB_WORKSPACE/work/linux"
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
           FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
-
-          KCONFIG_ALLCONFIG="$FRAGMENT" make -C "$SRC" O="$OUT" \
-            ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
-          make -C "$SRC" O="$OUT" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-
+          MODULES_ROOT="$GITHUB_WORKSPACE/work/modules-root"
+          test "$(git hash-object "$SEED")" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$SEED" "$FRAGMENT" \
+            2>&1 | tee work/logs/kernel-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           cp "$OUT/.config" work/kernel.config
-          for option in \
-            CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_ROCKCHIP_ERRATUM_3568002 CONFIG_OF CONFIG_OF_FLATTREE \
-            CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT \
-            CONFIG_PROC_FS CONFIG_SYSFS CONFIG_PRINTK CONFIG_TTY \
-            CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE CONFIG_SERIAL_8250_DW \
-            CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON \
-            CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 CONFIG_PINCTRL_ROCKCHIP; do
-            grep -qx "${option}=y" work/kernel.config || {
-              echo "::error::Required kernel option missing: ${option}=y"
-              exit 1
-            }
-          done
-
-          if grep -Eq '^CONFIG_(NET|NETDEVICES|ETHERNET|PACKET|INET|IPV6|STMMAC_ETH|DWMAC_ROCKCHIP|MDIO_BUS|PHYLIB|REALTEK_PHY|CAN|PPP|TUN|BT|WLAN|WIRELESS|CFG80211|MAC80211|RFKILL|USB|MMC|SCSI|SCSI_MOD|ATA|NVME|MTD|BLOCK|MODULES)=[ym]$' work/kernel.config; then
-            echo "::error::Network/USB/storage/module Kconfig residue found"
-            grep -E '^CONFIG_(NET|PACKET|INET|IPV6|STMMAC_ETH|DWMAC_ROCKCHIP|MDIO_BUS|PHYLIB|REALTEK_PHY|CAN|PPP|TUN|BT|WLAN|WIRELESS|CFG80211|MAC80211|RFKILL|USB|MMC|SCSI|SCSI_MOD|ATA|NVME|MTD|BLOCK|MODULES)=[ym]$' work/kernel.config
-            exit 1
+          grep -qx 'CONFIG_ARM64_VA_BITS=48' work/kernel.config
+          grep -qx 'CONFIG_ARM64_PA_BITS=48' work/kernel.config
+          grep -qx 'CONFIG_ARM64_4K_PAGES=y' work/kernel.config
+          grep -qx '# CONFIG_ARM64_LPA2 is not set' work/kernel.config
+          grep -qx 'CONFIG_MODULES=y' work/kernel.config
+          grep -qx 'CONFIG_BLOCK=y' work/kernel.config
+          grep -qx 'CONFIG_MMC=y' work/kernel.config
+          grep -qx 'CONFIG_USB=y' work/kernel.config
+          grep -qx '# CONFIG_NET is not set' work/kernel.config
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image modules 2>&1 | tee work/logs/kernel-build.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH="$MODULES_ROOT"
+          test -n "$(find "$MODULES_ROOT/lib/modules" -type f -name '*.ko*' -print -quit)"
+          if find "$MODULES_ROOT/lib/modules" -type f -name '*.ko*' \( -path '*/kernel/net/*' -o -path '*/kernel/drivers/net/*' -o -path '*/kernel/drivers/bluetooth/*' \) -print -quit | grep -q .; then
+            echo "::error::Network/Ethernet/Bluetooth module unexpectedly built"; exit 1
           fi
-
-          make -C "$SRC" O="$OUT" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- prepare
-          make -C "$SRC" O="$OUT" ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- -j2 Image 2>&1 | tee work/logs/kernel-build.log
-
+          tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
           install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
           file work/output/Image | tee work/kernel-image-file.txt
-          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \\n')"
           test "$IMAGE_MAGIC" = "41524d64" || { echo "::error::Kernel payload is not an ARM64 Image"; exit 1; }
           cp work/kernel.config work/output/kernel.config
+          cp "$SEED" work/output/kernel.config.seed
           cp "$FRAGMENT" work/output/kernel.config.fragment
-          cp scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch work/output/
 
       - name: Derive and compile isolated Panther X2 DTB
         run: |
@@ -159,18 +140,25 @@ jobs:
           echo "$COMPATIBLE" | grep -q 'panther,x2'
           echo "$COMPATIBLE" | grep -q 'rockchip,rk3566'
 
-          for node in \
-            /ethernet@fe010000 /ethernet@fe010000/mdio \
-            /mmc@fe310000 /mmc@fe2b0000 /mmc@fe2c0000 \
-            /serial@fe650000 /usb@fcc00000 /usb@fd000000 \
-            /usb@fd800000 /usb@fd840000 /usb@fd880000 /usb@fd8c0000 \
+          assert_status() {
+            local node="$1" expected="$2" actual
+            actual="$(fdtget -t s "$DTB" "$node" status)"
+            test "$actual" = "$expected" || { echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"; exit 1; }
+          }
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /mmc@fe310000 okay
+          assert_status /mmc@fe2b0000 okay
+          assert_status /serial@fe650000 okay
+          if fdtget -l "$DTB" /serial@fe650000 | grep -qx bluetooth; then
+            echo "::error::Bluetooth child remains under UART1"; exit 1
+          fi
+          for node in /usb@fcc00000 /usb@fd000000 /usb@fd800000 /usb@fd840000 /usb@fd880000 /usb@fd8c0000 \
             /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port \
             /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
-            STATUS="$(fdtget -t s "$DTB" "$node" status)"
-            test "$STATUS" = "disabled" || {
-              echo "::error::B1 DTB node not disabled: $node status=$STATUS"
-              exit 1
-            }
+            assert_status "$node" okay
           done
 
           STDOUT_PATH="$(fdtget -t s "$DTB" /chosen stdout-path)"
@@ -189,9 +177,9 @@ jobs:
           UART2_CLOCK_NAMES="$(fdtget -t s "$DTB" "$SERIAL2_PATH" clock-names)"
           test "$UART2_CLOCK_NAMES" = "baudclk apb_pclk"
           dtc -I dtb -O dts "$DTB" > work/clean-dtb-decoded.dts
-          if grep -Eiq 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts; then
-            echo "::error::Wi-Fi/BT/PHY residue remains in B1 DTB"
-            grep -Ein 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts || true
+          if grep -Eiq 'wifi|wireless|bluetooth|sdio-pwrseq|wifi-enable-h|wifi-host-wake|bt-enable|bt-wake|led-wifi' work/clean-dtb-decoded.dts; then
+            echo "::error::Wi-Fi/BT board-specific residue remains in B1 DTB"
+            grep -Ein 'wifi|wireless|bluetooth|sdio-pwrseq|wifi-enable-h|wifi-host-wake|bt-enable|bt-wake|led-wifi' work/clean-dtb-decoded.dts || true
             exit 1
           fi
 
@@ -271,7 +259,7 @@ jobs:
           cp .config "$GITHUB_WORKSPACE/work/output/busybox.config"
           cd "$GITHUB_WORKSPACE"
           bash scripts/panther-x2-b1/verify-b1-config.sh \
-            work/kernel.config work/output/busybox.config work/output/busybox
+            work/kernel.config work/output/busybox.config work/output/busybox work/modules-root
 
           qemu-aarch64-static work/output/busybox --list | sort | tee work/busybox-applets.txt
           cp busybox-applets.actual work/output/busybox-applets.txt
@@ -317,7 +305,11 @@ jobs:
             echo "kernel_version=${KERNEL_VERSION}"
             echo "kernel_source=${KERNEL_SOURCE_REPO}"
             echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
-            echo "kernel_patch_sha256=$(sha256sum scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch | awk '{print $1}')"
+            echo "kernel_config_seed=ophub/kernel@ba00be60d59300bd93633218a8905829d6cabd72"
+            echo "kernel_config_seed_blob_sha=${KERNEL_CONFIG_SEED_BLOB_SHA}"
+            echo "kernel_config_seed_sha256=$(sha256sum work/output/kernel.config.seed | awk '{print $1}')"
+            echo "kernel_config_fragment_sha256=$(sha256sum work/output/kernel.config.fragment | awk '{print $1}')"
+            echo "modules_archive_sha256=$(sha256sum work/output/modules.tar.zst | awk '{print $1}')"
             echo "busybox_version=${BUSYBOX_VERSION}"
             echo "busybox_archive_sha256=${BUSYBOX_SHA256}"
             echo "jp_uboot_sha256=${JP_UBOOT_SHA256}"
@@ -372,7 +364,8 @@ jobs:
           printf '%s\\n' \
             'Panther X2 B1 clean RAM test image; PREPARE-ONLY.' \
             'Boot chain: existing eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
-            'No TF IDB/SPL is installed; Linux B1 disables MMC, USB and network.' \
+            'No TF IDB/SPL is installed; Linux B1 retains MMC/block/storage and USB support but disables network and Ethernet.' \
+            'Linux may enumerate eMMC; /init does not mount or write persistent filesystems. The eMMC safety gate remains mandatory.' \
             'Do not flash or boot until eMMC hardware write-protection and U-Boot address safety gates are cleared.' \
             | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
           sync

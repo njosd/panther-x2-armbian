@@ -502,3 +502,32 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 **当前基线判断：** 6.1.65 已有较强的源码/配置/板级 DTS 候选来源链，但 Image 二进制与具体构建 commit/config 尚未实现密码学级绑定。它仍是项目 A 第一黄金基线；6.1.116 只作后期同机正向行为参照。
 
 **下一步：** 从用户原始 IMG 本体直接提取 `config-6.1.65-ophub`、modules 清单、`System.map`、rootfs 网络服务/配置文件与 U-Boot 文件 hash；并审计 `f16bd...` 到 `4428...` 之间 stmmac/Rockchip clock/reset/PHY 的实际差异。未完成前不启动 Linux、不刷写介质。
+
+
+## 2026-11-23 B1 基线纠偏（覆盖旧裁剪规则）
+
+本节与 `PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md` 一致；较早章节中“B1 关闭 MMC/USB/模块”等旧表述不再作为执行指令。
+
+- **配置种子：** `ophub/kernel` 的 `kernel-config/release/rk35xx/config-6.12`，来源 commit `ba00be60d59300bd93633218a8905829d6cabd72`，Git blob `dee127c6c644f38426eeb28000d73536084d34a3`。
+- **配置流程：** 完整 seed → Linux 6.18.63 `olddefconfig` 适配 → 网络隔离 fragment → 再次 `olddefconfig`；禁止从 `allnoconfig` 起步。
+- **保留：** ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB、文件系统、MODULES，以及 UART、时钟、复位、pinctrl、regulator、PMIC、DMA 和中断基础支持。
+- **隔离：** 网络协议栈、网络设备、板载 Ethernet/GMAC/STMMAC/DWMAC、MDIO/PHY/PCS、Wi-Fi/无线和 Bluetooth。Wi-Fi/无线与 Bluetooth 永久排除；USB/PCIe 外接网卡也不属于项目 A。
+- **DTB：** 保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1（仅移除 Bluetooth 子节点）、UART2、完整 aliases、Ethernet LED、GMAC 时钟节点及共享资源；禁用 GMAC1/MDIO1/PHY 和 Wi-Fi 专用 `sdmmc1`，移除 Wi-Fi/BT 专用节点。
+- **模块：** 构建 Image 与 modules，安装并单独打包；不由 `/init` 自动加载。
+- **RAM init：** 只挂载 procfs/sysfs，不自动挂载持久化文件系统、不主动写入存储。MMC 恢复后 Linux 仍可能枚举 eMMC；eMMC pre-Linux 安全门继续是实机启动的必要前置条件。
+- **uevent：** 旧 kobject_uevent 补丁不再应用，仅保留历史审计；B1 使用未修改的锁定上游源码。
+
+当前仅完成仓库分支中的实现和静态文件审查；CI、artifact、eMMC 安全门和 Panther X2 实机结果均未验证。
+
+
+## B2 板载有线千兆 Ethernet 分层路线
+
+| 子阶段 | 唯一目标 | 验收重点 |
+|---|---|---|
+| B2-1 | 恢复 NET/INET/NETDEVICES 最小网络核心，暂不启用 Panther GMAC | 网络核心初始化、loopback |
+| B2-2 | 加入 STMMAC/Rockchip DWMAC 与必要 SoC 资源，GMAC DTB 仍 disabled | 驱动 probe、netdev 注册，不要求 link |
+| B2-3 | 引入 MDIO/PHYLIB/RTL8211F 最小依赖并激活目标节点 | MDIO 扫描、PHY 发现、驱动绑定和寄存器访问 |
+| B2-4 | 验证 RGMII、时钟方向/频率、TX/RX delay 和 PHY 协商 | 物理链路、1000 Mbps Full Duplex |
+| B2-5 | 验证 MAC DMA 与真实数据收发 | TX/RX、ARP、ICMP、TCP/UDP、持续传输和稳定性 |
+
+每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。不得将 GMAC probe 成功等同网络打通。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。B2 属于项目 A 的分层功能验证，不是恢复项目 B 的历史故障根因调查。
