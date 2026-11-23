@@ -594,8 +594,9 @@ jobs:
           zstd -t "${IMAGE}.zst"
           gzip -t work/output/initramfs.cpio.gz
           gzip -dc work/output/initramfs.cpio.gz | cpio -t > work/initramfs-file-list.txt
-          grep -qx './init' work/initramfs-file-list.txt
-          grep -qx './bin/busybox' work/initramfs-file-list.txt
+          # GNU cpio -t removes the leading "./" from listed member names.
+          grep -qx 'init' work/initramfs-file-list.txt
+          grep -qx 'bin/busybox' work/initramfs-file-list.txt
           test -s work/initramfs-file-list.txt
           # Generate the complete checksum manifest after all artifact/readback checks.
           (
