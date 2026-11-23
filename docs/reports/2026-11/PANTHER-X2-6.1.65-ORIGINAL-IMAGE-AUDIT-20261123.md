@@ -4,7 +4,7 @@
 - 目标设备：Panther X2 / RK3566
 - 原始镜像：\`Armbian_24.2.0_rockchip_panther-x2_jammy_6.1.65_server_2023.1.gz\`
 - 审计性质：离线、只读、静态文件审计
-- 状态：**uInitrd 二进制及内部结构已完成静态审计；Kernel 二进制身份审计仍待补齐**
+- 状态：**Kernel 与 uInitrd 两个核心启动二进制均已完成静态身份、完整性及关键内部结构审计；实机启动仍未验证**
 - 项目 A 关系：历史 6.1.65 基线资料；不改变项目 A 当前锁定的 6.18.63 源码自建 B1 路线
 - 范围限制：不开展 GMAC/MDIO/PHY 故障根因调查，不制作驱动补丁；Wi-Fi/无线网络与蓝牙永久排除出项目 A
 
@@ -249,6 +249,76 @@ udev 相关脚本：
 
 **对 B1 的参考价值：** 可参考早期挂载顺序、root 参数解析、设备等待与 rootfs handoff 的实现；不能把该 uInitrd 直接当作 B1 独立 initramfs，也不应把其发行版用户空间、udev、Plymouth、模块集合或 rootfs 依赖带入 B1。
 
+
+### 6.8 Kernel 实际二进制身份与内嵌配置（2026-11-23）
+
+本节依据用户上传到当前对话的真实文件 `vmlinuz-6.1.65-ophub` 进行直接字节检查；不是只依据文件名、manifest 或独立 config 文件推断。
+
+| 项目 | 实测结果 |
+|---|---|
+| 文件大小 | 33,858,048 bytes |
+| SHA-256 | `d11b0c781a8ac0ffc153ff60e1b1bd88a926afd8f810dd13896d2f0ea16e8bef` |
+| 文件识别 | Linux kernel ARM64 boot executable Image |
+| ARM64 Image magic | `ARMd`，偏移 `0x38` |
+| ARM64 text_offset | `0x0` |
+| ARM64 image_size 字段 | `0x2130000` |
+| ARM64 flags 字段 | `0xA` |
+| EFI/PE signature | `PE\0\0`，偏移 `0x40` |
+| PE Machine | `0xAA64`（AArch64） |
+| PE sections | `.text`、`.data` |
+| 内核 release | `6.1.65-ophub` |
+
+文件大小与此前用户从 03 阶段包提取并记录的 33,858,048 bytes 完全一致；SHA-256 也与此前本机记录完全一致。文件同时包含 ARM64 Linux Image 头与 AArch64 EFI/PE stub 结构。PE COFF timestamp 字段为 0，不能从该字段推导构建时间。
+
+从内核字符串中读取到的完整版本/构建标识：
+
+```text
+Linux version 6.1.65-ophub (root@fv-az841-991)
+(aarch64-none-linux-gnu-gcc (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 13.2.1 20231009,
+GNU ld (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 2.41.0.20231009)
+#1 SMP Sun Dec  3 05:14:23 EST 2023
+```
+
+这说明该二进制记录的编译用户/主机字符串为 `root@fv-az841-991`，编译器为 Arm GNU Toolchain 13.2.1，链接器为 GNU ld 2.41.0.20231009，内核编译时间字符串为 2023-12-03 05:14:23 EST（10:14:23 UTC）。主机名形态与云端 runner 环境相符，但单凭字符串不能证明具体 GitHub Actions run、runner 身份或构建来源。
+
+#### 内嵌 IKCONFIG
+
+内核中存在 `IKCFG_ST` / `IKCFG_ED` 标记。提取其间 gzip 数据并解压成功，得到 235,886 bytes 的完整文本 Kernel config。关键字段如下：
+
+| 配置 | 内嵌值 |
+|---|---|
+| `CONFIG_IKCONFIG` | `y` |
+| `CONFIG_IKCONFIG_PROC` | `y` |
+| `CONFIG_STMMAC_ETH` | `y` |
+| `CONFIG_STMMAC_PLATFORM` | `y` |
+| `CONFIG_DWMAC_ROCKCHIP` | `y` |
+| `CONFIG_DWMAC_GENERIC` | `y` |
+| `CONFIG_PHYLINK` | `y` |
+| `CONFIG_PHYLIB` | `y` |
+| `CONFIG_ROCKCHIP_PHY` | `y` |
+| `CONFIG_MDIO_BUS` | `y` |
+| `CONFIG_OF_MDIO` | `y` |
+| `CONFIG_BLK_DEV_INITRD` | `y` |
+| `CONFIG_INITRAMFS_SOURCE` | 空字符串 |
+| `CONFIG_RD_GZIP` / `CONFIG_RD_XZ` / `CONFIG_RD_ZSTD` | 均为 `y` |
+| `CONFIG_DEVTMPFS` | `y` |
+| `CONFIG_NET` | `y` |
+| `CONFIG_PACKET` / `CONFIG_UNIX` / `CONFIG_INET` | 均为 `y` |
+| `CONFIG_MODULES` | `y` |
+
+内嵌配置确认此前从 `config-6.1.65-ophub` 和 `modules.builtin` 得出的关键构建配置：STMMAC/Rockchip DWMAC、PHYLINK、PHYLIB、Rockchip PHY 与 OF/MDIO 支持均编译进内核。该结果是实际 Kernel 二进制自身携带的配置证据，强于仅凭独立配置文件推断。它仍然只证明编译配置，不证明驱动在 Panther X2 实机 probe 或工作成功。
+
+#### 与 uInitrd 的构建时间关系
+
+Kernel banner 记录的编译时间为 2023-12-03 10:14:23 UTC；uInitrd uImage header 时间为 2023-12-03 10:19:56 UTC，gzip header 时间为 10:19:49 UTC。时间顺序相隔约 5 分钟，与先生成 Kernel、随后生成 initramfs 的构建顺序相容。时间相近不能单独证明两者由同一个 workflow run 生成。
+
+#### 静态结论与限制
+
+**已证实：** Kernel 文件身份、大小和 SHA-256 与本机提取记录一致；ARM64 Image 与 AArch64 PE/EFI 头可识别；内核版本、编译器/链接器标识和编译时间可从二进制读取；内嵌 IKCONFIG 成功解压，并确认关键配置。
+
+**不应据此声称：** Kernel 已在 Panther X2 实机成功启动；EFI stub 或 U-Boot 启动路径已实测；设备树匹配、驱动 probe、PHY 链路或网络功能通过；构建主机字符串足以确定某个 GitHub Actions run。
+
+
 ## 7. Kernel 与模块清单
 
 - 03 Kernel manifest：21 条数据项；\`vmlinuz-6.1.65-ophub\` 大小 33,858,048 bytes；\`Image\` 是指向它的符号链接。
@@ -318,16 +388,11 @@ udev 相关脚本：
 
 Dropbox 中的原始 uInitrd 与 05 阶段包保持不动。
 
-### 11.2 仍需完成：Kernel 实际二进制
+### 11.2 已完成：Kernel 实际二进制
 
-`vmlinuz-6.1.65-ophub` 已从 `03-kernel.tar.gz` 提取，用户本机报告大小 33,858,048 bytes，SHA-256 为 `d11b0c781a8ac0ffc153ff60e1b1bd88a926afd8f810dd13896d2f0ea16e8bef`，类型为 Linux ARM64 boot executable Image。该文件已上传 Dropbox，但当前对话尚未收到 Kernel 二进制附件，因此仍需直接检查实际内容：
+用户已将 `vmlinuz-6.1.65-ophub` 作为当前对话附件提供。已直接复算文件大小和 SHA-256，结果与此前本机提取记录完全一致；已解析 ARM64 Image/EFI PE 头、内核 release、编译器/链接器标识、编译时间，并从内嵌 `IKCONFIG` 区段提取完整 235,886-byte 配置。关键配置与此前独立 config 证据相符，详见第 6.8 节。
 
-1. 独立复算文件大小和 SHA-256；
-2. 解析 ARM64 Image header、文件格式与可识别的内核版本/build 字符串；
-3. 在可行范围内提取内嵌 kernel config/build 信息，并与已审计的 `config-6.1.65-ophub`、`modules.builtin` 对照；
-4. 区分二进制可识别信息与实际硬件启动验证。
-
-无需重新提取或上传 03 阶段包。
+无需重新提取或上传 03 阶段包。Dropbox 原始 Kernel 与 03 阶段包保持不动。
 
 ### 11.3 暂不扩大范围
 
@@ -338,7 +403,7 @@ Dropbox 中的原始 uInitrd 与 05 阶段包保持不动。
 
 ### 11.4 完成定义
 
-本轮已经完成 6.1.65 真实 uInitrd 的二进制身份、外层 uImage、gzip、cpio、`/init`、rootfs handoff、主要用户空间和模块清单的静态审计。Kernel 实际二进制审计完成后，可将这两项启动资产的静态检查闭合。
+本轮已完成 6.1.65 真实 uInitrd 与 Kernel 两个核心启动二进制的静态身份及关键内部结构审计：uInitrd 的 uImage/gzip/cpio、`/init` 与 rootfs handoff 已检查；Kernel 的 ARM64 Image/PE 头、版本/build 字符串与内嵌 IKCONFIG 已检查。两项核心启动资产的静态审计闭合。
 
 即使两项静态检查全部完成，也不等于 Panther X2 实机启动成功、驱动 probe 成功或网络功能通过。实机行为必须单独标注为未验证，除非有实际启动日志/测试证据。
 
