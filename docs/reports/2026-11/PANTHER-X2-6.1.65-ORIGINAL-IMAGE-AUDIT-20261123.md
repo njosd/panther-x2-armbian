@@ -219,7 +219,7 @@ kernel/drivers/net/mdio/of_mdio.ko
 1. \`vmlinuz-6.1.65-ophub\)：来自 \`03-kernel.tar.gz\`，manifest 记录大小 33,858,048 bytes。用于核验实际 Kernel 镜像类型、内嵌版本/build 字符串、文件哈希，并与 config/modules 元数据对应。
 2. \`uInitrd-6.1.65-ophub\`：来自 \`05-initramfs-userspace.tar.gz\`。用于检查 uImage/initramfs header、压缩算法、cpio 内容、真实 \`/init\` 与早期用户空间依赖，是当前最重要的未审计启动资产。
 
-请提取 Kernel 目标文件及启动分区中 uInitrd 符号链接指向的实际二进制，单独上传 Dropbox；上传后核对文件非空、SHA-256、来源路径和文件格式。不要只上传符号链接本身。
+请从 03-kernel.tar.gz 和 05-initramfs-userspace.tar.gz 按上述精确成员路径提取两个普通文件，单独上传（最好作为当前对话附件，以便直接读取二进制）；上传后核对文件非空、SHA-256 和文件格式。不要只上传符号链接本身。
 
 ### 11.2 当前不需要提取的内容
 
@@ -248,3 +248,75 @@ kernel/drivers/net/mdio/of_mdio.ko
 - Git 仓库只保存本报告及必要的小型文本证据，不加入大型原始镜像或 modules 压缩包。
 - 后续提取只针对第 11 节明确列出的文件，不重复已完成的镜像布局、boot script CRC、DTB 文件存在性和 Kernel 配置核验。
 - 结论必须区分用户本机报告、已读取文件静态证据、待验证事项和实机运行证据。
+
+## 14. 镜像构建来源与个人 fork 代码审计（2026-11-23 补充）
+
+现有一手镜像元数据与公开仓库历史源码快照显示：该镜像并非简单地由 Ophub 官方仓库直接执行一次构建并原样发布。当前最强证据指向一个 Panther X2 专用 fork 的 GitHub Actions 工作流负责生成基础镜像并调用 Ophub Rebuild action 完成板级重构。
+
+### 14.1 镜像自身的构建元数据
+
+当前设备遗留的 /etc/ophub-release 字段记录：
+
+- BUILD_REPOSITORY=github.com/armbian/build
+- REBUILD_REPOSITORY=github.com/ophub/amlogic-s9xxx-armbian
+- KERNEL_REPO=ophub/kernel
+- KERNEL_TAGS=stable
+- CONTRIBUTORS=tdleiyao
+- BUILDER_NAME=ophub
+- PACKAGED_DATE=2023-12-07
+- MODEL_NAME=Panther-X2、SOC=rk3566
+
+这些字段支持“Armbian 基础构建 + Ophub 重构框架 + Ophub kernel 发布资产”的组合来源。BUILDER_NAME=ophub 是镜像 builder signature 字段，不等于所有构建步骤、补丁和板级代码均由 Ophub 官方仓库作者编写。
+
+### 14.2 镜像时间点附近的个人 fork 快照
+
+公开仓库：https://github.com/lintao1890/panther-x2-armbian
+
+与 gzip header 时间（2023-12-07 05:18:54 UTC）最接近的已识别仓库提交：
+
+- 31b1b96f258a6d66ecaf8a719145860b533100f6，提交时间 2023-12-07 03:28:08 UTC；
+- 下一提交 96fce8d0e059ab9e7ead3c27a922c9bd0f9da896，时间 2023-12-07 06:07:11 UTC，晚于 gzip header 时间。
+
+因此前一提交是当前最强公开源码快照候选，但没有原始 GitHub Actions run/input/checkout SHA，不能证明它就是实际执行构建时的确切 checkout。
+
+### 14.3 工作流明确包含 fork 自己的编排代码
+
+在 31b1... 快照的 .github/workflows/build-armbian.yml 中，流程是：
+
+1. checkout 当前 Panther X2 fork；
+2. clone Armbian 官方 armbian/build 的浮动 main；
+3. 运行 compile.sh RELEASE=jammy BOARD=odroidn2 BRANCH=current 等参数，先构建通用 Jammy 基础镜像；
+4. 调用 ophub/amlogic-s9xxx-armbian@main 的 Rebuild Armbian action；
+5. 将重构后的镜像上传到 fork 自己的 Release。
+
+这不是“在 Ophub 官方仓库内直接生成并发布”的单一流程。它是 fork 仓库自行维护的 Actions 编排，依赖 Armbian 官方构建系统和 Ophub 重构 action 两个上游。
+
+### 14.4 Panther X2 专用配置与自定义代码边界
+
+同一快照的 model_database.conf 包含 Panther X2 专用记录：model ID r301、SoC rk3566、DTB rk3566-panther-x2.dtb、kernel tag family 6.1.y、board panther-x2、contributor 字段 tdleiyao、boot config armbianEnv.txt。
+
+fork 中还存在 Panther X2 专用 armbianEnv.txt，以及 compile-kernel/tools/script/armbian_rootfs.sh 等脚本。后者负责清理/重打包基础 rootfs、重命名镜像和生成 sha256 文件；它不是内核驱动补丁，但属于镜像生成路径中的可执行自定义代码，必须纳入审计。
+
+rebuild、armbian_rootfs.sh、armbian_compile_kernel_script.sh 等文件头标注来源于 Ophub Rebuild 项目，不能仅凭版权头认定 fork 内文件与当时 Ophub 上游版本逐字节一致。需要以同一时间点的上游 commit 做文件级 diff，识别 fork 自己的改动。
+
+### 14.5 当前来源判断
+
+| 层次 | 当前判断 | 证据等级 |
+|---|---|---|
+| 原始镜像身份 | 用户持有的 2023-12-07 Panther X2 Jammy 6.1.65 原件 | 已确认 |
+| 镜像生成入口 | Panther X2 fork 的 Actions 工作流 | 高置信度候选；缺原始 Actions run |
+| 基础 rootfs | Armbian build 的 Odroid N2 Jammy 基础构建，再经 Panther X2 重构 | 工作流源码已确认；具体 run inputs 未保存 |
+| 板级重构 | 调用 ophub/amlogic-s9xxx-armbian@main | 工作流源码已确认；当时 action commit 未固定 |
+| Kernel | 从 ophub/kernel 的 kernel_stable 6.1.y 通用资产路线选取 | 高置信度；待原始 kernel tarball / Actions 记录闭环 |
+| Panther X2 板级配置 | fork 自带 model database 与 Panther X2 boot environment | 源码快照已确认 |
+| Loader/U-Boot/Firmware | 重构脚本从 Ophub 相关仓库浮动 main 获取 | 构建代码已确认；实际二进制 commit 未锁定 |
+| fork 自编代码 | 工作流编排、rootfs 整理脚本及板级配置确实存在 | 已确认存在；具体差异尚待逐文件 diff |
+
+### 14.6 下一轮必须审计的代码范围
+
+1. 31b1... 快照与同时间点 ophub/amlogic-s9xxx-armbian 的 rebuild、build-armbian、compile-kernel 相关文件逐文件比较；
+2. 检查 Panther X2 fork 自己的 .github/workflows/build-armbian.yml、armbian_rootfs.sh 和板级 armbianEnv.txt 是否引入额外补丁、下载替换、文件覆盖或构建后修改；
+3. 检查当时 Ophub action 实际引用的源码版本，以及它下载的 kernel、U-Boot、firmware 资产版本；
+4. 在可获得的镜像内容中寻找 build metadata、脚本残留、软件包版本、文件时间与哈希，和公开 workflow 交叉验证。
+
+审计原则：不把 fork 作者归属等同于恶意或错误；也不把上游项目版权头等同于无修改的上游代码。任何自编代码都先识别其输入、输出和修改范围，再判断它是否影响 Kernel、DTB、initramfs、rootfs、bootloader 或网络行为。
