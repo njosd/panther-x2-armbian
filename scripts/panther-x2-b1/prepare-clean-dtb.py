@@ -127,8 +127,15 @@ def main() -> None:
     for marker, replacement in disabled:
         text = replace_block(text, marker, replacement)
 
-    # All board aliases in the original DTS point to MMC or Ethernet.
-    text = remove_block(text, "aliases {")
+    # Keep the UART2 alias required by /chosen/stdout-path. The inherited
+    # rk356x-base.dtsi aliases node also defines serial2 = &uart2; replacing
+    # the whole node without this entry silently breaks earlycon resolution.
+    # MMC/Ethernet aliases are not needed by the RAM-only B1 kernel.
+    text = replace_block(
+        text,
+        "aliases {",
+        "aliases {\\n\\tserial2 = &uart2;\\n};",
+    )
 
     forbidden_residue = re.compile(
         r"\b(?:wifi|wireless|bluetooth|bt_enable_h|bt_host_wake_l|bt_wake_l|"
@@ -150,7 +157,8 @@ def main() -> None:
     path.write_text(text)
     print(f"Prepared B1 clean-test DTB source: {path}")
     print("Disabled: GMAC/MDIO/PHY, eMMC/TF/SDIO, Bluetooth UART, USB host/PHY")
-    print("Removed: Wi-Fi/BT GPIO/power-sequence nodes, Wi-Fi/Ethernet LEDs, aliases")
+    print("Removed: Wi-Fi/BT GPIO/power-sequence nodes, Wi-Fi/Ethernet LEDs, MMC/Ethernet aliases")
+    print("Retained: serial2 alias -> UART2 for earlycon")
 
 
 if __name__ == "__main__":
