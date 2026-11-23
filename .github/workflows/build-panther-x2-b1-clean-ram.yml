@@ -165,8 +165,22 @@ jobs:
 
           assert_status() {
             local node="$1" expected="$2" actual
-            actual="$(fdtget -t s "$DTB" "$node" status)"
-            test "$actual" = "$expected" || { echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"; exit 1; }
+            if ! fdtget -l "$DTB" "$node" >/dev/null 2>&1; then
+              echo "::error::DTB node missing: $node"
+              exit 1
+            fi
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            # Devicetree specification: an omitted status property means enabled.
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            if [ "$expected" = "okay" ] && [ "$actual" = "okay (implicit default)" ]; then
+              echo "DTB status: $node = okay (implicit default)"
+              return 0
+            fi
+            test "$actual" = "$expected" || {
+              echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"
+              fdtget -p "$DTB" "$node" || true
+              exit 1
+            }
           }
           assert_status /ethernet@fe010000 disabled
           assert_status /ethernet@fe010000/mdio disabled
