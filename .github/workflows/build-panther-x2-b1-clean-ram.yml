@@ -10,9 +10,16 @@ on:
       - scripts/panther-x2-minimal-initramfs/init
       - scripts/panther-x2-minimal-initramfs/boot.cmd
   workflow_dispatch:
+    inputs:
+      reuse_kernel_run_id:
+        description: "Optional successful run ID containing b1-kernel-dtb artifact; skips kernel/DTB rebuild"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: panther-x2-b1-clean-ram
@@ -29,6 +36,7 @@ env:
 
 jobs:
   build-kernel-dtb:
+    if: ${{ inputs.reuse_kernel_run_id == '' }}
     name: Build and validate kernel plus DTB
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -247,6 +255,7 @@ jobs:
           retention-days: 14
 
   build-busybox:
+    if: ${{ !cancelled() }}
     name: Build and validate static BusyBox
     needs: build-kernel-dtb
     runs-on: ubuntu-24.04
@@ -261,11 +270,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential flex gcc-aarch64-linux-gnu make perl python3 qemu-user-static
 
-      - name: Restore verified kernel and DTB stage
+      - name: Restore kernel and DTB from this run
+        if: ${{ inputs.reuse_kernel_run_id == '' }}
         uses: actions/download-artifact@v6
         with:
           name: b1-kernel-dtb
           path: work
+
+      - name: Reuse kernel and DTB from a previous successful run
+        if: ${{ inputs.reuse_kernel_run_id != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_kernel_run_id }}
+          github-token: ${{ github.token }}
 
       - name: Restore installed kernel modules for validation
         run: |
