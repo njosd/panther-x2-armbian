@@ -272,6 +272,7 @@ jobs:
           set -euo pipefail
           mkdir -p work/modules-root
           tar --zstd -xf work/output/modules.tar.zst -C work/modules-root
+          cp work/output/kernel.config work/kernel.config
 
       - name: Build static BusyBox with minimal applet allowlist
         run: |
