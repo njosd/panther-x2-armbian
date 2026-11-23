@@ -6,6 +6,10 @@ CONFIG_SMP=y
 CONFIG_NR_CPUS=4
 CONFIG_EXPERT=y
 
+# RK3566 GIC600 ITS is limited to 32-bit physical addresses.
+# Keep ITS command/collection tables below 4 GiB even when DRAM has a high bank.
+CONFIG_ROCKCHIP_ERRATUM_3568002=y
+
 CONFIG_OF=y
 CONFIG_OF_FLATTREE=y
 CONFIG_OF_EARLY_FLATTREE=y
