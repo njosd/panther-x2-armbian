@@ -380,6 +380,7 @@ jobs:
           retention-days: 14
 
   package-b1:
+    if: ${{ !cancelled() && needs.build-busybox.result == 'success' }}
     name: Assemble and verify PREPARE-ONLY image
     needs: build-busybox
     runs-on: ubuntu-24.04
