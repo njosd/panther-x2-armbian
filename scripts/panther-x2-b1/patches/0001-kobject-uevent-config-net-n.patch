@@ -1,7 +1,7 @@
 diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
 --- a/lib/kobject_uevent.c
 +++ b/lib/kobject_uevent.c
-@@ -729,7 +729,11 @@
+@@ -729,7 +729,12 @@
  int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
  		     gfp_t allocation)
  {
