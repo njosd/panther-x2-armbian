@@ -134,7 +134,7 @@ def main() -> None:
     text = replace_block(
         text,
         "aliases {",
-        "aliases {\\n\\tserial2 = &uart2;\\n};",
+        "aliases {\n\tserial2 = &uart2;\n};",
     )
 
     forbidden_residue = re.compile(
