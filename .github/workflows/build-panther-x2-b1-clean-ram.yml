@@ -174,7 +174,14 @@ jobs:
           done
 
           STDOUT_PATH="$(fdtget -t s "$DTB" /chosen stdout-path)"
-          echo "$STDOUT_PATH" | grep -q '^serial2:'
+          test "$STDOUT_PATH" = "serial2:1500000n8"
+          SERIAL2_PATH="$(fdtget -t s "$DTB" /aliases serial2)"
+          test "$SERIAL2_PATH" = "/serial@fe660000"
+          UART2_STATUS="$(fdtget -t s "$DTB" "$SERIAL2_PATH" status)"
+          test "$UART2_STATUS" = "okay"
+          UART2_COMPATIBLE="$(fdtget -t s "$DTB" "$SERIAL2_PATH" compatible)"
+          echo "$UART2_COMPATIBLE" | grep -q 'rockchip,rk3568-uart'
+          echo "$UART2_COMPATIBLE" | grep -q 'snps,dw-apb-uart'
           dtc -I dtb -O dts "$DTB" > work/clean-dtb-decoded.dts
           if grep -Eiq 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts; then
             echo "::error::Wi-Fi/BT/PHY residue remains in B1 DTB"
