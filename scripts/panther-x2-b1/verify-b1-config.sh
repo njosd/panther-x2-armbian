@@ -4,7 +4,7 @@ if [[ "$#" -lt 4 ]]; then echo "usage: verify-b1-config.sh <kernel.config> <busy
 KERNEL_CONFIG="$1"; BUSYBOX_CONFIG="$2"; BUSYBOX_BIN="$3"; MODULES_ROOT="$4"; CROSS_PREFIX="${5:-aarch64-linux-gnu-}"
 require_y(){ grep -qx "$1=y" "$2" || { echo "::error::Required option missing: $1=y in $2"; exit 1; }; }
 require_value(){ grep -qx "$1=$2" "$3" || { echo "::error::Required option missing: $1=$2 in $3"; exit 1; }; }
-require_unset(){ grep -qx "# $1 is not set" "$2" || { echo "::error::Required option is not disabled: $1"; exit 1; }; }
+require_unset(){ if grep -Eq "^$1=[ym]$" "$2"; then echo "::error::Forbidden option is enabled: $1"; grep -E "^$1=" "$2"; exit 1; fi; }
 for key in CONFIG_ARM64 CONFIG_ARM64_4K_PAGES CONFIG_ARM64_VA_BITS_48 CONFIG_ARM64_PA_BITS_48 CONFIG_ARCH_ROCKCHIP CONFIG_ROCKCHIP_ERRATUM_3568002 CONFIG_OF CONFIG_OF_FLATTREE CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT CONFIG_PROC_FS CONFIG_SYSFS CONFIG_PRINTK CONFIG_TTY CONFIG_SMP CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE CONFIG_SERIAL_8250_DW CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 CONFIG_PINCTRL_ROCKCHIP; do require_y "$key" "$KERNEL_CONFIG"; done
 require_unset CONFIG_ARM64_LPA2 "$KERNEL_CONFIG"
 require_unset CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG "$KERNEL_CONFIG"
