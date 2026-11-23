@@ -4,7 +4,7 @@
 - 目标设备：Panther X2 / RK3566
 - 原始镜像：\`Armbian_24.2.0_rockchip_panther-x2_jammy_6.1.65_server_2023.1.gz\`
 - 审计性质：离线、只读、静态文件审计
-- 状态：**Kernel 与 uInitrd 两个核心启动二进制均已完成静态身份、完整性及关键内部结构审计；实机启动仍未验证**
+- 状态：**6.1.65 静态审计与面向后续最小系统工作的来源溯源已完成；精确 Actions run / checkout SHA 不可证，实机启动仍未验证**
 - 项目 A 关系：历史 6.1.65 基线资料；不改变项目 A 当前锁定的 6.18.63 源码自建 B1 路线
 - 范围限制：不开展 GMAC/MDIO/PHY 故障根因调查，不制作驱动补丁；Wi-Fi/无线网络与蓝牙永久排除出项目 A
 
@@ -491,11 +491,58 @@ Dropbox 中的原始 uInitrd 与 05 阶段包保持不动。
 - **个人贡献者代码：可能存在板级贡献，但不能泛化。** Panther X2 的 model database、专用 boot environment、DTB 等需追踪引入提交；当前尚无证据显示它们包含私下未公开的构建后补丁。
 - **构建是否完全可复现：尚不能确认。** Armbian build、Ophub Rebuild action、kernel release、U-Boot 和 firmware 部分依赖浮动 `main` 或发布标签；缺原始 Actions run 与具体 inputs。
 
-### 14.7 下一轮必须审计的代码范围
+### 14.7 溯源收口标准（本轮完成）
 
-1. 取得 2023-12-07 附近 Ophub Actions workflow run 及其 inputs、checkout SHA、日志和上传产物记录；
-2. 追踪 Panther X2 的 model database 行、Panther 专用 boot files、DTS/DTB 及相关文件最初由哪个提交引入、作者是谁、修改内容是什么；
-3. 锁定当时 `ophub/amlogic-s9xxx-armbian@main`、`armbian/build@main`、`ophub/kernel`、`ophub/u-boot@main`、`ophub/firmware@main` 的实际 commit/tag；
-4. 对实际生成的 Kernel、DTB、uInitrd 与阶段包中的二进制做哈希/构建指纹比对。
+本轮只保留对后续复现和 6.18 最小系统构建有实际价值的来源链证据：
 
-审计原则：不把贡献者身份等同于私人定制，也不把上游仓库归属等同于所有组件均为上游原生。只有定位到具体提交、代码差异和实际构建调用关系后，才判断自定义代码是否影响 Kernel、DTB、initramfs、rootfs、bootloader 或网络行为。
+1. Panther X2 DTS 最初进入 `unifreq/linux-6.1.y`：
+   - `afaa1a194f812e30a9faedd88d6c09e7a49d909a`，2023-07-07，新增 `rk3566-panther-x2.dts`。
+2. Panther X2 板级 DTS 后续更新：
+   - `80101d21c55ec1c87a00a52a0c3e137a37ac7a80`，2023-07-11，提交说明明确包含 USB mode 改为 host、启用 GPU。
+   - 该提交是候选 6.1.65 源码提交 `4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` 的祖先；两者之间为 118 个提交，未发生分叉。
+3. Kernel 源码版本候选：
+   - `4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`，提交标题 `up to 6.1.65`，时间为 2023-12-03 08:14:01 UTC。
+   - 与实际 Kernel banner 的 2023-12-03 10:14:23 UTC 编译时间相差约两小时，时间关系合理；但时间吻合和源码内容吻合仍不能证明构建时精确 checkout 了该 SHA。
+4. 2023-12-07 附近的 Ophub workflow 快照确认：
+   - 使用 GitHub Actions 的 `ubuntu-22.04` runner；
+   - 浅克隆 `armbian/build@main`，构建 Jammy 基础镜像；
+   - 再调用 `ophub/amlogic-s9xxx-armbian@main` 的 Rebuild action；
+   - Rebuild 默认从 `ophub/kernel` 的 stable 发布资产选择/下载 Kernel。该仓库在此流程中是 Kernel 发布包来源，不等于已证明底层源码 checkout SHA。
+5. 对 `ophub/amlogic-s9xxx-armbian` 在 2023-12-06 至 2023-12-08 的 Actions runs 查询未返回可用运行记录。故本次无法取得原始 run ID、dispatch inputs、完整日志和各浮动分支的实际 checkout SHA。
+
+**最终来源判断：**
+
+- 已证实：原始镜像身份与本机 SHA-256；Kernel/uInitrd 二进制身份和内部结构；构建元数据指向 Armbian + Ophub Rebuild；Ophub 当时公开 workflow 的自动构建方式；Panther X2 DTS 的引入与板级更新历史。
+- 强候选：`unifreq/linux-6.1.y@4428b96f...` 是与 6.1.65 Kernel banner、编译时间及 Panther X2 板级 DTS 相吻合的源码版本。
+- 未证实且不再作为本项目阻塞项：原始 Actions run、构建时精确 checkout SHA，以及 Armbian/Ophub/U-Boot/firmware 所有浮动分支在该次运行中的精确提交。
+- 不支持的说法：不能声称已完全复现 2023-12-07 的构建，也不能把候选 SHA 写成已证实的构建 SHA。
+
+到此停止扩大历史溯源。缺失的精确 Actions 记录不影响将用户保存的 6.1.65 原始镜像作为第一黄金基线，也不妨碍与已正常运行的 6.1.116 第二黄金基线做功能和资产对照。后续只在某项 6.18 构建问题确实需要时，针对性回查对应组件来源。
+
+
+## 15. 面向 6.18 最小系统项目的最终审计结论（2026-11-23）
+
+本次 6.1.65 审计达到项目所需的完成标准，不再追加与后续验证无直接关系的历史考证。
+
+### 可作为基线使用的内容
+
+- 原始镜像身份指纹：SHA-256 `0326e757a72182b5e60b112000ceef808bcb3a2bfd954448bbb6c9b16eb6f3ea`。
+- Kernel：`6.1.65-ophub`，SHA-256 `d11b0c781a8ac0ffc153ff60e1b1bd88a926afd8f810dd13896d2f0ea16e8bef`；内嵌 IKCONFIG 已提取，可用于构建配置对照。
+- uInitrd：SHA-256 `b15a440caff522227c1b792271d5bf50508edf1c1bee33396430b8aca18342a0`；uImage/gzip/cpio 完整性通过，启动职责和 rootfs handoff 已明确。
+- Panther X2 DTB：文件身份、大小和 SHA-256 已记录；源码候选的板级 DTS 来源链已建立。镜像内 DTB 的完整反编译属性比对不是本轮继续扩大审计的前置条件，后续按实际启动测试需要再核对。
+- boot 配置与脚本：配置引用关系、boot.scr CRC 和与 boot.cmd 的正文一致性已核验。
+- 构建来源：已达到“上游项目/自动构建流程/板级 DTS 来源/Kernel 源码强候选”层级；精确 Actions run 与 checkout SHA 明确标为不可证。
+
+### 不作为已验证事实的内容
+
+- 6.1.65 已在 Panther X2 实机成功启动；
+- 所有驱动均已在目标硬件 probe 并正常工作；
+- USB、以太网或其他外设已通过实机功能测试；
+- 候选源码 SHA 就是原始构建的精确 checkout；
+- 整个历史构建流程可逐字节复现。
+
+### 对后续 6.18 工作的使用方式
+
+6.1.65 只作为原始历史镜像与启动资产参考；6.1.116 作为已正常运行的第二黄金基线。两者用于识别必要的板级配置、启动链、内核配置和功能差异。新系统仍按既定最小系统路线逐项加入组件、逐阶段验证；不照搬发行版复杂用户空间，不因历史配置直接制作补丁，也不把 6.1.65/6.1.116 当作最终内核目标。
+
+项目目标仍是构造可用、功能正常且可持续更新的 Panther X2 6.18 系统。6.1.65 的审计至此收口；若未来发现具体问题，再按问题所涉及的单一组件回查证据。
