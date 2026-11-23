@@ -59,7 +59,7 @@ def main():
  path=Path(sys.argv[1]); original=path.read_text()
  if 'model = "Panther X2";' not in original or '"panther,x2"' not in original: raise SystemExit("refusing non-Panther-X2 DTS")
  text=original
- for marker in ("sdio_pwrseq: sdio-pwrseq","wireless-wlan {","\tbt {","bluetooth {","led_wifi: led-wifi","led_wifi_enable_h: led-wifi-enable-h"):
+ for marker in ("sdio_pwrseq: sdio-pwrseq","sdio-pwrseq {","wireless-wlan {","\tbt {","bluetooth {","led_wifi: led-wifi","led_wifi_enable_h: led-wifi-enable-h"):
   text=remove_block(text,marker)
  text=remove_property(text,"&sdmmc1 {","mmc-pwrseq")
  for marker in ("&gmac1 {","&mdio1 {","rgmii_phy1: ethernet-phy@0","&sdmmc1 {"):

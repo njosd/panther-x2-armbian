@@ -4,6 +4,8 @@
 
 ## 当前唯一执行主线：项目 A
 
+- [B1 完整基础配置与网络隔离基线纠偏（2026-11-23）](./PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md)：覆盖旧 B1 过度裁剪规则的新决策，包含配置 seed、DTB、模块、安全边界与 B2 分层路线。
+
 - [项目 A 总路线图](reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威路线，涵盖项目边界、JP U-Boot 测试基线论证、最小系统架构、组件选择原则、安全门和 B0—B7。
 - [项目 A 分阶段实施计划](reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 细化为可执行子步骤、验收标准和停止条件。
 - [B1 最小 RAM 启动与 eMMC 安全关口审计](reports/2026-11/PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)：B1 的专项技术证据与安全审计。
