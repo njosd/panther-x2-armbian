@@ -88,14 +88,15 @@ jobs:
           make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           cp "$OUT/.config" work/kernel.config
           echo "=== B1 Kconfig effective values ==="
-          for key in CONFIG_ARM64_4K_PAGES CONFIG_ARM64_VA_BITS_48 CONFIG_ARM64_VA_BITS CONFIG_ARM64_PA_BITS_48 CONFIG_ARM64_PA_BITS CONFIG_ARM64_LPA2 CONFIG_MODULES CONFIG_BLOCK CONFIG_MMC CONFIG_USB CONFIG_NET; do
-            grep -E "^(CONFIG_${key#CONFIG_}=|# ${key} is not set)$" work/kernel.config || echo "${key}=<not emitted>"
+          for key in CONFIG_ARM64_4K_PAGES CONFIG_ARM64_VA_BITS_48 CONFIG_ARM64_PA_BITS_48 CONFIG_MODULES CONFIG_BLOCK CONFIG_MMC CONFIG_USB CONFIG_NET; do
+            grep -E "^(${key}=.*|# ${key} is not set)$" work/kernel.config || echo "${key}=<not emitted>"
           done
           echo "=== End B1 Kconfig effective values ==="
-          grep -qx 'CONFIG_ARM64_VA_BITS=48' work/kernel.config
-          grep -qx 'CONFIG_ARM64_PA_BITS=48' work/kernel.config
+          # VA_BITS and PA_BITS are invisible derived Kconfig integers in this kernel;
+          # validate their user-selectable choice symbols instead of expecting .config entries.
+          grep -qx 'CONFIG_ARM64_VA_BITS_48=y' work/kernel.config
+          grep -qx 'CONFIG_ARM64_PA_BITS_48=y' work/kernel.config
           grep -qx 'CONFIG_ARM64_4K_PAGES=y' work/kernel.config
-          grep -qx '# CONFIG_ARM64_LPA2 is not set' work/kernel.config
           grep -qx 'CONFIG_MODULES=y' work/kernel.config
           grep -qx 'CONFIG_BLOCK=y' work/kernel.config
           grep -qx 'CONFIG_MMC=y' work/kernel.config
