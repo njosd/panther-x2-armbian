@@ -1,13 +1,17 @@
 diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
 --- a/lib/kobject_uevent.c
 +++ b/lib/kobject_uevent.c
-@@ -730,6 +730,8 @@ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+@@
+ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
  		     gfp_t allocation)
  {
 -	kfree_skb(skb);
-+	/* No skb can be allocated when CONFIG_NET is disabled. */
++	/*
++	 * With CONFIG_NET disabled, the skb allocation and netlink paths
++	 * in this file are compiled out. The skb release implementation
++	 * is not linked either, so this stub must only accept a NULL skb.
++	 */
 +	if (skb)
 +		return -EOPNOTSUPP;
  	return 0;
  }
- #endif
