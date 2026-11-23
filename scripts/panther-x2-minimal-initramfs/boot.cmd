@@ -2,7 +2,7 @@
 # U-Boot reads these three files from TF before Linux starts.
 # Linux DTB deliberately disables all MMC/eMMC/TF, USB and network devices.
 # This script never resets/reboots the board on a file-load failure.
-setenv bootargs "console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
+setenv bootargs "console=ttyS0,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
 
 echo "Panther X2 B1 clean RAM baseline"
 echo "Boot source: ${devtype} ${devnum}"
