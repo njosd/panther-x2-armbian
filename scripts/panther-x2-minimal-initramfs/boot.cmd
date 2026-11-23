@@ -1,6 +1,6 @@
 # Panther X2 B1 clean RAM-only Linux baseline.
 # U-Boot reads these three files from TF before Linux starts.
-# Linux DTB deliberately disables all MMC/eMMC/TF, USB and network devices.
+# Linux DTB disables network devices and Wi-Fi SDIO; MMC/eMMC/TF, USB and UART remain enabled.
 # This script never resets/reboots the board on a file-load failure.
 setenv bootargs "earlycon=uart8250,mmio32,0xfe660000 keep_bootcon console=ttyS2,1500000n8 loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
 
