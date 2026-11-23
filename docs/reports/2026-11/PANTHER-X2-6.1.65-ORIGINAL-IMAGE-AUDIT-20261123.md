@@ -4,7 +4,7 @@
 - 目标设备：Panther X2 / RK3566
 - 原始镜像：\`Armbian_24.2.0_rockchip_panther-x2_jammy_6.1.65_server_2023.1.gz\`
 - 审计性质：离线、只读、静态文件审计
-- 状态：**阶段性审计已完成；完整启动资产闭包仍待补齐**
+- 状态：**uInitrd 二进制及内部结构已完成静态审计；Kernel 二进制身份审计仍待补齐**
 - 项目 A 关系：历史 6.1.65 基线资料；不改变项目 A 当前锁定的 6.18.63 源码自建 B1 路线
 - 范围限制：不开展 GMAC/MDIO/PHY 故障根因调查，不制作驱动补丁；Wi-Fi/无线网络与蓝牙永久排除出项目 A
 
@@ -141,13 +141,113 @@ kernel/drivers/net/mdio/of_mdio.ko
 
 镜像启动配置引用该路径，独立 DTB 阶段包中也存在同尺寸文件。存在性与哈希已记录；这不等于已证明 DTB 与目标设备硬件修订完全匹配，也不等于实机加载成功。
 
-## 6. Initramfs / 用户空间清单
+## 6. 真实 uInitrd 二进制与内部结构审计（2026-11-23）
 
-05 manifest 共 247 条数据项，其中 132 个符号链接，其余为普通文件。清单可见 \`usr/lib/initramfs-tools/bin/busybox\`（337,968 bytes）及 \`sbin/init\` 指向 systemd 等内容。
+本节依据用户上传到当前对话的真实文件 `uInitrd-6.1.65-ophub` 进行字节级检查；不是依据 05 manifest 推断。原始 Dropbox 文件未被修改。
 
-**边界：** 05 manifest 是 rootfs/initramfs-tools 相关文件清单，不是解包后的 \`uInitrd\` cpio 清单。不能据此断言真实 uInitrd 的 init 入口为 systemd，也不能确认其依赖闭包、设备节点、挂载逻辑或独立启动能力。
+### 6.1 文件身份与 U-Boot legacy uImage
 
-实际 uInitrd 解包后仍需核验：外层格式/header、压缩算法、cpio 成员、\`/init\` 是否存在及权限、BusyBox 和库依赖、是否依赖 systemd/udev/模块/存储设备/持久化 rootfs，以及是否带入 B1 不需要的组件。
+| 项目 | 实测结果 |
+|---|---|
+| 文件大小 | 16,865,725 bytes |
+| SHA-256 | `b15a440caff522227c1b792271d5bf50508edf1c1bee33396430b8aca18342a0` |
+| uImage magic | `0x27051956` |
+| Header 长度 | 64 bytes |
+| Header CRC（存储/重算） | `0x051694A1` / 一致 |
+| Payload 长度 | 16,865,661 bytes |
+| Data CRC（存储/重算） | `0x9B275961` / 一致 |
+| uImage 时间 | 2023-12-03 10:19:56 UTC |
+| Name | `uInitrd` |
+| OS / Arch / Type / Compression | Linux / ARM64 / RAMDisk / gzip |
+| Load / Entry | 0 / 0 |
+
+uImage header CRC 是将 header CRC 字段清零后重新计算；data CRC 对完整 16,865,661-byte payload 独立计算。两者均与 header 内记录一致。
+
+### 6.2 gzip 与 cpio 完整性
+
+| 项目 | 实测结果 |
+|---|---|
+| gzip header 文件名 | `mkinitramfs-MAIN_jvPOVk` |
+| gzip header 时间 | 2023-12-03 10:19:49 UTC |
+| 解压后长度 | 49,225,728 bytes |
+| gzip footer CRC32（存储/重算） | `0x8B846DEE` / 一致 |
+| gzip ISIZE（存储/实测） | 49,225,728 / 一致 |
+| cpio 格式 | `newc`（magic `070701`） |
+| 实际条目数（不含 trailer） | 931 |
+| 普通文件 / 目录 / 符号链接 | 704 / 166 / 61 |
+| 结束标记 | `TRAILER!!!` 存在 |
+| 归档尾部填充 | 336 bytes，均为零 |
+| 相对符号链接 | 56 条，未发现悬空目标 |
+
+因此，当前上传文件的 uImage、gzip 和 cpio 三层结构均通过静态完整性检查；没有发现截断或 CRC 不匹配。
+
+### 6.3 init 入口与 rootfs 交接逻辑
+
+- cpio 中存在根目录 `/init`，普通文件，mode `0755`，大小 6,556 bytes。
+- `/init` 是 shell 脚本，shebang 为 `#!/bin/sh`。
+- 启动早期创建/挂载 `/dev`、`/proc`、`/sys`、`/run` 等运行环境。
+- 读取内核命令行中的 `root=`、`rootfstype=`、`rootflags=`、`rootdelay=` 等参数。
+- 默认 `BOOT=local`，加载 `/scripts/local` 和 `/scripts/nfs`；本镜像启动参数指定本地 ext4 root UUID。
+- `scripts/local` 中的 `local_mount_root()` 调用设备解析/等待逻辑、文件系统类型识别与 mount，将真实根分区挂载到 `/root`。
+- 随后执行 `run-init`，把控制权交给真实 rootfs 中的 `/sbin/init`；不是在 initramfs 内启动一个长期独立用户空间。
+
+该流程直接证明：此 uInitrd 的设计职责是发现并挂载真实 rootfs，然后切换根目录和 PID 1；它不是 B1 所要求的“脱离持久化存储系统独立运行”的最小 initramfs。
+
+### 6.4 发行版与 initramfs-tools 配置
+
+真实 cpio 内的 `etc/os-release` 声明：
+
+- `PRETTY_NAME="Armbian 23.11.0-trunk bookworm"`
+- Debian GNU/Linux 12 / bookworm
+- `ID=debian`
+
+`conf/arch.conf`：`DPKG_ARCH=arm64`。
+
+`conf/initramfs.conf` 的关键配置：
+
+| 配置 | 值 |
+|---|---|
+| `MODULES` | `most` |
+| `BUSYBOX` | `auto` |
+| `KEYMAP` | `n` |
+| `NFSROOT` | `auto` |
+| `FSTYPE` | `auto` |
+| `RESUME` | `none` |
+| `COMPRESS` | `gzip` |
+
+虽然配置写有 `BUSYBOX=auto`，但实际 cpio 中未发现 BusyBox 二进制，也未发现 `dash` 或 `bash`。实际 `/bin/sh`（归档路径 `usr/bin/sh`）是 AArch64 klibc ELF；`run-init` 和 `mount` 也为 klibc 工具。不能把 05 rootfs manifest 中的 BusyBox helper 当成真实 uInitrd 中存在 BusyBox 的证据。
+
+### 6.5 用户空间、udev 与动态链接
+
+真实 initramfs 包含 klibc 启动工具、kmod、udevadm、blkid、btrfs、ntfs-3g、dmsetup、Plymouth、文件系统/设备发现工具和多组共享库。
+
+已抽查 ELF：
+- `usr/bin/sh`、`usr/bin/run-init`、`usr/bin/mount` 为 AArch64 klibc 程序；使用归档内的 `klibc-*.so` 解释器，未显示普通 ELF `NEEDED` 共享库项。
+- `usr/bin/kmod`、`usr/bin/udevadm`、`usr/sbin/blkid` 为 AArch64 glibc 动态链接程序；其 ELF interpreter 和直接依赖的关键库在归档中可找到。
+- 已检查的直接库包括 `libc.so.6`、`libkmod.so.2`、`libacl.so.1`、`libblkid.so.1`、`libcap.so.2`、`libselinux.so.1`、`libzstd.so.1`、`liblzma.so.5`、`libcrypto.so.3`。
+
+udev 相关脚本：
+- `scripts/init-top/udev` 启动 `/lib/systemd/systemd-udevd`，执行 udev subsystem/device trigger 和 settle。
+- 归档中的 `usr/lib/systemd/systemd-udevd` 是指向 `../../bin/udevadm` 的符号链接；实际使用的是 udevadm 二进制的 udevd 入口。
+- `scripts/init-bottom/udev` 停止 udevd，并将 initramfs 的 `/dev` 移交到真实 rootfs。
+
+这里存在 systemd 项目的 udev 组件，但没有证据表明 initramfs 以 systemd 作为 PID 1；实际 `/init` 是 initramfs-tools shell 脚本，最终交接给真实 rootfs 的 `/sbin/init`。直接依赖已抽查，尚未对所有动态 ELF 做完整递归依赖闭包审计。
+
+### 6.6 内核模块和范围边界
+
+- cpio 中包含 `usr/lib/modules/6.1.65-ophub`，共 386 个 `.ko` 文件，合计 15,764,232 bytes，并包含 modules.dep、modules.alias、modules.builtin 等元数据。
+- 未发现 `drivers/net/wireless` 或 `drivers/bluetooth` 模块目录/模块成员。
+- 未发现 STMMAC 独立模块文件；第 4 节已确认该驱动族在对应 Kernel 配置中为 built-in。
+- udev rules 中存在 `10-wifi-disable-powermanagement.rules` 文件；单个规则文件不等于无线驱动或无线功能已被装入/启用。
+- 该 initramfs 还包含大量通用存储、USB、网络和其他模块及用户空间工具，不是 B1 的无模块最小基线。
+
+### 6.7 静态结论与限制
+
+**已证实：** uInitrd 文件身份与三层完整性检查通过；真实 cpio 的 `/init` 会挂载指定 rootfs，并通过 `run-init` 交接到 rootfs 的 `/sbin/init`；其实现属于 Armbian/Debian initramfs-tools 风格；含 klibc、udev、动态用户空间工具和 386 个模块。
+
+**不应据此声称：** Panther X2 实机已经成功执行此 initramfs；所有动态库递归依赖均已闭包；rootfs 或所有模块均与目标硬件实测兼容；该 initramfs 能脱离真实 rootfs 独立运行。
+
+**对 B1 的参考价值：** 可参考早期挂载顺序、root 参数解析、设备等待与 rootfs handoff 的实现；不能把该 uInitrd 直接当作 B1 独立 initramfs，也不应把其发行版用户空间、udev、Plymouth、模块集合或 rootfs 依赖带入 B1。
 
 ## 7. Kernel 与模块清单
 
@@ -210,27 +310,37 @@ kernel/drivers/net/mdio/of_mdio.ko
 - \`kernel-config-evidence.zip\`：\`id:9qHOnx-HLYoAAAAAAAAAFQ\`，包含 \`config-6.1.65-ophub\` 与 \`modules.builtin\`
 - 单独上传的 manifest：\`03-kernel-MANIFEST.tsv\`、\`05-initramfs-userspace-MANIFEST.tsv\`、\`06-modules-dependencies-MANIFEST.tsv\`
 
-## 11. 尚需提取的文件与完成条件
+## 11. 尚需补齐的审计项与完成条件
 
-### 11.1 B1 启动资产闭包必须补齐的两个文件
+### 11.1 已完成：真实 uInitrd
 
-只需从现有阶段包提取以下两个目标文件，不必重新运行全量脚本：
+已从现有 `05-initramfs-userspace.tar.gz` 的精确成员提取并上传真实 `uInitrd-6.1.65-ophub`。文件大小和 SHA-256 与 manifest 一致；uImage header/data CRC、gzip CRC/ISIZE、cpio newc 结构均已独立验证。详细结果见第 6 节。
 
-1. \`vmlinuz-6.1.65-ophub\)：来自 \`03-kernel.tar.gz\`，manifest 记录大小 33,858,048 bytes。用于核验实际 Kernel 镜像类型、内嵌版本/build 字符串、文件哈希，并与 config/modules 元数据对应。
-2. \`uInitrd-6.1.65-ophub\`：来自 \`05-initramfs-userspace.tar.gz\`。用于检查 uImage/initramfs header、压缩算法、cpio 内容、真实 \`/init\` 与早期用户空间依赖，是当前最重要的未审计启动资产。
+Dropbox 中的原始 uInitrd 与 05 阶段包保持不动。
 
-请从 03-kernel.tar.gz 和 05-initramfs-userspace.tar.gz 按上述精确成员路径提取两个普通文件，单独上传（最好作为当前对话附件，以便直接读取二进制）；上传后核对文件非空、SHA-256 和文件格式。不要只上传符号链接本身。
+### 11.2 仍需完成：Kernel 实际二进制
 
-### 11.2 当前不需要提取的内容
+`vmlinuz-6.1.65-ophub` 已从 `03-kernel.tar.gz` 提取，用户本机报告大小 33,858,048 bytes，SHA-256 为 `d11b0c781a8ac0ffc153ff60e1b1bd88a926afd8f810dd13896d2f0ea16e8bef`，类型为 Linux ARM64 boot executable Image。该文件已上传 Dropbox，但当前对话尚未收到 Kernel 二进制附件，因此仍需直接检查实际内容：
 
-- 完整 202 MiB \`06-modules-dependencies.tar.gz\` 不需要再上传或整体解压进 B1 构建环境；B1 明确不启用模块系统和 \`/lib/modules\`。未来只有遇到明确问题才提取其中小文件。
-- 07 包网络工具依赖审计属于 B2/B3 阶段，不进入 B1。
-- 16 条失败中的非启动必需 netfilter headers 与模块，不为追求“零失败”而扩大当前范围。
-- 08 包无线/蓝牙分类误判不应成为项目 A 新任务；这些功能永久排除。
+1. 独立复算文件大小和 SHA-256；
+2. 解析 ARM64 Image header、文件格式与可识别的内核版本/build 字符串；
+3. 在可行范围内提取内嵌 kernel config/build 信息，并与已审计的 `config-6.1.65-ophub`、`modules.builtin` 对照；
+4. 区分二进制可识别信息与实际硬件启动验证。
 
-### 11.3 完成定义
+无需重新提取或上传 03 阶段包。
 
-本报告完成“镜像布局、启动配置、DTB 文件身份、Kernel 配置/内建驱动、模块与用户空间清单”的阶段性静态审计。补齐 Kernel 实际二进制和真实 uInitrd 内容，并完成哈希/结构核验后，才可将 6.1.65 启动资产静态闭包标记为完成。即使静态闭包完成，也不等于 Panther X2 实机启动或网络功能通过。
+### 11.3 暂不扩大范围
+
+- 不重新解压完整 202 MiB `06-modules-dependencies.tar.gz`。
+- 07 网络工具的完整依赖审计不属于当前 uInitrd 闭包任务，也不进入 B1。
+- 不追查无线/蓝牙功能；项目 A 永久排除。
+- 不因本报告内容转入 GMAC/MDIO/PHY 故障排查或制作补丁。
+
+### 11.4 完成定义
+
+本轮已经完成 6.1.65 真实 uInitrd 的二进制身份、外层 uImage、gzip、cpio、`/init`、rootfs handoff、主要用户空间和模块清单的静态审计。Kernel 实际二进制审计完成后，可将这两项启动资产的静态检查闭合。
+
+即使两项静态检查全部完成，也不等于 Panther X2 实机启动成功、驱动 probe 成功或网络功能通过。实机行为必须单独标注为未验证，除非有实际启动日志/测试证据。
 
 ## 12. 对项目 A B1 的结论
 
