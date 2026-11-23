@@ -182,6 +182,12 @@ jobs:
           UART2_COMPATIBLE="$(fdtget -t s "$DTB" "$SERIAL2_PATH" compatible)"
           echo "$UART2_COMPATIBLE" | grep -q 'rockchip,rk3568-uart'
           echo "$UART2_COMPATIBLE" | grep -q 'snps,dw-apb-uart'
+          UART2_REG_SHIFT="$(fdtget -t u "$DTB" "$SERIAL2_PATH" reg-shift)"
+          test "$UART2_REG_SHIFT" = "2"
+          UART2_REG_IO_WIDTH="$(fdtget -t u "$DTB" "$SERIAL2_PATH" reg-io-width)"
+          test "$UART2_REG_IO_WIDTH" = "4"
+          UART2_CLOCK_NAMES="$(fdtget -t s "$DTB" "$SERIAL2_PATH" clock-names)"
+          test "$UART2_CLOCK_NAMES" = "baudclk apb_pclk"
           dtc -I dtb -O dts "$DTB" > work/clean-dtb-decoded.dts
           if grep -Eiq 'wifi|wireless|bluetooth|ethernet-phy|sdio-pwrseq' work/clean-dtb-decoded.dts; then
             echo "::error::Wi-Fi/BT/PHY residue remains in B1 DTB"
@@ -292,6 +298,7 @@ jobs:
           mkimage -l work/output/uInitrd | tee work/uinitrd-header.txt
 
           install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/output/boot.cmd
+          grep -Fqx 'setenv bootargs "earlycon=uart8250,mmio32,0xfe660000 keep_bootcon console=ttyS2,1500000n8 loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"' work/output/boot.cmd
           mkimage -A arm -O linux -T script -C none \
             -n "Panther X2 B1 clean RAM boot" \
             -d work/output/boot.cmd work/output/boot.scr
