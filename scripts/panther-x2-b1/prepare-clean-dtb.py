@@ -40,12 +40,57 @@ def block_span(text: str, marker: str) -> tuple[int,int]:
 def remove_block(text,marker):
  a,b=block_span(text,marker); return text[:a]+text[b:]
 
+def direct_status_span(block):
+ brace=block.find("{")
+ if brace<0: raise RuntimeError("node opening brace missing")
+ depth=0; state="normal"; i=0; line_start=0
+ while i<len(block):
+  if i==brace:
+   depth=1; i+=1; line_start=i; continue
+  ch=block[i]; nxt=block[i+1] if i+1<len(block) else ""
+  if state=="line":
+   if ch=="\n": state="normal"; line_start=i+1
+   i+=1
+  elif state=="block":
+   if ch=="*" and nxt=="/": state="normal"; i+=2
+   else: i+=1
+  elif state=="string":
+   if ch=="\\": i+=2
+   elif ch=='"': state="normal"; i+=1
+   else: i+=1
+  elif ch=="/" and nxt=="/": state="line"; i+=2
+  elif ch=="/" and nxt=="*": state="block"; i+=2
+  elif ch=='"': state="string"; i+=1
+  elif ch=="{": depth+=1; i+=1
+  elif ch=="}":
+   depth-=1
+   if depth==0: return None
+   i+=1
+  elif ch=="\n":
+   line_start=i+1; i+=1
+  else:
+   if depth==1 and block[line_start:i].strip()=="":
+    line_end=block.find("\n",i)
+    if line_end<0: line_end=len(block)
+    line=block[line_start:line_end]
+    match=re.match(r'^([ \t]*)status\s*=\s*"([^"]+)"\s*;[ \t]*$',line)
+    if match: return (line_start,line_end,match.group(1),match.group(2))
+   i+=1
+ return None
+
+def get_direct_status(text,marker):
+ a,b=block_span(text,marker); found=direct_status_span(text[a:b])
+ return found[3] if found else None
+
 def set_status(text,marker,status):
  a,b=block_span(text,marker); block=text[a:b]
- pat=re.compile(r'(?m)^([ \t]*)status\s*=\s*"[^"]+"\s*;'); m=pat.search(block)
- if m: block=block[:m.start()]+f'{m.group(1)}status = "{status}";'+block[m.end():]
+ found=direct_status_span(block)
+ if found:
+  line_start,line_end,indent,_=found
+  block=block[:line_start]+f'{indent}status = "{status}";'+block[line_end:]
  else:
-  brace=block.find("{"); block=block[:brace+1]+f'\n\tstatus = "{status}";'+block[brace+1:]
+  brace=block.find("{")
+  block=block[:brace+1]+f'\n\tstatus = "{status}";'+block[brace+1:]
  return text[:a]+block+text[b:]
 
 def remove_property(text,marker,name):
@@ -70,8 +115,8 @@ def main():
  for alias in ("ethernet0","mmc0","mmc1","mmc2"):
   if not re.search(rf"(?m)^\s*{alias}\s*=",aliases): raise SystemExit(f"original alias lost: {alias}")
  for marker in ("&gmac1 {","&mdio1 {","rgmii_phy1: ethernet-phy@0","&sdmmc1 {"):
-  a,b=block_span(text,marker)
-  if not re.search(r'status\s*=\s*"disabled"',text[a:b]): raise SystemExit(f"node not disabled: {marker}")
+  actual=get_direct_status(text,marker)
+  if actual!="disabled": raise SystemExit(f"node direct status not disabled: {marker} (actual={actual!r})")
  for marker in ("&sdhci {","&sdmmc0 {","&uart1 {","&uart2 {","&usb_host0_xhci {","&usb_host0_ohci {","&usb_host0_ehci {","&usb2phy0 {","&usb2phy0_host {","&usb2phy0_otg {"):
   a,b=block_span(text,marker)
   if re.search(r'status\s*=\s*"disabled"',text[a:b]): raise SystemExit(f"non-network node disabled: {marker}")
