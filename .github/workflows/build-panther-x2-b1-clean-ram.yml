@@ -80,6 +80,7 @@ jobs:
           SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
           FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
           MODULES_ROOT="$GITHUB_WORKSPACE/work/modules-root"
+          mkdir -p "$OUT"
           test "$(git hash-object "$SEED")" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
           ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$SEED" "$FRAGMENT" \
@@ -155,9 +156,11 @@ jobs:
           if fdtget -l "$DTB" /serial@fe650000 | grep -qx bluetooth; then
             echo "::error::Bluetooth child remains under UART1"; exit 1
           fi
-          for node in /usb@fcc00000 /usb@fd000000 /usb@fd800000 /usb@fd840000 /usb@fd880000 /usb@fd8c0000 \
-            /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port \
-            /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
+          # Match the original Panther X2 DTS enabled USB subset only:
+          # host0 xHCI/EHCI/OHCI and USB2PHY0. Other RK356x USB controllers
+          # remain at their upstream disabled defaults.
+          for node in /usb@fcc00000 /usb@fd800000 /usb@fd840000 \
+            /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port; do
             assert_status "$node" okay
           done
 
