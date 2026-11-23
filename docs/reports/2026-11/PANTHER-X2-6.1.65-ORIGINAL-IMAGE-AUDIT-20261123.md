@@ -249,74 +249,78 @@ kernel/drivers/net/mdio/of_mdio.ko
 - 后续提取只针对第 11 节明确列出的文件，不重复已完成的镜像布局、boot script CRC、DTB 文件存在性和 Kernel 配置核验。
 - 结论必须区分用户本机报告、已读取文件静态证据、待验证事项和实机运行证据。
 
-## 14. 镜像构建来源与个人 fork 代码审计（2026-11-23 补充）
+## 14. 镜像构建来源、上游工作流与自定义代码审计（2026-11-23 修订）
 
-现有一手镜像元数据与公开仓库历史源码快照显示：该镜像并非简单地由 Ophub 官方仓库直接执行一次构建并原样发布。当前最强证据指向一个 Panther X2 专用 fork 的 GitHub Actions 工作流负责生成基础镜像并调用 Ophub Rebuild action 完成板级重构。
+本节修正前一版的来源推断：不能把 `lintao1890/panther-x2-armbian` 当成 2023-12-07 镜像的构建仓库。GitHub 仓库元数据显示，该仓库是 `ophub/amlogic-s9xxx-armbian` 的 fork，创建于 2024-01-21，晚于原始镜像时间。因此它只能作为后续 fork 快照/交叉比较样本，不能是 2023-12-07 构建当时的在线仓库身份。
 
-### 14.1 镜像自身的构建元数据
+### 14.1 镜像自身保留的构建元数据
 
-当前设备遗留的 /etc/ophub-release 字段记录：
+设备遗留的 `/etc/ophub-release` 字段记录：
 
-- BUILD_REPOSITORY=github.com/armbian/build
-- REBUILD_REPOSITORY=github.com/ophub/amlogic-s9xxx-armbian
-- KERNEL_REPO=ophub/kernel
-- KERNEL_TAGS=stable
-- CONTRIBUTORS=tdleiyao
-- BUILDER_NAME=ophub
-- PACKAGED_DATE=2023-12-07
-- MODEL_NAME=Panther-X2、SOC=rk3566
+- `BUILD_REPOSITORY=github.com/armbian/build`
+- `REBUILD_REPOSITORY=github.com/ophub/amlogic-s9xxx-armbian`
+- `KERNEL_REPO=ophub/kernel`
+- `KERNEL_TAGS=stable`
+- `CONTRIBUTORS=tdleiyao`
+- `BUILDER_NAME=ophub`
+- `PACKAGED_DATE=2023-12-07`
+- `MODEL_NAME=Panther-X2`、`SOC=rk3566`
 
-这些字段支持“Armbian 基础构建 + Ophub 重构框架 + Ophub kernel 发布资产”的组合来源。BUILDER_NAME=ophub 是镜像 builder signature 字段，不等于所有构建步骤、补丁和板级代码均由 Ophub 官方仓库作者编写。
+这些元数据指向 Armbian 基础构建、Ophub Rebuild 项目和 Ophub kernel 发布资产。特别是 `REBUILD_REPOSITORY` 明确指向 Ophub 官方仓库，而不是 lintao1890 的 fork。
 
-### 14.2 镜像时间点附近的个人 fork 快照
+`BUILDER_NAME=ophub` 是镜像签名/标识字段，本身不能证明每个二进制均由 Ophub 作者亲自编写，也不能证明镜像由某台个人机器本地打包。
 
-公开仓库：https://github.com/lintao1890/panther-x2-armbian
+### 14.2 构建时间点的 Ophub 上游提交
 
-与 gzip header 时间（2023-12-07 05:18:54 UTC）最接近的已识别仓库提交：
+镜像 gzip header 时间为 2023-12-07 05:18:54 UTC。与该时点相邻的 `ophub/amlogic-s9xxx-armbian` 提交：
 
-- 31b1b96f258a6d66ecaf8a719145860b533100f6，提交时间 2023-12-07 03:28:08 UTC；
-- 下一提交 96fce8d0e059ab9e7ead3c27a922c9bd0f9da896，时间 2023-12-07 06:07:11 UTC，晚于 gzip header 时间。
+- `c2fdbfa0be9d8e4ab3704c33525adae53bca681e`
+- 提交时间：2023-12-07 03:28:08 UTC
+- 提交说明：`Adding kernel directory check`
 
-因此前一提交是当前最强公开源码快照候选，但没有原始 GitHub Actions run/input/checkout SHA，不能证明它就是实际执行构建时的确切 checkout。
+同一提交也出现在后来 fork 的历史中。时间关系与镜像的 `PACKAGED_DATE` 相符，但仍缺原始 GitHub Actions run ID、workflow dispatch inputs、实际 checkout SHA 和产物记录，故它是强时间点源码候选，不是单独的构建证明。
 
-### 14.3 工作流明确包含 fork 自己的编排代码
+### 14.3 当时工作流呈现的构建方式
 
-在 31b1... 快照的 .github/workflows/build-armbian.yml 中，流程是：
+该时间点的 `.github/workflows/build-armbian.yml` 工作流内容显示：
 
-1. checkout 当前 Panther X2 fork；
-2. clone Armbian 官方 armbian/build 的浮动 main；
-3. 运行 compile.sh RELEASE=jammy BOARD=odroidn2 BRANCH=current 等参数，先构建通用 Jammy 基础镜像；
-4. 调用 ophub/amlogic-s9xxx-armbian@main 的 Rebuild Armbian action；
-5. 将重构后的镜像上传到 fork 自己的 Release。
+1. 在 GitHub Actions runner 上 checkout `ophub/amlogic-s9xxx-armbian`；
+2. clone Armbian 官方 `armbian/build` 的 `main` 分支；
+3. 使用 `RELEASE=jammy BOARD=odroidn2 BRANCH=current` 等参数先生成通用 Jammy 基础镜像；
+4. 调用 `ophub/amlogic-s9xxx-armbian@main` 的 Rebuild Armbian action；
+5. 通过 GitHub Release action 上传重构后的镜像。
 
-这不是“在 Ophub 官方仓库内直接生成并发布”的单一流程。它是 fork 仓库自行维护的 Actions 编排，依赖 Armbian 官方构建系统和 Ophub 重构 action 两个上游。
+这说明公开构建流程设计为 **GitHub Actions 自动构建**，不是要求维护者在个人电脑上手工编译、打包。由于 `armbian/build@main` 与 Ophub action 都使用浮动分支引用，精确依赖提交仍需历史 run/日志才能锁定。
 
-### 14.4 Panther X2 专用配置与自定义代码边界
+### 14.4 Panther X2 专用配置与贡献者代码
 
-同一快照的 model_database.conf 包含 Panther X2 专用记录：model ID r301、SoC rk3566、DTB rk3566-panther-x2.dtb、kernel tag family 6.1.y、board panther-x2、contributor 字段 tdleiyao、boot config armbianEnv.txt。
+构建时点的 Ophub `model_database.conf` 已有 Panther X2 记录，字段包括 model ID `r301`、SoC `rk3566`、DTB `rk3566-panther-x2.dtb`、kernel tag family `6.1.y`、board `panther-x2`、contributor `tdleiyao`、boot config `armbianEnv.txt`。
 
-fork 中还存在 Panther X2 专用 armbianEnv.txt，以及 compile-kernel/tools/script/armbian_rootfs.sh 等脚本。后者负责清理/重打包基础 rootfs、重命名镜像和生成 sha256 文件；它不是内核驱动补丁，但属于镜像生成路径中的可执行自定义代码，必须纳入审计。
+这说明 Panther X2 支持并非由基础 Armbian Odroid N2 配置自动产生，而是通过 Ophub 项目中的板级记录和 Panther X2 专用文件集成。贡献者字段表明存在板级支持贡献，但不能仅凭该字段认定贡献者自行编写了全部相关代码，必须看具体提交和文件 diff。
 
-rebuild、armbian_rootfs.sh、armbian_compile_kernel_script.sh 等文件头标注来源于 Ophub Rebuild 项目，不能仅凭版权头认定 fork 内文件与当时 Ophub 上游版本逐字节一致。需要以同一时间点的上游 commit 做文件级 diff，识别 fork 自己的改动。
+### 14.5 后续 fork 与上游的文件级比较
 
-### 14.5 当前来源判断
+对 `lintao1890/panther-x2-armbian@31b1b96f258a6d66ecaf8a719145860b533100f6` 与 `ophub/amlogic-s9xxx-armbian@c2fdbfa0be9d8e4ab3704c33525adae53bca681e` 的 Git tree 做了逐项比较：
 
-| 层次 | 当前判断 | 证据等级 |
-|---|---|---|
-| 原始镜像身份 | 用户持有的 2023-12-07 Panther X2 Jammy 6.1.65 原件 | 已确认 |
-| 镜像生成入口 | Panther X2 fork 的 Actions 工作流 | 高置信度候选；缺原始 Actions run |
-| 基础 rootfs | Armbian build 的 Odroid N2 Jammy 基础构建，再经 Panther X2 重构 | 工作流源码已确认；具体 run inputs 未保存 |
-| 板级重构 | 调用 ophub/amlogic-s9xxx-armbian@main | 工作流源码已确认；当时 action commit 未固定 |
-| Kernel | 从 ophub/kernel 的 kernel_stable 6.1.y 通用资产路线选取 | 高置信度；待原始 kernel tarball / Actions 记录闭环 |
-| Panther X2 板级配置 | fork 自带 model database 与 Panther X2 boot environment | 源码快照已确认 |
-| Loader/U-Boot/Firmware | 重构脚本从 Ophub 相关仓库浮动 main 获取 | 构建代码已确认；实际二进制 commit 未锁定 |
-| fork 自编代码 | 工作流编排、rootfs 整理脚本及板级配置确实存在 | 已确认存在；具体差异尚待逐文件 diff |
+- fork 的仓库创建时间为 2024-01-21，晚于镜像时间；
+- 两边共有的 tracked blob 文件中，没有发现内容不同的文件；
+- fork 比对应上游快照多 6 个文件：4 个 kernel config、1 个 OpenWrt build dependency 脚本、1 个 x86_64 loader symlink/文件；
+- `.github/workflows/build-armbian.yml`、`rebuild`、Panther X2 `model_database.conf`、Panther X2 `armbianEnv.txt`、`armbian_rootfs.sh`、`armbian_compile_kernel_script.sh` 均与对应上游快照逐字节相同。
 
-### 14.6 下一轮必须审计的代码范围
+因此目前没有证据表明这个后续 fork 在上述构建关键文件中加入了个人改写。反而，已检查的内容与 Ophub 上游快照一致。额外 6 个文件的存在本身不证明它们参与了这次镜像构建；还需按 workflow 调用关系确认是否会被执行。
 
-1. 31b1... 快照与同时间点 ophub/amlogic-s9xxx-armbian 的 rebuild、build-armbian、compile-kernel 相关文件逐文件比较；
-2. 检查 Panther X2 fork 自己的 .github/workflows/build-armbian.yml、armbian_rootfs.sh 和板级 armbianEnv.txt 是否引入额外补丁、下载替换、文件覆盖或构建后修改；
-3. 检查当时 Ophub action 实际引用的源码版本，以及它下载的 kernel、U-Boot、firmware 资产版本；
-4. 在可获得的镜像内容中寻找 build metadata、脚本残留、软件包版本、文件时间与哈希，和公开 workflow 交叉验证。
+### 14.6 是否存在个人编写代码、是否本地打包：当前判断
 
-审计原则：不把 fork 作者归属等同于恶意或错误；也不把上游项目版权头等同于无修改的上游代码。任何自编代码都先识别其输入、输出和修改范围，再判断它是否影响 Kernel、DTB、initramfs、rootfs、bootloader 或网络行为。
+- **个人电脑本地打包：没有证据支持。** 公开 workflow 是 GitHub Actions 自动化流程，镜像元数据也指向 Ophub Rebuild 仓库。
+- **个人 fork 是 2023-12-07 构建源：排除。** 当前可核验的 lintao1890 fork 创建于 2024-01-21，晚于镜像。
+- **个人贡献者代码：可能存在板级贡献，但不能泛化。** Panther X2 的 model database、专用 boot environment、DTB 等需追踪引入提交；当前尚无证据显示它们包含私下未公开的构建后补丁。
+- **构建是否完全可复现：尚不能确认。** Armbian build、Ophub Rebuild action、kernel release、U-Boot 和 firmware 部分依赖浮动 `main` 或发布标签；缺原始 Actions run 与具体 inputs。
+
+### 14.7 下一轮必须审计的代码范围
+
+1. 取得 2023-12-07 附近 Ophub Actions workflow run 及其 inputs、checkout SHA、日志和上传产物记录；
+2. 追踪 Panther X2 的 model database 行、Panther 专用 boot files、DTS/DTB 及相关文件最初由哪个提交引入、作者是谁、修改内容是什么；
+3. 锁定当时 `ophub/amlogic-s9xxx-armbian@main`、`armbian/build@main`、`ophub/kernel`、`ophub/u-boot@main`、`ophub/firmware@main` 的实际 commit/tag；
+4. 对实际生成的 Kernel、DTB、uInitrd 与阶段包中的二进制做哈希/构建指纹比对。
+
+审计原则：不把贡献者身份等同于私人定制，也不把上游仓库归属等同于所有组件均为上游原生。只有定位到具体提交、代码差异和实际构建调用关系后，才判断自定义代码是否影响 Kernel、DTB、initramfs、rootfs、bootloader 或网络行为。
