@@ -1,44 +1,25 @@
 #!/bin/sh
-# Panther X2 B1: RAM-only userspace, intentionally no network or storage stack.
+# Panther X2 B1: RAM root, full base hardware support, network isolated.
 PATH=/bin:/sbin
 HOME=/
 PS1='(panther-x2-b1-clean) # '
 export PATH HOME PS1
-
-printf '\n=== Panther X2 B1 clean RAM baseline ===\n'
-printf 'Network stack and network devices: intentionally absent.\n'
-printf 'Linux MMC/eMMC/TF and USB: intentionally absent.\n'
-printf 'Root filesystem: initramfs in RAM; no persistent filesystem is mounted.\n'
-
+printf '\n=== Panther X2 B1 network-isolated RAM baseline ===\n'
+printf 'Network stack and network devices: intentionally disabled.\n'
+printf 'MMC/eMMC/TF/SD, USB, block, filesystems and module support: retained.\n'
+printf 'No persistent filesystem is mounted or written by this init script.\n'
+printf 'Storage controllers may enumerate devices; eMMC safety gate remains mandatory.\n'
+printf 'Wi-Fi/wireless and Bluetooth: excluded from Project A.\n'
 mkdir -p /proc /sys
-
-if ! mount -t proc proc /proc; then
-    printf 'WARNING: could not mount procfs\n'
-fi
-if ! mount -t sysfs sysfs /sys; then
-    printf 'WARNING: could not mount sysfs\n'
-fi
-
-printf '\n--- Kernel ---\n'
-uname -a
+if ! mount -t proc proc /proc; then printf 'WARNING: could not mount procfs\n'; fi
+if ! mount -t sysfs sysfs /sys; then printf 'WARNING: could not mount sysfs\n'; fi
+printf '\n--- Kernel ---\n'; uname -a
 printf '\n--- Device model ---\n'
-if [ -r /proc/device-tree/model ]; then
-    cat /proc/device-tree/model
-    printf '\n'
-else
-    printf 'Device-tree model unavailable\n'
-fi
-
-printf '\n--- Kernel command line ---\n'
-cat /proc/cmdline
-printf '\n--- CPU ---\n'
-cat /proc/cpuinfo
-printf '\n--- Memory ---\n'
-cat /proc/meminfo
-printf '\n--- Mounts (no persistent storage expected) ---\n'
-mount
-printf '\n--- Last 120 kernel messages ---\n'
-dmesg | tail -n 120
-
-printf '\nB1 baseline ready. Interactive shell follows.\n'
+if [ -r /proc/device-tree/model ]; then cat /proc/device-tree/model; printf '\n'; else printf 'Device-tree model unavailable\n'; fi
+printf '\n--- Kernel command line ---\n'; cat /proc/cmdline
+printf '\n--- CPU ---\n'; cat /proc/cpuinfo
+printf '\n--- Memory ---\n'; cat /proc/meminfo
+printf '\n--- Mounts (no persistent filesystem should be mounted) ---\n'; mount
+printf '\n--- Last 120 kernel messages ---\n'; dmesg | tail -n 120
+printf '\nB1 network-isolated baseline ready. Interactive shell follows.\n'
 exec /bin/sh -i
