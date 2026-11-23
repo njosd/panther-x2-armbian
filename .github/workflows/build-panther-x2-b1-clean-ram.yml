@@ -18,23 +18,23 @@ concurrency:
   group: panther-x2-b1-clean-ram
   cancel-in-progress: true
 
+env:
+    KERNEL_VERSION: "6.18.63"
+    KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+    KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+    BUSYBOX_VERSION: "1.37.0"
+    BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
+    JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+    KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
+
 jobs:
-  build-b1-clean-ram:
+  build-kernel-dtb:
+    name: Build and validate kernel plus DTB
     runs-on: ubuntu-24.04
     timeout-minutes: 180
-    env:
-      KERNEL_VERSION: "6.18.63"
-      KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
-      KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
-      BUSYBOX_VERSION: "1.37.0"
-      BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
-      JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
-      KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
-
     steps:
       - name: Checkout project
         uses: actions/checkout@v6
-
       - name: Install isolated build toolchain
         run: |
           set -euo pipefail
@@ -44,7 +44,6 @@ jobs:
             file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
             libncurses-dev libssl-dev make perl python3 qemu-user-static \
             binutils e2fsprogs gdisk kmod zstd u-boot-tools
-
       - name: Fetch exact Linux source commit
         run: |
           set -euo pipefail
@@ -87,7 +86,6 @@ jobs:
             echo "kobject_uevent_patch=$PATCH"
             echo "kobject_uevent_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
           } | tee work/source-lock.txt
-
       - name: Configure from full RK35xx seed and build kernel plus modules
         run: |
           set -euo pipefail
@@ -133,7 +131,6 @@ jobs:
           cp work/kernel.config work/output/kernel.config
           cp "$SEED" work/output/kernel.config.seed
           cp "$FRAGMENT" work/output/kernel.config.fragment
-
       - name: Derive and compile isolated Panther X2 DTB
         run: |
           set -euo pipefail
@@ -229,6 +226,52 @@ jobs:
             sha256sum "$DTB"
           } | tee work/dtb-verification.txt
           cp work/dtb-verification.txt work/output/
+      - name: Save completed kernel and DTB stage
+        uses: actions/upload-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: |
+            work/output/Image
+            work/output/modules.tar.zst
+            work/output/kernel.config
+            work/output/kernel.config.seed
+            work/output/kernel.config.fragment
+            work/output/dtb/rockchip/rk3566-panther-x2.dtb
+            work/output/panther-x2-b1-clean.dts
+            work/output/dtb-verification.txt
+            work/logs/
+            work/source-lock.txt
+            work/kernel-image-file.txt
+            work/dtb-verification.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  build-busybox:
+    name: Build and validate static BusyBox
+    needs: build-kernel-dtb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install BusyBox-only build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex gcc-aarch64-linux-gnu make perl python3 qemu-user-static
+
+      - name: Restore verified kernel and DTB stage
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+
+      - name: Restore installed kernel modules for validation
+        run: |
+          set -euo pipefail
+          mkdir -p work/modules-root
+          tar --zstd -xf work/output/modules.tar.zst -C work/modules-root
 
       - name: Build static BusyBox with minimal applet allowlist
         run: |
@@ -302,6 +345,40 @@ jobs:
 
           qemu-aarch64-static work/output/busybox --list | sort | tee work/busybox-applets.txt
           cp busybox-applets.actual work/output/busybox-applets.txt
+      - name: Save completed BusyBox stage
+        uses: actions/upload-artifact@v6
+        with:
+          name: b1-busybox
+          path: |
+            work/output/busybox
+            work/output/busybox.config
+            work/output/busybox-applets.txt
+            work/logs/busybox-build.log
+            work/busybox-applets.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  package-b1:
+    name: Assemble and verify PREPARE-ONLY image
+    needs: build-busybox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install image packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cpio curl device-tree-compiler e2fsprogs gdisk kmod zstd u-boot-tools
+
+      - name: Restore completed kernel, DTB and BusyBox stages
+        uses: actions/download-artifact@v6
+        with:
+          pattern: b1-*
+          merge-multiple: true
+          path: work
 
       - name: Assemble RAM initramfs and U-Boot boot script
         run: |
@@ -330,7 +407,6 @@ jobs:
             -n "Panther X2 B1 clean RAM boot" \
             -d work/output/boot.cmd work/output/boot.scr
           mkimage -l work/output/boot.scr | tee work/bootscr-header.txt
-
       - name: Include verified JP U-Boot proper and create manifest
         run: |
           set -euo pipefail
@@ -357,8 +433,6 @@ jobs:
             echo "dtb_sha256=$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')"
             echo "toolchain=$(aarch64-linux-gnu-gcc --version | head -n 1)"
           } | tee work/output/BUILD-MANIFEST.txt
-
-
       - name: Package PREPARE-ONLY hybrid TF image and verify layout
         run: |
           set -euo pipefail
@@ -460,7 +534,6 @@ jobs:
             sha256sum -c SHA256SUMS
           )
           cat work/output/SHA256SUMS
-
       - name: Upload B1 clean RAM components (prepare only)
         uses: actions/upload-artifact@v6
         with:
