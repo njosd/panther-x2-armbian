@@ -322,11 +322,6 @@ jobs:
             echo "toolchain=$(aarch64-linux-gnu-gcc --version | head -n 1)"
           } | tee work/output/BUILD-MANIFEST.txt
 
-          (
-            cd work/output
-            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
-          )
-          cat work/output/SHA256SUMS
 
       - name: Package PREPARE-ONLY hybrid TF image and verify layout
         run: |
@@ -364,7 +359,7 @@ jobs:
           sudo mkdir -p work/tf-mnt/dtb/rockchip
           sudo cp -a work/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/
           sudo cp -a work/output/boot.cmd work/tf-mnt/boot.cmd
-          printf '%s\\n' \
+          printf '%s\n' \
             'Panther X2 B1 clean RAM test image; PREPARE-ONLY.' \
             'Boot chain: existing eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
             'No TF IDB/SPL is installed; Linux B1 retains MMC/block/storage and USB support but disables network and Ethernet.' \
@@ -413,6 +408,22 @@ jobs:
           sha256sum "$IMAGE" "${IMAGE}.zst" > work/output/tf-image-sha256.txt
           rm -f "$IMAGE"
           cat work/output/tf-image-sha256.txt
+
+          # Validate compressed artifacts and the exact initramfs payload.
+          zstd -t work/output/modules.tar.zst
+          zstd -t "${IMAGE}.zst"
+          gzip -t work/output/initramfs.cpio.gz
+          gzip -dc work/output/initramfs.cpio.gz | cpio -t > work/initramfs-file-list.txt
+          grep -qx './init' work/initramfs-file-list.txt
+          grep -qx './bin/busybox' work/initramfs-file-list.txt
+          test -s work/initramfs-file-list.txt
+          # Generate the complete checksum manifest after all artifact/readback checks.
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          cat work/output/SHA256SUMS
 
       - name: Upload B1 clean RAM components (prepare only)
         uses: actions/upload-artifact@v6
