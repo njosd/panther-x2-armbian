@@ -23,6 +23,9 @@ CONFIG_ROCKCHIP_ERRATUM_3568002=y
 # CONFIG_MDIO_BUS is not set
 # CONFIG_PHYLIB is not set
 # CONFIG_REALTEK_PHY is not set
+# OpenWrt GPIO hotplug broadcasts uevents through skb APIs; not needed in B1.
+# Its board GPIO button nodes are removed from the clean test DTB.
+# CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG is not set
 # Wi-Fi/wireless and Bluetooth are permanently excluded from Project A.
 # CONFIG_BT is not set
 # CONFIG_WIRELESS is not set
