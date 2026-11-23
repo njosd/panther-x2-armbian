@@ -97,6 +97,7 @@ jobs:
       - name: Configure from full RK35xx seed and build kernel plus modules
         run: |
           set -euo pipefail
+          aarch64-linux-gnu-gcc --version | head -n 1 > work/toolchain-version.txt
           SRC="$GITHUB_WORKSPACE/work/linux"
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
           SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
@@ -249,6 +250,7 @@ jobs:
             work/output/dtb-verification.txt
             work/logs/
             work/source-lock.txt
+            work/toolchain-version.txt
             work/kernel-image-file.txt
             work/dtb-verification.txt
           if-no-files-found: error
@@ -395,12 +397,54 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cpio curl device-tree-compiler e2fsprogs gdisk kmod zstd u-boot-tools
 
-      - name: Restore completed kernel, DTB and BusyBox stages
+      - name: Restore BusyBox from this run
         uses: actions/download-artifact@v6
         with:
-          pattern: b1-*
-          merge-multiple: true
+          name: b1-busybox
           path: work
+
+      - name: Restore kernel and DTB from this run
+        if: ${{ inputs.reuse_kernel_run_id == '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+
+      - name: Reuse kernel and DTB from the selected successful run
+        if: ${{ inputs.reuse_kernel_run_id != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_kernel_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify restored stage inputs before packaging
+        run: |
+          set -euo pipefail
+          required_files=(
+            work/output/Image
+            work/output/modules.tar.zst
+            work/output/kernel.config
+            work/output/kernel.config.seed
+            work/output/kernel.config.fragment
+            work/output/dtb/rockchip/rk3566-panther-x2.dtb
+            work/output/busybox
+            work/output/busybox.config
+          )
+          for path in "${required_files[@]}"; do
+            if [ ! -s "$path" ]; then
+              echo "::error::Required restored stage artifact is missing or empty: $path"
+              exit 1
+            fi
+          done
+          echo "All Kernel/DTB and BusyBox stage inputs are present."
+          if [ -s work/toolchain-version.txt ]; then
+            cat work/toolchain-version.txt
+          else
+            echo "Historical Kernel/DTB artifact has no toolchain-version record; this metadata is unavailable."
+          fi
 
       - name: Assemble RAM initramfs and U-Boot boot script
         run: |
@@ -453,7 +497,11 @@ jobs:
             echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
             echo "busybox_config_sha256=$(sha256sum work/output/busybox.config | awk '{print $1}')"
             echo "dtb_sha256=$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')"
-            echo "toolchain=$(aarch64-linux-gnu-gcc --version | head -n 1)"
+            if [ -s work/toolchain-version.txt ]; then
+              echo "kernel_build_toolchain=$(cat work/toolchain-version.txt)"
+            else
+              echo "kernel_build_toolchain=not-recorded-in-reused-artifact"
+            fi
           } | tee work/output/BUILD-MANIFEST.txt
       - name: Package PREPARE-ONLY hybrid TF image and verify layout
         run: |
