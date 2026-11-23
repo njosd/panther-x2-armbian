@@ -105,7 +105,7 @@ jobs:
           tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
           install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
           file work/output/Image | tee work/kernel-image-file.txt
-          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \\n')"
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
           test "$IMAGE_MAGIC" = "41524d64" || { echo "::error::Kernel payload is not an ARM64 Image"; exit 1; }
           cp work/kernel.config work/output/kernel.config
           cp "$SEED" work/output/kernel.config.seed
