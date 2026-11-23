@@ -219,7 +219,7 @@ kernel/drivers/net/mdio/of_mdio.ko
 1. \`vmlinuz-6.1.65-ophub\)：来自 \`03-kernel.tar.gz\`，manifest 记录大小 33,858,048 bytes。用于核验实际 Kernel 镜像类型、内嵌版本/build 字符串、文件哈希，并与 config/modules 元数据对应。
 2. \`uInitrd-6.1.65-ophub\`：来自 \`05-initramfs-userspace.tar.gz\`。用于检查 uImage/initramfs header、压缩算法、cpio 内容、真实 \`/init\` 与早期用户空间依赖，是当前最重要的未审计启动资产。
 
-请从原 tar 包按精确成员路径提取这两个目标文件，单独上传 Dropbox；上传后核对文件非空、SHA-256 和 tar 成员路径。不要只上传符号链接本身。
+请提取 Kernel 目标文件及启动分区中 uInitrd 符号链接指向的实际二进制，单独上传 Dropbox；上传后核对文件非空、SHA-256、来源路径和文件格式。不要只上传符号链接本身。
 
 ### 11.2 当前不需要提取的内容
 
