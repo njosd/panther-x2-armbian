@@ -55,6 +55,20 @@ jobs:
           git -C work/linux checkout --detach FETCH_HEAD
           ACTUAL_COMMIT="$(git -C work/linux rev-parse HEAD)"
           test "$ACTUAL_COMMIT" = "${KERNEL_SOURCE_COMMIT}"
+          PATCH="scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch"
+          patch --dry-run -d work/linux -p1 < "$PATCH"
+          patch -d work/linux -p1 < "$PATCH"
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("work/linux/lib/kobject_uevent.c").read_text()
+          start = source.index("#else" + chr(10) + "int broadcast_uevent")
+          end = source.index("#endif", start)
+          stub = source[start:end]
+          assert "if (skb)" in stub
+          assert "return -EOPNOTSUPP;" in stub
+          assert "kfree_skb" not in stub
+          print("B1 CONFIG_NET=n kobject_uevent compatibility patch: PASS")
+          PY
           grep -qx 'VERSION = 6' work/linux/Makefile
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
           grep -qx 'SUBLEVEL = 63' work/linux/Makefile
@@ -70,6 +84,8 @@ jobs:
             echo "kernel_config_seed=$SEED"
             echo "kernel_config_seed_blob_sha=$SEED_BLOB"
             echo "kernel_config_seed_origin=ophub/kernel@ba00be60d59300bd93633218a8905829d6cabd72:kernel-config/release/rk35xx/config-6.12"
+            echo "kobject_uevent_patch=$PATCH"
+            echo "kobject_uevent_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
           } | tee work/source-lock.txt
 
       - name: Configure from full RK35xx seed and build kernel plus modules
