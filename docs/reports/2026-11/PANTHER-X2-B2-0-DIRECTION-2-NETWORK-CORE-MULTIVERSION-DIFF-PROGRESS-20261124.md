@@ -906,3 +906,99 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 4. 6.12 移除可选 `ETHERNET_PACKET_MANGLE` hook，是否与 Panther PHY driver 有关联留给方向三，不在本轮越界审计。
 
 本轮仅进行固定源码端点静态比较；没有构建、修改配置、执行设备操作或实机网络试验。方向二仍未结项；TX DMA descriptor/mapping/doorbell/completion/reclaim 留在后续既定驱动方向，不在本节提前展开。
+
+## 23. 本轮追加核验：netdev_start_xmit、TX queue flow control、watchdog 与 skb completion/free
+
+承接第 22 节的 `ndo_start_xmit` 驱动边界，本轮继续核对其上层调用封装、TX queue stop/wake、BQL（Byte Queue Limits）、watchdog timeout，以及驱动完成发送后 skb 的释放/消费路径。目标是确认网络核心是否可能在“已进入驱动调用”之后，由通用队列管理或 skb 生命周期机制改变发送推进状态。
+
+固定源码端点仍为第 2 节的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
+- `include/linux/netdevice.h`：`__netdev_start_xmit()`、`netdev_start_xmit()`、`netdev_tx_sent_queue()`、`netdev_tx_completed_queue()`、`__netdev_tx_sent_queue()`、`netif_tx_stop_queue()`、`netif_tx_queue_stopped()`、`netif_xmit_stopped()`、`txq_trans_update()`；
+- `net/core/dev.c`：`netif_tx_wake_queue()`；
+- `net/sched/sch_generic.c`：`dev_watchdog()`；
+- `include/linux/skbuff.h` 与 `net/core/skbuff.c`：skb refcount、`skb_release_all()`、`skb_release_data()`、`consume_skb()`、`napi_consume_skb()` 与 drop-reason 相关路径。
+
+### 23.1 netdev_start_xmit：通用驱动调用封装
+
+三个版本的 `netdev_start_xmit()` 函数体一致：
+1. 取 `dev->netdev_ops`；
+2. 调用 `__netdev_start_xmit()`，后者最终执行 `ops->ndo_start_xmit(skb, dev)`；
+3. 只有驱动返回 `NETDEV_TX_OK` 时才执行 `txq_trans_update(txq)`；
+4. 原样返回驱动的 `NETDEV_TX_OK / NETDEV_TX_BUSY` 等结果。
+
+`txq_trans_update()` 三版一致：仅当 `xmit_lock_owner != -1` 时更新 `trans_start`。未发现 6.1.116→6.1.174 或 6.1→6.12 改变驱动返回码解释、成功发送时间戳更新条件或调用次序。
+
+**6.12 的条件性变化：** `__netdev_start_xmit()` 不再直接写 `__this_cpu_write(softnet_data.xmit.more, more)`，改为调用 `netdev_xmit_set_more(more)`。6.12 helper 的实现为：
+- 非 `CONFIG_PREEMPT_RT`：仍使用 `__this_cpu_write(softnet_data.xmit.more, more)`，与 6.1 实现相同；
+- `CONFIG_PREEMPT_RT`：改为写入 `current->net_xmit.more`，并由 `netdev_xmit_more()` 从当前 task 读取。
+
+这是 PREEMPT_RT 下 xmit_more 状态存储位置的适配；非 RT 配置行为保持原样。其作用是让驱动在一次 TX 批次中判断是否还有后续 skb、决定是否延后 doorbell/kick。它不改变本次 skb 是否调用 `ndo_start_xmit`，也不改变驱动返回码。当前没有 Panther 目标内核的 `CONFIG_PREEMPT_RT` 证据，故只记录为条件性差异，不推定其启用。
+
+### 23.2 TX queue stop/wake 与状态位
+
+以下通用 helper 三个端点函数体一致：
+- `netif_tx_stop_queue()`：更新 `trans_start`，执行与 watchdog 配对的内存屏障，再置位 `__QUEUE_STATE_DRV_XOFF`；
+- `netif_tx_queue_stopped()`：读取 driver XOFF；
+- `netif_xmit_stopped()`：检查 `QUEUE_STATE_ANY_XOFF`；
+- `netif_tx_wake_queue()`：原子清除 driver XOFF；只有原先确实 stopped 时才在 RCU 读锁内取 qdisc 并调用 `__netif_schedule()`；
+- `netif_tx_stop_all_queues()`：逐队列调用 stop helper。
+
+本轮没有发现版本变化造成 generic TX queue stop/wake 状态位语义、唤醒后 qdisc 重新调度动作或 memory-ordering 配对发生变化。网卡驱动是否正确调用 stop/wake、是否在资源恢复时唤醒，属于驱动实现和运行时行为，本轮不作推断。
+
+### 23.3 BQL：发送记账与完成记账
+
+`netdev_tx_sent_queue()` 三版函数体逐字一致：在 `CONFIG_BQL` 开启时调用 `dql_queued()`；若可用额度不足，则更新时间戳、设置 STACK_XOFF，并通过屏障和二次额度检查避免与 completion 并发时永久停队列。
+
+`__netdev_tx_sent_queue()` 三版一致：
+- `xmit_more=true` 时只记入 queued bytes，并返回当前 driver queue 是否已 stopped；
+- 最后一包（`xmit_more=false`）调用 `netdev_tx_sent_queue()` 并返回 true，提示驱动应 kick/doorbell。
+
+`netdev_tx_completed_queue()`：
+- 6.1.116 与 6.1.174 函数体一致；
+- 6.12 仅在既有 `smp_mb()` 行增加注释，明确 `netdev_txq_completed_mb()` 依赖该屏障；可执行语句和顺序未变。
+
+因此，本轮未发现 BQL queued/completed 计数、额度判断、STACK_XOFF 设置/清除或完成后 qdisc 唤醒逻辑的行为变化。实际是否编译启用 `CONFIG_BQL`、驱动是否调用 sent/completed helper，仍需目标配置和驱动源码证据。
+
+### 23.4 TX watchdog timeout
+
+`dev_watchdog()` 三个固定端点函数体完全一致：
+- 仅在设备 present、running、carrier OK 且 qdisc 非 noop 时检查；
+- 遍历 TX queues，仅检查 `netif_xmit_stopped()` 的队列；
+- 使用与 queue stop/sent 路径配对的屏障读取 `trans_start`；
+- 超时后增加 `trans_timeout`、发出 `net_dev_xmit_timeout` trace 和内核日志；
+- 冻结 queues 后调用驱动 `ndo_tx_timeout(dev, queue)`，再解冻；
+- 按最早发送时间重设 watchdog timer。
+
+6.1.116→6.1.174 与 6.1→6.12 均未发现 watchdog 判断条件、timeout 时间计算、驱动 timeout callback 调用或 timer 重排逻辑变化。故本轮没有发现通用 watchdog 在新版本中更容易误判/漏判 TX 停滞的源码差异。
+
+### 23.5 skb completion 与释放路径
+
+驱动成功完成发送后，常见语义是通过 `dev_consume_skb_any()` / `napi_consume_skb()` 消费 skb；丢弃路径则使用 kfree/drop-reason 相关接口。当前方向二只审计网络核心提供的通用生命周期，不据此推定 Panther 驱动具体使用哪一个 helper。
+
+已核对的版本变化：
+- `consume_skb()`：6.1.116 与 6.1.174 一致；6.12 的消费 tracepoint 增加调用者地址参数，随后仍执行 `__kfree_skb()`。
+- `napi_consume_skb()`：三版均先处理零 budget 的非 NAPI 情况，再检查 skb 引用计数；clone 仍走 `__kfree_skb()`，普通 skb 释放资源后进入 NAPI skb cache。6.12 增加 trace caller 参数，并将 `skb_release_all(skb)` 改为 `skb_release_all(skb, SKB_CONSUMED)`，以便释放路径携带消费原因。
+- `skb_release_all()` / `skb_release_data()`：6.12 增加 `enum skb_drop_reason` 参数，并将 reason 传给 frag_list 的 `kfree_skb_list_reason()`；普通 fragment unref、zcopy 清理、head 释放及 page-pool recycle 主体仍保留。
+- skb data refcount：6.1 在 `skb_release_data()` 内直接使用 `atomic_sub_return()`；6.12 抽出 `skb_data_unref()` helper，针对 clone/dataref 已处于最后一个引用的情形先读计数并使用 `smp_rmb()`，否则执行原有 atomic decrement。其目的为重构共享数据引用判断；没有发现普通单 skb 的 fragment/head 释放动作被删除。
+- 6.12 的 skb head 分配器增加 small-head cache 分支，属于 skb 内存分配/回收优化；不是 TX queue handoff 或发送状态机变化。
+
+这些变化主要涉及释放路径的 drop/consume reason 可追踪性、共享数据引用计数整理和内存缓存优化。当前没有发现它们会在 skb 尚未交给驱动前改变普通 UDP TX 的发送结果；若驱动 completion 错误地重复释放、漏释放或错误回收 DMA buffer，那属于驱动所有权/完成处理，不能由本节 generic skb helper 静态比较代替。
+
+### 23.6 本轮结论
+
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | TX 判断 |
+|---|---|---|---|
+| `netdev_start_xmit()` / driver return | 一致 | 调用封装一致 | 无通用交付/返回码变化 |
+| `xmit_more` 状态 | 一致 | PREEMPT_RT 下改为 task-local；非 RT 仍 per-CPU | 条件性执行上下文适配 |
+| queue stop/wake | 一致 | 一致 | 未发现队列状态机回归 |
+| BQL sent/completed | 一致 | 可执行逻辑一致 | 未发现记账/唤醒变化 |
+| watchdog | 一致 | 一致 | 未发现 timeout 判定变化 |
+| skb consume/free | 一致 | reason/caller tracing、dataref helper、small-head cache | 生命周期诊断/内存管理重构，未发现普通 TX handoff 回归 |
+
+**本轮结论：**
+1. 从 `netdev_start_xmit()` 到 `ndo_start_xmit` 的通用封装和返回码处理，三个版本一致。
+2. TX queue stop/wake、BQL 和 watchdog 的核心可执行逻辑没有发现版本回归。
+3. 6.12 的 `xmit_more` 改动仅在 PREEMPT_RT 配置下改变状态存储位置；非 RT 保持原 per-CPU 行为。
+4. 6.12 skb 生命周期变化集中在 reason/caller trace、共享 dataref helper 和小型 head cache；目前未发现会阻断普通 UDP skb 交付的新增 generic TX 丢弃门。
+5. 至此方向二 TX 通用网络核心已覆盖到驱动调用封装、队列流控、watchdog 与 skb completion/free 边界；但方向二整体仍需按原计划核对剩余网络核心子项，不能据此宣布方向二结项，也不提前进入方向三。
+
+本轮仅做固定源码端点静态比较；没有构建、修改配置、执行设备操作或实机网络试验。
