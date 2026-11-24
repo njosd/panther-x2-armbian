@@ -222,7 +222,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 | 阶段 | 名称 | 目标 | 当前状态 |
 |---|---|---|---|
 | B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和 eMMC 安全边界 | 部分完成；安全门未通过 |
-| B1 | 最小 RAM Linux 干净基线 | 进入 `/init`，UART shell 可交互；Linux 不启用网络、Ethernet、MMC/block、USB、无线/蓝牙和模块，根文件系统完全在 RAM | 构建流程已提交；CI/实机未验证 |
+| B1 | 最小 RAM Linux 干净基线 | 保留正常 RK35xx 基础能力；隔离网络协议栈、板载 Ethernet/GMAC/MDIO/PHY、Wi-Fi/无线和 Bluetooth；RAM initramfs/UART shell | CI 流水线曾成功；旧 Kernel/DTB 因应用已废弃补丁不予验收；修正后 Kernel/DTB 待重建；实机未验证 |
 | B2 | 板载有线千兆网口分层验证 | 仅对板载 Ethernet 的内核网络基础、MAC、MDIO/PHY 依赖按单项引入；再验证 link、静态地址、ARP、同网段与网关 ICMP | 未开始 |
 | B3 | 板载有线千兆网口 TCP/UDP 验证 | 仅通过板载有线千兆网口进行 TCP 与 UDP 双向端到端验证，分开测试且结果可重复 | 未开始 |
 | B4 | 网络组件按需扩展 | 根据明确需求加入 DHCP/DNS/SSH 等 | 条件触发 |
@@ -254,7 +254,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - JP proper 新系统重复启动稳定性；
 - 长期 U-Boot 候选完整板级适配。
 
-**当前唯一优先事项：** 静态审查并运行新 B1 clean RAM workflow，审查构建 artifact；同时独立完成 B0.4 eMMC pre-Linux 写入安全门。安全门未通过前，不写 SU08G、不启动实验固件、不进行 Panther X2 实机启动。
+**当前唯一优先事项：** 按 2026-11-24 修正后的 workflow 重新构建未修改上游源码的 Kernel/DTB，并继承新产物完成后续阶段；并行只读推进 B0.4 eMMC pre-Linux 写入安全门审计。安全门未通过前，不写 SU08G、不启动实验固件、不进行 Panther X2 实机启动。失败后只恢复失败阶段及必要下游，禁止重复已成功且输入未变化的耗时阶段。
 
 ## 9. 关联文档与维护
 
@@ -531,3 +531,10 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 | B2-5 | 验证 MAC DMA 与真实数据收发 | TX/RX、ARP、ICMP、TCP/UDP、持续传输和稳定性 |
 
 每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。不得将 GMAC probe 成功等同网络打通。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。B2 属于项目 A 的分层功能验证，不是恢复项目 B 的历史故障根因调查。
+
+
+## 2026-11-24 B1 CI 复核状态
+
+Run #62（45291347822）的 BusyBox 与 PREPARE-ONLY 镜像打包 Job 成功，但 Kernel/DTB 来自 Run #58（45201970736），其构建仍应用了 2026-11-23 B1 基线纠偏明确废弃的 `kobject_uevent` 补丁。因此 Run #62 只能记录为流水线与打包验证成功，不能作为当前 B1 Kernel/DTB 基线验收。Workflow 已在 `e6d94d2d337fe6caaff1d743aca1aef77451159d` 修正为不修改锁定上游源码；新 Kernel/DTB 构建待运行。具体 artifact、digest、Job 结果和证据见 [B1 构建实施记录](PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)。
+
+后续所有多阶段构建必须支持跨 Run 阶段产物复用和从失败阶段恢复。复用前校验来源 commit、配置基线及 SHA-256；基线变化的产物必须重建。不得为修复单一阶段而重复耗时的已成功阶段。
