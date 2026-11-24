@@ -98,9 +98,9 @@ U-Boot DHCP、网关和外部 IP ping 均成功，表示当前启动链在本次
 #### U-Boot MAC 环境变量
 现场执行 `printenv ethaddr`，输出：
 
-    ethaddr=16:70:f6:c8:b2:95
+    ethaddr=[REDACTED-MAC]
 
-结论：当前 U-Boot 环境中存在 `ethaddr`，其值为 `16:70:f6:c8:b2:95`。首字节 0x16 的 I/G 位为 0（单播），U/L 位为 1（本地管理地址）。因此这是一个本地管理型单播 MAC，不能仅凭该环境变量认定它就是板载厂商写入的原始 MAC，也不能证明 Ethernet 驱动已经将其配置到 MAC 控制器或实际用于发包。仍需核对 eth1addr/其他接口变量、设备驱动当前 MAC，以及 Panther X2 实际 MAC 存储来源。此次仅 printenv 读取，没有修改环境变量。
+结论：当前 U-Boot 环境中存在 `ethaddr`，其值为 `[REDACTED-MAC]`。首字节 0x16 的 I/G 位为 0（单播），U/L 位为 1（本地管理地址）。因此这是一个本地管理型单播 MAC，不能仅凭该环境变量认定它就是板载厂商写入的原始 MAC，也不能证明 Ethernet 驱动已经将其配置到 MAC 控制器或实际用于发包。仍需核对 eth1addr/其他接口变量、设备驱动当前 MAC，以及 Panther X2 实际 MAC 存储来源。此次仅 printenv 读取，没有修改环境变量。
 
 当前已知：U-Boot 有 ethaddr 环境变量；板载原始 MAC 是否已正确读取、驱动是否采用该值，仍未确认。
 
@@ -112,7 +112,7 @@ U-Boot DHCP、网关和外部 IP ping 均成功，表示当前启动链在本次
 
 - 启动链：eMMC 前级 SPL → TF 上 JP-TvBox U-Boot proper；当前 proper 为 U-Boot 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000)。
 - 当前停留在 U-Boot => 提示符，尚未启动 Linux。
-- 当前环境变量已读取：ethaddr=16:70:f6:c8:b2:95。该值是本地管理型单播 MAC；其来源及是否被 Ethernet 驱动实际采用尚未确认。
+- 当前环境变量已读取：ethaddr=[REDACTED-MAC]。该值是本地管理型单播 MAC；其来源及是否被 Ethernet 驱动实际采用尚未确认。
 - mdio list 枚举 ethernet@fe010000；mii device 也枚举并选中同名设备。
 - mii info 0-31 语法尝试失败，没有完成 PHY 扫描；PHY 地址/型号、link、DHCP、网关 ping、外部 IP ping 均未验证。
 - 已执行的命令均为查询/帮助命令；没有执行 DHCP、没有进行网络下载、没有写 PHY 寄存器、没有执行 setenv/saveenv，没有写 TF/eMMC，也没有启动其他镜像。
@@ -358,13 +358,13 @@ Current device: 'ethernet@fe010000'
 ```
 ## Error: "ethact" not defined
 ## Error: "ethprime" not defined
-ethaddr=16:70:f6:c8:b2:95
+ethaddr=[REDACTED-MAC]
 ```
 
 记录：
 - `ethact` 未定义。
 - `ethprime` 未定义。
-- `ethaddr` 已定义为 `16:70:f6:c8:b2:95`。
+- `ethaddr` 已定义为 `[REDACTED-MAC]`。
 - `ethact`/`ethprime` 未定义不等于 Ethernet DM 设备未 probe，也不推翻 `mii device` 已确认唯一 MII 设备且当前选择为 `ethernet@fe010000` 的结果。
 - MAC 首字节 `0x16` 表明该地址为单播、本地管理地址；其来源和驱动是否实际采用仍未由当前输出证明。
 
@@ -503,7 +503,7 @@ Resetting CPU ...
 
 实体 Reset 按钮短按未恢复；用户随后断电重启，重新进入 U-Boot proper。重新核对：
 - `version`：仍为 U-Boot 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000)。
-- `ethaddr=16:70:f6:c8:b2:95` 保持不变。
+- `ethaddr=[REDACTED-MAC]` 保持不变。
 - `ethact`、`ethprime`、`autoload` 均未定义。
 - `ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile` 均未定义。
 - `bootcmd=run distro_bootcmd;boot_fit;boot_android ${devtype} ${devnum};`
