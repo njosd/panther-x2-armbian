@@ -254,3 +254,78 @@ Panther 当前命中路径仍是：
 ### 13.5 当前结论
 
 6.18.63 的 RK3568 ops、RGMII clocks 和 external PHY 资源解析与 Panther runtime DTS 条件相符。尚未发现新的静态 setup/probe 错误。但这仍是源码控制流匹配，不是 6.18 网络功能的实机验证；实际 clock rate、GRF 写入是否成功和物理 RGMII 波形仍未验证。
+
+
+## 14. 跨组件初始化时序：6.1.116、6.12.81 与 6.18.63 的组合核对
+
+本节将 Rockchip glue、CCF clock、GRF、PHY regulator、STMMAC core 的先后关系放在同一条调用链审查，避免把每个函数单独判为“正常”后忽略组合效应。
+
+### 14.1 三版共同的主时序骨架
+
+三版 Panther GMAC1 的主流程均为：
+
+1. rk_gmac_setup() 解析接口模式、clock_in_out、TX/RX delay、GRF、PHY regulator；
+2. rk_gmac_clk_init() 获取 Rockchip glue 所需 clocks；
+3. rk_gmac_powerup() 开始上电；
+4. gmac_clk_enable(true) 使能 GMAC 时钟；
+5. 配置 SoC GRF 的接口模式及 RGMII delay；
+6. rk_gmac_phy_power_on(true) / rk_phy_powerup() 打开外置 PHY supply；
+7. pm_runtime_get_sync()；
+8. 调用 STMMAC platform/core probe，注册 MAC、MDIO 并连接 PHY；
+9. 接口 open/link-up 时配置 MAC speed、TX clock 和 MAC TE。
+
+因此 6.18.63 没有把 PHY regulator 上电移到 GMAC clock enable 之前，也没有把 RGMII GRF 配置放到 PHY regulator 之后。不能仅凭函数拆分或行号变化判断初始化顺序颠倒。
+
+### 14.2 真正发生变化的是“时钟使能成功”与“后续配置继续”的组合
+
+| 维度 | 6.1.116 | 6.12.81 | 6.18.63 |
+|---|---|---|---|
+| GMAC clocks | bulk prepare/enable | 逐项 prepare/enable | bulk prepare/enable |
+| enable 错误处理 | 检查并返回 | 多项只检查 handle，不检查 enable 返回值 | 检查并返回 |
+| 时钟稳定等待 | 5ms | 100–200µs | 5ms |
+| clock selection | ops callback（RK3568 未设置） | ops callback（RK3568 未设置） | 新的 SoC GRF IO/CRU selector helper；RK3568 masks 未设置，实际不写此项 |
+| RGMII GRF | set_to_rgmii，写入顺序 data→enable | 同左，但历史顺序曾为 enable→data | data→enable |
+| PHY regulator enable | 调用后即使失败，helper 最终仍返回 0 | 同样不把 regulator_enable 错误传播给 powerup | 返回真实错误，失败会阻止继续 probe |
+| PHY supply 与 MAC clock 的顺序 | clocks→GRF→supply | clocks→GRF→supply | clocks→GRF→supply |
+
+**关键组合结论：** 6.12 的问题不只是“少等了约 5ms”，而是“逐项 enable 的错误可能被忽略 + 只等待 100–200µs + 后续仍执行 GRF/PHY supply/STMMAC probe”。如果某个时钟 enable 失败，后续阶段仍可能继续，形成表面 probe/link 成功但底层时钟条件不完整的状态。这是比孤立 delay 差异更完整、也更值得保留的组合候选。
+
+但当前没有现场证据证明 6.12 的 Panther GMAC 任一必需 clock 的 enable 曾失败；也没有证据证明 100–200µs 对 RK3566 一定不足。因此它是**高价值机制候选，不是根因定案**。
+
+### 14.3 6.18.63 对这组组合的处理
+
+6.18.63 恢复了 bulk enable 的整体错误检查和 5ms settle；若 clk_phy enable 失败，还会回滚已启用的 bulk clocks。外置 RTL8211F 场景下 integrated-PHY clk_phy 不构成独立时钟依赖，但错误回滚仍是更完整的通用实现。
+
+另一个正向变化是 PHY regulator enable 错误现在会向 rk_gmac_powerup() 传播；旧的 6.1.116/6.12.81 helper 在记录错误日志后仍无条件返回 0。6.18 因而避免在 PHY supply enable 失败时继续进入 STMMAC probe。
+
+### 14.4 6.18 新增的 RK3568 PHY interface select 写入
+
+6.18.63 的 RK3568 ops 新增 gmac_phy_intf_sel_mask = GENMASK_U16(6, 4)；rk_gmac_powerup() 在 set_to_rgmii() 之前通过 rk_get_phy_intf_sel(RGMII) 编码并写入 GMAC1_CON1 的接口选择字段，检查 regmap 写入错误。
+
+旧 6.1.116 / 6.12.81 RK3568 ops 没有这组通用字段写入；其 rk3568_set_to_rgmii() 直接写 GMAC1_CON0 delay values 和 CON1 的 RGMII mode / delay enable。
+
+静态字段位置：
+- 新的 PHY interface select：CON1 bits 6:4；
+- RGMII/SGMII mode：CON1 bit 7；
+- RX/TX delay enable：CON1 bits 1/0；
+- delay values：CON0。
+
+这些字段在位域上不重叠，因此按代码写入顺序，6.18 先设置 bits 6:4，再由 set_to_rgmii() 设置 bit7、bit1、bit0，不会从写掩码本身推导出覆盖接口选择字段的冲突。它是 6.18 新增的硬件配置步骤，当前看属于显式补齐接口选择，而非已证实回归。
+
+仍需核实 stmmac_get_phy_intf_sel() 对 RGMII 返回的枚举值与 RK3568 bits 6:4 的硬件编码是否完全一致；本轮尚未完成该 helper/SoC TRM 编码闭环，因此不把“位域不重叠”夸大为“编码必然正确”。
+
+### 14.5 GRF 写入错误传播的组合边界
+
+6.18 新增的通用 PHY interface select GRF 写入会检查返回值并在失败时关闭 clocks、终止 powerup；但 RK3568 set_to_rgmii() 内部两次 regmap_write() 仍为 void 且不检查返回值。该行为在 6.1.116/6.12.81 也存在，不是 6.18 新回归。
+
+因此三版都存在一个共同的可观察性缺口：RGMII delay/mode 写入失败时，glue 层可能继续 PHY supply 上电和 STMMAC probe。当前没有 regmap 错误证据；不得把它单独定为故障原因。
+
+### 14.6 当前组合判断
+
+- **6.12.81 高价值候选：** clock enable error handling 退化 + 100–200µs settle + 无条件继续后续 powerup/probe。
+- **6.18.63 正向变化：** bulk enable error propagation + 5ms settle + PHY clock enable 失败回滚 + PHY regulator error propagation。
+- **6.18.63 新增项：** RK3568 PHY interface select field write；位域与 RGMII mode/delay enable 不重叠，编码值仍待核对。
+- **三版共同缺口：** RK3568 RGMII delay/mode 的两次 regmap_write 返回值未向 powerup 传播。
+- **尚未证明：** 6.12 任一必需 clock enable 失败、settle 不足、或 GRF 写入失败在 Panther 实际发生。
+
+这轮没有进行设备操作、构建或补丁修改。
