@@ -435,3 +435,18 @@ Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
 此处只审计源码控制流和已有日志，不读取 MMIO/MDIO，不重启接口、不发包、不构建、不修改设备。
 
 **B2-0 继续；B2-1 不放行。**
+
+
+## 2026-11-24 B2-0 组合时序研究增补
+
+专项报告 `PANTHER-X2-PROJECT-A-B2-0-GMAC-6.18-CROSSCHECK-20261124.md` 第 14 节新增 6.1.116、6.12.81、6.18.63 跨组件 power-up 顺序比较。
+
+新增发现与执行要求：
+1. 三版 Panther 主调用顺序均为 GMAC clocks → RGMII GRF → external PHY regulator → runtime PM → STMMAC probe；没有发现 6.18 把 PHY 上电与 MAC clock/GRF 的先后颠倒。
+2. 6.12.81 的候选风险必须作为组合评估：逐项 clock enable 不检查返回值 + 100–200µs settle + 后续仍继续 GRF/PHY supply/STMMAC probe。不得只把 5ms 与 100µs 的数字孤立比较。
+3. 6.18.63 恢复 bulk clock enable 错误传播与 5ms settle；并修复 PHY regulator enable 错误传播，避免 supply enable 失败后仍继续 STMMAC probe。
+4. 6.18.63 新增 RK3568 PHY interface select 写入（GMAC1_CON1 bits 6:4），位域不与 RGMII mode bit7、delay enable bits1:0 重叠；但 helper 返回的 RGMII 编码值仍待对照 RK3568 硬件定义，暂不作正确性定论。
+5. 三版共同保留 RK3568 RGMII delay/mode regmap_write 返回值不检查的可观察性缺口；没有现场 regmap failure 证据，暂不定为根因。
+6. 下一轮先闭合 interface-select enum/寄存器编码与 clock/resource mapping 的组合语义，再核对 STMMAC probe 前后 DMA reset、MAC open/link-up 的依赖状态。所有已审计项目 B 证据继续复用，不重做实机测试。
+
+状态仍为 B2-0；B2-1 不放行。
