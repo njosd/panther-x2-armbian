@@ -311,3 +311,91 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 本轮新增覆盖 Linux RX 通用分派、IPv4 输入、UDP socket lookup、UDP receive queue 与网络核心 Kconfig 模板差异。此前 TX、checksum、GSO、ARP/neighbour、IPv4 route key、初始化与 NAPI allocator 证据继续复用。
 
 下一项仍在方向二：整理并核对网络核心中 packet socket / AF_PACKET、VLAN/bridge 接收分派以及 netfilter ingress/PREROUTING 相关 Kconfig 与调用链，优先判断它们是否改变普通未打 VLAN 标签、未桥接的 IPv4/UDP 流量。方向二未完成前不进入方向三。B2-0 全程只做不同版本源码、Kconfig、最终配置证据及设备树静态差异审计，不涉及 B1 生成包的实机配置、构建、启动或网络试验。
+
+
+## 14. 本轮追加核验：AF_PACKET、VLAN/bridge RX 与 Netfilter ingress
+
+固定源码端点仍为第 2 节所列三个 commit。本轮读取：
+- `net/packet/af_packet.c`：`packet_rcv()`、`packet_rcv_spkt()`、`tpacket_rcv()`、`packet_create()`
+- `net/8021q/vlan_core.c`：`vlan_do_receive()`
+- `net/bridge/br_input.c`：`br_handle_frame()`、`br_pass_frame_up()`
+- `net/bridge/br_private.h`：`br_mst_is_enabled()`
+- `net/core/dev.c`：`nf_ingress()` 与 ingress hook 调用位置
+- `net/netfilter/core.c`：`nf_hook_slow()`、`nf_register_net_hook()`
+- 相关 packet / bridge / VLAN / netfilter Kconfig。
+
+### 14.1 AF_PACKET 接收
+
+- `packet_rcv_spkt()` 与 `tpacket_rcv()` 三个端点函数体一致（TPACKET 声明位置相邻，不应将声明区域当成实现差异）。
+- `packet_rcv()` 在 6.1.116 与 6.1.174 一致；6.12 改变抓包 snaplen 计算：
+  - 6.1：`snaplen = skb->len`
+  - 6.12：`snaplen = skb_frags_readable(skb) ? skb->len : skb_headlen(skb)`
+- 该变化在 skb fragment 不可由 host 读取时，只让 AF_PACKET 的抓包/过滤可见长度限制在线性 head 部分，避免按完整 skb 长度读取不可读 fragment。它改变的是 PF_PACKET 用户态抓包可见内容，不是普通 IPv4/UDP 协议接收函数的丢包条件。
+- `packet_create()` 在 6.12 有初始化/错误标签整理；三版均保留 CAP_NET_RAW 权限检查、SOCK_DGRAM/SOCK_RAW/SOCK_PACKET 类型检查、packet socket 建立及 protocol hook 注册。未发现普通 IP 收包路径因此改变。
+- `CONFIG_PACKET`、`CONFIG_PACKET_DIAG` 在两个已读取配置模板中均为 y。AF_PACKET 功能编入不表示系统一定运行 tcpdump 或其他 packet socket 监听程序。
+
+### 14.2 VLAN RX
+
+`vlan_do_receive()` 三个源码端点函数体一致。它仅在 skb 存在硬件 VLAN tag 时按 VLAN protocol/ID 查找 VLAN net_device；匹配后切换 skb->dev、必要时恢复 VLAN header、清理硬件 tag 并更新 VLAN 统计。
+
+因此，普通未打 VLAN 标签的 IPv4/UDP skb 不会因为本函数的版本变化而改变路径；本轮没有发现该函数在 6.1.116→6.1.174 或 6.1→6.12 有实现差异。
+
+配置模板差异：
+- 6.1 general `config-6.1`：`CONFIG_VLAN_8021Q=y`
+- 当前 6.12 RK35xx `config-6.12` 候选模板：`CONFIG_VLAN_8021Q=m`
+- 两个模板均为 `CONFIG_BRIDGE_VLAN_FILTERING=y`。该选项依赖 BRIDGE 与 VLAN_8021Q；6.12 中 VLAN 驱动模块化，意味着相关 VLAN 功能需模块可用/加载后才能使用，不代表无 VLAN 标签的物理接口普通 IPv4/UDP 自动经过 VLAN 子设备路径。
+
+### 14.3 Bridge RX
+
+`br_handle_frame()` 的变化仅在网卡设备注册了 bridge RX handler、数据包确实进入 Linux bridge port 时相关：
+- 6.1.116→6.1.174：MST helper 从接收 bridge 对象改为接收 bridge port；helper 同时增加对 port VLAN group 指针的 RCU 检查，以规避 port 删除竞争。调用点相应调整。
+- 6.12：`br_handle_frame()` 移除原先的 `br_offload_input(p, skb)` 快速处理调用，并在 bridge skb control block 初始化后设置 `br_tc_skb_miss_set(skb, false)`；MST helper 继续使用 port 参数。
+- `br_pass_frame_up()` 三个端点函数体一致。
+- 这些是 bridge/switchdev/TC offload 集成路径变化。当前没有证据证明 Panther 故障接口处于 Linux bridge port，也没有证据证明 bridge RX handler 对普通物理接口生效。不能把这组变化当成未桥接接口的普通 IPv4/UDP 根因。
+
+### 14.4 Netfilter ingress / hook dispatch
+
+- `net/core/dev.c` 的 `nf_ingress()` 仅在 `nf_hook_ingress_active(skb)` 为真时执行；active 状态来自实际注册的 ingress hook。代码先交付待处理 packet_type，再执行 ingress hook；无活动 hook 时直接返回，不增加 Netfilter ingress 拦截。
+- `__netif_receive_skb_core()` 在三个端点均保留 ingress hook 与 VLAN RX handler 的先后处理结构。6.12 相关 timestamp 状态变量迁入 `net_hotdata`，不是新增默认 ingress drop。
+- `nf_register_net_hook()` 与 `nf_register_net_hooks()` 三版函数体一致；`NFPROTO_INET` 的 ingress hook 注册仍按 INET ingress 规则处理，其他 INET hook 同时注册 IPv4/IPv6。
+- `nf_hook_slow()` 在 6.1.116 与 6.1.174 一致；6.12 将 `NF_STOLEN` 从 default 分支单独列出，并返回 verdict 中的 error 编码；其他非标准 verdict 改为 WARN_ON_ONCE。常规 `NF_ACCEPT`、`NF_DROP`、`NF_QUEUE` 分支保持相同。普通规则未返回带错误码的 NF_STOLEN 时，不应推断此变化会改变报文命运。
+- `CONFIG_NETFILTER_INGRESS`、`CONFIG_NETFILTER_EGRESS` 在 Kconfig 三个源码端点均为 default y，并 select `NET_INGRESS` / `NET_EGRESS`。编译支持不等于实际有 ingress hook 或规则注册。
+- IP `PREROUTING` 仍需有对应 IPv4 Netfilter hook 注册者（例如 iptables/nftables 规则链）才会执行相应 hook；`CONFIG_NETFILTER=y` 本身不是丢包规则。
+
+### 14.5 配置模板交叉对照
+
+以下仅比较已固定来源的模板文件，不冒充 6.12.81 最终构建 `.config`：
+- 6.1：`ophub/kernel@8f6eb6e392d68b89a4708c8c45caf9d3f46eadaa`，`kernel-config/release/general/config-6.1`，blob SHA `c5e4598301c3ef3675be0058b99b9b6044a14bbf`。
+- 6.12 候选：`ophub/kernel@bfc9b24f64cf30c3499295b484bbcabddbcc18b6`，`kernel-config/release/rk35xx/config-6.12`，blob SHA `6c7714f5668362dd4ae9c4d1a7eb8249e6b23de5`。
+
+| 符号 | 6.1 模板 | 6.12 候选模板 | 判断 |
+|---|---:|---:|---|
+| `NET_INGRESS` / `NET_EGRESS` | y / y | y / y | 一致 |
+| `NETFILTER_INGRESS` / `NETFILTER_EGRESS` | y / y | y / y | 一致 |
+| `PACKET` / `PACKET_DIAG` | y / y | y / y | 一致 |
+| `BRIDGE` | m | m | 一致 |
+| `BRIDGE_VLAN_FILTERING` | y | y | 一致 |
+| `VLAN_8021Q` | y | m | 模块形态变化 |
+| `BRIDGE_NETFILTER` | m | m | 一致 |
+| `NF_CONNTRACK` | y | y | 一致 |
+| `NF_TABLES` | m | y | nftables 核心从模块变为 built-in |
+
+模板差异本身不证明 nftables 规则集内容、hook 是否注册或规则是否实际加载。尤其 `NF_TABLES=y` 仅代表内核具备相应功能，不代表有一条规则会丢弃 DHCP/UDP。
+
+### 14.6 本轮结论
+
+| 子系统 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未桥接、未打 VLAN 标签 IPv4/UDP 的判断 |
+|---|---|---|---|
+| AF_PACKET | packet_rcv 核心行为一致 | unreadable fragment 时限制抓包 snaplen | 用户态抓包可见性变化，不是协议栈通用 drop |
+| VLAN RX | vlan_do_receive 一致 | vlan_do_receive 一致 | 无 VLAN tag 不走该子设备切换路径 |
+| Bridge RX | MST helper 改为 port-aware | bridge offload/TC miss bookkeeping 调整 | 仅 bridge port 条件路径 |
+| Netfilter ingress | hook dispatch 结构一致 | NF_STOLEN 错误返回处理整理 | 实际 hook 注册和规则 verdict 才会影响报文 |
+| Kconfig | ingress/egress 与 packet 功能相同 | VLAN 模块化、NF_TABLES built-in 化 | 配置能力差异，不等于运行时规则差异 |
+
+当前没有发现能够解释“未桥接、未打 VLAN 标签、普通 IPv4/UDP”收包故障的已证实 AF_PACKET/VLAN/bridge/Netfilter 核心回归点。条件性变化已保留，待结合对应最终配置和既有运行证据判断。
+
+## 15. 方向二下一项
+
+本轮完成 AF_PACKET、VLAN RX、bridge RX、Netfilter ingress/注册核心与相关 Kconfig 模板差异核对。方向二仍未结项。
+
+下一项继续审计 IPv4 Netfilter PREROUTING/LOCAL_IN 与 conntrack/NAT hook 的核心注册、调用顺序和 Kconfig 依赖，区分“内核具备功能”与“实际 hook/ruleset 生效”。B2-0 仍然只做多版本源码、Kconfig、配置及设备树静态审计，不涉及 B1 包的实机配置、构建、启动或网络试验。
