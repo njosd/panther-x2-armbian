@@ -81,7 +81,7 @@
 |---|---|---|---|
 | U-Boot proper | 2017.09-armbian (Nov 12 2023 - 15:05:14 +0000) | 当前运行proper身份字符串 | 不能单独证明其精确源码commit/二进制来源完整闭环 |
 | 提示符 | `=>` | proper已进入交互命令阶段 | 不代表已执行最终Linux启动交接 |
-| `ethaddr` | `16:70:f6:c8:b2:95` | 当前环境中存在该值 | 不重新解释MAC来源；也不单独证明最终Linux FDT落点 |
+| `ethaddr` | `[REDACTED-MAC]` | 当前环境中存在该值 | 不重新解释MAC来源；也不单独证明最终Linux FDT落点 |
 | MDIO | `ethernet@fe010000` | MDIO bus已注册 | 不证明PHY已识别/link up |
 | MII | `ethernet@fe010000`为当前设备 | MII设备枚举成功 | 不证明MAC数据收发 |
 | DHCP/ping | 尚未执行 | 无 | 不可宣称U-Boot网络已通 |
