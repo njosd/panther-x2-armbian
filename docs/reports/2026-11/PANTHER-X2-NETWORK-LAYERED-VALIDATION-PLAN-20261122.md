@@ -28,7 +28,7 @@
 - `mdio list`、`mii device` 曾枚举 `ethernet@fe010000`；MII/MDIO 只读查询地址 0–4未取得有效 PHY 标准寄存器响应（多项返回 0xffff）。
 - proper 内置 FIT FDT 静态审计身份为 Radxa ROCK3 Model C，不是 Panther X2 专用 FDT。
 - 在临时设置 `autoload=no` 并读回确认后执行 `dhcp`，UART 先出现 `EQOS_DMA_MODE_SWR stuck`，随后出现 AArch64 Synchronous Abort / Data Abort，最后停在 `Please RESET the board`。没有 DHCP 成功、DHCP 报文往返、TFTP 下载或网络连通结果证据。
-- 实体 Reset 短按未恢复；断电重启后重新进入同一 proper。重启后 `ethaddr` 保持 `16:70:f6:c8:b2:95`；`ethact`、`ethprime`、`autoload`、`ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile` 均未定义。
+- 实体 Reset 短按未恢复；断电重启后重新进入同一 proper。重启后 `ethaddr` 保持 `[REDACTED-MAC]`；`ethact`、`ethprime`、`autoload`、`ipaddr`、`serverip`、`gatewayip`、`netmask`、`bootfile` 均未定义。
 - 当前会话已读取 `bootcmd`、`bootdelay=0`、`distro_bootcmd`、`boot_targets=nvme mmc1 mmc0 usb0 pxe dhcp`、`bootcmd_nvme/mmc1/mmc0/usb0/pxe/dhcp`。PXE/DHCP 自动启动路径包含网络初始化、脚本获取/执行、TFTP 和潜在 bootefi；不得让设备无人值守自动运行这些路径。
 - 当前 DHCP 测试已挂起；禁止重复执行 `dhcp` 或以此开展 U-Boot GMAC 根因专项。U-Boot 网络连通性标记为“未完成/因 DMA 初始化异常暂停”，不是“硬件损坏”或“项目失败”。
 
