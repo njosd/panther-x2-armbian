@@ -361,3 +361,48 @@ Panther 当前命中路径仍是：
 此外，6.12 逐项获取的 RGMII 相关时钟句柄名称与 Panther DTS 中的 clock-names 应逐项核对，不能只看 RK3568 ops。现有 DTS 包含 aclk_mac、pclk_mac、mac_clk_tx、clk_mac_speed 和 stmmaceth；在外置 PHY + RGMII 条件下，mac_clk_rx / clk_mac_ref / clk_mac_refout 属 RMII 专用，pclk_xpcs / clk_xpcs_eee 属 SGMII/QSGMII 专用。该名字映射目前没有发现 Panther 的明显缺项。
 
 **本项状态：** 6.12 的错误传播退化已由精确源码确认；Panther 现场是否触发仍未知。
+## 17. 重要纠偏：1500ms DMA reset 前等待是正常 6.1.65/6.1.116 的实际通用执行差异
+
+本轮重新把用户 2026-11-24 实机通过的原版 6.1.65 纳入精确源码对照，发现此前将 1500ms delay 仅作为 JL2XX1 专用背景而降级，结论不够准确，现予纠正。
+
+### 17.1 代码事实
+- 正常 6.1.65 源码端点 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` 的 `stmmac_init_dma_engine()` 在 `stmmac_reset()` 前无条件执行 `msleep(1500)`。
+- 正常 6.1.116 源码端点 `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` 同样无条件执行该 1500ms wait。
+- 引入该代码的 commit `49b5f340f346cc9a5b777499fce46150b691b70e` 标题为 `drv: net: ethernet: stmmac fix for jl2xx1 phy`；该提交同时在 stmmac_main.c 增加 1500ms wait，并在 stmmac_mdio.c 增加四次 MDIO 写入。
+- 但 1500ms wait 写在通用 `stmmac_init_dma_engine()` 中，没有 PHY ID / compatible / SoC 条件判断。因此它不只是 JL2XX1 的条件性执行：Panther X2 在 6.1.65 和 6.1.116 上也会实际经过这段等待。
+- 6.12.81 精确源码 `661b2d8` 的同一函数没有 1500ms wait；DMA reset 失败会记录 error 并返回，终止该次初始化。
+- 6.18.63 精确源码 `aee4e35` 同样没有 1500ms wait；但 reset 失败改为 warning-and-continue，随后继续 DMA channel 初始化。
+
+### 17.2 必须按组合解释，而不是孤立看 delay
+
+这形成一条新的高价值跨组件时间/错误传播候选：
+
+`RK GMAC powerup（clock/GRF/PHY supply） → STMMAC probe → 1500ms 等待（6.1.65/6.1.116 有，6.12/6.18 无） → DMA software reset → DMA channel/descriptor 初始化`
+
+对比：
+
+| 版本 | 1500ms DMA reset 前等待 | DMA reset 失败处理 | 已知网络结果 |
+|---|---|---|---|
+| 6.1.65 | 有，无条件 | error + abort | 用户 2026-11-24 实机网络全通 |
+| 6.1.116 | 有，无条件 | error + abort | 已有实机网络全通 |
+| 6.12.81 | 无 | error + abort | 已实机建立 1Gbps link，但 TX 外部接收故障 |
+| 6.18.63 | 无 | warning + continue | B1 网络关闭，网络行为未验证 |
+
+注意：6.1.65/6.1.116 的等待并非 PHY regulator enable 后的固定“PHY 上电等待”API，而是 STMMAC DMA engine 初始化中的通用等待；但从调用顺序看，它确实发生在 Rockchip glue 已开启 PHY supply、STMMAC 准备 DMA reset 之后。其实际硬件作用可能是让 PHY/相关时钟/GMAC 状态有额外稳定时间，也可能仅为 JL2XX1 特定问题的副作用。源码只能证明等待存在及执行位置，不能证明它对 Panther 必需。
+
+### 17.3 对之前结论的修订
+
+- 保留 P1 已收口决定：不重开 JL2XX1 四次 MDIO 写入的寄存器猜测，不把它们移植到 RTL8211F。
+- **撤销“1500ms delay 不属于 Panther 主线”的绝对表述。** 更准确结论是：该等待的提交意图来自 JL2XX1 workaround，但实现是 STMMAC 通用、无条件执行；因此它是 Panther 两个已验证正常版本共有的实际时序条件，必须纳入版本组合差异。
+- 6.12.81 的“无等待 + reset failure abort”与 6.18.63 的“无等待 + reset failure warning-and-continue”必须分开看。后者比前者多一层可能掩盖 reset 失败的风险。
+- 不能直接推断 1500ms 是 Panther 正常工作的必要条件；也不能因为其提交说明写 JL2XX1 就把它排除。需要结合 6.1.65、6.1.116 两条实机成功基线和后续异常版本继续追踪。
+
+### 17.4 下一步静态核查
+
+1. 追踪 6.12/6.18 移除 1500ms 的具体提交及其理由，确定是上游重构、特定硬件 workaround 清理，还是 Ophub/Rockchip patchset 差异。
+2. 比较 6.1.65/6.1.116 的 `stmmac_reset()` 与 6.12/6.18 实现、reset poll 条件、DMA reset bit 清除判定及调用上下文；只读源码，不读设备 MMIO。
+3. 检查等待被删除后，是否同时有其他 PHY power-up、clock stabilization 或 DMA reset 时序补偿改动；以调用顺序和真实条件为依据，不猜测。
+4. 与 6.12.81 既有“接口 UP、TX descriptor 回收、MMC TX 计数增长、外部 0 收包”证据交叉解释：该结果不排除 reset/初始化边界的部分异常，但也不支持直接断言 DMA reset 失败。
+5. 6.18.63 若未来进入获批实机阶段，DMA reset warning 必须单独作为异常门槛；在此之前不启动、不构建、不打补丁。
+
+**当前评价：** 1500ms wait 的存在/删除与 DMA reset 错误处理形成版本间真实差异，列为 B2-0 高价值时序组合候选；是否为 Panther 必需仍未验证。
