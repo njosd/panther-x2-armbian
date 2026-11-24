@@ -538,3 +538,12 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 Run #62（45291347822）的 BusyBox 与 PREPARE-ONLY 镜像打包 Job 成功，但 Kernel/DTB 来自 Run #58（45201970736），其构建仍应用了 2026-11-23 B1 基线纠偏明确废弃的 `kobject_uevent` 补丁。因此 Run #62 只能记录为流水线与打包验证成功，不能作为当前 B1 Kernel/DTB 基线验收。Workflow 已在 `e6d94d2d337fe6caaff1d743aca1aef77451159d` 修正为不修改锁定上游源码；新 Kernel/DTB 构建待运行。具体 artifact、digest、Job 结果和证据见 [B1 构建实施记录](PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)。
 
 后续所有多阶段构建必须支持跨 Run 阶段产物复用和从失败阶段恢复。复用前校验来源 commit、配置基线及 SHA-256；基线变化的产物必须重建。不得为修复单一阶段而重复耗时的已成功阶段。
+
+
+## 2026-11-24 B1 构建失败与修正状态
+
+Run #63（45294164685）Kernel/DTB 在最终链接阶段因 `CONFIG_NET=n` 下 uevent stub 引用 `sk_skb_reason_drop` 失败；BusyBox 和 package 未产生有效结果。已确认锁定源码中的 GPIO hotplug 调用者由 `CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG` 控制，而 B1 fragment 明确禁用该选项。
+
+当前兼容补丁改为仅在 `CONFIG_NET` 下声明、实现和导出 `broadcast_uevent()`，删除无网络 stub，保留正常网络实现中的 skb 释放逻辑。旧的无网络 stub 补丁不再应用。Workflow 同时修正为：Kernel/DTB 失败时跳过 BusyBox/package；仅在明确提供已成功 Kernel/DTB Run ID 时才复用旧产物。
+
+该修正已提交，但未触发 Actions；补丁应用、Kernel 链接、完整 B1 artifact 均待下一次用户手动运行验证。B1 尚未通过，实机启动仍受 eMMC pre-Linux 安全门约束。
