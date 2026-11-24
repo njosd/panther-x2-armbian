@@ -16,7 +16,7 @@
 - [ ] 实际设备树为 Panther X2 专用 DTB。
 - [ ] 识别到实际有线网卡及 PHY。
 - [ ] RTL8211F/GMAC 链路协商成功，确认速率和双工状态。
-- [ ] DHCP 从 hEX 获得 192.168.9.0/24 网段地址。
+- [ ] DHCP 从 hEX 获得 192.168.x.0/24 网段地址。
 - [ ] 路由器邻居/ARP 表项正常，不出现持续 stale/failed。
 - [ ] 从 iMac 可以 ping 通 Panther X2。
 - [ ] Panther X2 可以访问 LAN 网关。
