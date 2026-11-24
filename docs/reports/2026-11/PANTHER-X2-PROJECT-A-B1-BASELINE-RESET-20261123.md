@@ -58,3 +58,20 @@
 仓库已包含完整 seed、网络 fragment、配置验证脚本、DTB 派生脚本、/init、workflow 与旧补丁说明。尚未验证 merge_config/olddefconfig 最终配置、Image/modules 编译、模块清单、DTB 派生与编译、BusyBox/initramfs/uInitrd/boot.scr、CI artifact、eMMC 安全门和 Panther X2 实机启动。
 
 本次仅修改 GitHub 独立分支；未运行 CI、未写 TF/eMMC、未操作设备。
+
+
+## 2026-11-24 补充：Run #63 与 kobject_uevent 兼容性修正
+
+Run #63（45294164685）按未修改上游源码构建时，在 vmlinux 链接阶段失败：`lib/kobject_uevent.o` 对 `sk_skb_reason_drop` 存在未定义引用。原因是 `CONFIG_NET=n` 时顶层 Kbuild 不编译 `net/`，但 `lib/kobject_uevent.c` 的无网络备用 stub 仍调用 `kfree_skb()`。
+
+进一步核对锁定源码后，发现当前 B1 唯一确认的 `broadcast_uevent()` 调用者为 `drivers/input/keyboard/gpio-button-hotplug.c`，由 `CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG` 控制；B1 fragment 已明确禁用该选项。因此不需要保留无网络 stub。
+
+新的兼容补丁 `scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch`：
+- 仅在 `CONFIG_NET` 下声明、编译和导出 `broadcast_uevent()`；
+- 删除 `CONFIG_NET=n` stub；
+- 不改变网络启用时的实现和 `kfree_skb(skb)` 释放语义；
+- 未来若在无网络配置下意外启用调用者，将在编译阶段暴露，而不是留下不完整的 skb 所有权路径。
+
+旧补丁 `0001-kobject-uevent-config-net-n.patch` 保留为历史材料，不应用。workflow 已增加补丁结构检查，并修正 BusyBox 依赖条件：无复用 Run ID 时，Kernel/DTB 必须成功后才运行 BusyBox；指定历史成功 Run ID 时才允许跳过 Kernel/DTB 并恢复产物。
+
+当前补丁尚未经过 Actions 应用与 Kernel 链接验证。Run #63 没有产生可用 artifact；未触发新工作流，未写 TF/eMMC，未启动设备。后续仍须先完成 B1 CI 构建和 artifact 审计，再考虑 eMMC pre-Linux 安全门。
