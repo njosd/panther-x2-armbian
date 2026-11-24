@@ -192,58 +192,58 @@ B1 通过标准：Linux 执行 `/init` 并进入 UART ash shell；Panther X2/RK3
 **放行条件：**本组件所有规定检查通过、证据完整且可归因，才允许进入下一项。若失败，先定位在构建、装载、初始化还是组件运行边界；不得用增加工具、替换多个组件或继续跑完整网络测试来绕过失败。组件级通过只代表该组件及其规定范围通过，不自动代表整个最小系统或网络功能通过。
 
 
-## B2 — Panther X2 板载有线千兆网口分层连通性
+## B2 — Panther X2 板载有线千兆网口源码适配与分层验证
 
-前置：B1 核心启动目标已通过实机验证。**必须先完成 B2-0，才允许开始 B2-1。** 两条正常网络黄金基线为原版 Armbian 6.1.65（2026-11-24 实机 DHCP/网关/外部 IPv4/DNS/千兆链路通过）和 Linux 6.1.116（2026-11-16 实机 DHCP/LAN 连通/千兆链路通过）；6.18.63 B1 仅为网络隔离启动基线。详细对照见 [B2-0 专项报告](PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)。
+前置：B1 核心启动目标已实机通过。两条正常网络黄金基线为 6.1.65 与 6.1.116；6.1.174/6.12.81 是项目 B 已有异常回归研究样本；6.18.63 是当前目标源码基线。
 
-### B2-0 黄金基线与恢复顺序（当前阶段）
+**B2 的主线是源码适配与版本回归审查，不是简单恢复配置。** 项目 B 已经分段核对过多个组件的配置和实现，B2 必须先继承这些结论、报告和证据，不得重复已完成工作。配置审查主要用于最终组件复合与查漏补缺。
 
-- [x] 归档并对照 6.1.65 正常网络实机证据；
-- [x] 归档并对照 6.1.116 正常网络实机证据；
-- [x] 归档 6.18.63 B1 自动启动实机证据及网络隔离边界；
-- [x] 列出两条黄金线共同 GMAC/PHY/DTB 配置；
-- [ ] 审计锁定 6.18.63 源码 commit 的 NET/INET、netdev、STMMAC、DWMAC_ROCKCHIP、MDIO、PHYLIB/PHYLINK、RTL8211F Kconfig/Makefile 最小依赖闭包；
-- [ ] 对照 B1 clean DTB 与原始 Panther X2 DTS 的 Ethernet 节点、pinctrl、clock、reset、regulator、DMA/IRQ 共享资源；
-- [ ] 完成 B2-1 单变量试验卡（config diff、构建输入、验收命令、预期结果、停止条件、回退点）。
+详细执行规则、组件矩阵、历史差异和决策标准见 [B2 源码适配、版本回归与组件恢复审查计划](PANTHER-X2-PROJECT-A-B2-SOURCE-COMPATIBILITY-AND-VERSION-REGRESSION-PLAN-20261124.md)。
 
-B2-0 未完成以上静态审计前，不构建 B2-1、不写卡、不启动网络镜像。
+### B2-0：黄金基线与项目 B 成果继承（当前阶段）
 
-### B2 组件恢复顺序
+- [x] 纳入 6.1.65 正常网络实机黄金基线；
+- [x] 纳入 6.1.116 正常网络实机黄金基线；
+- [x] 纳入 6.18.63 B1 自动启动实机基线及网络隔离边界；
+- [x] 定位项目 B 已有 STMMAC、DWMAC4、Rockchip GMAC clock、RGMII、MDIO/PHY、RTL8211F、DMA/TX 路径源码审计报告；
+- [ ] 建立项目 B 组件审计账本：组件、精确源码端点、已完成文件/函数、结论、证据等级、未完成项；
+- [ ] 在 6.18.63 精确 commit 中核验项目 B 已发现的高价值差异是否存在、是否改变、是否命中 Panther X2 路径；
+- [ ] 补充 6.18.63 组件自身新增/删除/重构/修复的相关变化；
+- [ ] 完成组件级保留/修复/回退/待验证决策；
+- [ ] 源码审查收敛后，才完成最终配置复合、DTS/资源查漏和集成试验卡。
 
-| 顺序 | 子阶段 | 恢复内容 | 暂不加入 | 验收 |
+B2-0 未完成前，不放行后续配置构建或实机验证。
+
+### B2 主线工作顺序
+
+| 顺序 | 审查主题 | 主审内容 | 配置工作定位 | 放行结果 |
 |---|---|---|---|---|
-| 1 | B2-1 | 最小网络核心、loopback、必要 IPv4/ARP/ICMP 能力 | 物理 Ethernet/GMAC/MDIO/PHY | 网络栈初始化、loopback 本机验证 |
-| 2 | B2-2 | netdev/Ethernet 框架、STMMAC core/platform、Rockchip DWMAC 最小闭包 | GMAC DT 节点保持 disabled | 编译/链接通过，不宣称硬件 probe |
-| 3 | B2-3 | GMAC1、MDIO1、PHYLIB/PHYLINK、RTL8211F 及必要闭包 | 无关无线/蓝牙、外接网卡 | MAC/MDIO/PHY probe 与绑定状态 |
-| 4 | B2-4 | pinctrl、clock、reset、regulator、DMA、IRQ、RGMII 连接 | 不同时修改无关 SoC/存储/USB 配置 | PHY attach、carrier、1000Mb/s Full |
-| 5 | B2-5 | 最小接口工具、静态 IPv4、直连路由、ARP、ICMP | DHCP/DNS/SSH/NetworkManager | 双端报文及计数器证明 TX/RX、ARP、ICMP |
+| 1 | Linux 网络核心 | 6.18 网络核心、netdev、packet、IPv4/ARP/ICMP 相关源码/API/生命周期变化 | 继承项目 B 已审配置，核对最小依赖 | 核心实现与依赖结论 |
+| 2 | STMMAC core / DWMAC4 | open/close、DMA reset、TX/RX、descriptor、MTL、IRQ/NAPI、DMA API、错误处理 | 核对驱动闭包和设备资源 | 无未解释高风险差异，或形成有依据的修复方案 |
+| 3 | Rockchip GMAC glue / CCF / CRU | clock get/enable 错误处理、时钟顺序/稳定等待、CSU、power/reset、speed callback、RGMII GRF | 复用已核对的 Panther clock/pinctrl/reset 配置，重点查漏 | Panther 实际命中路径与版本差异有结论 |
+| 4 | MDIO / PHYLIB / PHYLINK / RTL8211F | 注册/扫描/attach、生命周期、reset、config_init、EEE、寄存器 mask | 核对 MDIO1、PHY addr 0、compatible、supply/reset | PHY 初始化行为有依据，不含未经证明的寄存器写入 |
+| 5 | ARM64 DMA / IRQ / pinctrl / reset / regulator | DMA ops/cache/coherency/IOMMU、IRQ/NAPI、共享资源、probe defer | 复合 DTS 和 provider 依赖 | 共享资源和硬件依赖闭环 |
+| 6 | 全组件集成 | 汇总组件版本选择与必要最小改动，复核最终 config/DTB/module/built-in | 配置复合、查漏补缺 | 形成最终集成构建方案和分层试验卡 |
 
-各项依赖必须以锁定源码 Kconfig、Makefile 和 probe 路径确认；若选项不可拆分，以证据支持的最小依赖闭包作为单轮变量。驱动构建成功、probe 成功、PHY link、双向报文属于不同验收层，不可互相替代。
+### 版本选择规则
 
-前置：测试端点、LAN 参数和安全边界已确认。B2 每次只执行一个验证子项；前一项通过并归档后，才进入下一项。
+- 优先检查同一 6.18.y 分支后续修复，不因 6.1.116 正常就整体回退。
+- 仅当精确源码差异能命中 Panther 实际路径，且有证据支持时，才考虑单组件 revert/backport 或最小补丁。
+- 面向 JL2xx1 的 PHY workaround 不得未经 RTL8211F 寄存器语义证明直接移植。
+- 不把 6.12.81 的源码差异自动推定为 6.18.63 仍存在。
+- 每项决策记录源码 commit、差异、适用条件、潜在副作用、验证方式和回退点。
 
-### B2-5.1 工具范围
-只加入接口/link 查询、接口启用、静态 IPv4/掩码、路由、邻居表/ARP、ICMP ping 所需最少命令。先验证 BusyBox `ip`/`ping`，缺功能再加入必要上游工具。不得将 DHCP、DNS、SSH、NetworkManager 或完整 iproute2 作为默认依赖。
+### 后续分层验证（源码审查与集成方案放行后）
 
-### B2-5.2 单项试验顺序
-1. 只读读取接口名、MAC 传递结果、link/carrier；
-2. 单独启用接口，确认状态变化；
-3. 单独配置经确认且不与现网冲突的临时静态 IPv4；
-4. 单独检查内核自动生成的直连路由；如需手动添加路由，作为独立试验；
-5. 单独检查 ARP/邻居解析；
-6. 单独 ping 同网段测试主机；
-7. 单独 ping 网关；
-8. 需要时以已知 IP 测外部路由，不依赖 DNS，作为独立子项；
-9. 确认所有配置只存在于 RAM，重启不持久化。
+- B2-1：网络核心/loopback；
+- B2-2：netdev、STMMAC/DWMAC4 驱动构建和静态验证，GMAC DT 节点保持 disabled；
+- B2-3：Rockchip GMAC、MDIO、RTL8211F probe；
+- B2-4：时钟/复位/电源/RGMII/PHY link；
+- B2-5：静态 IPv4、ARP、ICMP 与双端报文验证；
+- B3：TCP、UDP 分开进行双向 payload 验收。
 
-每个子项开始前记录基线；若失败，停止在该子项，不继续执行后续步骤。不得在同一轮中同时改接口状态、地址、路由和测试端点。
+驱动构建成功、probe 成功、PHY link、双向报文属于不同验收层。失败时停止当前层，不叠加多个组件版本或配置变量。
 
-所有地址参数以执行前读取的当前 LAN 配置为准，不在计划中预设固定地址。
-
-### B2-5.3 通过标准
-接口/link 可观测；静态地址/路由正确；ARP 解析成功；同网段主机和网关双向 ICMP 连通；外部路由子项（如执行）以 IP 目标成功；多轮可重复并记录丢包/时延/计数；无持久化写入。
-
-停止条件：接口/link 不存在或静态配置失败时，只收集最小必要状态并停止本阶段，不擅自升级内核/U-Boot或转入驱动根因排障。
 
 ## B3 — 板载有线千兆网口分项 TCP/UDP 验证
 
