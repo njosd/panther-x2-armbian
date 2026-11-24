@@ -224,3 +224,31 @@ The in-tree caller identified in the locked source is `drivers/input/keyboard/gp
 The source-level design is corrected, but not yet proven by a successful build. The next user-triggered workflow must rebuild Kernel/DTB from the pinned source with the new patch. Only after that stage succeeds may BusyBox and package proceed. If a later stage alone fails, reuse the successful Kernel/DTB artifact Run ID and resume from that stage.
 
 The current B1 state remains **build not yet validated**. No TF/eMMC writes, no Panther X2 boot and no eMMC safety-gate bypass are authorized by this change.
+
+## Run #64 — malformed compatibility patch (2026-11-24)
+
+Run: `45307203767`  
+Failed job: `138153844897` — Build and validate kernel plus DTB.
+
+Observed sequence:
+- Toolchain installation completed.
+- The exact pinned Linux source commit `aee4e352a15d636cbc484f56819c6e59474dfd9f` was fetched and checked out successfully.
+- The job stopped at `git apply --check` before kernel configuration or compilation.
+- Exact error: `corrupt patch .../0001-broadcast-uevent-net-only-api.patch:37`.
+- Kernel/DTB compilation and artifact upload did not run. BusyBox and package jobs were skipped. No new artifact was produced.
+
+Root cause:
+- The second unified-diff hunk header declared line counts that did not match its actual context/addition/deletion lines. This made the patch syntactically corrupt; it was not a source-context mismatch and the linker failure from Run #63 was not reached.
+
+Correction committed on the same branch:
+- Corrected the first hunk offset to match the pinned header source.
+- Corrected the second hunk offset and its declared old/new line counts to match the pinned source and actual hunk body.
+- Rechecked both unified-diff hunk counts against the patch text; both are internally consistent.
+- Rewrote `scripts/panther-x2-b1/patches/README.md`, which still described the obsolete historical stub patch and contradicted the current API-only patch.
+
+Current verification boundary:
+- Static source review and hunk-count consistency: checked.
+- Actual `git apply --check` in Actions: pending; the corrected patch has not yet been run in CI.
+- Kernel compile/link, DTB, BusyBox, package artifact and hardware boot: not verified by Run #64.
+- No workflow was triggered by the correction, and no storage write or hardware boot was performed.
+
