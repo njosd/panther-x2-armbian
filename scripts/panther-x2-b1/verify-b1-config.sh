@@ -15,12 +15,18 @@ MODULE_DIR="$(find "$MODULES_ROOT/lib/modules" -mindepth 1 -maxdepth 1 -type d -
 test -n "$MODULE_DIR" || { echo "::error::No installed module release"; exit 1; }
 find "$MODULE_DIR" -type f -name '*.ko*' -print -quit | grep -q . || { echo "::error::No kernel modules installed"; exit 1; }
 if find "$MODULE_DIR" -type f -name '*.ko*' \( -path '*/kernel/net/*' -o -path '*/kernel/drivers/net/*' -o -path '*/kernel/drivers/bluetooth/*' \) -print -quit | grep -q .; then echo "::error::Network/Ethernet/Bluetooth module found"; exit 1; fi
-for key in CONFIG_STATIC CONFIG_BUSYBOX CONFIG_ASH CONFIG_SH_IS_ASH CONFIG_CAT CONFIG_DMESG CONFIG_MKDIR CONFIG_MOUNT CONFIG_TAIL CONFIG_UNAME; do require_y "$key" "$BUSYBOX_CONFIG"; done
+for key in CONFIG_STATIC CONFIG_BUSYBOX CONFIG_ASH CONFIG_SH_IS_ASH CONFIG_CAT CONFIG_DMESG CONFIG_ECHO CONFIG_LS CONFIG_MKDIR CONFIG_MOUNT CONFIG_PRINTF CONFIG_TAIL CONFIG_TEST CONFIG_UNAME; do require_y "$key" "$BUSYBOX_CONFIG"; done
 readelf -h "$BUSYBOX_BIN" | grep -q 'AArch64'
 if readelf -l "$BUSYBOX_BIN" | grep -q 'INTERP'; then echo "::error::BusyBox is dynamically linked"; exit 1; fi
 "$CROSS_PREFIX"gcc --version >/dev/null; qemu-aarch64-static "$BUSYBOX_BIN" --list | sort > busybox-applets.actual
-for applet in ash sh cat dmesg mkdir mount tail uname; do grep -qx "$applet" busybox-applets.actual || { echo "::error::Missing BusyBox applet: $applet"; exit 1; }; done
+for applet in ash sh cat dmesg echo ls mkdir mount printf test tail uname; do grep -qx "$applet" busybox-applets.actual || { echo "::error::Missing BusyBox applet: $applet"; exit 1; }; done
 APPLET_COUNT="$(wc -l < busybox-applets.actual)"
 if [[ "$APPLET_COUNT" -gt 16 ]]; then echo "::error::BusyBox applet set too large ($APPLET_COUNT)"; cat busybox-applets.actual; exit 1; fi
 for applet in ip ifconfig route arp arping ping ping6 nc netstat telnet wget ftpget ftpput udhcpc udhcpd nslookup brctl traceroute tc tunctl ipcalc nameif ether-wake ifup ifdown; do if grep -qx "$applet" busybox-applets.actual; then echo "::error::Forbidden network applet: $applet"; exit 1; fi; done
-echo "B1 full-base, network-isolation, modules and BusyBox checks: PASS"
+for applet in echo ls printf test; do
+  grep -qx "$applet" busybox-applets.actual || {
+    echo "::error::/init and interactive shell dependency missing: $applet"
+    exit 1
+  }
+done
+echo "B1 full-base, network-isolation, modules and complete /init BusyBox checks: PASS"
