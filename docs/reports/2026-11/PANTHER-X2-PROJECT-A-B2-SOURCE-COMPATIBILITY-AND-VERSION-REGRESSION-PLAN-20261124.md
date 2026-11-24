@@ -356,3 +356,82 @@ B2-0 仍在进行，B2-1 不放行。当前主线是 GMAC1/RGMII 从 Linux probe
 - 组合审查必须回用项目 B 已有实机结果，不重复设备测试；新证据出现前不做构建、补丁、刷写或网络启动。
 
 **状态不变：B2-0 继续；B2-1 不放行。** 本节更新研究方法与检查表，不代表已证明某个组合就是根因。
+
+
+## 2026-11-24 组合效应核查：Rockchip pinctrl 错误传播 × GMAC1 RGMII pin groups
+
+本轮不是重做 P4，而是将 P4 已有源码差异放回 GMAC1 的真实 pinctrl 调用链，并新增核对 6.18.63 是否仍携带同一错误条件。
+
+### 1. 精确源码结果
+
+对照版本：
+- 正常 6.1.65 候选：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`
+- 正常 6.1.116：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`
+- 异常 6.1.174-rk35xx 高置信度候选：`ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`
+- 异常 6.12.81-rk35xx：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`
+- 目标 6.18.63：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9`
+
+`drivers/pinctrl/pinctrl-rockchip.c:rockchip_pmx_set()`：
+- 6.1.65、6.1.116：`if (ret)`，首 pin 写入失败会返回 errno；
+- 6.1.174-rk35xx、6.12.81-rk35xx：`if (ret && cnt)`，当 group 第一个 pin 失败（cnt=0）时，跳过错误返回并最终返回 0；循环已 break，同组后续 pin 不会执行；
+- 6.18.63：恢复为 `if (ret)`，首 pin 失败会向 pinctrl core 正常传播错误。
+
+因此，6.18.63 在这项错误传播语义上与两条正常 6.1 通用线一致，而不是继承两个异常 RK35xx BSP 候选的条件。
+
+### 2. 与 Panther GMAC1 pin group 的交互
+
+Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
+- `gmac1m0_tx_bus2`
+- `gmac1m0_rgmii_clk`
+- `gmac1m0_rgmii_bus`
+- MDIO/MDC 相关组
+
+既有 P4 审计已核实 TX 相关组的 pin 顺序：首 pin 写入失败时，异常 `rockchip_pmx_set()` 会跳过同组后续 pin。其潜在影响包括 TXD、TXEN、TXCLK、TXD2/TXD3 等信号未完整切换到 GMAC 功能。
+
+这构成一个明确的跨组件组合：
+`GMAC DTS pinctrl state` → `Rockchip pinctrl group iteration` → `rockchip_set_mux()/regmap` → `ret && cnt` 错误传播 → `RGMII TX pin mux 是否完整`。
+
+### 3. 为什么仍不能认定为根因
+
+已有 P4 复核显示：
+- Panther 使用 RK3566/RK3568 对应的普通 GRF syscon/regmap 路径；
+- GMAC mux=3 是合法 4-bit IOMUX；
+- 未设置会触发 Trust Firmware group-info 校验的 `rockchip,group-info`；
+- 未发现 Panther 正常 MMIO regmap 写入路径会自然产生 errno 的具体机制；
+- 没有历史故障启动日志证明某个 GMAC pin group 首 pin 的 `rockchip_set_mux()` 曾返回错误。
+
+所以：
+- **源码错误条件：已确认。**
+- **Panther pin group 的潜在影响：已确认可达。**
+- **故障启动时是否触发：未验证，且当前缺少现实触发证据。**
+- **是否为 6.1.y 故障族共同根因：不能认定。**
+
+该结果不改变 P4 的“极低/理论候选”评级，不重开 P4 实机调查，也不提出补丁。
+
+### 4. 组合层面的实际意义
+
+该差异说明，单独比较 GMAC driver 可能漏掉真正影响 GMAC 的 pinctrl provider 错误传播。6.1.174/6.12 的 GMAC glue 可以正确请求 pinctrl state，但 provider 在特定首 pin 写入失败条件下可能错误报告成功；上层因此可能继续 probe/link-up，而某些 RGMII TX pins 实际未完成 mux。
+
+反过来，6.18.63 已恢复错误传播语义，未来 B2 即使恢复相同 Panther DTS，也不会继承这一特定“首 pin 失败被吞”组合条件。它仍需要确认 pinctrl state 选择是否成功，但不需要为此重复修改 pinctrl。
+
+### 5. 与其他候选组合的优先级关系
+
+| 组合 | 版本证据 | 触发条件 | 当前评价 |
+|---|---|---|---|
+| pinctrl 首 pin error × GMAC TX group 顺序 | 正常 6.1 与异常 RK35xx 源码存在差异；6.18 已恢复正常条件 | 首 pin mux/regmap 操作必须真实返回 errno | 有明确跨组件机制，但缺现场触发证据；保留低优先级 |
+| GMAC clock enable error × ignored return × 100–200µs settle | 6.12 明确存在，6.18 已恢复 bulk/error-check/5ms 路径 | 必需 clock enable 失败或稳定时间不足 | 源码组合成立；是否实际失败/不足未验证 |
+| DMA reset failure × warning-and-continue × MAC TE | 6.18 新增 warning-and-continue | stmmac_reset() 必须实际失败 | 6.18 新风险；未来 B2 必须将该 warning 视为失败，不可继续验收 |
+| PHY regulator/reset × RGMII delay × link-up | 跨版本存在顺序/实现差异 | PHY 上电/复位时序与 MAC 配置需发生冲突 | 需进一步按 cold boot 路径核对；不重开已收口的单项 PHY reset/RGMII 数值审计 |
+
+### 6. 下一轮研究
+
+优先对 6.18.63 做完整的“错误状态传播链”审计，而不是只看函数是否返回错误：
+1. pinctrl state apply 的错误是否传递至 GMAC probe；6.18 已确认 provider 本身在首 pin error 时返回错误；
+2. Rockchip GMAC clock bulk enable / PHY clock enable / rollback 是否正确传播至 probe/open；
+3. STMMAC DMA reset 的 warning-and-continue 是否会让后续 DMA/MAC setup 继续；
+4. TX clock `clk_set_rate(125MHz)` 失败是否会继续启用 MAC；
+5. 对每个“失败后仍继续”的位置，确认后续步骤的前置条件是否被满足，避免形成表面 link-up、实际 TX 不出线。
+
+此处只审计源码控制流和已有日志，不读取 MMIO/MDIO，不重启接口、不发包、不构建、不修改设备。
+
+**B2-0 继续；B2-1 不放行。**
