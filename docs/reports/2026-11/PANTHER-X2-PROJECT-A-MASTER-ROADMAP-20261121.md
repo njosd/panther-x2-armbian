@@ -547,3 +547,10 @@ Run #63（45294164685）Kernel/DTB 在最终链接阶段因 `CONFIG_NET=n` 下 u
 当前兼容补丁改为仅在 `CONFIG_NET` 下声明、实现和导出 `broadcast_uevent()`，删除无网络 stub，保留正常网络实现中的 skb 释放逻辑。旧的无网络 stub 补丁不再应用。Workflow 同时修正为：Kernel/DTB 失败时跳过 BusyBox/package；仅在明确提供已成功 Kernel/DTB Run ID 时才复用旧产物。
 
 该修正已提交，但未触发 Actions；补丁应用、Kernel 链接、完整 B1 artifact 均待下一次用户手动运行验证。B1 尚未通过，实机启动仍受 eMMC pre-Linux 安全门约束。
+
+### B1 latest status — 2026-11-24 (Run #64)
+
+Run `45307203767` failed before kernel compilation because the new no-NET `broadcast_uevent` compatibility patch had malformed unified-diff hunk counts. The exact pinned source checkout succeeded; `git apply --check` rejected the patch. Kernel/DTB, BusyBox and package stages did not produce new outputs.
+
+The patch hunk offsets/counts and its README have been corrected in the repository, and hunk-count consistency has been statically checked. This correction is not yet CI-verified. B1 remains unaccepted; the next gate is successful patch application, followed by Kernel/DTB build. No hardware boot or storage write is authorized by this result.
+
