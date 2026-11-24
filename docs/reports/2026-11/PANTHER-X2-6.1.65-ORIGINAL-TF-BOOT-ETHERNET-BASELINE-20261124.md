@@ -16,7 +16,7 @@
 - Linux 6.1.65-ophub
 - uptime 约 6 分钟
 - 内存总量约 3.84 GiB
-- 系统 banner 显示 IPv4 地址 192.168.9.187
+- 系统 banner 显示 IPv4 地址 192.168.x.x
 
 用户明确指出：这是原版 6.1.65 在 TF 卡实际启动的效果，不是正在打包构建的 B1 最小系统。B1 workflow 当时仍处于打包/构建过程中。
 
@@ -29,16 +29,16 @@
 
 `ip -br link`：
 - `eth0` 为 `UP`，标志包含 `LOWER_UP`；
-- MAC 显示为 `be:5b:25:b3:b3:77`。该值仅为本次现场输出，不作为公开仓库中的长期设备身份数据；
+- MAC 显示为 `[REDACTED-MAC]`。该值仅为本次现场输出，不作为公开仓库中的长期设备身份数据；
 - `wlan0` 为 DOWN，本项目 A 排除无线部分，不分析。
 
 `ip -br addr`：
-- `eth0` IPv4：`192.168.9.187/24`
+- `eth0` IPv4：`192.168.x.x/24`
 - 同时存在两个全局 IPv6 地址和一个 link-local IPv6 地址；本次没有进行 IPv6 通信验收。
 
 `ip route`：
-- 默认路由：`default via 192.168.9.1 dev eth0 proto dhcp metric 100`
-- 直连网段：`192.168.9.0/24 dev eth0`
+- 默认路由：`default via 192.168.x.1 dev eth0 proto dhcp metric 100`
+- 直连网段：`192.168.x.0/24 dev eth0`
 - 存在 `169.254.0.0/16` link-scope 路由。
 
 据 DHCP 来源标记及地址/默认路由结果，可确认原版系统的 eth0 已取得 DHCP IPv4 配置。
@@ -71,7 +71,7 @@
 
 命令：
 ```sh
-ping -c 4 -W 2 192.168.9.1
+ping -c 4 -W 2 192.168.x.1
 ```
 
 结果：
@@ -128,7 +128,7 @@ getent ahostsv4 www.baidu.com
 - `st_gmac` 驱动已加载；
 - eth0 为 UP/LOWER_UP；
 - 千兆全双工链路已建立；
-- DHCP 获取 IPv4 地址 192.168.9.187/24 及默认网关 192.168.9.1；
+- DHCP 获取 IPv4 地址 192.168.x.x/24 及默认网关 192.168.x.1；
 - 网关 ICMP、外部 IPv4 ICMP、域名 IPv4 解析均成功。
 
 ### 尚未验证
@@ -168,7 +168,7 @@ getent ahostsv4 www.baidu.com
 `/proc/cmdline`：
 
 ```
-root=UUID=ddcbfa1d-95e7-4863-97c8-ec9b7767968b rootwait rootfstype=ext4 rootflags=rw,errors=remount-ro bootsplash.bootfile=bootsplash.armbian earlycon console=ttyS02,1500000 console=tty0 consoleblank=0 loglevel=7 ubootpart=1ef0258e-6807-493d-bb0c-a2903d5d5988 usb-storage.quirks=0x2537:0x1066:u,0x2537:0x1068:u net.ifnames=0 max_loop=128 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1
+root=UUID=[REDACTED-UUID] rootwait rootfstype=ext4 rootflags=rw,errors=remount-ro bootsplash.bootfile=bootsplash.armbian earlycon console=ttyS02,1500000 console=tty0 consoleblank=0 loglevel=7 ubootpart=[REDACTED-UUID] usb-storage.quirks=0x2537:0x1066:u,0x2537:0x1068:u net.ifnames=0 max_loop=128 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1
 ```
 
 设备及挂载关系：
@@ -242,7 +242,7 @@ GMAC 节点：`/ethernet@fe010000`。
 
 在原版 Armbian 6.1.65 的本次混合启动环境中，已验证以下完整有线 IPv4 路径：
 
-`Panther X2 / RK3566 → fe010000 GMAC → rk_gmac-dwmac → RTL8211F (0x001cc916) → RGMII → 1000Mb/s Full Duplex → DHCP IPv4 → 192.168.9.1 网关 → 外部 IPv4 → DNS 查询成功`
+`Panther X2 / RK3566 → fe010000 GMAC → rk_gmac-dwmac → RTL8211F (0x001cc916) → RGMII → 1000Mb/s Full Duplex → DHCP IPv4 → 192.168.x.1 网关 → 外部 IPv4 → DNS 查询成功`
 
 其中：
 - **已验证：** 原版系统启动、运行时 GMAC 平台驱动绑定、RTL8211F PHY 识别、RGMII、千兆全双工、DHCP、网关 IPv4、外部 IPv4、DNS 查询。
