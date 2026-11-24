@@ -147,3 +147,107 @@ getent ahostsv4 www.baidu.com
 - 后续最小系统实验必须独立证明每一层能力，不得把本记录的结果转记为 B1/B2/B3 通过；
 - 若后续候选系统表现不同，应比较各自 Kernel/DTB/启动链/用户空间与网络管理配置，按项目路线逐层定位，不预先归因或直接制作补丁。
 
+
+
+## 8. 2026-11-24 补充实机证据：运行环境、实际驱动绑定与设备树
+
+本节补充用户随后提供的完整实机命令输出，用于修正早期记录中驱动名称不够准确的问题，并补充 SoC、内存、存储布局及 GMAC 设备树参数。证据仍仅适用于本次原版 Armbian 6.1.65 混合启动环境。
+
+### 8.1 系统、SoC 与内存
+
+采集时间：2026-11-24 11:10:33 CST。
+
+- `uname -a`：Linux `armbian`，`6.1.65-ophub`，aarch64；构建标识 `#1 SMP Sun Dec 3 05:14:23 EST 2023`。
+- Device Tree root model：`Panther X2`。
+- Root compatible：`panther,x2`、`rockchip,rk3566`。
+- CPU：4 cores，ARMv8，CPU part `0xd05`（Cortex-A55）。
+- `MemTotal`：4,024,088 kB；`MemAvailable`：3,732,672 kB。
+
+### 8.2 启动参数与存储布局
+
+`/proc/cmdline`：
+
+```
+root=UUID=ddcbfa1d-95e7-4863-97c8-ec9b7767968b rootwait rootfstype=ext4 rootflags=rw,errors=remount-ro bootsplash.bootfile=bootsplash.armbian earlycon console=ttyS02,1500000 console=tty0 consoleblank=0 loglevel=7 ubootpart=1ef0258e-6807-493d-bb0c-a2903d5d5988 usb-storage.quirks=0x2537:0x1066:u,0x2537:0x1068:u net.ifnames=0 max_loop=128 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1
+```
+
+设备及挂载关系：
+
+| 设备 | 容量/分区 | 实测用途 |
+|---|---|---|
+| TF `mmcblk0` | 7.4G | TF 卡 |
+| `mmcblk0p1` | 255M ext4 | TF 第一分区 |
+| `mmcblk0p2` | 7.1G ext4 | 根文件系统 `/`，同时挂载 `/var/log.hdd` |
+| eMMC `mmcblk1` | 29.1G | eMMC |
+| `mmcblk1p1` | 255M ext4 | 挂载为 `/boot` |
+| `mmcblk1p2` | 28.9G | 未挂载 |
+| `mmcblk1boot0/1` | 各 4M | eMMC boot 分区 |
+| `zram0` | 1.9G | swap |
+| `zram1` | 50M | `/var/log` |
+
+**启动链证据边界：** 当前运行环境明确为 TF 根文件系统 + eMMC `/boot` 的混合布局。上述挂载信息不能单独证明 BootROM、SPL、U-Boot、Kernel 和 DTB 每一个阶段的实际加载来源；尤其不能据此声称本次为 TF 独立启动。后续 B1 必须单独审查启动链及 eMMC 写入风险，不得写入 eMMC。
+
+### 8.3 Ethernet 实际驱动绑定（修正早期记录）
+
+- `eth0`：UP、LOWER_UP；parent device `fe010000.ethernet`；8 TX queues、8 RX queues；altname `end0`。
+- 运行时平台驱动 sysfs 路径：`/sys/bus/platform/drivers/rk_gmac-dwmac`。
+- PHY 驱动 sysfs 路径：`/sys/bus/mdio_bus/drivers/RTL8211F Gigabit Ethernet`。
+- PHY ID：`0x001cc916`；PHY address：0。
+- `ethtool eth0`：1000Mb/s、Full Duplex、autoneg on、Link detected yes、external transceiver。
+- 本次计数器：RX 484361 bytes / 6797 packets，errors 0、dropped 0；TX 90413 bytes / 1232 packets，errors 0、dropped 0、carrier 0、collisions 0。
+- Kernel log：GMAC 节点 `fe010000.ethernet` 初始化；随后识别 RTL8211F（日志设备名 `stmmac-0:00`），配置 `phy/rgmii`，链路升至 1Gbps/Full。
+
+**名称纠正：** 早期本报告引用 `ethtool -i` 的 `st_gmac` 字符串。后续实机 sysfs 绑定证据明确显示平台驱动为 `rk_gmac-dwmac`。因此本项目比较驱动绑定时应以平台驱动 sysfs 路径 `rk_gmac-dwmac` 为准；`stmmac-0:00` 是日志中的 MAC/MDIO 设备命名，不应误认为平台驱动名。此前 `st_gmac` 记录保留为原始工具输出，不再作为最终平台驱动识别结论。
+
+### 8.4 GMAC Device Tree 实测参数
+
+运行设备树路径：`/sys/firmware/devicetree/base`。
+
+GMAC 节点：`/ethernet@fe010000`。
+
+| 属性 | 实测值 |
+|---|---|
+| GMAC compatible | `rockchip,rk3568-gmac`、`snps,dwmac-4.20a` |
+| reg | base `0xfe010000`，size `0x10000` |
+| status | `okay` |
+| phy-mode | `rgmii` |
+| phy-handle | phandle `0x4f` |
+| clock_in_out | `input` |
+| tx_delay | `0x30` |
+| rx_delay | `0x10` |
+| phy-supply | phandle `0x18` |
+| rockchip,grf | phandle `0x1d` |
+| snps,axi-config | phandle `0x44` |
+| snps,reset-gpio | 原始 cell：`00 00 00 4e 00 00 00 01 00 00 00 01` |
+| snps,reset-delays-us | `0`、`20000`、`100000` |
+| interrupt-names | `macirq`、`eth_wake_irq` |
+
+其他已观察内容：
+- GMAC 节点 pinctrl-0 引用 phandle `0x48` 至 `0x4d`。
+- 时钟、assigned-clocks、clock parents 的原始 big-endian cells 已采集，但本次没有完成符号解码；不对具体时钟频率或父时钟关系作推断。
+- MDIO 子节点为 `ethernet-phy@0`；运行时 PHY 地址及 ID 已由 sysfs/ethtool 证实。
+- Root compatible 中的 `rockchip,rk3566` 标识 SoC/板级兼容信息；GMAC 子节点的 `rockchip,rk3568-gmac` 是该 MAC 节点的 compatible 字符串，不能据此把整板误判为 RK3568。
+
+### 8.5 相关内核日志与无关告警的边界
+
+- GMAC 节点 `fe010000.ethernet` 初始化约在启动 2.394s。
+- 日志显示 TX delay `0x30`、RX delay `0x10`，RGMII，clock input from PHY。
+- RTL8211F PHY 约在 16.607s 被识别。
+- 1Gbps/Full 链路约在 21.255s 建立。
+- 日志出现 `IRQ eth_lpi not found` 警告，但随后 GMAC 初始化成功并建立千兆全双工链路；不能仅凭该警告判定网口失败。
+- brcmfmac firmware failure 属于无线部分；项目 A 已排除无线/蓝牙，不纳入本次有线网口判断。
+- rockchip-drm 的 VOP 提示与本次 Ethernet 验证无关。
+
+### 8.6 当前最终基准结论
+
+在原版 Armbian 6.1.65 的本次混合启动环境中，已验证以下完整有线 IPv4 路径：
+
+`Panther X2 / RK3566 → fe010000 GMAC → rk_gmac-dwmac → RTL8211F (0x001cc916) → RGMII → 1000Mb/s Full Duplex → DHCP IPv4 → 192.168.9.1 网关 → 外部 IPv4 → DNS 查询成功`
+
+其中：
+- **已验证：** 原版系统启动、运行时 GMAC 平台驱动绑定、RTL8211F PHY 识别、RGMII、千兆全双工、DHCP、网关 IPv4、外部 IPv4、DNS 查询。
+- **已验证但需限定：** TF 根文件系统与 eMMC `/boot` 的混合挂载布局。
+- **未验证：** BootROM/SPL/U-Boot/Kernel/DTB 各阶段完整加载来源；TF 独立启动；IPv6 端到端；吞吐与长期稳定性。
+- **未外推：** 本记录不代表 B1/B2 或 6.18.y 已经通过任何实机启动或网络测试。
+
+本节作为 2026-11-24 补充证据，优先用于后续驱动绑定和设备树对照；早期记录中的 `st_gmac` 字符串保留作原始输出历史，但平台驱动最终识别以本节运行时 sysfs 证据为准。
