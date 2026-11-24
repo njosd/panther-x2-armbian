@@ -194,7 +194,33 @@ B1 通过标准：Linux 执行 `/init` 并进入 UART ash shell；Panther X2/RK3
 
 ## B2 — Panther X2 板载有线千兆网口分层连通性
 
-前置：B1 通过；测试端点、LAN 参数和安全边界已确认。B2 每次只执行下面一个验证子项；前一项通过并归档后，才进入下一项。
+前置：B1 核心启动目标已通过实机验证。**必须先完成 B2-0，才允许开始 B2-1。** 两条正常网络黄金基线为原版 Armbian 6.1.65（2026-11-24 实机 DHCP/网关/外部 IPv4/DNS/千兆链路通过）和 Linux 6.1.116（2026-11-16 实机 DHCP/LAN 连通/千兆链路通过）；6.18.63 B1 仅为网络隔离启动基线。详细对照见 [B2-0 专项报告](PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)。
+
+### B2-0 黄金基线与恢复顺序（当前阶段）
+
+- [x] 归档并对照 6.1.65 正常网络实机证据；
+- [x] 归档并对照 6.1.116 正常网络实机证据；
+- [x] 归档 6.18.63 B1 自动启动实机证据及网络隔离边界；
+- [x] 列出两条黄金线共同 GMAC/PHY/DTB 配置；
+- [ ] 审计锁定 6.18.63 源码 commit 的 NET/INET、netdev、STMMAC、DWMAC_ROCKCHIP、MDIO、PHYLIB/PHYLINK、RTL8211F Kconfig/Makefile 最小依赖闭包；
+- [ ] 对照 B1 clean DTB 与原始 Panther X2 DTS 的 Ethernet 节点、pinctrl、clock、reset、regulator、DMA/IRQ 共享资源；
+- [ ] 完成 B2-1 单变量试验卡（config diff、构建输入、验收命令、预期结果、停止条件、回退点）。
+
+B2-0 未完成以上静态审计前，不构建 B2-1、不写卡、不启动网络镜像。
+
+### B2 组件恢复顺序
+
+| 顺序 | 子阶段 | 恢复内容 | 暂不加入 | 验收 |
+|---|---|---|---|---|
+| 1 | B2-1 | 最小网络核心、loopback、必要 IPv4/ARP/ICMP 能力 | 物理 Ethernet/GMAC/MDIO/PHY | 网络栈初始化、loopback 本机验证 |
+| 2 | B2-2 | netdev/Ethernet 框架、STMMAC core/platform、Rockchip DWMAC 最小闭包 | GMAC DT 节点保持 disabled | 编译/链接通过，不宣称硬件 probe |
+| 3 | B2-3 | GMAC1、MDIO1、PHYLIB/PHYLINK、RTL8211F 及必要闭包 | 无关无线/蓝牙、外接网卡 | MAC/MDIO/PHY probe 与绑定状态 |
+| 4 | B2-4 | pinctrl、clock、reset、regulator、DMA、IRQ、RGMII 连接 | 不同时修改无关 SoC/存储/USB 配置 | PHY attach、carrier、1000Mb/s Full |
+| 5 | B2-5 | 最小接口工具、静态 IPv4、直连路由、ARP、ICMP | DHCP/DNS/SSH/NetworkManager | 双端报文及计数器证明 TX/RX、ARP、ICMP |
+
+各项依赖必须以锁定源码 Kconfig、Makefile 和 probe 路径确认；若选项不可拆分，以证据支持的最小依赖闭包作为单轮变量。驱动构建成功、probe 成功、PHY link、双向报文属于不同验收层，不可互相替代。
+
+前置：测试端点、LAN 参数和安全边界已确认。B2 每次只执行一个验证子项；前一项通过并归档后，才进入下一项。
 
 ### B2.1 工具范围
 只加入接口/link 查询、接口启用、静态 IPv4/掩码、路由、邻居表/ARP、ICMP ping 所需最少命令。先验证 BusyBox `ip`/`ping`，缺功能再加入必要上游工具。不得将 DHCP、DNS、SSH、NetworkManager 或完整 iproute2 作为默认依赖。
@@ -277,7 +303,9 @@ Panther X2/Ophub 原版、JP-TvBox、Rockchip 官方 RK3566 DDR/SPL/BL31、NixOS
 - [ ] 审查 B1 artifact 中的最终 config、Image、DTB、BusyBox applet 清单、initramfs 和哈希；
 - [ ] B0.4 完成 eMMC pre-Linux 写入安全门；
 - [ ] 安全门通过且获本次授权后，写入 SU08G 并完成实机启动；
-- [ ] B1 通过后执行 B2；
+- [x] B1 核心目标已实机自动启动通过（Run #45328201244）；
+- [ ] 完成 B2-0 黄金基线/依赖审计放行；
+- [ ] B2-0 放行后按 B2-1 至 B2-5 顺序执行；
 - [ ] B2 通过后执行 B3；
 - [ ] B3 通过后进入 B5。
 
@@ -425,3 +453,12 @@ Run `45307203767` stopped in the Kernel/DTB job during `git apply --check`: the 
 
 The patch hunk offsets/counts have since been corrected and checked for internal consistency; the obsolete patch README was also corrected. This is a source-control fix only, not a CI-verified patch application. The next user-triggered run should first validate `git apply --check`; do not rebuild or reuse unrelated stages until the corrected patch has passed its source-application gate. Kernel/DTB build and all later stages remain unverified.
 
+
+
+## 2026-11-24 阶段状态同步
+
+- B1 核心启动目标：**实机自动启动通过**，不再标记为等待启动认证。
+- B2 当前阶段：**B2-0 建立黄金基线对照表和组件恢复顺序**。
+- 两条正常网络黄金基线：6.1.65（2026-11-24）与 6.1.116（2026-11-16），两者均为同一 Panther X2 的实机正向网络证据；6.1.65 不得只标注为静态镜像审计。
+- B1 6.18.63 是网络隔离启动基线，不与两条网络正常基线混为一谈。
+- B2-0 静态 Kconfig/Makefile 依赖闭包、B1 DTB 差异及 B2-1 试验卡未完成前，不放行 B2-1。
