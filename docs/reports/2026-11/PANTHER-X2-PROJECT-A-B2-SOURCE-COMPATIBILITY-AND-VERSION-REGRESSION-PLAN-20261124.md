@@ -450,3 +450,19 @@ Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
 6. 下一轮先闭合 interface-select enum/寄存器编码与 clock/resource mapping 的组合语义，再核对 STMMAC probe 前后 DMA reset、MAC open/link-up 的依赖状态。所有已审计项目 B 证据继续复用，不重做实机测试。
 
 状态仍为 B2-0；B2-1 不放行。
+
+### 2026-11-24 组合时序与 clock 错误传播补充
+
+专项报告 `PANTHER-X2-PROJECT-A-B2-0-GMAC-6.18-CROSSCHECK-20261124.md` 第 14–16 节进一步闭合了跨组件初始化顺序、RK3568 interface-select 编码及 clock 获取/使能错误传播。
+
+关键结论：
+- 三版主顺序均为 GMAC clocks → RGMII GRF → external PHY supply → runtime PM → STMMAC probe；未发现 6.18 把供电与时钟/接口配置顺序颠倒。
+- 6.12.81 的重要组合风险不仅是逐项 clk_prepare_enable() 不检查返回值，还包括逐项 devm_clk_get() 失败仅打印错误、不阻止 rk_gmac_clk_init() 返回成功；后续跳过 ERR_PTR clocks、仍设置 clk_enabled=true 并继续 PHY supply/probe。
+- 6.1.116 与 6.18.63 使用 bulk clock 获取并检查获取/使能错误；6.18 另补 PHY clock enable 失败后的 bulk rollback。
+- 6.18.63 新增 RK3568 interface-select 的 RGMII 编码链已在 Linux STMMAC enum 与 RK3568 mask 间静态闭合为字段值 001；与 mode/delay bits 不重叠。硬件 TRM/readback 仍未验证。
+- 6.18.63 PHY regulator enable 错误会阻止继续 probe；6.1/6.12 旧 helper 曾记录错误但仍返回 0。此项是 6.18 的正向错误传播改进。
+- 当前最值得保留的 6.12 候选是 clock 获取/使能失败被吞后继续初始化的跨函数状态组合；仍无证据证明 Panther 实际触发。
+
+下一轮优先查找历史 6.12 启动日志中 clock get/enable 相关错误，核实是否存在对应证据；再继续对照首次异常 6.1.y 构建的实际 source/patch inputs。不得重新跑已经完成的实机测试。
+
+状态仍为 B2-0；B2-1 不放行。
