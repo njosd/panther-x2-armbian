@@ -452,7 +452,7 @@ jobs:
           ROOT=work/initramfs
           mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
           install -m 0755 work/output/busybox "$ROOT/bin/busybox"
-          for applet in ash sh mount mkdir cat uname dmesg tail echo ls printf test; do
+          for applet in ash sh mount mkdir cat uname dmesg tail echo ls printf test '['; do
             ln -s busybox "$ROOT/bin/$applet"
           done
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
@@ -474,6 +474,7 @@ jobs:
           grep -Fqx '        if load mmc 1:1 0x0a200000 /uInitrd; then' work/output/boot.cmd
           grep -Fqx '            if load mmc 1:1 0x0a100000 /dtb/rockchip/rk3566-panther-x2.dtb; then' work/output/boot.cmd
           grep -Fqx '                booti 0x00280000 0x0a200000 0x0a100000' work/output/boot.cmd
+          grep -Fqx "setenv boot_targets 'mmc1'" work/output/boot.cmd
           if grep -Eiq 'saveenv|save\s+|reset|dhcp|tftp|ping|boot_android|boot_fit' work/output/boot.cmd; then
             echo "::error::Forbidden persistent-write, reset or network/fallback command in B1 boot script"
             exit 1
