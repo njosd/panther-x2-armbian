@@ -399,3 +399,108 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 本轮完成 AF_PACKET、VLAN RX、bridge RX、Netfilter ingress/注册核心与相关 Kconfig 模板差异核对。方向二仍未结项。
 
 下一项继续审计 IPv4 Netfilter PREROUTING/LOCAL_IN 与 conntrack/NAT hook 的核心注册、调用顺序和 Kconfig 依赖，区分“内核具备功能”与“实际 hook/ruleset 生效”。B2-0 仍然只做多版本源码、Kconfig、配置及设备树静态审计，不涉及 B1 包的实机配置、构建、启动或网络试验。
+
+## 16. 本轮追加核验：IPv4 PREROUTING/LOCAL_IN、conntrack 与 NAT hook
+
+固定源码端点仍为第 2 节列出的 6.1.116、6.1.174、6.12.81 commit。本轮重点核对：
+- `net/netfilter/nf_conntrack_proto.c`：IPv4 conntrack hook ops、注册/注销；
+- `net/netfilter/nf_conntrack_core.c`：`nf_conntrack_in()`、`resolve_normal_ct()`、`init_conntrack()`；
+- `net/netfilter/nf_nat_core.c`：`nf_nat_inet_fn()`、`nf_nat_register_fn()`；
+- `net/ipv4/netfilter/iptable_filter.c`、`iptable_nat.c`：legacy filter/NAT 表及 hook 注册；
+- `net/netfilter/Kconfig`、`net/ipv4/netfilter/Kconfig` 与两个配置模板中的 conntrack/NAT 符号。
+
+### 16.1 IPv4 conntrack hook 注册与顺序
+
+三个源码端点的 IPv4 conntrack hook 集合及优先级一致：
+
+| Hook | 函数 | 优先级 | 作用位置 |
+|---|---|---:|---|
+| `NF_INET_PRE_ROUTING` | `ipv4_conntrack_in()` → `nf_conntrack_in()` | `NF_IP_PRI_CONNTRACK` | IPv4 路由决策前跟踪 |
+| `NF_INET_LOCAL_OUT` | `ipv4_conntrack_local()` | `NF_IP_PRI_CONNTRACK` | 本机发出的 IPv4 包 |
+| `NF_INET_POST_ROUTING` | confirm hook | `NF_IP_PRI_CONNTRACK_CONFIRM` | 发送路径连接确认 |
+| `NF_INET_LOCAL_IN` | confirm hook | `NF_IP_PRI_CONNTRACK_CONFIRM` | 本机接收路径连接确认 |
+
+`nf_ct_netns_do_get()` 在三个端点的 IPv4 注册流程一致：首次引用时先启用 IPv4 defragmentation，再通过 `nf_register_net_hooks()` 注册上述 hook；后续引用只增加 users 计数；最后一次释放时注销 hook 并关闭 defragmentation。注册失败会回退 users 计数。
+
+重要边界：conntrack 内核代码存在，并不自动意味着 IPv4 PREROUTING hook 已注册。是否注册取决于 conntrack netns 引用者/初始化路径；本轮源码确认了注册机制，但没有将其等同于 Panther 某次运行时的 hook 状态。
+
+### 16.2 6.12 confirm hook 的重构
+
+6.1.116 与 6.1.174 使用 `ipv4_confirm()` 包装函数，hook ops 的 POST_ROUTING/LOCAL_IN 项均指向该函数；6.12 将 hook ops 改为指向通用 `nf_confirm()`。
+
+6.1 wrapper 的处理要点：
+- skb 没有关联 conntrack，或状态为 `IP_CT_RELATED_REPLY` 时直接调用 `nf_conntrack_confirm()`；
+- POST_ROUTING 的 L3 master/VRF 特殊情况返回 ACCEPT；
+- 其他情况计算 IPv4 transport offset，再调用通用 confirm/helper 处理。
+
+6.12 的通用 `nf_confirm()` 将 IPv4/IPv6 处理统一：
+- 无 conntrack 或 VRF postrouting 仍返回 ACCEPT；
+- 无 helper 且无需 sequence adjustment 时直接 `nf_conntrack_confirm()`；
+- related-reply 直接 confirm；
+- 有 helper/sequence adjustment 时按 conntrack L3 协议计算 transport offset，再执行 helper/seq-adjust，最后 confirm。
+
+对普通 IPv4 UDP 包，如果没有 conntrack helper、没有 sequence adjustment，6.1 与 6.12 均走直接 confirm；6.12 的变化主要是将 IPv4 wrapper 逻辑并入通用 IPv4/IPv6 实现。当前未发现普通 DHCP UDP 在此处新增丢弃条件。
+
+### 16.3 conntrack tuple lookup 与内存分配错误处理
+
+- `nf_conntrack_in()` 在 6.1.116 与 6.1.174 函数体一致；6.12 去掉若干仅用于调试的 `pr_debug()`，并保留 invalid/drop 计数、tuple 解析、conntrack 建立、协议跟踪和 verdict 处理流程。
+- `resolve_normal_ct()` 在 6.1.116 与 6.1.174 一致；6.12 将 tuple 解析失败的调试输出去掉，并将状态判断从 `test_bit()` 整理为 `READ_ONCE(ct->status)` mask 检查。
+- 特别核对了 `init_conntrack()`：6.1 已经会将 `__nf_conntrack_alloc()` 的错误指针向上传递；`resolve_normal_ct()` 对 `IS_ERR(h)` 返回负错误码；`nf_conntrack_in()` 将此类资源压力错误计入 drop 并返回 NF_DROP。6.12 保留相同错误传播结构。因此不能把“6.12 开始在 conntrack 分配失败时丢包”作为新回归；该语义在 6.1.116 已存在。
+- 6.12 `resolve_normal_ct()` 仍在找不到既有 tuple 时调用 `init_conntrack()`；对普通 UDP 首包，只有 conntrack hook 实际启用且建立连接跟踪项时才会进入该分配路径。
+
+### 16.4 NAT hook 与 legacy filter 表
+
+`iptable_nat.c` 的 IPv4 NAT hook ops 三个端点一致，覆盖：
+- PREROUTING：`NF_IP_PRI_NAT_DST`；
+- POSTROUTING：`NF_IP_PRI_NAT_SRC`；
+- LOCAL_OUT：`NF_IP_PRI_NAT_DST`；
+- LOCAL_IN：`NF_IP_PRI_NAT_SRC`。
+
+NAT 表初始化先建立表，再逐项调用 `nf_nat_ipv4_register_fn()` 注册 hook；注册中途失败会注销已注册项并释放资源。6.1.116、6.1.174、6.12 的 `iptable_nat` 注册结构与 hook 位置一致。6.12 `nf_nat_register_fn()` 仅将 `kmemdup()` 改为带元素数量参数的 `kmemdup_array()`，属于数组分配 API 整理；`nf_nat_inet_fn()` 三个端点函数体一致。
+
+`iptable_filter.c` 的 per-net 初始化、filter 表模板注册和 hook ops 分配在三个端点一致。filter 表本身覆盖 LOCAL_IN、FORWARD、LOCAL_OUT；它不是 PREROUTING hook。故普通到本机的入站包先经过已注册的 PREROUTING conntrack/DNAT hook，再路由到本机，随后才可能经过 LOCAL_IN filter hook，最后进行 conntrack confirm。具体规则 verdict 取决于实际加载的表和规则集。
+
+### 16.5 Kconfig 与模板差异
+
+两个指定模板仍是静态候选对照，不代表 6.12.81 最终运行 `.config`：
+- 6.1 模板 blob SHA：`c5e4598301c3ef3675be0058b99b9b6044a14bbf`；
+- 6.12 RK35xx 候选模板 blob SHA：`6c7714f5668362dd4ae9c4d1a7eb8249e6b23de5`。
+
+| 符号 | 6.1 模板 | 6.12 候选模板 | 说明 |
+|---|---:|---:|---|
+| `NF_CONNTRACK` | y | y | 核心 conntrack 均内建 |
+| `NF_CONNTRACK_MARK/ZONES/PROCFS/EVENTS` | y | y | 选定子功能一致 |
+| `NF_NAT` | m | y | NAT 核心从模块变为内建 |
+| `NETFILTER_XTABLES` | m | y | xtables 核心从模块变为内建 |
+| `NETFILTER_XT_NAT` | m | y | xtables NAT glue 从模块变为内建 |
+| `IP_NF_IPTABLES` | m | m | legacy iptables 顶层仍为模块 |
+| `IP_NF_IPTABLES_LEGACY` | 无独立符号 | m | 6.12 拆分出 legacy 实现符号 |
+| `IP_NF_FILTER` | m | m | filter 表仍为模块 |
+| `IP_NF_NAT` | m | m | iptables NAT 表仍为模块 |
+| `NF_DEFRAG_IPV4` | y | y | IPv4 defrag 均内建 |
+
+Kconfig 结构变化：
+- 6.12 的 `IP_NF_FILTER`、`IP_NF_NAT` 显式 select `IP_NF_IPTABLES_LEGACY`，将旧式 iptables 实现拆分成单独符号；这是构建/模块依赖关系变化，不代表 hook 优先级或规则匹配语义变化。
+- `IP_NF_MATCH_RPFILTER` 在 6.12 增加 `NFT_COMPAT` 作为可选依赖路径；只影响 rpfilter match 的配置可用性，不是默认收包路径的强制组件。
+- `NF_NAT`、`NETFILTER_XTABLES`、`NETFILTER_XT_NAT` 在候选模板中从 m 变为 y，而具体 `IP_NF_FILTER`/`IP_NF_NAT` 仍为 m。此差异可能影响模块依赖、装载顺序和镜像/模块打包完整性；是否影响某个运行系统，必须以该版本最终 `.config`、模块清单及实际加载证据确认。
+- 由于 6.12 模板 SHA 与先前运行配置报告记录的模板 SHA 不同，以上 6.12 值仍只能称为候选模板值，不能回填成 6.12.81 的最终配置结论。
+
+### 16.6 本轮阶段性结论
+
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 结论 |
+|---|---|---|---|
+| IPv4 conntrack hook 位置/优先级 | 一致 | 一致 | 未发现普通 PREROUTING/LOCAL_IN 顺序变化 |
+| conntrack tuple lookup | 一致 | debug 输出和状态读取方式整理 | 未发现普通 UDP tuple 匹配语义变化 |
+| conntrack allocation failure | 错误指针传播语义已存在 | 延续既有行为 | 不是 6.12 新增的资源压力 drop |
+| conntrack confirm | 一致 | IPv4 wrapper 并入通用 nf_confirm | 普通 IPv4 无 helper/seqadj 路径等价 |
+| iptables filter hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 |
+| iptables NAT hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 |
+| Kconfig | 本轮未见该窗口核心配置逻辑变化 | legacy 拆分及核心模块化形态变化 | 需结合最终配置与模块打包核验 |
+
+**对普通未桥接、无 VLAN 标签的 IPv4/UDP 流量：** 当前没有发现 6.1.116→6.1.174 的 conntrack/NAT hook 核心回归，也没有发现 6.12 在普通 PREROUTING/LOCAL_IN 顺序上引入新的丢包点。保留的主要差异是 6.12 Netfilter/iptables 组件的 built-in/module 组合变化，后续需与确切最终配置及模块打包证据对齐。
+
+## 17. 方向二下一项
+
+本轮完成 IPv4 conntrack hook 注册、confirm、tuple lookup、NAT hook 和 legacy filter/NAT Kconfig 差异核对。方向二仍未结项。
+
+下一项继续核对 netfilter 之外、但处于 IPv4 路由与本机交付边界的关键网络核心配置/代码：IPv4 defragmentation、IP checksum/fragment handling、local delivery 与相关 Kconfig/module 依赖，优先围绕普通 DHCP/UDP 包的实际路径。B2-0 继续限定为源码、Kconfig、配置及设备树静态差异审计，不涉及 B1 包的实机配置、构建、启动或网络试验。
