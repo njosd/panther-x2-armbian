@@ -58,11 +58,7 @@ jobs:
             (rb"/Users/[^/\s]+", b"/Users/[REDACTED-USER]"),
             (rb"/home/[^/\s]+", b"/home/[REDACTED-USER]"),
             (rb"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", b"[REDACTED-EMAIL]"),
-            (rb"9c7ff1a4-9beb-4346-b396-cdd1d4d1feea", b"[REDACTED-UUID]"),
-            (rb"57ba8610-bc1c-4f13-9ce4-c864b229d25e", b"[REDACTED-UUID]"),
-            (rb"55586ba5-0259-40c3-a67a-30e92526320b", b"[REDACTED-UUID]"),
-            (rb"0387b7f9-f90e-4c1c-b00e-b8fec2c6cb9c", b"[REDACTED-UUID]"),
-            (rb"f705ecc6-6a2b-4a16-9ccb-d62a59d92001", b"[REDACTED-UUID]"),
+            (rb"(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b", b"[REDACTED-UUID]"),
           ]
           if b"\x00" not in blob.data:
             data = blob.data
@@ -94,34 +90,45 @@ jobs:
           bad = []
           patterns = [
             ("MAC", re.compile(rb"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}:){5}[0-9a-f]{2}(?![0-9a-f])")),
-            ("UUID", re.compile(rb"(?i)\b(?:9c7ff1a4-9beb-4346-b396-cdd1d4d1feea|57ba8610-bc1c-4f13-9ce4-c864b229d25e|55586ba5-0259-40c3-a67a-30e92526320b|0387b7f9-f90e-4c1c-b00e-b8fec2c6cb9c|f705ecc6-6a2b-4a16-9ccb-d62a59d92001)\b")),
+            ("UUID", re.compile(rb"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")),
             ("CPU_SERIAL", re.compile(rb"4433a81e51158739")),
-            ("PRIVATE_LAN", re.compile(rb"192\.168\.(?:9|3|1)\.[0-9]{1,3}")),
+            ("PRIVATE_IPV4", re.compile(rb"(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[01])\.(?:[0-9]{1,3}\.)[0-9]{1,3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?![0-9.])")),
           ]
           checked_text = 0
           for sha in shas:
-            proc.stdin.write((sha+"\n").encode()); proc.stdin.flush()
+            proc.stdin.write((sha+"\n").encode())
+            proc.stdin.flush()
             header = proc.stdout.readline()
             if not header:
-              raise RuntimeError("git cat-file returned no header")
-            parts = header.split()
-            if len(parts) < 3 or parts[1] != b"blob":
-              continue
-            size = int(parts[2]); data = proc.stdout.read(size); proc.stdout.read(1)
-            if b"\x00" in data:
+              raise RuntimeError("git cat-file returned no header for " + sha)
+            parts = header.rstrip(b"\n").split()
+            if len(parts) < 3:
+              raise RuntimeError("Unexpected cat-file header: " + repr(header))
+            obj_type = parts[1]
+            size = int(parts[2])
+            data = proc.stdout.read(size)
+            if len(data) != size:
+              raise RuntimeError("Short read from git cat-file for " + sha)
+            if proc.stdout.read(1) != b"\n":
+              raise RuntimeError("Missing cat-file object terminator for " + sha)
+            if obj_type != b"blob" or b"\x00" in data:
               continue
             checked_text += 1
             for label, pattern in patterns:
               if pattern.search(data):
                 bad.append((sha,label))
                 break
-          proc.stdin.close(); proc.wait()
+          proc.stdin.close()
+          rc = proc.wait()
+          if rc:
+            raise RuntimeError("git cat-file exited with " + str(rc))
           if bad:
-            print("Privacy verification failed; no push performed. Finding counts:", len(bad))
-            for item in bad[:30]: print(item[0], item[1])
+            print("Privacy verification failed; no push performed. Findings:", len(bad))
+            for item in bad[:100]:
+              print(item[0], item[1])
             sys.exit(1)
           print("Verified reachable text blob count:", checked_text)
-          print("No targeted text MAC, UUID, CPU serial, or private LAN identifiers found.")
+          print("No MAC, UUID, CPU serial, private IPv4 or CGNAT identifiers found in reachable text blobs.")
           PY
 
       - name: Force-update all branch and tag refs
@@ -141,7 +148,7 @@ jobs:
           {
             echo "## Privacy history rewrite"
             echo "- Published branch and tag refs were rewritten."
-            echo "- Raw UART and unreviewed hardware tar archives were removed from reachable history."
+            echo "- Identified raw UART captures and Base64 chunks were removed; hardware archives were retained pending separate content-aware review."
             echo "- Text identifiers were redacted; reachable text blobs were scanned before push."
             echo "- Binary blobs were not mutated by the redaction callback."
             echo "- GitHub-managed refs/pull/*, caches, forks, clones and workflow artifacts are outside this branch/tag push and may require separate cleanup."
