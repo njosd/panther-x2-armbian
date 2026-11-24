@@ -478,3 +478,13 @@ Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
 后续 B2-0 应追踪移除等待的具体提交、DMA reset poll 语义与时序补偿是否被其他改动替代；不能因提交标题指向 JL2XX1 而忽略其无条件通用执行效果，也不能直接移植 1500ms 作为修复。
 
 状态仍为 B2-0；B2-1 不放行。
+### 2026-11-24 补充：6.1.65 原版实机黄金线与源码端点映射
+
+新增专项报告第 18 节已将 2026-11-24 原版 Armbian 6.1.65 实机网络全通证据映射至源码候选 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`。
+
+- 6.1.65 `dwmac-rk.c` 与 6.1.79/112/116 blob 完全相同；Panther DTS blob 完全相同；pinctrl 首 pin 错误处理仍是 `if (ret)`。
+- 6.1.65 STMMAC DMA init 在 reset 前无条件等待 1500ms，reset failure 则 error + abort。
+- 6.1.65 RTL8211F RGMII delay / PHYCR1 初始化路径与 6.1.116 主体高度一致；LED 扩展不改变普通 RGMII delay 分支。
+- 6.1.65 实机网络全通是直接证据；4428... 是高置信度源码候选，不是原始 Image 的逐字节构建来源证明。
+
+版本矩阵必须以 6.1.65 与 6.1.116 双正常实机基线为两端，不得只以 6.1.116 代表正常历史。
