@@ -554,3 +554,29 @@ Run `45307203767` failed before kernel compilation because the new no-NET `broad
 
 The patch hunk offsets/counts and its README have been corrected in the repository, and hunk-count consistency has been statically checked. This correction is not yet CI-verified. B1 remains unaccepted; the next gate is successful patch application, followed by Kernel/DTB build. No hardware boot or storage write is authorized by this result.
 
+
+
+## 2026-11-24 B1 实机通过与 B2-0 黄金基线矩阵
+
+B1 核心目标已在 Panther X2 实机自动启动通过：Linux 6.18.63、Panther X2 DTB、RAM initramfs、`/init` 和 BusyBox shell 均已由 Run #45328201244 的 artifact 与 UART 记录确认。B1 网络组件仍按设计隔离，不能视为网络验收。
+
+**B2-0 当前工作：建立黄金基线对照表和组件恢复顺序。** 正常网络行为有两条同机实测黄金基线，不得遗漏或混淆：
+
+1. **第一黄金基线：原版 Armbian 6.1.65。** 2026-11-24 Panther X2 实机 TF rootfs + eMMC /boot 混合环境，已验证 `rk_gmac-dwmac`、RTL8211F、RGMII、1000Mb/s Full、DHCP IPv4、hEX 网关 ICMP、外部 IPv4 ICMP、DNS 查询成功。详见 `PANTHER-X2-6.1.65-ORIGINAL-TF-BOOT-ETHERNET-BASELINE-20261124.md`。这条线同时有原始镜像静态审计与本机网络实测证据。
+2. **第二黄金基线：Linux 6.1.116。** 2026-11-16 同机正常运行记录，已验证最终 1000Mb/s Full、DHCP IPv4、网关/iMac IPv4 连通；详见 `panther-x2-6.1.116-usb-ethernet-baseline-20261116.md` 与网络测试总记录。
+3. **B1 隔离基线：Linux 6.18.63。** 自动启动到 RAM BusyBox 实机通过，但 `CONFIG_NET=n` 且 GMAC/MDIO/PHY 驱动与节点隔离；仅作为新内核启动和硬件基线，不代表网络功能通过。
+
+两条黄金线用于对照网络栈、STMMAC/DWMAC、MDIO/PHY、GMAC DTB 与正常运行行为；6.1.65 的实机测试不证明 TCP/UDP payload、IPv6 或长期压力稳定性，6.1.116 亦保留其原有证据边界。
+
+B2 恢复顺序固定为：
+- B2-0：黄金基线矩阵、6.18.63 精确源码 Kconfig/Makefile 依赖图、DTB/共享资源引用图、逐项试验卡。
+- B2-1：最小网络核心与 loopback，不启用物理 Ethernet。
+- B2-2：netdev/Ethernet 框架及 STMMAC/Rockchip DWMAC，GMAC DT 节点保持 disabled。
+- B2-3：GMAC1、MDIO1、PHYLIB/PHYLINK、RTL8211F 及最小依赖闭包。
+- B2-4：pinctrl、clock、reset、regulator、DMA、IRQ、RGMII 与千兆链路。
+- B2-5：最小用户空间工具、静态 IPv4、ARP、ICMP 和双端报文验证。
+- B3：TCP、UDP 分开验证双向 payload。
+
+**当前状态：** B2-0 的黄金基线矩阵与恢复顺序已建立；源码依赖闭包、B1 DTB 差异和 B2-1 单项试验卡仍待静态审计，完成前不放行 B2-1。详见 [B2-0 专项报告](PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)。
+
+非阻断待办：B1 `/init` 的 BusyBox `[` applet/设备树型号显示问题，以及 MMC deferred-probe PMIC 依赖静态审计，安排在下次打包处理，不为此重建已通过的 B1。
