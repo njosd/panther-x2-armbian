@@ -191,3 +191,36 @@ Run #58 的 Kernel/DTB 构建日志证明它使用了 2026-11-23 完整 RK35xx s
 - 待验证：按修正后 workflow、未修改上游源码重新构建 Kernel/DTB；之后再用新 Kernel/DTB 重新完成 BusyBox/打包的依赖链。已验证的阶段产物应继续复用，不得无故从头重建。
 - 未验证：eMMC pre-Linux 安全门、TF 写入、Panther X2 实机启动、UART shell、B1 运行时行为。
 - 安全边界保持不变：PREPARE-ONLY；不写 TF/eMMC，不启动实验固件；项目 A 只围绕板载有线千兆 Ethernet，Wi-Fi/无线和 Bluetooth 永久排除。
+
+
+## 2026-11-24 Run #63 failure analysis and corrected uevent design
+
+### Run result
+
+- Workflow Run: [#63 / 45294164685](https://github.com/njosd/panther-x2-armbian/actions/runs/45294164685)
+- Kernel/DTB job failed at final vmlinux link:
+  `lib/kobject_uevent.o: undefined reference to sk_skb_reason_drop`.
+- The final configuration had `CONFIG_NET=n`; top-level `Kbuild` contains `obj-$(CONFIG_NET) += net/`, so the networking core providing `sk_skb_reason_drop()` is not linked.
+- BusyBox did not start building. The previous workflow condition `!cancelled()` incorrectly allowed the dependent job to run after a failed Kernel job; this has been corrected.
+- No new Kernel/DTB, BusyBox or package artifact was produced. No device or storage medium was touched.
+
+### Corrected source-level finding
+
+The failure is caused by the no-network fallback implementation in upstream `lib/kobject_uevent.c`: it calls inline `kfree_skb()`, which calls `sk_skb_reason_drop()`. The normal network implementation also calls `kfree_skb()`, but is compiled only under `CONFIG_NET`.
+
+The in-tree caller identified in the locked source is `drivers/input/keyboard/gpio-button-hotplug.c`; it is selected by `CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG`. The B1 fragment explicitly sets this option not set. Its Makefile object is therefore excluded from B1. The no-network stub is not needed by the current B1 configuration.
+
+### Corrected patch and workflow
+
+- Added `scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch`.
+- The patch guards the `broadcast_uevent()` declaration, implementation and export with `CONFIG_NET`, removes the no-NET stub, and leaves the normal network implementation—including `kfree_skb(skb)`—unchanged.
+- This avoids both the undefined network symbol and the skb leak risk in the old patch. It does not enable `CONFIG_NET`, any network protocol, Ethernet driver, Wi-Fi or Bluetooth.
+- The workflow applies the patch only after checking the pinned source checkout is pristine. It checks the patch structure and records the runtime SHA-256 in the source manifest.
+- BusyBox now runs only if the Kernel/DTB job succeeded, or if a prior Kernel/DTB Run ID was explicitly supplied for artifact reuse. A failed Kernel build therefore skips BusyBox and package.
+- Workflow updates and the new patch have been committed to the project branch. No Actions run was triggered by these commits.
+
+### Remaining validation
+
+The source-level design is corrected, but not yet proven by a successful build. The next user-triggered workflow must rebuild Kernel/DTB from the pinned source with the new patch. Only after that stage succeeds may BusyBox and package proceed. If a later stage alone fails, reuse the successful Kernel/DTB artifact Run ID and resume from that stage.
+
+The current B1 state remains **build not yet validated**. No TF/eMMC writes, no Panther X2 boot and no eMMC safety-gate bypass are authorized by this change.
