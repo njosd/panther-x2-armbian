@@ -329,3 +329,20 @@ Panther 当前命中路径仍是：
 - **尚未证明：** 6.12 任一必需 clock enable 失败、settle 不足、或 GRF 写入失败在 Panther 实际发生。
 
 这轮没有进行设备操作、构建或补丁修改。
+
+## 15. RK3568 PHY interface-select 编码与实际执行路径闭环
+
+继续追踪 6.18.63 精确源码后，已确认：
+
+- common.h 的 PHY interface select 编码定义为 PHY_INTF_SEL_RGMII = 1；
+- stmmac_get_phy_intf_sel(PHY_INTERFACE_MODE_RGMII) 对 RGMII 返回该值 1；
+- rk_encode_wm16(1, GENMASK_U16(6, 4)) 将 1 编码到 GMAC1_CON1 bit4，即 bits[6:4] 字段值为 001；
+- RK3568 ops 的 gmac_phy_intf_sel_mask 确实为 bits[6:4]；
+- 随后的 rk3568_set_to_rgmii() 使用 CON1 bit7 选择 RGMII，并设置 bits1:0 的 RX/TX delay enable；CON0 写入 TX delay 0x30、RX delay 0x10；
+- interface select bits[6:4]、mode bit7、delay enable bits[1:0] 不重叠。
+
+因此，6.18 对 Panther RGMII 的新增 interface-select 写入，按 Linux STMMAC interface 编码和 RK3568 ops mask 的组合结果为字段值 001；代码中没有看到与 mode/delay bits 的掩码冲突。当前源码层面可确认编码链条内部一致。仍未以 RK3566/RK3568 TRM 原始字段定义或实机 GRF readback 证明硅片最终解释，硬件寄存器实值仍未验证。
+
+另外纠正一个路径边界：6.18 stmmac_prereset_configure() 只有在 plat_dat->set_phy_intf_sel 非 NULL 时才执行；Rockchip RK3568 glue 本身没有赋值该 callback。因此 Panther 这次 interface-select 写入并不是 stmmac_prereset_configure() 调用，而是在 rk_gmac_powerup() 中直接调用 rk_get_phy_intf_sel()、rk_encode_wm16() 和 rk_write_gmac_grf_reg() 完成。两条路径不可混淆。
+
+**本项状态：** 源码编码链内部一致；硬件最终状态未验证；暂不列为故障候选。
