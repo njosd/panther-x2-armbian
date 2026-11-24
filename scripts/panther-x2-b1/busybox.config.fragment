@@ -5,9 +5,13 @@ CONFIG_ASH=y
 CONFIG_SH_IS_ASH=y
 CONFIG_CAT=y
 CONFIG_DMESG=y
+CONFIG_ECHO=y
+CONFIG_LS=y
 CONFIG_MKDIR=y
 CONFIG_MOUNT=y
+CONFIG_PRINTF=y
 CONFIG_TAIL=y
+CONFIG_TEST=y
 CONFIG_UNAME=y
 
 # Keep the image small and do not compile networking or storage utilities.
