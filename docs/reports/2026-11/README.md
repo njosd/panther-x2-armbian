@@ -8,6 +8,9 @@
 
 ## 项目 A：当前权威文档
 
+- [B2-0 黄金基线对照与组件恢复顺序（2026-11-24）](./PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)：确认 6.1.65、6.1.116 两条正常网络实机黄金基线及 6.18.63 B1 隔离基线，列出 B2-1 至 B2-5 恢复顺序与放行条件。
+- [6.1.65 原版 TF 启动 Ethernet 实机基线（2026-11-24）](./PANTHER-X2-6.1.65-ORIGINAL-TF-BOOT-ETHERNET-BASELINE-20261124.md)：记录原版 6.1.65 在 Panther X2 上的驱动绑定、RTL8211F、千兆链路、DHCP、网关/外网 ICMP 与 DNS 实测。
+
 - [B1 完整基础配置与网络隔离基线纠偏（2026-11-23）](./PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md)：覆盖旧 B1 过度裁剪规则的新决策，包含配置 seed、DTB、模块、安全边界与 B2 分层路线。
 
 - [B1 完整基础配置与网络隔离基线纠偏（2026-11-23）](./PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md)：覆盖旧 B1 过度裁剪规则的新决策，包含配置 seed、DTB、模块、安全边界与 B2 分层路线。
