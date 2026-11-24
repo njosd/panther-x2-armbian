@@ -110,3 +110,19 @@ A manually gated workflow has been added at `.github/workflows/privacy-history-r
 - The workflow has **not been dispatched**. The history rewrite and force-push have **not occurred**.
 - The workflow's scan is targeted, not a complete secret-scanning guarantee. Binary assets are preserved and not modified; the removed hardware tar archives are excluded pending separate review.
 - GitHub-managed PR refs/caches and external clones remain outside this workflow and may require GitHub Support follow-up after a successful rewrite.
+
+
+## 2026-11-24 workflow run 45327562809 review
+
+The first manually dispatched rewrite run fetched all 11 branch heads and completed local `git-filter-repo` rewriting, but the verification step was cancelled after running for approximately 45 minutes. The force-push step was skipped. Therefore no remote branch or tag history was changed by that run.
+
+Root cause: the original verifier used `git cat-file --batch` but did not consume non-blob object bodies before reading the next header, desynchronizing the stream and causing the scan to stall.
+
+A corrected workflow was committed at `.github/workflows/privacy-history-rewrite.yml` (commit `c7f32db28b72db0001ef70dd1f27a47aa532fe1d`):
+- consumes every Git object body and its terminator before requesting the next object;
+- scans all reachable text blobs for MAC addresses, UUIDs, CPU serial and private/CGNAT IPv4 ranges;
+- redacts generic UUIDs and private/CGNAT IPv4 patterns in text blobs;
+- preserves binary assets; no unreviewed hardware tar archives are removed by the corrected workflow;
+- keeps the force-push gated behind a successful verification step.
+
+The corrected workflow has not yet been dispatched. Remote history remains unchanged until a new run passes verification and reaches the force-push step.
