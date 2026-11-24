@@ -420,3 +420,57 @@ Panther 当前命中路径仍是：
 因此 6.1.65 不仅是“系统网络功能通过”的实机基准，也为 6.1.116 的 GMAC glue、Panther DTS、DMA reset 前等待和 pinctrl 错误传播提供了更早的源码正向对照。下一轮版本回归表必须同时以 6.1.65 与 6.1.116 为正常端点，不得只用 6.1.116 代表所有正常版本。
 
 **来源边界：** 6.1.65 实机网络全通是用户提供的直接测试证据；4428... 是时间和源码版本匹配的高置信度源码候选。尚未把原始 Image 的 build-id、完整 .config、modules 与该 commit 做到逐字节构建来源闭环。
+## 19. 新增研究主线：非网络子系统可能间接阻断 TX
+
+根据用户提出的关键假设，B2-0 不再把故障搜索边界限定为网络相关目录。需要正式纳入“非网络组件/通用内核机制改变了 GMAC TX 所依赖的系统条件”的研究主线。即使 GMAC、STMMAC、PHY、RGMII 和协议栈配置各自正确，内存/DMA/cache、IOMMU、总线/QoS、IRQ、时钟/电源管理、固件或全局设备树也可能通过跨子系统依赖影响 TX。
+
+### 19.1 目前已核对的 DTS 事实
+
+对照源码端点：
+- 正常 6.1.65 候选：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`；Panther DTS blob `1e3153c392d8de617f72b3133eaeddf45569bde8`。
+- 异常 6.12.81：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；Panther DTS blob `d517c99841cf9d724a61cd31acf9437acbb131e6`。
+- 目标 6.18.63：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9`；Panther DTS blob `a0a08476f45fb2d602fd7312def6f587f33fb91e`。
+
+Panther GMAC1 子节点在三个版本中均保留核心配置：`phy-mode=rgmii`、`clock_in_out=input`、`phy-supply=vcc_3v3`、同一组 GMAC1 M0 pinctrl、同一 reset GPIO/延迟、同一 TX/RX delay 值、同一 AXI 配置 `blen=<0 0 0 0 16 8 4>`、`rd_osr_lmt=8`、`wr_osr_lmt=4`，以及单 TX/RX queue 的 MTL 配置。6.12 的 SoC GMAC node 增加了 XPCS clocks，但 Panther 使用 RGMII，当前驱动条件路径不获取 RMII/XPCS 专用资源；这不是已证实故障。
+
+注意：三个版本的 Panther DTS 文件整体 blob 不同，不能由“GMAC 子节点核心字段相同”推断整个设备树相同。必须继续比较根节点、memory/reserved-memory、全局 DMA coherency、CPU/cache、GIC/IRQ、CRU/PMU、IOMMU、QoS 和其他新增节点。
+
+### 19.2 当前可排除或降级的一个常见误区：Rockchip IOMMU
+
+在目前读取的三个 Panther GMAC 节点中，均未见 `iommus` 属性；GMAC1 没有直接绑定 Rockchip IOMMU 的设备树关系。RK356x SoC DTS 中 VPU/RGA/VOP 等多媒体设备有各自 IOMMU 节点，但不能仅因 IOMMU 驱动或多媒体组件存在，就认定它会重映射 GMAC DMA。当前没有证据支持“GMAC TX 被 Rockchip IOMMU 直接拦截”。
+
+不过，DMA API、cache coherency、DMA mask、物理地址可达性仍是独立问题；无 `iommus` 不等于 DMA/cache 一定正确。需要追踪 STMMAC 设备 DMA mask、descriptor/buffer 分配与 map/unmap/sync 路径，并核对 ARM64 平台 coherent/non-coherent 属性及相关内核配置。
+
+### 19.3 非网络影响 TX 的优先研究矩阵
+
+| 方向 | 可能的跨组件影响路径 | 当前状态/下一步证据 |
+|---|---|---|
+| DMA API / cache coherency / memory attributes | TX descriptor 或 packet buffer 对 DMA 不可见、地址/同步错误 | 高优先级静态审计；核对 DMA mask、dma_map/unmap/sync、arm64 DMA ops、DTS coherency 属性及 CONFIG_DMA_* 差异 |
+| AXI/interconnect/QoS / bus arbitration | GMAC 发起 DMA 读请求后被总线仲裁、QoS 或时钟条件限制 | 高优先级；比较 GMAC AXI 参数、QoS 节点/驱动、CRU ACLK_GMAC1 及系统 interconnect 变更；寻找超时/总线错误证据 |
+| GIC / IRQ / NAPI / softirq | TX completion IRQ 未送达或延迟，队列停止/descriptor 回收异常 | 高优先级；将既有 descriptor 回收证据与 IRQ handler/NAPI 路径对照，确认计数点与中断处理关系 |
+| 内存布局 / CMA / reserved-memory / SWIOTLB | DMA buffer 地址超出控制器能力或映射失败 | 中高优先级；比较启动参数、memblock、reserved-memory、DMA zone 与 mask |
+| CPU cache / coherency / architecture config | 新配置或补丁改变 DMA 一致性维护语义 | 高优先级；比较实际 `.config` 和 arm64 DMA 相关源码/补丁，避免只看 GMAC Kconfig |
+| runtime PM / genpd / CRU / reset | GMAC/AXI 时钟、总线域或相关供电被其他 PM 操作关闭/降频 | 中高优先级；核对 GMAC 所属 power-domain（若有）、runtime PM 引用计数与 suspend/resume 路径 |
+| firmware / SCMI / secure-world / boot handoff | 固件设置的时钟、复位、QoS 或安全访问策略发生变化 | 中优先级；先找 Panther 相关日志/设备树依赖，不假设所有 SCMI warning 与 GMAC 有关 |
+| 网络之外的内核新增功能 | 通用 DMA、netdev、workqueue、RCU、lockdep、security 或 vendor patch 改变执行时序/内存状态 | 作为差分搜索面；必须找到具体依赖链，不做全仓库无目标猜测 |
+
+### 19.4 重要证据边界
+
+项目 B 已有现象：软件 TX 请求、TX descriptor 回收和 MAC MMC TX 计数有活动，但外部监听器未收到帧。它把问题定位到“软件提交之后、外部线缆接收之前”，但不能证明 DMA 真的把正确字节送入 MAC，也不能证明 MAC MMC 计数位于 RGMII 物理发送之后。下一步必须精确定位：
+1. TX descriptor OWN/complete 状态由谁更新，CPU 是否在正确 cache/DMA 同步后观察到；
+2. TX packet buffer 的 DMA address 是否处于硬件可访问范围，DMA mapping 是否成功；
+3. MMC TX counter 在 MAC 数据路径的具体统计位置，是否可能在实际 RGMII 发射前递增；
+4. TX completion IRQ、NAPI/cleanup 与 MAC 发射之间的先后关系；
+5. AXI DMA 读请求是否可能被总线错误/时钟/QoS 条件阻断。
+
+因此，descriptor 回收 + MMC TX 计数增长不能直接等同于“DMA 已成功把帧送到 PHY”。也不能据此直接把问题归咎于 PHY。
+
+### 19.5 对 B2 干净系统策略的正式调整
+
+干净系统不应简单等于“只启用网络驱动”。它应成为可审计的最小依赖闭包：
+- 必须保留：CPU/内存管理、DMA API 与 arm64 cache maintenance、必要的 CRU/GRF/GPIO/regulator、pinctrl、GIC/IRQ、必要的时钟/复位框架、基础网络栈、STMMAC/DWMAC、RTL8211F PHYLIB、静态 IP/ARP/ICMP 测试工具。
+- 初期不主动启用：Wi-Fi/蓝牙、GPU/VPU/RGA/NPU、多媒体、显示、音频、摄像头、USB 网络、VPN/防火墙复杂规则、容器和非必要后台服务。
+- 但“初期不启用”不等于随意裁掉通用内核子系统；尤其不能删除 DMA/cache、IOMMU 核心依赖、IRQ、时钟/电源框架等基础设施。IOMMU 若与 GMAC 无绑定，可先不加载具体多媒体 IOMMU master，但必须以依赖关系证明。
+- 先以 6.1.65/6.1.116 的正常行为作为参考，构建依赖闭包和差异表；之后逐类恢复非必要组件，若恢复某类后故障出现，再通过最小差异确定触发组件或组合。
+
+本节新增的是研究范围和验证策略，不代表已经找到非网络根因。无设备操作、无构建、无补丁。B2-0 继续，B2-1 不放行。
