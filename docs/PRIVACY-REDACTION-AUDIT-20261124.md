@@ -97,3 +97,16 @@ The GitHub integration available in this session can inspect and update files/br
 The rewrite must preserve all 11 branch tips as separate branches, preserve their branch-specific files and commit relationships where possible, redact historical text blobs, remove unredacted raw UART capture paths, and push only `refs/heads/*` and tags. GitHub-managed `refs/pull/*` and cached views may remain accessible after branch rewriting; after the rewrite, GitHub Support may need to purge cached sensitive objects/PR refs. A repository history rewrite alone cannot guarantee deletion of third-party clones or external caches.
 
 Before force-pushing, binary evidence archives and bootloader images still require a content-aware scan. In particular, the three `evidence/hardware/*.tar.gz` archives and binary bootloader assets were inventoried but not fully unpacked/string-scanned in this session. They must be checked before declaring the repository fully clean.
+
+
+## Workflow prepared for the authorized rewrite
+
+A manually gated workflow has been added at `.github/workflows/privacy-history-rewrite.yml`.
+
+- Trigger: GitHub Actions → **Privacy-safe Git history rewrite** → **Run workflow**.
+- Required confirmation input: `REWRITE-PUBLIC-HISTORY`.
+- It mirror-clones all published branches/tags, rewrites text blobs without mutating NUL-containing binary blobs, removes identified raw UART files/chunks and unreviewed hardware tar archives, scans reachable text blobs, and only then force-pushes all branches and tags.
+- The workflow checks that at least 11 branch refs are present before beginning.
+- The workflow has **not been dispatched**. The history rewrite and force-push have **not occurred**.
+- The workflow's scan is targeted, not a complete secret-scanning guarantee. Binary assets are preserved and not modified; the removed hardware tar archives are excluded pending separate review.
+- GitHub-managed PR refs/caches and external clones remain outside this workflow and may require GitHub Support follow-up after a successful rewrite.
