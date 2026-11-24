@@ -346,3 +346,18 @@ Panther 当前命中路径仍是：
 另外纠正一个路径边界：6.18 stmmac_prereset_configure() 只有在 plat_dat->set_phy_intf_sel 非 NULL 时才执行；Rockchip RK3568 glue 本身没有赋值该 callback。因此 Panther 这次 interface-select 写入并不是 stmmac_prereset_configure() 调用，而是在 rk_gmac_powerup() 中直接调用 rk_get_phy_intf_sel()、rk_encode_wm16() 和 rk_write_gmac_grf_reg() 完成。两条路径不可混淆。
 
 **本项状态：** 源码编码链内部一致；硬件最终状态未验证；暂不列为故障候选。
+## 16. 必需 clock 获取失败与 enable 失败的组合传播
+
+继续把 rk_gmac_clk_init() 与 gmac_clk_enable() 合并审查后，发现 6.12 的风险比单纯“逐项 enable 忽略返回值”更完整：
+
+- 6.1.116：使用 devm_clk_bulk_get_optional() 获取 bulk clocks；获取错误会由 rk_gmac_clk_init() 返回并阻止 probe 继续。stmmaceth 单独获取，失败同样返回错误。bulk enable 失败会阻止 powerup。
+- 6.12.81：逐个 devm_clk_get() 获取 aclk_mac、pclk_mac、mac_clk_tx、clk_mac_speed 等；获取失败只打印错误，不从 rk_gmac_clk_init() 返回。后续 gmac_clk_enable() 对 ERR_PTR handle 跳过 enable；对有效 handle 调用 clk_prepare_enable() 却不检查返回值，最后仍将 clk_enabled 设为 true。
+- 6.18.63：恢复 devm_clk_bulk_get_optional() 获取 bulk clocks，并检查获取错误；gmac_clk_enable() 检查 bulk enable 返回值，失败即停止；PHY clock enable 失败时回滚 bulk clocks。stmmaceth 仍单独获取并检查。
+
+这形成一个明确的跨函数状态差异：6.12 可能在某个 Rockchip glue clock handle 获取失败或 enable 失败后，仍将 clk_enabled 标记为 true，并继续 RGMII GRF、PHY supply、runtime PM 和 STMMAC probe；6.1/6.18 对 bulk 获取/使能失败会更早终止。
+
+**候选强度：高价值组合机制。** 它比单独的 100–200µs settle 更有直接的错误传播因果链；但必须区分“代码允许此故障模式”与“Panther 实际发生此故障模式”。目前尚无历史日志证明 6.12 的具体某个 clock 获取/enable 失败。后续如发现 6.12 启动日志中 cannot get clock / Failed to get clocks / clock provider defer 等记录，才可把候选进一步提升；没有这些证据前不下根因结论。
+
+此外，6.12 逐项获取的 RGMII 相关时钟句柄名称与 Panther DTS 中的 clock-names 应逐项核对，不能只看 RK3568 ops。现有 DTS 包含 aclk_mac、pclk_mac、mac_clk_tx、clk_mac_speed 和 stmmaceth；在外置 PHY + RGMII 条件下，mac_clk_rx / clk_mac_ref / clk_mac_refout 属 RMII 专用，pclk_xpcs / clk_xpcs_eee 属 SGMII/QSGMII 专用。该名字映射目前没有发现 Panther 的明显缺项。
+
+**本项状态：** 6.12 的错误传播退化已由精确源码确认；Panther 现场是否触发仍未知。
