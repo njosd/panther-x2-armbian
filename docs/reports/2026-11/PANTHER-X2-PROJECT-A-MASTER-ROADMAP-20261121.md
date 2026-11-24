@@ -502,3 +502,12 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 **当前基线判断：** 6.1.65 已有较强的源码/配置/板级 DTS 候选来源链，但 Image 二进制与具体构建 commit/config 尚未实现密码学级绑定。它仍是项目 A 第一黄金基线；6.1.116 只作后期同机正向行为参照。
 
 **下一步：** 从用户原始 IMG 本体直接提取 `config-6.1.65-ophub`、modules 清单、`System.map`、rootfs 网络服务/配置文件与 U-Boot 文件 hash；并审计 `f16bd...` 到 `4428...` 之间 stmmac/Rockchip clock/reset/PHY 的实际差异。未完成前不启动 Linux、不刷写介质。
+
+
+## 19. 2026-11-24 原版 6.1.65 TF 启动有线网络实机基线
+
+2026-11-24 用户在 Panther X2 上实际启动原版 Armbian 6.1.65（TF rootfs，日志显示 /boot 位于 eMMC），完成 eth0 驱动/链路、DHCP IPv4、hEX 网关 ICMP、外部 IPv4 ICMP 和 DNS 解析验证。完整现场数据与证据边界见：
+
+- `docs/reports/2026-11/PANTHER-X2-6.1.65-ORIGINAL-TF-BOOT-ETHERNET-BASELINE-20261124.md`
+
+**重要边界：** 这是原版 6.1.65 完整 Armbian 系统的实机正向基线，不是 B1 最小 RAM Linux 的测试结果。B1 当时仍处于打包构建阶段；B1 的构建、artifact 审计、目标硬件启动及后续网络验收均须独立完成。不得把本次原版系统测试转记为 B1/B2/B3 通过。
