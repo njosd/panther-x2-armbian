@@ -156,7 +156,7 @@ DHCP 日志明确显示第一次 DHCPv4 transaction 超时，NetworkManager 随�
 
 ## 9. 证据文件
 
-- UART 原始启动日志：`evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart.log`
-- DHCP / 接口状态输出（公开版本已脱敏）：`evidence/network/2026-11-19-panther-x2-dhcp-ipv4-status.txt`
+- UART 原始启动日志：`evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart-redacted.log`
+- DHCP / 接口状态输出（公开版本已脱敏）：`evidence/network/2026-11-19-panther-x2-dhcp-ipv4-status-redacted.txt`
 - 历史基线：`docs/reports/2026-11/GMAC-DHCP-UBOOT-INVESTIGATION-2026-11-17.md`
 - 历史启动链差分：`docs/reports/2026-11/PANTHER-X2-UBOOT-BOOTLOG-DELTA-AND-MIXED-CHAIN-20261118.md`
