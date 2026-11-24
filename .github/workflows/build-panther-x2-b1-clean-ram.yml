@@ -452,7 +452,7 @@ jobs:
           ROOT=work/initramfs
           mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
           install -m 0755 work/output/busybox "$ROOT/bin/busybox"
-          for applet in ash sh mount mkdir cat uname dmesg tail; do
+          for applet in ash sh mount mkdir cat uname dmesg tail echo ls printf test; do
             ln -s busybox "$ROOT/bin/$applet"
           done
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
@@ -468,9 +468,19 @@ jobs:
           mkimage -l work/output/uInitrd | tee work/uinitrd-header.txt
 
           install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/output/boot.cmd
-          grep -Fqx 'setenv bootargs "earlycon=uart8250,mmio32,0xfe660000 keep_bootcon console=ttyS2,1500000n8 loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"' work/output/boot.cmd
+          grep -Fqx "setenv bootargs 'console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init'" work/output/boot.cmd
+          grep -Fqx 'if mmc dev 1; then' work/output/boot.cmd
+          grep -Fqx '    if load mmc 1:1 0x00280000 /Image; then' work/output/boot.cmd
+          grep -Fqx '        if load mmc 1:1 0x0a200000 /uInitrd; then' work/output/boot.cmd
+          grep -Fqx '            if load mmc 1:1 0x0a100000 /dtb/rockchip/rk3566-panther-x2.dtb; then' work/output/boot.cmd
+          grep -Fqx '                booti 0x00280000 0x0a200000 0x0a100000' work/output/boot.cmd
+          if grep -Eiq 'saveenv|save\s+|reset|dhcp|tftp|ping|boot_android|boot_fit' work/output/boot.cmd; then
+            echo "::error::Forbidden persistent-write, reset or network/fallback command in B1 boot script"
+            exit 1
+          fi
+          grep -Fq 'while true; do' work/output/boot.cmd
           mkimage -A arm -O linux -T script -C none \
-            -n "Panther X2 B1 clean RAM boot" \
+            -n "Panther X2 B1 automatic clean RAM boot" \
             -d work/output/boot.cmd work/output/boot.scr
           mkimage -l work/output/boot.scr | tee work/bootscr-header.txt
       - name: Include verified JP U-Boot proper and create manifest
