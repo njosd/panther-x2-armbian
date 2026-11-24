@@ -4,6 +4,7 @@
 # No environment is saved; no persistent storage is written.
 # If any step fails, hold here instead of falling through to eMMC/PXE/DHCP.
 setenv bootargs 'console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init'
+setenv boot_targets 'mmc1'
 
 echo "Panther X2 B1 automatic clean RAM boot"
 echo "Selecting verified SU08G TF device: mmc 1"
