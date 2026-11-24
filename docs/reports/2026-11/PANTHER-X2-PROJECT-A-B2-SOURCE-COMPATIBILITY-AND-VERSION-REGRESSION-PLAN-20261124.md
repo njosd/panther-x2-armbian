@@ -264,3 +264,16 @@ B2 每个阶段均执行：**先源码对照 → 确认 Panther 路径是否命�
 ### F. 当前状态
 
 B2-0 仍在进行，B2-1 不放行。当前主线是 GMAC1/RGMII 从 Linux probe 到 MAC→RGMII TX 的源码与硬件适配审查。以上只调整研究优先级，不授权构建、补丁、刷写、启动网络镜像或任何设备操作。
+
+## 2026-11-24 B2-0 GMAC 6.18.63 对照结果与优先级纠偏
+
+新增专项报告：
+- `docs/reports/2026-11/PANTHER-X2-PROJECT-A-B2-0-GMAC-6.18-CROSSCHECK-20261124.md`
+
+本轮重要修订：
+1. **EEE 降级：** 项目 B 已有 6.1.116 EEE enabled-active 与 6.12.81 EEE disabled 的反向对照。标准 ethtool EEE 状态不能直接等同于 RTL8211F PHYCR2 PHY-mode EEE bit5。不得再把“6.12 没有关闭 EEE”作为故障解释，也不重复 EEE 实机测试。
+2. **1500ms delay 降级：** 项目 B 唯一主路线图已收口为 JL2XX1/JL2101 快速启动 workaround；Panther 是 RTL8211F 家族，不能移植该等待作为未经证明的修复。
+3. **6.18.63 的正向源码回归：** Rockchip GMAC clock enable 回到 bulk enable + 错误检查 + 5ms settle；并补足 PHY clock enable 失败后的 bulk clock rollback。RK3568 RGMII GRF delay value 先写、再 enable/interface 的顺序与正常 6.1.116 一致。
+4. **6.18.63 的新增风险：** STMMAC DMA reset 失败后由 error return 改为 warning-and-continue。此改动来自面向 RK3288/RK3328 的临时 workaround，但没有按 compatible 限定；B2 实机日志必须把 `Failed to reset the dma, device will work with reduced throughput` 作为异常/阻断信号，不得把 open/probe 继续等同于 DMA reset 成功。当前不擅自删除该 workaround。
+5. **MAC link-up 复核：** 6.18.63 普通 RGMII 1000Mbps speed select 仍选择正确 1000Mbps 字段；新的 Rockchip TX clock callback 对 Panther RK3568 ops 实际调用 clk_mac_speed=125MHz，目标与旧版一致；未发现可解释现有 TX 故障的新差异。
+6. **当前主线：** 不重复 EEE、JL2xx1 1500ms、PHYCR2、CSU、CRU 全树、descriptor 等项目 B 已收口审计。继续核对 6.18.63 GMAC1 probe/setup 与 Panther 精确资源解析和新增通用重构的适用性。B2-0 未完成，B2-1 不放行。
