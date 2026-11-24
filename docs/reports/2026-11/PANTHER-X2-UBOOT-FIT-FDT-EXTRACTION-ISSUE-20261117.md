@@ -474,7 +474,7 @@ Linux interface 输出：
 
 ~~~text
 eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> ...
-link/ether e6:e0:02:b2:71:f9
+link/ether [REDACTED-MAC]
 parentdev fe010000.ethernet
 altname end0
 altname enxe6e002b271f9
@@ -483,8 +483,8 @@ altname enxe6e002b271f9
 ### 15.1 直接证实的事实
 
 - Linux 运行时 FDT 的 aliases.ethernet0 指向 GMAC1（/ethernet@fe010000）。
-- GMAC1 节点的 local-mac-address 是 e6:e0:02:b2:71:f9。
-- Linux 的 eth0 当前 MAC 同样是 e6:e0:02:b2:71:f9。
+- GMAC1 节点的 local-mac-address 是 [REDACTED-MAC]。
+- Linux 的 eth0 当前 MAC 同样是 [REDACTED-MAC]。
 - eth0 的 parent device 是 fe010000.ethernet，确认接口就是该 GMAC1。
 - 因此运行时 FDT 中的 GMAC1 MAC 与 Linux 实际接口 MAC 完全一致；这不是仅看接口名称推测出来的关系。
 
@@ -500,7 +500,7 @@ Linux 实际运行 FDT 描述：
 - aliases.ethernet0 = "/ethernet@fe010000"。
 - GMAC1 节点 status = "okay"。
 - GMAC1 pinctrl 为 M0、clock_in_out 为 input、delay 为 0x30/0x10。
-- GMAC1 local-mac-address 为 e6:e0:02:b2:71:f9。
+- GMAC1 local-mac-address 为 [REDACTED-MAC]。
 
 这说明 U-Boot control FDT 与传给 Linux 的运行时 FDT 不是同一份原样配置；Linux 启动时使用的是 Panther X2 kernel DTB，并且 MAC 属性已存在于最终运行时 FDT。不能把 control FDT 中的 disabled/M1/output/delay 属性直接套用到 Linux 当前 GMAC1。
 
@@ -510,7 +510,7 @@ Linux 实际运行 FDT 描述：
 
 本次输出进一步闭环了该路径的后半段：
 - Panther X2 kernel DTB 的运行时 alias 将 ethernet0 指向 GMAC1；
-- 运行时 GMAC1 节点含 local-mac-address=e6:e0:02:b2:71:f9；
+- 运行时 GMAC1 节点含 local-mac-address=[REDACTED-MAC]；
 - Linux eth0 实际采用同一个 MAC。
 
 **边界：** 这证明最终 FDT MAC 属性与接口 MAC 一致；单独这一份运行时输出仍不能证明该值究竟由 U-Boot fdt_fixup_ethernet() 写入、由其他 boot script/fixup 写入，还是由其他早期路径注入。结合第 14 节的源码机制和 kernel DTS 中没有静态 MAC 的事实，U-Boot Vendor MAC fixup 是目前有源码依据且与现象吻合的解释，但要把具体写入者提升为实机直接证实，仍需比对启动前原始 kernel DTB 与最终运行时 FDT，或读取可靠的 U-Boot 环境/启动日志。
@@ -519,10 +519,10 @@ Linux 实际运行 FDT 描述：
 
 还不能。
 
-e6:e0:02:b2:71:f9 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 0、U/L 位为 1），在以太网中属于合法的 locally administered unicast address。MAC 与 eMMC 板载 MAC 不同，本身不会使 DHCP Discover 广播帧失效。
+[REDACTED-MAC] 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 0、U/L 位为 1），在以太网中属于合法的 locally administered unicast address。MAC 与 eMMC 板载 MAC 不同，本身不会使 DHCP Discover 广播帧失效。
 
 当前已知：
-- Linux eth0 以 e6:e0:02:b2:71:f9 发出 DHCP Discover（此前本机 tcpdump 已观察到 UDP 68 → 67 广播）。
+- Linux eth0 以 [REDACTED-MAC] 发出 DHCP Discover（此前本机 tcpdump 已观察到 UDP 68 → 67 广播）。
 - hEX 未观察到来自 Panther 的 DHCP 报文。
 - MAC 来源错位可以解释设备身份/地址来源不符合预期，但尚无证据证明它导致帧在到达 hEX 前丢失。
 
@@ -531,7 +531,7 @@ e6:e0:02:b2:71:f9 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 
 ### 15.5 下一步优先级
 
 1. 在源码侧核对当前 U-Boot 构建是否启用 CONFIG_ROCKCHIP_SET_ETHADDR、CONFIG_FDT_FIXUP 及 MAC 序号配置；目前确切二进制 .config 尚未恢复。
-2. 如果仓库中已有 TF Vendor Storage 的 MAC 值与 eMMC 板载 MAC 值，直接与 e6:e0:02:b2:71:f9 对照，不要求用户重复读取已保存的介质镜像。
+2. 如果仓库中已有 TF Vendor Storage 的 MAC 值与 eMMC 板载 MAC 值，直接与 [REDACTED-MAC] 对照，不要求用户重复读取已保存的介质镜像。
 3. 研究 Linux GMAC TX DMA/descriptor、stmmac transmit completion、PHY TX/RX 物理链路的证据链；目标是解释本机抓包可见但 hEX 抓包不可见的帧在哪一段消失。
 4. 不修改 U-Boot FDT、Linux DTB、MAC、GRF、GPIO 或网络服务；不重复此前 DHCP/hEX 抓包基础测试。
 
@@ -539,7 +539,7 @@ e6:e0:02:b2:71:f9 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 
 
 **已验证：**
 - Linux runtime FDT 的 ethernet0 alias 指向 GMAC1。
-- Linux runtime FDT 的 GMAC1 local-mac-address 是 e6:e0:02:b2:71:f9。
+- Linux runtime FDT 的 GMAC1 local-mac-address 是 [REDACTED-MAC]。
 - Linux eth0 的 parent 是 GMAC1，接口 MAC 与 runtime FDT 完全一致。
 - U-Boot control FDT 与 Linux runtime FDT 对 GMAC1 的启用状态、alias 序号、pinmux、时钟方向和 delay 属性存在明确差异。
 
@@ -549,7 +549,7 @@ e6:e0:02:b2:71:f9 是单播且本地管理的 MAC（首字节 E6 的 I/G 位为 
 
 **尚未验证：**
 - 当前 FIT 中 U-Boot 的确切构建配置及相关 CONFIG 值。
-- e6:e0:02:b2:71:f9 与 TF Vendor Storage 中具体 MAC 值的逐字节对照（如尚未在仓库中记录）。
+- [REDACTED-MAC] 与 TF Vendor Storage 中具体 MAC 值的逐字节对照（如尚未在仓库中记录）。
 - 最终 MAC 属性的实际写入者。
 - 错误 MAC 来源是否与 DHCP 帧未到达 hEX 有任何因果关系。
 - Linux GMAC TX 到 PHY 物理引脚之间的实际帧传输状态。
