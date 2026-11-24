@@ -28,7 +28,7 @@ systemd-udevd[420]: eth0: Could not set offload features, ignoring: Device or re
 - boot-relative 约 21.32 秒：`configuring for phy/rgmii link mode`。
 - boot-relative 约 24.42 秒：`Link is Up - 1Gbps/Full - flow control rx/tx`。
 
-随后 NetworkManager 检测到 carrier，接口完成激活并通过 DHCP 获得 192.168.9.6。
+随后 NetworkManager 检测到 carrier，接口完成激活并通过 DHCP 获得 192.168.x.6。
 
 同一事件在 `syslog.4.gz`、`kern.log.3.gz` 等轮转日志中有对应记录；这些是同一启动事件的重复留存，不应误认为多个独立故障样本。
 
