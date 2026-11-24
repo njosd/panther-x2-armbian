@@ -2,7 +2,7 @@
 
 - 日期：2026-11-21
 - 从属文档：[项目 A 总路线图](PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)
-- 当前状态：B1 干净 RAM 构建流程已写入仓库，尚未运行 CI；eMMC pre-Linux 安全门未通过，未获准写卡或实机启动
+- 当前状态：B1 workflow 已完成一次端到端 CI，但旧 Kernel/DTB 产物因应用了已废弃补丁而不予当前基线验收；已修正 workflow，等待重新构建 Kernel/DTB。eMMC pre-Linux 安全门未通过，未获准写卡或实机启动
 
 ## 执行纪律
 
@@ -17,7 +17,7 @@
 7. 失败先界定故障层级并分析现有证据；不得同时更换内核、DTB、驱动、工具和网络配置来碰运气。
 8. 若一次试验改变多个变量，或无法区分各变量影响，该次结果不得作为可靠根因证据；先恢复已知基线，再拆分试验。
 9. 顺序为静态审计 → CI 构建 → artifact 审查 → 安全门 → 明确授权写卡 → 实机验证。
-10. CI 成功不等于实机启动成功；实机启动成功不等于网络验收成功。
+10. CI 成功不等于实机启动成功；实机启动成功不等于网络验收成功。\n11. 所有多阶段 workflow 必须支持阶段产物跨 Run 复用/从失败阶段恢复；失败后只重跑失败阶段及其必要下游，不重复已成功且输入未变化的耗时阶段。每个阶段必须校验复用产物的来源 Run、commit、配置基线和 SHA-256；上游基线变化时，旧产物不得继续复用。
 6. 未经明确授权，不安装软件、不修改系统/内核/驱动/网络服务，不写 TF/eMMC，不启动实验固件。
 7. eMMC pre-Linux 写入安全门未通过，禁止进入写卡与上电启动。
 8. 项目 A 不开展网卡故障根因调查；仅执行本计划定义的基础网络功能验收。
@@ -400,3 +400,12 @@ DHCP help 显示 DHCP/TFTP 组合命令，未给出显式 DHCP-only 参数。必
 | B2-5 | 验证 MAC DMA 与真实数据收发 | TX/RX、ARP、ICMP、TCP/UDP、持续传输和稳定性 |
 
 每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。不得将 GMAC probe 成功等同网络打通。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。B2 属于项目 A 的分层功能验证，不是恢复项目 B 的历史故障根因调查。
+
+
+## 2026-11-24 B1 CI 状态更新
+
+Run #62（45291347822）三个 Job 的流水线结果为：Kernel/DTB skipped（复用 Run #58）、BusyBox success、PREPARE-ONLY package success。但 Run #58 的 Kernel/DTB 构建仍应用了 2026-11-23 基线纠偏已明确废弃的 `kobject_uevent` 补丁，故该 Kernel/DTB 及其派生镜像不作为当前 B1 基线验收结果。
+
+已在提交 `e6d94d2d337fe6caaff1d743aca1aef77451159d` 修正 workflow，改为固定上游源码不打补丁。下一步只需运行修正后的 Kernel/DTB 构建；通过后再继承该新产物完成 BusyBox 与 package 阶段。不得重复无关已成功阶段。当前没有触发新 workflow。
+
+完整证据、Artifact ID/digest 与安全边界见 [B1 构建实施记录](PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)。
