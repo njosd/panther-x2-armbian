@@ -179,7 +179,7 @@ https://github.com/tanshihaj/1e6f6a66196f0d5f4574508c71423aa9
 ## 10. 本机两份完整 UART 日志的 DDR FSP 差异：已定位“1056MHz 从何而来”
 
 本轮直接重新读取仓库两份现存完整启动日志（不是要求用户重跑）：
-- JP SPL/V1.10：`evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart.log`
+- JP SPL/V1.10：`evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart-redacted.log`
 - 原版 SPL/V1.13：`evidence/uart/panther-jp-tvbox-u-boot-boot-20261117.txt`
 
 ### 10.1 两份日志识别到的是同一类 DRAM 配置
