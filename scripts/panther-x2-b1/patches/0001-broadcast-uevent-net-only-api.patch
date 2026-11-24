@@ -15,7 +15,7 @@ diff --git a/include/linux/kobject.h b/include/linux/kobject.h
 diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
 --- a/lib/kobject_uevent.c
 +++ b/lib/kobject_uevent.c
-@@ -723,14 +723,7 @@ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+@@ -723,17 +723,10 @@ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
  	mutex_unlock(&uevent_sock_mutex);
  
  	kfree_skb(skb);
