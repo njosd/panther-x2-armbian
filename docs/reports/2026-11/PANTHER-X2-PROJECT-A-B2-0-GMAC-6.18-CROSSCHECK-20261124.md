@@ -202,3 +202,55 @@ Panther 的 RK3568 ops 没有设置 `clock.gmii_clk_sel_mask`，所以 `rk_set_c
 - 6.18.63 warning-and-continue DMA reset：当前发现的主要集成风险；必须在 B2 实机日志中作为异常信号处理，不可把 reset failure 当作正常继续。
 
 **B2-0 仍在进行。** 下一轮研究转向 6.18.63 GMAC1 probe/setup 与 Panther 精确 clock/supply/reset 资源解析的差异核验，重点确认哪些 6.18 generic refactor 实际命中 RK3566 GMAC1；不重复 CRU parent 全树、DMA descriptor、EEE、CSU 或 PHYCR2 已收口工作。
+
+
+## 13. 6.18.63 RK3568 GMAC setup 与 Panther 资源实际命中关系
+
+对 6.18.63 `dwmac-rk.c` 的 `rk_gmac_setup()`、`rk_gmac_clk_init()`、`rk_gmac_powerup()` 再做一轮按 Panther runtime DTS 条件的静态映射：
+
+### 13.1 实际 compatible / ops
+
+Panther GMAC1 的 compatible 包含 `rockchip,rk3568-gmac`，MMIO resource 为 `0xfe010000`。6.18.63 match table 对应 `rk3568_ops`，其寄存器表将 `0xfe010000` 映射为 GMAC id=1。
+
+RK3568 ops 提供：
+- `rk3568_init`
+- `rk3568_set_to_rgmii`
+- `rk_set_clk_mac_speed`
+- GRF interface select mask
+- 不要求 PHP-GRF；不要求 SGMII/PCS。
+
+因此不会命中 RK3576/RK3588 PHP-GRF 路径，也不会命中 SGMII/QSGMII/XPCS 路径。
+
+### 13.2 6.18.63 的 RGMII clock list
+
+6.18.63 将公共 Rockchip clocks 列表定义为：
+- `aclk_mac`
+- `pclk_mac`
+- `mac_clk_tx`
+- `clk_mac_speed`
+
+RMII 专用 clocks（`mac_clk_rx`、`clk_mac_ref`、`clk_mac_refout`）只在 RMII 时附加。6.18.63 不再把 `pclk_xpcs` 放进所有模式共用的 bulk list；Panther 为外置 RTL8211F + RGMII，且无 PCS-handle/SGMII 证据，因此没有发现缺少 XPCS clock 会影响 Panther 当前 GMAC1 路径的机制。
+
+与 6.1.116 相比，旧版公共 bulk list 包含 `pclk_xpcs`；6.12.81 已经把 XPCS clock 获取/使能限定在 SGMII/QSGMII。6.18 的处理更贴近接口模式。该差异当前评为预期裁剪，不是 TX 故障候选。
+
+### 13.3 外置 PHY 与 clk_phy 的概念边界
+
+6.18.63 只在 PHY node 存在 `phy-is-integrated` 属性时获取 `clk_phy` 并准备 integrated PHY reset control。Panther 的 RTL8211F 是外置 PHY，没有该属性证据，因此不会走 integrated-PHY clock/reset 路径。
+
+这里的 `clk_phy` 不能误解为“PHY 输出给 MAC 的 125MHz RGMII RX clock”。Panther 的 `clock_in_out=input` 是 Rockchip GMAC 时钟方向配置；外置 PHY 的 RGMII 时钟信号通过板级接口进入 MAC，并不意味着驱动必须通过 integrated-PHY 的 `clk_phy` handle 获取或 enable 它。
+
+### 13.4 Setup / power-up 顺序
+
+Panther 当前命中路径仍是：
+1. `rk_gmac_setup()` 解析 `phy-interface`、`clock_in_out=input`、TX/RX delay、GRF 和 PHY regulator；
+2. `rk_gmac_clk_init()` 获取上述四个 RGMII clocks；
+3. `rk_gmac_powerup()` 执行 bulk clock enable；
+4. `rk3568_set_to_rgmii()` 写入 GMAC1 GRF delay value 和 RGMII interface/enable；
+5. 打开外置 PHY regulator；
+6. STMMAC probe/open 后由 MDIO/PHYLIB 连接外置 RTL8211F。
+
+没有发现 6.18.63 将 Panther 外置 PHY 错误识别为 integrated PHY，或把 RGMII 错送入 RMII/SGMII 路径的源码条件。
+
+### 13.5 当前结论
+
+6.18.63 的 RK3568 ops、RGMII clocks 和 external PHY 资源解析与 Panther runtime DTS 条件相符。尚未发现新的静态 setup/probe 错误。但这仍是源码控制流匹配，不是 6.18 网络功能的实机验证；实际 clock rate、GRF 写入是否成功和物理 RGMII 波形仍未验证。
