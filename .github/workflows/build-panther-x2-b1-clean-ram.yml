@@ -62,9 +62,559 @@ jobs:
           git -C work/linux checkout --detach FETCH_HEAD
           ACTUAL_COMMIT="$(git -C work/linux rev-parse HEAD)"
           test "$ACTUAL_COMMIT" = "${KERNEL_SOURCE_COMMIT}"
-          # B1 baseline reset explicitly retired the historical kobject_uevent patch.
-          # Build the pinned upstream source unchanged; do not reapply that patch.
+          # Verify the pinned upstream checkout is pristine before the narrow B1 compatibility patch.
           test -z "$(git -C work/linux status --porcelain)"
+          PATCH="scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          git -C work/linux apply --check "$GITHUB_WORKSPACE/$PATCH"
+          git -C work/linux apply "$GITHUB_WORKSPACE/$PATCH"
+          PATCH_SHA="$(sha256sum "$GITHUB_WORKSPACE/$PATCH" | awk '{print $1}')"
+          grep -q '^#ifdef CONFIG_NET
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+
+          git diff --check
+          SEED="scripts/panther-x2-b1/kernel.config.seed"
+          SEED_BLOB="$(git hash-object "$SEED")"
+          test "$SEED_BLOB" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
+          {
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=$ACTUAL_COMMIT"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "kernel_config_seed=$SEED"
+            echo "kernel_config_seed_blob_sha=$SEED_BLOB"
+            echo "kernel_config_seed_origin=ophub/kernel@ba00be60d59300bd93633218a8905829d6cabd72:kernel-config/release/rk35xx/config-6.12"
+            echo "kobject_uevent_patch=scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch sha256=$PATCH_SHA; API compiled only with CONFIG_NET"
+          } | tee work/source-lock.txt
+      - name: Configure from full RK35xx seed and build kernel plus modules
+        run: |
+          set -euo pipefail
+          aarch64-linux-gnu-gcc --version | head -n 1 > work/toolchain-version.txt
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
+          FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
+          MODULES_ROOT="$GITHUB_WORKSPACE/work/modules-root"
+          mkdir -p "$OUT"
+          test "$(git hash-object "$SEED")" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$SEED" "$FRAGMENT" \
+            2>&1 | tee work/logs/kernel-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/kernel.config
+          echo "=== B1 Kconfig effective values ==="
+          for key in CONFIG_ARM64_4K_PAGES CONFIG_ARM64_VA_BITS_48 CONFIG_ARM64_PA_BITS_48 CONFIG_MODULES CONFIG_BLOCK CONFIG_MMC CONFIG_USB CONFIG_NET; do
+            grep -E "^(${key}=.*|# ${key} is not set)$" work/kernel.config || echo "${key}=<not emitted>"
+          done
+          echo "=== End B1 Kconfig effective values ==="
+          # VA_BITS and PA_BITS are invisible derived Kconfig integers in this kernel;
+          # validate their user-selectable choice symbols instead of expecting .config entries.
+          grep -qx 'CONFIG_ARM64_VA_BITS_48=y' work/kernel.config
+          grep -qx 'CONFIG_ARM64_PA_BITS_48=y' work/kernel.config
+          grep -qx 'CONFIG_ARM64_4K_PAGES=y' work/kernel.config
+          grep -qx 'CONFIG_MODULES=y' work/kernel.config
+          grep -qx 'CONFIG_BLOCK=y' work/kernel.config
+          grep -qx 'CONFIG_MMC=y' work/kernel.config
+          grep -qx 'CONFIG_USB=y' work/kernel.config
+          grep -qx '# CONFIG_NET is not set' work/kernel.config
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image modules 2>&1 | tee work/logs/kernel-build.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH="$MODULES_ROOT"
+          test -n "$(find "$MODULES_ROOT/lib/modules" -type f -name '*.ko*' -print -quit)"
+          if find "$MODULES_ROOT/lib/modules" -type f -name '*.ko*' \( -path '*/kernel/net/*' -o -path '*/kernel/drivers/net/*' -o -path '*/kernel/drivers/bluetooth/*' \) -print -quit | grep -q .; then
+            echo "::error::Network/Ethernet/Bluetooth module unexpectedly built"; exit 1
+          fi
+          tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          file work/output/Image | tee work/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
+          test "$IMAGE_MAGIC" = "41524d64" || { echo "::error::Kernel payload is not an ARM64 Image"; exit 1; }
+          cp work/kernel.config work/output/kernel.config
+          cp "$SEED" work/output/kernel.config.seed
+          cp "$FRAGMENT" work/output/kernel.config.fragment
+      - name: Derive and compile isolated Panther X2 DTB
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          DTS="$SRC/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts"
+          CLEAN_DTS="$GITHUB_WORKSPACE/work/panther-x2-b1-clean.dts"
+          PREPROCESSED="$GITHUB_WORKSPACE/work/panther-x2-b1-clean.pp.dts"
+          DTB="$GITHUB_WORKSPACE/work/output/dtb/rockchip/rk3566-panther-x2.dtb"
+          mkdir -p "$(dirname "$DTB")"
+
+          cp "$DTS" "$CLEAN_DTS"
+          python3 scripts/panther-x2-b1/prepare-clean-dtb.py "$CLEAN_DTS"
+          cp "$CLEAN_DTS" work/output/panther-x2-b1-clean.dts
+
+          cpp -nostdinc \
+            -I "$SRC/include" \
+            -I "$SRC/arch/arm64/boot/dts" \
+            -I "$SRC/arch/arm64/boot/dts/include" \
+            -I "$SRC/arch/arm64/boot/dts/rockchip" \
+            -undef -D__DTS__ -x assembler-with-cpp \
+            "$CLEAN_DTS" > "$PREPROCESSED"
+          dtc -@ -I dts -O dtb -o "$DTB" "$PREPROCESSED" 2>&1 | tee work/logs/dtb-build.log
+
+          MODEL="$(fdtget -t s "$DTB" / model)"
+          COMPATIBLE="$(fdtget -t s "$DTB" / compatible)"
+          test "$MODEL" = "Panther X2"
+          echo "$COMPATIBLE" | grep -q 'panther,x2'
+          echo "$COMPATIBLE" | grep -q 'rockchip,rk3566'
+
+          assert_status() {
+            local node="$1" expected="$2" actual
+            if ! fdtget -l "$DTB" "$node" >/dev/null 2>&1; then
+              echo "::error::DTB node missing: $node"
+              exit 1
+            fi
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            # Devicetree specification: an omitted status property means enabled.
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            if [ "$expected" = "okay" ] && [ "$actual" = "okay (implicit default)" ]; then
+              echo "DTB status: $node = okay (implicit default)"
+              return 0
+            fi
+            test "$actual" = "$expected" || {
+              echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"
+              fdtget -p "$DTB" "$node" || true
+              exit 1
+            }
+          }
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /mmc@fe310000 okay
+          assert_status /mmc@fe2b0000 okay
+          assert_status /serial@fe650000 okay
+          if fdtget -l "$DTB" /serial@fe650000 | grep -qx bluetooth; then
+            echo "::error::Bluetooth child remains under UART1"; exit 1
+          fi
+          # Match the original Panther X2 DTS enabled USB subset only:
+          # host0 xHCI/EHCI/OHCI and USB2PHY0. Other RK356x USB controllers
+          # remain at their upstream disabled defaults.
+          for node in /usb@fcc00000 /usb@fd800000 /usb@fd840000 \
+            /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port; do
+            assert_status "$node" okay
+          done
+
+          STDOUT_PATH="$(fdtget -t s "$DTB" /chosen stdout-path)"
+          test "$STDOUT_PATH" = "serial2:1500000n8"
+          SERIAL2_PATH="$(fdtget -t s "$DTB" /aliases serial2)"
+          test "$SERIAL2_PATH" = "/serial@fe660000"
+          UART2_STATUS="$(fdtget -t s "$DTB" "$SERIAL2_PATH" status)"
+          test "$UART2_STATUS" = "okay"
+          UART2_COMPATIBLE="$(fdtget -t s "$DTB" "$SERIAL2_PATH" compatible)"
+          echo "$UART2_COMPATIBLE" | grep -q 'rockchip,rk3568-uart'
+          echo "$UART2_COMPATIBLE" | grep -q 'snps,dw-apb-uart'
+          UART2_REG_SHIFT="$(fdtget -t u "$DTB" "$SERIAL2_PATH" reg-shift)"
+          test "$UART2_REG_SHIFT" = "2"
+          UART2_REG_IO_WIDTH="$(fdtget -t u "$DTB" "$SERIAL2_PATH" reg-io-width)"
+          test "$UART2_REG_IO_WIDTH" = "4"
+          UART2_CLOCK_NAMES="$(fdtget -t s "$DTB" "$SERIAL2_PATH" clock-names)"
+          test "$UART2_CLOCK_NAMES" = "baudclk apb_pclk"
+          dtc -I dtb -O dts "$DTB" > work/clean-dtb-decoded.dts
+          if grep -Eiq 'wifi|wireless|bluetooth|sdio-pwrseq|wifi-enable-h|wifi-host-wake|bt-enable|bt-wake|led-wifi' work/clean-dtb-decoded.dts; then
+            echo "::error::Wi-Fi/BT board-specific residue remains in B1 DTB"
+            grep -Ein 'wifi|wireless|bluetooth|sdio-pwrseq|wifi-enable-h|wifi-host-wake|bt-enable|bt-wake|led-wifi' work/clean-dtb-decoded.dts || true
+            exit 1
+          fi
+
+          {
+            echo "model=$MODEL"
+            echo "compatible=$COMPATIBLE"
+            echo "stdout-path=$STDOUT_PATH"
+            sha256sum "$DTB"
+          } | tee work/dtb-verification.txt
+          cp work/dtb-verification.txt work/output/
+      - name: Save completed kernel and DTB stage
+        uses: actions/upload-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: |
+            work/output/Image
+            work/output/modules.tar.zst
+            work/output/kernel.config
+            work/output/kernel.config.seed
+            work/output/kernel.config.fragment
+            work/output/dtb/rockchip/rk3566-panther-x2.dtb
+            work/output/panther-x2-b1-clean.dts
+            work/output/dtb-verification.txt
+            work/logs/
+            work/source-lock.txt
+            work/toolchain-version.txt
+            work/kernel-image-file.txt
+            work/dtb-verification.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  build-busybox:
+    if: ${{ !cancelled() && (inputs.reuse_kernel_run_id != '' || needs.build-kernel-dtb.result == 'success') }}
+    name: Build and validate static BusyBox
+    needs: build-kernel-dtb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install BusyBox-only build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex gcc-aarch64-linux-gnu make perl python3 qemu-user-static
+
+      - name: Restore kernel and DTB from this run
+        if: ${{ inputs.reuse_kernel_run_id == '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+
+      - name: Reuse kernel and DTB from a previous successful run
+        if: ${{ inputs.reuse_kernel_run_id != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_kernel_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore installed kernel modules for validation
+        run: |
+          set -euo pipefail
+          mkdir -p work/modules-root
+          tar --zstd -xf work/output/modules.tar.zst -C work/modules-root
+          cp work/output/kernel.config work/kernel.config
+
+      - name: Build static BusyBox with minimal applet allowlist
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            "https://busybox.net/downloads/busybox-${BUSYBOX_VERSION}.tar.bz2" \
+            -o "work/busybox-${BUSYBOX_VERSION}.tar.bz2"
+          echo "${BUSYBOX_SHA256}  work/busybox-${BUSYBOX_VERSION}.tar.bz2" | sha256sum -c -
+          tar -xjf "work/busybox-${BUSYBOX_VERSION}.tar.bz2" -C work
+          cd "work/busybox-${BUSYBOX_VERSION}"
+
+          # BusyBox 1.37.0's bundled Kconfig does not reliably honor
+          # KCONFIG_ALLCONFIG during allnoconfig. Start from a clean all-no
+          # config, then merge the reviewed fragment as explicit user choices.
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- allnoconfig
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          config = Path(".config")
+          fragment = Path("../../scripts/panther-x2-b1/busybox.config.fragment")
+          current = config.read_text().splitlines()
+          updates = {}
+          for line in fragment.read_text().splitlines():
+              match = re.match(r"^(CONFIG_[A-Z0-9_]+)=(.*)$", line)
+              if match:
+                  updates[match.group(1)] = line
+                  continue
+              match = re.match(r"^# (CONFIG_[A-Z0-9_]+) is not set$", line)
+              if match:
+                  updates[match.group(1)] = line
+
+          seen = set()
+          merged = []
+          for line in current:
+              match = re.match(r"^(CONFIG_[A-Z0-9_]+)=", line)
+              if not match:
+                  match = re.match(r"^# (CONFIG_[A-Z0-9_]+) is not set$", line)
+              if match and match.group(1) in updates:
+                  key = match.group(1)
+                  if key not in seen:
+                      merged.append(updates[key])
+                      seen.add(key)
+                  continue
+              merged.append(line)
+          for key, line in updates.items():
+              if key not in seen:
+                  merged.append(line)
+          config.write_text("\n".join(merged) + "\n")
+          PY
+          grep -qx 'CONFIG_STATIC=y' .config || {
+            echo "::error::BusyBox fragment merge did not enable CONFIG_STATIC"
+            exit 1
+          }
+          # Resolve Kconfig dependencies and any new symbols. The make exit
+          # status is authoritative; yes may legitimately receive SIGPIPE.
+          set +o pipefail
+          yes "" | make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig >/dev/null
+          set -o pipefail
+          grep -qx 'CONFIG_STATIC=y' .config || {
+            echo "::error::BusyBox oldconfig dropped CONFIG_STATIC"
+            exit 1
+          }
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 2>&1 | tee "$GITHUB_WORKSPACE/work/logs/busybox-build.log"
+
+          install -m 0755 busybox "$GITHUB_WORKSPACE/work/output/busybox"
+          cp .config "$GITHUB_WORKSPACE/work/output/busybox.config"
+          cd "$GITHUB_WORKSPACE"
+          bash scripts/panther-x2-b1/verify-b1-config.sh \
+            work/kernel.config work/output/busybox.config work/output/busybox work/modules-root
+
+          qemu-aarch64-static work/output/busybox --list | sort | tee work/busybox-applets.txt
+          cp busybox-applets.actual work/output/busybox-applets.txt
+      - name: Save completed BusyBox stage
+        uses: actions/upload-artifact@v6
+        with:
+          name: b1-busybox
+          path: |
+            work/output/busybox
+            work/output/busybox.config
+            work/output/busybox-applets.txt
+            work/logs/busybox-build.log
+            work/busybox-applets.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  package-b1:
+    if: ${{ !cancelled() && needs.build-busybox.result == 'success' }}
+    name: Assemble and verify PREPARE-ONLY image
+    needs: build-busybox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v6
+
+      - name: Install image packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cpio curl device-tree-compiler e2fsprogs gdisk kmod zstd u-boot-tools
+
+      - name: Restore BusyBox from this run
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-busybox
+          path: work
+
+      - name: Restore kernel and DTB from this run
+        if: ${{ inputs.reuse_kernel_run_id == '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+
+      - name: Reuse kernel and DTB from the selected successful run
+        if: ${{ inputs.reuse_kernel_run_id != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.reuse_kernel_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify restored stage inputs before packaging
+        run: |
+          set -euo pipefail
+          required_files=(
+            work/output/Image
+            work/output/modules.tar.zst
+            work/output/kernel.config
+            work/output/kernel.config.seed
+            work/output/kernel.config.fragment
+            work/output/dtb/rockchip/rk3566-panther-x2.dtb
+            work/output/busybox
+            work/output/busybox.config
+          )
+          for path in "${required_files[@]}"; do
+            if [ ! -s "$path" ]; then
+              echo "::error::Required restored stage artifact is missing or empty: $path"
+              exit 1
+            fi
+          done
+          echo "All Kernel/DTB and BusyBox stage inputs are present."
+          if [ -s work/toolchain-version.txt ]; then
+            cat work/toolchain-version.txt
+          else
+            echo "Historical Kernel/DTB artifact has no toolchain-version record; this metadata is unavailable."
+          fi
+
+      - name: Assemble RAM initramfs and U-Boot boot script
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
+          install -m 0755 work/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname dmesg tail; do
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
+
+          (
+            cd "$ROOT"
+            find . -print0 | sort -z | cpio --null -o --format=newc
+          ) | gzip -n -9 > work/output/initramfs.cpio.gz
+
+          mkimage -A arm64 -O linux -T ramdisk -C gzip \
+            -n "Panther X2 B1 clean RAM initramfs" \
+            -d work/output/initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/uinitrd-header.txt
+
+          install -m 0644 scripts/panther-x2-minimal-initramfs/boot.cmd work/output/boot.cmd
+          grep -Fqx 'setenv bootargs "earlycon=uart8250,mmio32,0xfe660000 keep_bootcon console=ttyS2,1500000n8 loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"' work/output/boot.cmd
+          mkimage -A arm -O linux -T script -C none \
+            -n "Panther X2 B1 clean RAM boot" \
+            -d work/output/boot.cmd work/output/boot.scr
+          mkimage -l work/output/boot.scr | tee work/bootscr-header.txt
+      - name: Include verified JP U-Boot proper and create manifest
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/docs/research-assets/bootloader/panther-x2/JP-TvBox-U-Boot/u-boot.itb" \
+            -o work/output/JP-TvBox-u-boot.itb
+          echo "${JP_UBOOT_SHA256}  work/output/JP-TvBox-u-boot.itb" | sha256sum -c -
+
+          {
+            echo "purpose=PREPARE-ONLY; hybrid TF image artifact only; no physical TF/eMMC writes"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "kernel_config_seed=ophub/kernel@ba00be60d59300bd93633218a8905829d6cabd72"
+            echo "kernel_config_seed_blob_sha=${KERNEL_CONFIG_SEED_BLOB_SHA}"
+            echo "kernel_config_seed_sha256=$(sha256sum work/output/kernel.config.seed | awk '{print $1}')"
+            echo "kernel_config_fragment_sha256=$(sha256sum work/output/kernel.config.fragment | awk '{print $1}')"
+            echo "modules_archive_sha256=$(sha256sum work/output/modules.tar.zst | awk '{print $1}')"
+            echo "busybox_version=${BUSYBOX_VERSION}"
+            echo "busybox_archive_sha256=${BUSYBOX_SHA256}"
+            echo "jp_uboot_sha256=${JP_UBOOT_SHA256}"
+            echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "busybox_config_sha256=$(sha256sum work/output/busybox.config | awk '{print $1}')"
+            echo "dtb_sha256=$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')"
+            if [ -s work/toolchain-version.txt ]; then
+              echo "kernel_build_toolchain=$(cat work/toolchain-version.txt)"
+            else
+              echo "kernel_build_toolchain=not-recorded-in-reused-artifact"
+            fi
+          } | tee work/output/BUILD-MANIFEST.txt
+      - name: Package PREPARE-ONLY hybrid TF image and verify layout
+        run: |
+          set -euo pipefail
+          mkdir -p work/tf-mnt
+          test -s work/output/Image
+          test -s work/output/uInitrd
+          test -s work/output/boot.scr
+          test -s work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/output/JP-TvBox-u-boot.itb
+
+          IMAGE=work/output/panther-x2-b1-hybrid-PREPARE-ONLY.img
+          truncate -s 2G "$IMAGE"
+          sgdisk --clear \
+            --new=1:32768:4192255 \
+            --typecode=1:8300 \
+            --change-name=1:PANTHER_BOOT \
+            "$IMAGE"
+
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo cp -a work/output/Image work/tf-mnt/Image
+          sudo cp -a work/output/uInitrd work/tf-mnt/uInitrd
+          sudo cp -a work/output/boot.scr work/tf-mnt/boot.scr
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo cp -a work/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/
+          sudo cp -a work/output/boot.cmd work/tf-mnt/boot.cmd
+          printf '%s\n' \
+            'Panther X2 B1 clean RAM test image; PREPARE-ONLY.' \
+            'Boot chain: existing eMMC SPL -> TF JP-TvBox U-Boot proper -> Linux 6.18.63 -> RAM initramfs.' \
+            'No TF IDB/SPL is installed; Linux B1 retains MMC/block/storage and USB support but disables network and Ethernet.' \
+            'Linux may enumerate eMMC; /init does not mount or write persistent filesystems. The eMMC safety gate remains mandatory.' \
+            'Do not flash or boot until eMMC hardware write-protection and U-Boot address safety gates are cleared.' \
+            | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          # Place the verified JP U-Boot proper FIT at raw LBA 16384 (8 MiB).
+          dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+
+          SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
+          ACTUAL_SHA="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$SIZE" status=none | sha256sum | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$JP_UBOOT_SHA256"
+          echo "JP proper expected=$JP_UBOOT_SHA256 readback=$ACTUAL_SHA"
+
+          # Reopen the completed image read-only and verify the ext4 payload.
+          LOOP="$(sudo losetup --find --show --partscan --read-only "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          sudo mount -o ro "${LOOP}p1" work/tf-mnt
+          for p in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do
+            test -s "work/tf-mnt/$p"
+          done
+          (
+            cd work/tf-mnt
+            find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum
+          ) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          zstd -T0 -10 "$IMAGE" -o "${IMAGE}.zst"
+          sha256sum "$IMAGE" "${IMAGE}.zst" > work/output/tf-image-sha256.txt
+          rm -f "$IMAGE"
+          cat work/output/tf-image-sha256.txt
+
+          # Validate compressed artifacts and the exact initramfs payload.
+          zstd -t work/output/modules.tar.zst
+          zstd -t "${IMAGE}.zst"
+          gzip -t work/output/initramfs.cpio.gz
+          gzip -dc work/output/initramfs.cpio.gz | cpio -t > work/initramfs-file-list.txt
+          # GNU cpio -t removes the leading "./" from listed member names.
+          grep -qx 'init' work/initramfs-file-list.txt
+          grep -qx 'bin/busybox' work/initramfs-file-list.txt
+          test -s work/initramfs-file-list.txt
+          # Generate the complete checksum manifest after all artifact/readback checks.
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+          cat work/output/SHA256SUMS
+      - name: Upload B1 clean RAM components (prepare only)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/kernel-image-file.txt
+            work/dtb-verification.txt
+            work/uinitrd-header.txt
+            work/bootscr-header.txt
+            work/busybox-applets.txt
+          if-no-files-found: error
+          retention-days: 14
+ work/linux/include/linux/kobject.h
+          ! sed -n '/^#else$/,/^#endif$/p' work/linux/lib/kobject_uevent.c | grep -q 'broadcast_uevent'
+          grep -q 'kfree_skb(skb);' work/linux/lib/kobject_uevent.c
+          grep -q 'broadcast_uevent' work/linux/lib/kobject_uevent.c
           grep -qx 'VERSION = 6' work/linux/Makefile
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
           grep -qx 'SUBLEVEL = 63' work/linux/Makefile
