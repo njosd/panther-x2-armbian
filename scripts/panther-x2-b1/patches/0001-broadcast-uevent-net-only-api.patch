@@ -1,7 +1,7 @@
 diff --git a/include/linux/kobject.h b/include/linux/kobject.h
 --- a/include/linux/kobject.h
 +++ b/include/linux/kobject.h
-@@ -223,8 +223,10 @@ __printf(2, 3)
+@@ -222,8 +222,10 @@ __printf(2, 3)
  int add_uevent_var(struct kobj_uevent_env *env, const char *format, ...);
  
  u64 uevent_next_seqnum(void);
