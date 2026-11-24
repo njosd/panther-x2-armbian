@@ -290,3 +290,69 @@ B2-0 仍在进行，B2-1 不放行。当前主线是 GMAC1/RGMII 从 Linux probe
 - 6.18 的 probe/setup/powerup 控制流与 Panther 的外置 PHY + RGMII runtime DTS 条件匹配，尚未发现新静态错配。
 
 本轮仍没有证明实际硬件 clock/GRF 写入和 RGMII 波形。B2-0 继续；B2-1 不放行。
+
+
+## 2026-11-24 方法论补充：必须审查 GMAC 组件组合效应，不能只做逐组件孤立比较
+
+用户特别指出：GMAC 数据通路像一条由多个环节共同构成的通道，不同环节/条件的组合可能出现“某些组合可通、另一些组合不通”。B2-0 因此增加组合效应审查要求。
+
+### 1. 研究模型：从组件清单转为端到端状态链
+
+不能只问某个组件单独是否正确，还必须检查组件之间的接口契约、初始化先后、状态传递和错误处理是否兼容。当前 Panther TX 方向至少拆成：
+
+1. DTS/资源描述：compatible、reg、clocks、clock-names、resets、power-domains、pinctrl、phy-supply、phy-mode、phy-handle；
+2. Rockchip glue probe/setup：资源解析、clock 获取、regulator、reset、GRF 配置；
+3. 时钟/电源/复位时序：bulk clocks、PHY clock、5ms settle、regulator enable、runtime PM；
+4. STMMAC platform handoff：DMA mask、bus configuration、MAC address、phylink/MDIO 连接；
+5. DMA 初始化：software reset、DMA channel、descriptor ring、tail pointer、DMA start；
+6. MAC link-up：speed/duplex、TX clock rate、MAC TE/RE；
+7. RGMII 边界：TXC/TXD/TX_CTL、delay value/enable、pinctrl/IOMUX；
+8. RTL8211F：PHY reset、strap/延时、RGMII interface、link negotiation、LPI/EEE；
+9. MDI/对端：帧是否真正从 PHY 发出并被同网段监听器接收。
+
+每个节点的单项实现可能看起来正确，但跨节点组合仍可能不兼容。例如：clock enable 成功但 TX clock rate 设置失败；DMA reset 失败却被 warning-and-continue 吞掉；MAC TE 已开启但 RGMII delay/pinctrl 与 PHY 输出时序不匹配；PHY link 已建立但 MAC/PHY 对 RGMII 时钟方向或 LPI 行为理解不一致。
+
+### 2. 组合效应审查的四个维度
+
+每个跨版本差异必须额外检查：
+
+- **接口/资源组合：** DTS 属性与驱动分支是否匹配；clock name 与实际 clock list 是否一致；外置 PHY 与 integrated-PHY 路径是否混用；RK3566 芯片是否命中 RK3568 ops 中的预期分支。
+- **时序组合：** reset、clock enable、settle delay、PHY power-up、MDIO attach、DMA reset、MAC TE enable 的先后关系是否满足硬件依赖；不能只比较 delay 数值。
+- **状态/错误组合：** 某一步失败后是否继续执行；后续步骤是否假定前一步成功；warning-and-continue、ignored return、deferred probe、runtime PM 状态是否可能形成“表面成功、数据不通”。
+- **版本/补丁组合：** 组件 A 的新接口是否依赖组件 B 的配套改动；单独 backport/revert 是否会破坏调用约定、结构字段、回调时序或资源释放；不能把不同版本的局部代码随意拼接。
+
+### 3. 建立组合矩阵，而不是无目的穷举
+
+对每个关键阶段建立“版本 × 组件 × 条件 × 结果”矩阵：
+- 版本列：正常 6.1.65、正常 6.1.79/6.1.112/6.1.116、已确认异常的 6.1.y 具体版本、6.1.174-rk35xx、6.12.81-rk35xx、目标 6.18.63；
+- 组件列：DTS/DTB、Rockchip glue、STMMAC core、DWMAC4、PHY driver、pinctrl/CRU/regulator；
+- 条件列：cold boot、PHY reset、link-up、open/reopen、runtime suspend/resume、1000Mbps RGMII、DMA reset error 等，只登记有证据或源码可达的条件；
+- 结果列：probe、clock、PHY attach、DMA reset、MAC TE、TX descriptor、MAC counter、外部抓包等边界结果；
+- 证据列：精确 source commit、二进制来源、实际命中分支、历史实机结果、置信度。
+
+优先找“单组件没有明显错误，但两个或多个组件组合后出现行为差异”的交互项。先根据调用链、条件分支、时序和错误传播提出少量有因果依据的组合，再评估是否值得进行单变量替换。禁止把所有组件任意排列组合，也禁止仅凭相关性认定根因。
+
+### 4. 故障定位要用边界证据缩小组合范围
+
+已知项目 B 证据显示软件 TX 请求、descriptor 回收和 MAC MMC TX 计数均有活动，但外部监听器未收到对应帧；因此当前最重要的未闭合边界是 MAC 计数之后到外部 RGMII/PHY/MDI 发送之间。
+
+这并不证明故障一定在 PHY：如果 MAC 内部计数点位于真正 TX 输出之前，仍可能是 MAC TE/DMA 状态、时钟、GRF 或 RGMII 输出问题。后续源码研究应逐项确认各计数器的统计位置和代码路径，不能将 MMC TX 计数等同于物理出线。
+
+### 5. 组合候选的入选规则
+
+一个组合候选进入下一轮重点审查，至少满足：
+1. 组件间存在明确调用/资源/时序/状态依赖；
+2. 正常与异常版本之间至少一个参与组件或接口契约确有差异；
+3. 该差异在 Panther RGMII + 外置 RTL8211F + RK3566 条件下实际可达；
+4. 能解释现有故障边界，而不与已有实机证据冲突；
+5. 有可独立观察或未来可单变量替换的验证方式；
+6. 能说明替换时的依赖闭包与回退方案。
+
+### 6. 对当前 B2-0 的直接执行影响
+
+- 先前逐组件源码比较继续保留，但不能把“每项都与 6.1.116 一致”推导成“6.18 整条链必然正常”。
+- 下一步优先绘制 6.18.63 Panther GMAC1 从 probe → clock/power/reset → STMMAC handoff → DMA reset → link-up/TX clock → MAC TE 的顺序图，并与 6.1.116 正常路径、首个异常 6.1.y 的精确构建路径逐段比较。
+- 特别审查错误返回被忽略/降级后，后续步骤是否仍会运行；以及一个组件的补救提交是否依赖另一个组件或 PHY 生命周期改动。
+- 组合审查必须回用项目 B 已有实机结果，不重复设备测试；新证据出现前不做构建、补丁、刷写或网络启动。
+
+**状态不变：B2-0 继续；B2-1 不放行。** 本节更新研究方法与检查表，不代表已证明某个组合就是根因。
