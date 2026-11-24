@@ -418,3 +418,10 @@ Run #63（45294164685）在 Kernel 最终链接阶段失败，错误为 `sk_skb_
 Workflow 已调整：无旧产物复用时，Kernel/DTB 失败则 BusyBox 和 package 自动跳过；只有显式提供成功 Kernel/DTB Run ID 才复用上游产物。后续按失败阶段恢复，禁止无故重建已验收阶段。
 
 当前补丁尚未通过 Actions 构建验证；不得将本次静态修正描述为 Kernel 构建成功。下一步由用户手动运行 workflow，重新构建 Kernel/DTB；本次没有触发 Actions、写卡或启动设备。
+
+### 2026-11-24 update — Run #64 patch-format failure
+
+Run `45307203767` stopped in the Kernel/DTB job during `git apply --check`: the new `0001-broadcast-uevent-net-only-api.patch` had inconsistent unified-diff hunk counts. The pinned source fetch succeeded; kernel configuration and compilation did not start. BusyBox and package jobs were skipped, and no new artifacts were created.
+
+The patch hunk offsets/counts have since been corrected and checked for internal consistency; the obsolete patch README was also corrected. This is a source-control fix only, not a CI-verified patch application. The next user-triggered run should first validate `git apply --check`; do not rebuild or reuse unrelated stages until the corrected patch has passed its source-application gate. Kernel/DTB build and all later stages remain unverified.
+
