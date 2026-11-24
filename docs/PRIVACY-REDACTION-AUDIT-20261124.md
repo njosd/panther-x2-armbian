@@ -59,3 +59,41 @@ The `evidence/README.md`, `evidence/uart/README.md`, and `evidence/boot/README.m
 - Current-branch unredacted UART source files explicitly identified above: removed.
 - Full repository-wide binary/artifact scan: incomplete.
 - Git history cleanup: pending explicit authorization because it rewrites shared repository history.
+
+
+## Multi-branch review after authorization
+
+The repository exposes 11 branch heads:
+
+- `main`
+- `architecture/b1-full-base-network-isolation`
+- `audit/6.1.116-reference-dtb`
+- `audit/fnnas-boot-reference`
+- `audit/panther-x2-uboot-fit`
+- `audit/preflight-gpt-ext4-readonly`
+- `diagnostic/6.12.81-uart-rootfs`
+- `evidence/kernel-config/config-6.1.116-ophub`
+- `fix/panther-x2-usb2-host-phy`
+- `fix/uart-terminal-reliability`
+- `workflow/fnnas-reference-audit`
+
+No tag refs were returned by the repository refs endpoint. Three merged pull requests (PR #1–#3) still have GitHub-managed `refs/pull/*` references; these are not ordinary branch refs and cannot be force-updated through the branch-ref API.
+
+Additional stale-branch exposures found:
+
+- `architecture/b1-full-base-network-isolation` still contains the unredacted 2026-11-19 UART log (root filesystem UUIDs, partition UUIDs and CPU serial), the unredacted DHCP status file (wireless MAC and NetworkManager connection UUID), the compressed 2026-11-13 UART capture, its Base64 chunks, and the large UART strings dump.
+- `fix/uart-terminal-reliability` still contains the same old UART archive and Base64 chunks.
+- `diagnostic/6.12.81-uart-rootfs` contains a reconstructed UART excerpt with a filesystem UUID.
+- `fix/panther-x2-usb2-host-phy` contains the home LAN address `192.168.9.6` in a project document.
+
+These are historical branch-tip findings and must be handled by the all-branch rewrite; cleaning `main` alone is insufficient.
+
+## Authorized history rewrite — not yet executed
+
+The user approved rewriting Git history and force-updating remote branches on 2026-11-24. The rewrite has **not** been run yet.
+
+The GitHub integration available in this session can inspect and update files/branch refs, but does not expose a workflow-dispatch action or a local Git push operation. A safe rewrite therefore requires a prepared, manually dispatched GitHub Actions workflow (or an equivalent local Git-filter-repo run). Do not create a replacement commit whose parent is the old history and call that a history purge; that would leave the exposed commits reachable.
+
+The rewrite must preserve all 11 branch tips as separate branches, preserve their branch-specific files and commit relationships where possible, redact historical text blobs, remove unredacted raw UART capture paths, and push only `refs/heads/*` and tags. GitHub-managed `refs/pull/*` and cached views may remain accessible after branch rewriting; after the rewrite, GitHub Support may need to purge cached sensitive objects/PR refs. A repository history rewrite alone cannot guarantee deletion of third-party clones or external caches.
+
+Before force-pushing, binary evidence archives and bootloader images still require a content-aware scan. In particular, the three `evidence/hardware/*.tar.gz` archives and binary bootloader assets were inventoried but not fully unpacked/string-scanned in this session. They must be checked before declaring the repository fully clean.
