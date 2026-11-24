@@ -409,3 +409,12 @@ Run #62（45291347822）三个 Job 的流水线结果为：Kernel/DTB skipped（
 已在提交 `e6d94d2d337fe6caaff1d743aca1aef77451159d` 修正 workflow，改为固定上游源码不打补丁。下一步只需运行修正后的 Kernel/DTB 构建；通过后再继承该新产物完成 BusyBox 与 package 阶段。不得重复无关已成功阶段。当前没有触发新 workflow。
 
 完整证据、Artifact ID/digest 与安全边界见 [B1 构建实施记录](PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)。
+
+
+## 2026-11-24 B1 Run #63 故障与恢复规则补充
+
+Run #63（45294164685）在 Kernel 最终链接阶段失败，错误为 `sk_skb_reason_drop` 未定义。原因及修正详见总路线图与 B1 构建实施记录。当前分支已加入 `0001-broadcast-uevent-net-only-api.patch`：`broadcast_uevent()` 的声明、实现和导出仅在 `CONFIG_NET` 下存在；无网络 stub 被移除，正常网络分支 skb 释放语义保持不变。B1 已禁用该源码中的 GPIO hotplug 调用者。
+
+Workflow 已调整：无旧产物复用时，Kernel/DTB 失败则 BusyBox 和 package 自动跳过；只有显式提供成功 Kernel/DTB Run ID 才复用上游产物。后续按失败阶段恢复，禁止无故重建已验收阶段。
+
+当前补丁尚未通过 Actions 构建验证；不得将本次静态修正描述为 Kernel 构建成功。下一步由用户手动运行 workflow，重新构建 Kernel/DTB；本次没有触发 Actions、写卡或启动设备。
