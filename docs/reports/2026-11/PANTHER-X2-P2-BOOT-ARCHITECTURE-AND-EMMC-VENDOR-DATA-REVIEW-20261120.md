@@ -684,7 +684,7 @@ TF U-Boot 与 eMMC U-Boot 应共用同一只读实现：
 1. `yjdwbj/panther-x2` 项目 README（tag `v1.0`，2024-06-14）：
    - 记录 U-Boot 2024.01、Kernel 6.9.4、Debian 12；
    - 明确标注 “Boot log (booting from uSD Card)”；
-   - Linux kernel command line 的 root UUID 为 `248cdb28-ac33-4448-adbc-2972f265f0ff`；启动日志显示该 UUID 挂载自 `mmcblk0p2`，并将 `mmcblk0p1` 挂载为另一文件系统；
+   - Linux kernel command line 的 root UUID 为 `[REDACTED-UUID]`；启动日志显示该 UUID 挂载自 `mmcblk0p2`，并将 `mmcblk0p1` 挂载为另一文件系统；
    - 同时内核识别到另一块 32GB eMMC，设备号为 `mmcblk1`，并枚举其 boot0/boot1/RPMB；
    - 这强力支持其 boot/root 系统分区均位于 uSD，而 eMMC 仍在机内；但 README 没有提供 BootROM/SPL/U-Boot 阶段 UART 日志，不能判定 U-Boot proper 的来源，也不能证明 SPL 与 proper 均由 uSD 提供。
 
@@ -761,7 +761,7 @@ Lorenzo Gangemi 于 2026-06-14 发布的 Panther X2 记录称，其将普通 Arm
 同标签 README 的 uSD Linux 启动日志明确显示：
 - `mmcblk0` 是 116 GiB SDXC，分区为 p1/p2；
 - `mmcblk1` 是 32 GB eMMC，并枚举 `mmcblk1boot0`、`mmcblk1boot1` 和 RPMB；
-- kernel command line 的 root UUID 为 `248cdb28-ac33-4448-adbc-2972f265f0ff`；
+- kernel command line 的 root UUID 为 `[REDACTED-UUID]`；
 - `EXT4-fs (mmcblk0p2)` 挂载该 UUID，确认根文件系统在 TF/uSD 的 p2。
 
 结合该版本日志中 MMC 控制器地址和设备映射，`fe2b0000` 对应 SD/TF 控制器；U-Boot proper 从该控制器分区 1 读取 extlinux、Kernel、DTB 和 initramfs。SPL 的 `Trying to boot from MMC1` 则指向其 SPL 启动设备为 MMC1；按 Rockchip RK3566 启动源编号与本项目已验证的 MMC1/eMMC、MMC2/SD 对照，证据高度支持其为 eMMC 前级加载 TF 后级。
