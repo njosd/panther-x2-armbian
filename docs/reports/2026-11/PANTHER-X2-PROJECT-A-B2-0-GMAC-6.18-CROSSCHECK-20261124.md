@@ -406,3 +406,17 @@ Panther 当前命中路径仍是：
 5. 6.18.63 若未来进入获批实机阶段，DMA reset warning 必须单独作为异常门槛；在此之前不启动、不构建、不打补丁。
 
 **当前评价：** 1500ms wait 的存在/删除与 DMA reset 错误处理形成版本间真实差异，列为 B2-0 高价值时序组合候选；是否为 Panther 必需仍未验证。
+## 18. 原版 6.1.65 实机黄金线的精确源码映射补充
+
+将 2026-11-24 原版 Armbian 6.1.65 TF 启动网络全通记录与其最可能源码端点结合后，新增以下对照：
+
+- 原版 6.1.65 精确版本提交候选：unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc（提交说明 up to 6.1.65；构建时间与 2023-12-07 镜像时间相邻，仍非 Image 二进制的逐字节来源证明）。
+- 该版本的 dwmac-rk.c blob 为 514f1ac0dea2d49cd4f581a48db2b02160187d0a，与 6.1.79/6.1.112/6.1.116 的既有 blob 完全相同。
+- 该版本 Panther DTS blob 为 1e3153c392d8de617f72b3133eaeddf45569bde8，与 6.1.79/6.1.112/6.1.116 的既有 DTS blob 完全相同。
+- 该版本 pinctrl-rockchip.c blob 为 0276b52f37168423346316089a39417082e6f1f6；首 pin 失败仍执行 if (ret) 返回错误，不存在 if (ret && cnt) 的吞错行为。
+- 该版本 stmmac_init_dma_engine() 有无条件 msleep(1500)，之后 stmmac_reset() 失败则 error + abort。
+- 该版本 rtl8211f_config_init() 按 RGMII interface 清除 PHY 内 TX/RX delay，更新 ALDPS/PHYCR1；对 has_phycr2 条件执行 PHYCR2 配置，最后 genphy_soft_reset()。这与 6.1.116 的主体初始化流程高度一致；6.1.116 后续增加的 LED 配置不改变这里的 RGMII delay 分支。
+
+因此 6.1.65 不仅是“系统网络功能通过”的实机基准，也为 6.1.116 的 GMAC glue、Panther DTS、DMA reset 前等待和 pinctrl 错误传播提供了更早的源码正向对照。下一轮版本回归表必须同时以 6.1.65 与 6.1.116 为正常端点，不得只用 6.1.116 代表所有正常版本。
+
+**来源边界：** 6.1.65 实机网络全通是用户提供的直接测试证据；4428... 是时间和源码版本匹配的高置信度源码候选。尚未把原始 Image 的 build-id、完整 .config、modules 与该 commit 做到逐字节构建来源闭环。
