@@ -56,7 +56,7 @@
 - start LBA：32768（`0x8000`）。
 - end LBA：4192255（`0x3ff7ff`）。
 - type GUID：Linux filesystem `0fc63daf-8483-4772-8e79-3d69d8477de4`。
-- partition GUID：`f705ecc6-6a2b-4a16-9ccb-d62a59d92001`。
+- partition GUID：`[REDACTED-PARTITION-GUID]`。
 
 `ext4ls mmc 1:1 /` 成功，文件包括：
 - `Image`：3,713,032 bytes
