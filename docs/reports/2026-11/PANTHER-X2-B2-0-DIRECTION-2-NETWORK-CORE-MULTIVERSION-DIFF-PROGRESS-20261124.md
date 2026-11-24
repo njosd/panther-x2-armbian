@@ -88,15 +88,33 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 - 6.1.174 起，`qdisc_restart()` / `dequeue_skb()` 增加 packet budget 参数，`try_bulk_dequeue_skb()` 增加按 budget 限制批量 dequeue 的逻辑；6.12 延续该实现。
 - 该差异控制 qdisc 批量出队/调度公平性，不改变单个 skb 的驱动调用和返回处理。
 
-### 4.4 TX skb 校验
+### 4.4 TX checksum helper 与不可读 fragment 检查（位置更正）
 
-比较 `net/core/dev.c:validate_xmit_skb()`：
+本轮进一步逐函数比较 `net/core/dev.c`，确认 6.12 新增的 `skb_frags_readable(skb)` 检查**不在 `validate_xmit_skb()` 函数入口**，而是在它可能调用的 `skb_checksum_help()` 软件 checksum fallback 内。此前将该检查归到 `validate_xmit_skb()` 入口的表述不准确，以本节为准。
 
-- 6.1.116 与 6.1.174 的对应函数体一致。
-- 6.12 新增 `skb_frags_readable(skb)` 前置检查；若 skb 的 page fragments 标记为不可由 host 读取，则在进入 VLAN/GSO/校验和处理前丢弃。
-- `skb_frags_readable()` 检查的是 skb 的 `unreadable` 标记，主要影响带有不可读 page fragments 的 skb；它不是对普通线性 skb 的通用拒绝条件。
+`skb_checksum_help()`：
+- 6.1.116 与 6.1.174 函数体一致；
+- 6.12 在 `CHECKSUM_COMPLETE` 和 GSO 快速分支之后、实际读取 skb 数据计算 checksum 之前，增加：
+  `if (!skb_frags_readable(skb)) return -EFAULT;`
+- `skb_frags_readable()` 实际检查 `!skb->unreadable`；
+- 6.12 的 `__skb_fill_netmem_desc()` 在 fragment 使用 `netmem_is_net_iov(netmem)` 时设置 `skb->unreadable=true`。因此该保护针对包含 host 不可直接读取的 net_iov/device-memory fragment 的 skb，而不是普通 page fragment 或普通线性 skb。
 
-当前没有历史证据证明故障 DHCP Discover 带有不可读 page fragments。该变化应保留为 6.12 网络核心新增的条件性 TX 丢弃路径，但不能据此认定为 DHCP 故障原因。
+调用关系：
+`validate_xmit_skb()` → `skb_csum_hwoffload_help()` →（设备不支持当前 skb checksum offload 时）`skb_checksum_help()`。
+只有实际进入软件 checksum fallback 且 skb 带 unreadable fragment 时，新检查才会返回 `-EFAULT`，上层 TX 校验路径随后丢弃 skb。
+
+配置差异：
+- 6.1.116 与 6.1.174 的 `net/Kconfig` 没有 `NET_DEVMEM` 符号；
+- 6.12.81 源码中新增 `CONFIG_NET_DEVMEM`，定义为 `def_bool y`，依赖 `DMA_SHARED_BUFFER`、`GENERIC_ALLOCATOR` 和 `PAGE_POOL`；
+- 已核对的 Ophub RK35xx 6.12 配置模板 `kernel-config/release/rk35xx/config-6.12` 同时启用上述依赖及 `CONFIG_NET_DEVMEM=y`。这是模板配置证据；在未取得 6.12.81 最终构建 `.config` 原件前，不把它冒充为运行 Image 的逐项实测配置。
+
+对普通 UDP/DHCP 小包的适用性：
+- 6.12 的 `udp4_hwcsum()` 与 6.1.116、6.1.174 函数体一致；
+- `udp_send_skb()` 在 6.1.174 和 6.12 的变化位于 `cork->gso_size` 非零的 UDP GSO 分支，以及错误状态读取方式；普通非 GSO UDP datagram 的 checksum 分支没有相应变化；
+- `__ip_append_data()` 在 6.12 新增 `MSG_SPLICE_PAGES` 路径，可把用户页 splice 到 skb fragments；普通 UDP sendmsg 不设置该标志时不走该新增分支；
+- 常规 DHCP 小型 UDP 报文通常走普通 datagram 路径，不属于 UDP GSO，也没有理由仅凭 NET_DEVMEM=y 推断它包含 net_iov fragment。
+
+因此，这是一条真实存在的 6.12 新增条件性 TX 丢弃路径，但需要同时满足“skb 带 unreadable net_iov fragment”及“软件 checksum fallback 被调用”两个条件。当前没有历史证据证明 Panther 的 DHCP skb 满足任一条件；不得将它认定为故障根因。
 
 ## 5. 已复用的方向二既有审计，不重复
 
@@ -116,7 +134,7 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 | 6.12 net_hotdata / TCP strict-tag 字段 | 协议对象存储、TCP/ICMP 处理 | 不命中 UDP DHCP 发送 |
 | 6.1.174 GSO skb-list 处理 | GSO 多 segment 发送 | 不命中单 skb 小型 DHCP 报文 |
 | qdisc bulk dequeue budget | 批量出队和调度公平性 | 不改变单 skb 发送语义 |
-| 6.12 unreadable-frag 检查 | 含不可读 page fragments 的 skb | 仅条件性命中；当前无 DHCP skb 命中证据 |
+| 6.12 `skb_checksum_help()` unreadable-frag 检查 | 含 net_iov/device-memory fragment 且进入软件 checksum fallback 的 skb | 条件性路径；普通线性 DHCP 小包未见命中证据 |
 | IPv4 output RCU / 统计位置 | 路由引用保护、统计时点 | 未发现改变报文内容或普通设备提交路径 |
 
 **阶段性结论：** 本轮审查到的网络核心差异中，尚未发现一个已证实且命中普通本机小 UDP 报文发送路径的版本回归点。6.12 的 unreadable-frag 检查是新增条件性丢弃路径，保留观察；其余已见变化主要属于 GSO、qdisc batching、初始化和统计/结构调整。
@@ -131,4 +149,24 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 - 6.12.81 故障窗口是否曾出现 `skb->unreadable`；
 - 6.1.65 / 6.1.79 / 6.1.112 的精确源码端点。
 
-方向二下一项继续检查 Linux 网络核心中 SKB TX 侧 checksum、fragment/GSO 处理及其跨版本差异；复用已有 NAPI allocator 与 GRO/shared-frag 报告，不重做已完成内容。完成方向二全部子项之前，不进入方向三；不构建、不启动、不改配置、不做实机试验。
+本轮已完成 SKB TX checksum fallback、UDP checksum 生成、UDP GSO 与 splice-fragment 分支的源码差异检查。下一项继续方向二中尚未审查的网络核心子系统与配置差异；复用已有 NAPI allocator、GRO/shared-frag 报告，不重做已完成内容。完成方向二全部子项之前，不进入方向三；B2-0 全程只做源码、Kconfig、配置和设备树静态审计，不执行 B1 包的配置、构建、启动或实机试验。
+
+
+## 8. 本轮追加核验记录：checksum / fragment / UDP GSO
+
+源码端点仍为第 2 节固定的三个 commit。本轮直接读取并比较：
+- `net/core/dev.c`：`skb_checksum_help()`、`skb_csum_hwoffload_help()`
+- `net/ipv4/udp.c`：`udp4_hwcsum()`、`udp_send_skb()`
+- `net/ipv4/ip_output.c`：`__ip_append_data()`
+- `net/core/skbuff.c`：`skb_segment()`
+- `include/linux/skbuff.h`：`skb_frags_readable()`、`__skb_fill_netmem_desc()`
+- `net/Kconfig` 与 Ophub RK35xx 6.12 配置模板。
+
+主要结论：
+1. 6.1.116→6.1.174 的 `skb_csum_hwoffload_help()` 变化只涉及 IPv6 extension/jumbo header 的 offload 判定，不适用于 IPv4 DHCP。
+2. 6.1.174 的 `skb_segment()` shared-frag 标记传播修正已在既有 6.1.174 提交审计中记录；本轮不重复归因。
+3. 6.12 的 unreadable fragment 保护准确位于 `skb_checksum_help()` 软件 checksum fallback；它针对 net_iov/device-memory fragments。
+4. 6.12 UDP GSO 条件分支和 `MSG_SPLICE_PAGES` 分支有变化，但不等于普通 UDP datagram 路径发生变化。
+5. 目前这几项变化均未形成普通小 UDP/DHCP TX 故障的已证实解释。
+
+本轮仍是源码及配置模板静态审计；没有读取、改写或生成任何 B1 实机测试包，也没有执行任何设备侧操作。
