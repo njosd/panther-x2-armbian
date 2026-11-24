@@ -19,7 +19,7 @@ for key in CONFIG_STATIC CONFIG_BUSYBOX CONFIG_ASH CONFIG_SH_IS_ASH CONFIG_CAT C
 readelf -h "$BUSYBOX_BIN" | grep -q 'AArch64'
 if readelf -l "$BUSYBOX_BIN" | grep -q 'INTERP'; then echo "::error::BusyBox is dynamically linked"; exit 1; fi
 "$CROSS_PREFIX"gcc --version >/dev/null; qemu-aarch64-static "$BUSYBOX_BIN" --list | sort > busybox-applets.actual
-for applet in ash sh cat dmesg echo ls mkdir mount printf test tail uname; do grep -qx "$applet" busybox-applets.actual || { echo "::error::Missing BusyBox applet: $applet"; exit 1; }; done
+for applet in ash sh cat dmesg echo ls mkdir mount printf test '[' tail uname; do grep -qx "$applet" busybox-applets.actual || { echo "::error::Missing BusyBox applet: $applet"; exit 1; }; done
 APPLET_COUNT="$(wc -l < busybox-applets.actual)"
 if [[ "$APPLET_COUNT" -gt 16 ]]; then echo "::error::BusyBox applet set too large ($APPLET_COUNT)"; cat busybox-applets.actual; exit 1; fi
 for applet in ip ifconfig route arp arping ping ping6 nc netstat telnet wget ftpget ftpput udhcpc udhcpd nslookup brctl traceroute tc tunctl ipcalc nameif ether-wake ifup ifdown; do if grep -qx "$applet" busybox-applets.actual; then echo "::error::Forbidden network applet: $applet"; exit 1; fi; done
