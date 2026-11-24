@@ -201,3 +201,66 @@ B2 每个阶段均执行：**先源码对照 → 确认 Panther 路径是否命�
 4. 再映射至 6.12.81 与 6.18.63 的源码继承/重构差异。
 
 阶段仍为 B2-0；不放行 B2-1，不构建、不刷写、不改设备。
+
+
+## 2026-11-24 研究重点修订：B2-0 以 GMAC1/RGMII 数据通路回归为主线
+
+用户明确要求：结合项目 B 的分段排查结果，B2-0 应重点研究 GMAC 相关源码和硬件适配。项目 B 已经完成的配置审计在 B2 中主要用于复合、查漏补缺；不能把 B2 简化为逐项恢复配置，也不能重复项目 B 已收口的测试。
+
+### A. 先固定故障边界，防止错误归因
+
+项目 B 既有实机证据表明：
+- Linux outgoing / AF_PACKET 能提交测试帧；
+- 普通 STMMAC TX 路径接受请求，stmmac_xmit() 返回 NETDEV_TX_OK；
+- TX descriptor 后续被驱动清理/回收；
+- Linux TX 统计与 MAC MMC TX frame/octet 计数增长；
+- 同期 iMac 有线接口对测试 EtherType 的持续抓包为 0 个对应帧；
+- 没有 TXC/TXD/TX_CTL 波形或 PHY MDI 侧观测。
+
+因此目前只证明 TX 软件提交、descriptor 回收及 MAC 统计有进展；没有证明 MAC 已从 RGMII TX 引脚输出正确帧，也没有证明 RTL8211F 已从 MDI 侧发射。B2 源码研究必须优先审查从 GMAC probe/setup、clock/power/reset、RGMII GRF/pinctrl 到 STMMAC/DWMAC4 DMA/MAC 的完整路径，不能把 Link Up、MMC TX 增长或 NETDEV_TX_OK 等同于物理发送成功。
+
+### B. 项目 B 已有结果的使用规则
+
+以下项目 B 结果视为已有输入，不要求重做设备测试：
+1. U-Boot 启动链、MAC 地址来源及 Linux 重新初始化 GMAC 的事实；
+2. Panther DTS 的 GMAC1/MDIO1/RGMII/RTL8211F 配置核对；
+3. GMAC CRU parent、clock topology、clock_summary 相关审计；
+4. RGMII delay 数值、GRF 配置和写入顺序审计；
+5. STMMAC 普通 TX、DWMAC4 descriptor OWN/barrier/tail pointer/channel0、DMA reset、TX queue 等专项审计；
+6. RX/NAPI、DHCP 客户端、MAC 克隆、offload、EEE、速率等已有排查；
+7. pinctrl 首 pin 错误处理静态审计及其 Panther 正常 regmap 路径触发条件复核。
+
+任何重开项必须指出新版本源码或新证据如何改变旧结论。不得重复设备操作，不访问 dummy-syscon debugfs/devmem，不做 MMIO/MDIO 写入、驱动重载、接口重启或物理波形实验。
+
+### C. GMAC 版本回归的优先级
+
+| 优先级 | 研究项 | 已有项目 B 线索 | B2-0 需要完成的工作 |
+|---|---|---|---|
+| G1 | 6.1.116 正常源码中 STMMAC DMA reset 前 msleep(1500) 与 MDIO 注册后的 JL2xx1 四次 PHY 写入，在 6.1.174-rk35xx / 6.12.81-rk35xx 缺失 | 49b5f340f346cc9a5b777499fce46150b691b70e 引入；异常候选中未见等价实现。workaround 名称指向 JL2xx1，而 Panther 实物仅确认 RTL8211F 家族，不能直接套用 | 分离审查 1500ms DMA reset 前等待与四次 MDIO 写入；核对是否存在 RTL8211F 适用性、PHY 型号/修订差异、等价 backport，以及 6.18.63 是否存在相同/替代机制。禁止直接复制写入 |
+| G2 | Rockchip GMAC clock enable 语义变化 | 6.1.116 bulk enable 并检查错误、另启 PHY clock、固定等待 5ms；6.12.81 改逐项 enable、若干返回值未检查、等待约 100–200µs | 精确追踪 6.18.63 对应实现、错误传播和 Panther 实际命中 clock list；与首个异常 RK35xx 构建比较 |
+| G3 | RGMII GRF 写入顺序 | 6.1.116 先写 delay value 再 enable/interface；6.1.174-rk35xx 与 6.12.81 候选先 enable/interface 再写 delay value | 追踪进入 6.18.63 的具体提交及 plain RGMII（非 ID 模式）语义；区分确有源码差异和能解释当前板级失败 |
+| G4 | GMAC probe/setup/power handoff | rk_gmac_probe()/rk_gmac_setup()/rk_gmac_powerup() 的条件分支和资源处理存在跨分支变化；部分 clock helper 相同不能代表整个 probe path 相同 | 逐函数审查 clock/reset/regulator、runtime PM、PHY supply、STMMAC handoff、错误清理与 defer probe |
+| G5 | PHY/RXC 与 DMA reset 时序 | 上游存在 RK3566 + RTL8211F-VD + RGMII 在 PHY power-down 后 RXC 停止、导致 reopen 时 DMA reset 失败的真实案例；修复为硬件 setup 前恢复 PHY | 先核实 Panther 实际 PHY 型号/修订和是否存在 reopen/MTU change 触发；核对 6.18.63 是否包含等效修复。该场景是条件性候选，不得将其误判为已发生 |
+| G6 | STMMAC/DWMAC4 TX descriptor/DMA | 项目 B 已核对 OWN/barrier/tail pointer、channel0、DWMAC4 start；当前未发现能解释现象的共同差异 | 不重复基础路径；仅当 6.18.63 与已知正常源码出现具体新差异时，才重开 descriptor/cache/DMA mapping |
+| G7 | pinctrl/IOMUX 首 pin错误 | 两异常 BSP 候选出现 if (ret && cnt)，正常 6.1.116 为 if (ret)；后续已发现 Panther 正常 syscon/regmap 路径缺少明显 errno 来源 | 保留为低优先级理论候选；除非新证据证明 mux 写入失败，不得继续占用主线或制作补丁 |
+
+### D. 必须修正的版本/源码来源边界
+
+1. 6.1.79、6.1.112、6.1.116 是用户确认的早期正常实机历史线；其通用 unifreq/linux-6.1.y 源码端点可用于早期正常行为比较，但 6.1.79/112 的 eMMC 二进制与源码 commit 映射仍待补齐。
+2. 6.1.174-rk35xx 是首个明确异常样本，其高置信度源码候选为 ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633；不能用通用 stable unifreq/linux-6.1.y 的 6.1.174 端点替代它。
+3. 6.12.81-rk35xx 候选为 ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c。
+4. 6.18.63 B1 的网络栈/GMAC 被有意隔离，B1 启动成功不构成 6.18 GMAC 网络功能成功或失败证据。必须把 B1 实际 source commit 与未来 B2 网络恢复后的源码输入分开登记。
+5. 上一份 6.1.79/112/116 对照报告中关于 stable 6.1.174 GMAC cold power-up 路径相同的结论，仅适用于通用 stable 端点；不能用来降低 6.1.174-rk35xx BSP GMAC probe/setup 路径的审查优先级。
+
+### E. B2-0 接下来的实际研究顺序
+
+1. 先建立 GMAC1 的版本—源码—硬件路径账本：正常 6.1.65/79/112/116，异常 6.1.y 实测版本（逐个恢复）、6.1.174-rk35xx、6.12.81-rk35xx、6.18.63。
+2. 优先完成 G1：拆解 1500ms DMA reset 等待和 JL2xx1 MDIO workaround，确认它们是否分别影响 GMAC reset/RXC 时序，严禁假设 RTL8211F 必须采用 JL2xx1 写入。
+3. 随后完成 G2/G3/G4：逐函数审计 Rockchip GMAC 时钟使能、RGMII GRF 顺序、probe/setup/power handoff，重点绑定 Panther 的 RGMII + clock input 路径。
+4. 完成 G5：只做 PHY 型号/生命周期条件的源码和历史日志核对，不对设备做 MDIO 读取或写入。
+5. 最后将以上差异映射到 6.18.63；配置复合与查漏补缺作为后续工作，不得抢在源码适用性审查之前。
+6. 输出每个差异的已确认存在/未确认构建来源/是否命中 Panther/证据强度/可能修复方式/回退风险，再决定 B2-1。
+
+### F. 当前状态
+
+B2-0 仍在进行，B2-1 不放行。当前主线是 GMAC1/RGMII 从 Linux probe 到 MAC→RGMII TX 的源码与硬件适配审查。以上只调整研究优先级，不授权构建、补丁、刷写、启动网络镜像或任何设备操作。
