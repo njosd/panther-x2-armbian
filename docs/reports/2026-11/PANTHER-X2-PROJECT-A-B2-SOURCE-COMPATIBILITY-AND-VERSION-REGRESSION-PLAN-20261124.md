@@ -466,3 +466,15 @@ Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
 下一轮优先查找历史 6.12 启动日志中 clock get/enable 相关错误，核实是否存在对应证据；再继续对照首次异常 6.1.y 构建的实际 source/patch inputs。不得重新跑已经完成的实机测试。
 
 状态仍为 B2-0；B2-1 不放行。
+### 2026-11-24 重要修订：DMA reset 前 1500ms wait 必须纳入正常基线差异
+
+专项报告第 17 节纠正了此前对 JL2XX1 1500ms workaround 的过度降级：
+- 6.1.65（原版实机网络全通）和 6.1.116（实机网络全通）的 STMMAC `stmmac_init_dma_engine()` 都在 DMA software reset 前无条件执行 `msleep(1500)`。
+- 该等待由标题指向 JL2XX1 的 commit 引入，但代码没有 PHY ID 条件，因此 Panther 在两个正常版本上也实际经过这段等待。
+- 6.12.81 和 6.18.63 均移除了这段等待；6.12 reset failure 会 abort，6.18 则 warning-and-continue。
+- 不重开四次 MDIO 写入的 P1 寄存器猜测；但必须保留 1500ms 等待本身作为正常基线共有的真实时序差异。
+- 新候选是“PHY supply/clock 已开启 → STMMAC probe → 1500ms wait 有无 → DMA reset → reset error handling”的组合。当前尚未证明该等待对 Panther 必需，也未证明 6.12 reset 失败。
+
+后续 B2-0 应追踪移除等待的具体提交、DMA reset poll 语义与时序补偿是否被其他改动替代；不能因提交标题指向 JL2XX1 而忽略其无条件通用执行效果，也不能直接移植 1500ms 作为修复。
+
+状态仍为 B2-0；B2-1 不放行。
