@@ -154,3 +154,51 @@ Panther 使用 phy-mode="rgmii"，TX delay 0x30、RX delay 0x10，会命中 RK35
 ## 10. 当前状态
 
 B2-0 继续进行；B2-1 不放行。上述均为只读源码结果，未构建、未修改代码、未操作设备。当前没有根因定案，也没有提出补丁。
+
+
+## 11. 6.18.63 普通 RGMII 1000Mbps MAC link-up / TX clock callback 复核
+
+本轮继续按用户要求把研究范围限定在 Panther 实际命中的普通 RGMII、1000Mbps 分支，不扩展 SerDes/USXGMII。
+
+### 11.1 MAC speed select / TE enable 主体
+
+6.1.116 与 6.12.81 的 `stmmac_mac_link_up()` 对普通接口（包括 RGMII）都支持 SPEED_1000；两者先准备 MAC speed bits，再调用 Rockchip speed callback，配置 duplex/flow control，写 MAC_CTRL，最后调用 `stmmac_mac_set(..., true)`。
+
+6.18.63 将 speed switch 合并为按 speed 选择的统一 switch，SPEED_1000 仍写入 `priv->hw->link.speed1000`；对 Panther RGMII 1000Mbps，选中的 MAC speed 字段没有变化。新加入的 unsupported-speed error 只影响未支持的 speed，不命中 1000Mbps。
+
+因此，已知的 6.18.63 speed switch 重构没有发现能解释 Panther 千兆链路下普通 TX 失败的差异。
+
+### 11.2 TX clock callback 重构及 Panther 实际调用链
+
+6.1.116 / 6.12.81 使用旧的 `fix_mac_speed(bsp_priv, speed)` callback。6.18.63 改为：
+- STMMAC `set_clk_tx_rate(bsp_priv, clk_tx_i, interface, speed)`；
+- Rockchip glue `rk_set_clk_tx_rate()`；
+- RK3568 ops 的 `set_speed = rk_set_clk_mac_speed`；
+- `rk_set_clk_mac_speed()` 根据 speed 将 `clk_mac_speed` 设置为 2.5/25/125MHz。
+
+Panther 的 RK3568 ops 没有设置 `clock.gmii_clk_sel_mask`，所以 `rk_set_clk_tx_rate()` 中额外的 RGMII GMII divider GRF 写入分支不命中；实际命中的是 ops->set_speed，最终调用 `clk_set_rate(clk_mac_speed, 125MHz)`。这与 6.1.116/6.12.81 的旧 speed callback 对千兆设置 125MHz 的目标一致。
+
+6.18.63 的调用顺序略有重排：
+1. 先写 MAC_CTRL 的 speed/duplex/flow-control 字段；
+2. 调用 `set_clk_tx_rate()` 配置 TX clock；
+3. 调用 `stmmac_mac_set(..., true)` 设置 MAC TE/RE。
+
+旧版先调用 speed callback，再写 MAC_CTRL，最后启用 MAC。两条路径都在最终 MAC enable 前配置时钟；新路径在时钟设置前先写 MAC speed bits，但此时尚未执行最终 MAC enable。现有源码没有证据表明这会阻止首次发送。
+
+### 11.3 返回值处理的边界
+
+6.18.63 `set_clk_tx_rate()` 若失败会打印错误，但仍继续调用 `stmmac_mac_set(..., true)`。旧版 Rockchip speed callback 是 void，内部 `clk_set_rate()` 失败时打印错误，调用方同样继续启用 MAC。因此“设置 TX clock 失败仍启用 MAC”并不是 6.18 新引入的可确认回归；6.18 只是把错误通过 int 返回到 STMMAC 层记录。
+
+**结论：** 对 Panther RGMII 1000Mbps，6.18.63 MAC speed selection 和 Rockchip TX clock callback 没有发现新的明确功能性回归。保留一个共同风险：若 clk_set_rate(125MHz) 失败，驱动仍会启用 MAC；但旧版也有相同结果，且目前没有任何 Panther 实机错误日志证明该调用失败。
+
+## 12. 当前 G1/G2 研究收敛
+
+- JL2xx1 的 1500ms wait：按项目 B 已收口结论，不再作为 Panther 主线。
+- PHYCR2 0x1801：P1 已收口，不重复寄存器猜测；不移植写入。
+- PHY-mode EEE bit5：降为背景差异，不能解释 6.1.116 EEE active 与 6.12.81 EEE disabled 的反向对照。
+- 6.18.63 Rockchip clock bulk/error handling/5ms：与 6.1.116 正常版本接近，另有失败回滚。
+- 6.18.63 RK3568 RGMII GRF delay 写入顺序：与 6.1.116 正常版本一致。
+- 6.18.63 普通 RGMII 1000Mbps link-up speed selection/TX clock callback：未发现能解释当前故障的新差异。
+- 6.18.63 warning-and-continue DMA reset：当前发现的主要集成风险；必须在 B2 实机日志中作为异常信号处理，不可把 reset failure 当作正常继续。
+
+**B2-0 仍在进行。** 下一轮研究转向 6.18.63 GMAC1 probe/setup 与 Panther 精确 clock/supply/reset 资源解析的差异核验，重点确认哪些 6.18 generic refactor 实际命中 RK3566 GMAC1；不重复 CRU parent 全树、DMA descriptor、EEE、CSU 或 PHYCR2 已收口工作。
