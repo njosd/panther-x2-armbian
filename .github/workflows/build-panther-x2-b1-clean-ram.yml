@@ -475,7 +475,7 @@ jobs:
           grep -Fqx '            if load mmc 1:1 0x0a100000 /dtb/rockchip/rk3566-panther-x2.dtb; then' work/output/boot.cmd
           grep -Fqx '                booti 0x00280000 0x0a200000 0x0a100000' work/output/boot.cmd
           grep -Fqx "setenv boot_targets 'mmc1'" work/output/boot.cmd
-          if grep -Eiq 'saveenv|save\s+|reset|dhcp|tftp|ping|boot_android|boot_fit' work/output/boot.cmd; then
+          if sed 's/#.*$//' work/output/boot.cmd | grep -Eiq '(^|[[:space:];])(saveenv|save|reset|dhcp|tftp|ping|boot_android|boot_fit)([[:space:];]|$)'; then
             echo "::error::Forbidden persistent-write, reset or network/fallback command in B1 boot script"
             exit 1
           fi
