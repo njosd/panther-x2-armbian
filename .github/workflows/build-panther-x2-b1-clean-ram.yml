@@ -68,7 +68,16 @@ jobs:
           git -C work/linux apply --check "$GITHUB_WORKSPACE/$PATCH"
           git -C work/linux apply "$GITHUB_WORKSPACE/$PATCH"
           PATCH_SHA="$(sha256sum "$GITHUB_WORKSPACE/$PATCH" | awk '{print $1}')"
-          grep -q '^#ifdef CONFIG_NET
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          header = Path("work/linux/include/linux/kobject.h").read_text()
+          source = Path("work/linux/lib/kobject_uevent.c").read_text()
+          assert re.search(r"#ifdef CONFIG_NET\s+int broadcast_uevent\([^;]+;\s+#endif", header), "broadcast_uevent declaration is not CONFIG_NET-guarded"
+          assert re.search(r"#if defined\(CONFIG_NET\)\s+int broadcast_uevent\(", source), "network implementation missing"
+          assert not re.search(r"#else\s+int broadcast_uevent\(", source), "CONFIG_NET=n stub remains"
+          assert re.search(r"kfree_skb\(skb\);\s+return err;\s*}\s*EXPORT_SYMBOL_GPL\(broadcast_uevent\);\s*#endif", source), "network implementation must retain skb release and guarded export"
+          PY
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
           grep -qx 'SUBLEVEL = 63' work/linux/Makefile
 
