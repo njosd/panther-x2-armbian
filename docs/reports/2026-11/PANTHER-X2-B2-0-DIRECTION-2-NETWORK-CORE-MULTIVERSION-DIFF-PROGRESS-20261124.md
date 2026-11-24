@@ -668,3 +668,83 @@ IPv4 专用 `fib4_rule_match()`：
 **阶段性结论：** 本轮未发现 6.1.116→6.1.174 的 IPv4 FIB/policy-routing 数据路径回归。6.12 的主要真实差异集中在 DSCP/TOS selector 语义扩展和配置读取 accessor 整理；前者必须有相应 DSCP rule/route 才会改变路由匹配，后者不构成新增 drop。现有证据没有证明 Panther 历史 DHCP 报文命中 DSCP selector 或 IPv4 forwarding 路径。
 
 本轮仍为固定源码端点、Kconfig、Makefile 和候选配置模板的静态审计；未执行设备操作、构建、补丁或实机网络试验。方向二仍未结项。
+
+## 20. 本轮追加核验：ARP RX 处理与 neighbour 状态机
+
+承接第 9 节已经完成的 ARP/neighbour 输出关键函数，本轮补齐 ARP 输入和邻居项状态维护，避免将“ARP 输出函数一致”误写成整个 ARP/neighbour 子系统已审计。
+
+固定源码端点仍为第 2 节列出的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
+- `net/ipv4/arp.c`：`arp_rcv()`、`arp_process()`、`arp_ignore()`、`arp_filter()`、`arp_fwd_proxy()`、`arp_solicit()`
+- `net/core/neighbour.c`：`__neigh_event_send()`、`__neigh_update()`、`neigh_probe()`、`neigh_timer_handler()`、`neigh_periodic_work()`、`neigh_resolve_output()`、`neigh_connected_output()`
+- `include/net/route.h`：`ip_route_output()` helper
+- `net/ipv4/Kconfig` 与 `net/ipv4/Makefile`：ARP/IP 初始化配置接入。
+
+### 20.1 ARP RX 入口与报文校验
+
+`arp_rcv()` 三个端点函数体完全一致，处理顺序保持：
+1. 忽略 `IFF_NOARP`、`PACKET_OTHERHOST`、`PACKET_LOOPBACK`；
+2. `skb_share_check()` 获取可写 skb；
+3. `pskb_may_pull()` 确保完整 ARP header 与地址字段可读；
+4. 检查 hardware address length 与 IPv4 protocol address length；
+5. 初始化 neighbour skb control block；
+6. 通过 `NFPROTO_ARP / NF_ARP_IN` hook 进入 `arp_process()`。
+
+未发现 6.1.116→6.1.174 或 6.1→6.12 在 ARP RX 入口校验或 hook 入口上的实现变化。
+
+### 20.2 ARP 请求/应答处理
+
+`arp_process()` 三个端点函数体逐字一致。以下处理条件和顺序未变：
+- 检查 ARP hardware/protocol type 与 request/reply opcode；
+- 提取 sender/target hardware address 和 IPv4 address；
+- 丢弃目标 IPv4 multicast，以及未允许 `route_localnet` 时的 loopback 地址；
+- 按 `DROP_GRATUITOUS_ARP` 处理 gratuitous ARP；
+- 处理 RFC2131 地址冲突检测（sender IP 为 0）；
+- 对 ARP request 做 IPv4 route lookup，按 RTN_LOCAL、`arp_ignore`、`arp_filter` 决定是否应答；
+- 仅在 forwarding/proxy ARP 相关条件满足时处理转发代理；
+- 按 `arp_accept`、GARP 与 ARP reply 条件更新 neighbour cache；
+- 对普通 request/broadcast reply 使用 STALE，而不是直接宣告 REACHABLE。
+
+因此 ARP 核心接收处理没有发现版本回归。ARP Netfilter hook 的实际规则仍是运行时条件；本轮不将编译支持等同于 hook 注册或规则加载。
+
+### 20.3 ARP filter 的 6.12 调用签名变化
+
+`arp_filter()`：
+- 6.1.116 与 6.1.174 函数体一致，调用五参数 `ip_route_output(net, sip, tip, 0, l3mdev_master_ifindex_rcu(dev))`。
+- 6.12 增加第六个参数 `RT_SCOPE_UNIVERSE`。
+- 对应 `include/net/route.h` 的 `ip_route_output()` helper 在 6.1 中通过零初始化 `struct flowi4`，scope 字段默认值为 `RT_SCOPE_UNIVERSE`；6.12 将 scope 变为显式参数并写入 `flowi4_scope`。因此此调用是把原默认 scope 显式传入，未发现 scope 语义变化。
+- `arp_filter()` 仅在 `arp_process()` 已将请求路由为 RTN_LOCAL、且接口 `IN_DEV_ARPFILTER` 开启时调用。该条件性 ARP reply 策略不适用于 DHCP Discover 本身（DHCP Discover 是 IPv4/UDP 广播，不是 ARP request）；它可能影响后续依赖 ARP 解析的邻居通信，但本轮没有发现新行为。
+
+### 20.4 neighbour NUD 状态机与探测
+
+以下函数三个端点的函数体均一致：
+- `__neigh_event_send()`：从 stale/incomplete 到 probe、timer 和失败状态的转换；
+- `__neigh_update()`：邻居 MAC/NUD 状态更新、override、router flag、timer 与通知；
+- `neigh_probe()`：从 ARP queue 复制待处理 skb、释放锁后调用协议 solicit；
+- `neigh_timer_handler()`：REACHABLE/DELAY/PROBE/FAILED 等状态的超时推进；
+- `neigh_periodic_work()`：周期扫描与 GC；
+- `neigh_resolve_output()` / `neigh_connected_output()`：构造链路层 header 后调用 `dev_queue_xmit()`。
+
+未发现这些邻居解析、重试、状态转换或最终交付函数在三个固定源码端点之间发生实现差异。注意：这只覆盖本节列出的关键函数，不声称对 neighbour.c 每个函数逐字审计。
+
+### 20.5 Kconfig / Makefile 边界
+
+- IPv4 ARP 核心随 INET IPv4 协议栈编译接入；本轮没有发现单独的 `CONFIG_ARP` 开关或三版本间 ARP 对象接入变化。
+- `IP_PNP_RARP` 是启动阶段 RARP 自动配置选项，不是普通 ARP RX/TX 核心的开关，也不能与用户空间 DHCP 客户端混淆。
+- 本轮只确认 ARP 核心源码接入和相关 IPv4 配置边界；不将候选配置模板中某个 IP_PNP 选项的值解释为 ARP 协议路径是否存在。
+
+### 20.6 本轮结论
+
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 当前判断 |
+|---|---|---|---|
+| ARP RX 入口 `arp_rcv()` | 一致 | 一致 | 未发现新增入口丢弃条件 |
+| ARP request/reply `arp_process()` | 一致 | 一致 | 核心处理语义一致 |
+| ARP filter | 一致 | 显式传入原默认 RT_SCOPE_UNIVERSE | 调用签名变化，默认 scope 语义等价 |
+| ARP solicit | 一致 | 一致 | 未发现探测报文构造变化 |
+| neighbour NUD 状态机 | 本节关键函数一致 | 本节关键函数一致 | 未发现状态转换/重试回归 |
+| neighbour output | 第 9 节已核对 | 第 9 节已核对 | 不重复计数 |
+
+**阶段性结论：** 本轮未发现 ARP RX 或 neighbour NUD 状态机在 6.1.116→6.1.174 的回归，也未发现 6.12 新增普通 ARP request/reply 的丢弃条件。6.12 的 ARP filter 变化是 route helper 新增显式 scope 参数，调用处传入原先零初始化所代表的 `RT_SCOPE_UNIVERSE`，不是已证实的语义变化。
+
+对 DHCP Discover 而言，ARP 不是该广播报文的协议处理入口；ARP/neighbour 路径主要影响后续单播通信的下一跳解析。本轮静态审计不能替代历史运行时 ARP/neighbour 状态证据。
+
+本轮仅做固定源码端点、头文件及 Kconfig/Makefile 静态比较；未构建、未修改配置、未执行设备操作或实机网络试验。方向二仍未结项。
