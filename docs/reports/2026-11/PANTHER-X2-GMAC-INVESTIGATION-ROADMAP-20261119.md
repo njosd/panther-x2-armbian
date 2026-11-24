@@ -298,3 +298,16 @@ D. 对照两条黄金线与两条故障线的 built-in / module 分布、kernel 
 ### 路线收敛
 
 当前不做模块替换；不立即替换 DTB。下一个最有价值的比较项是：对 6.1.174 官方 Panther DTB 做 GMAC 节点定向解码，与 6.1.65/6.1.116 黄金 DTB 已有字段逐项对照，同时补记 6.1.174 vmlinuz hash。若无差异，再收口 DTB 候选。随后补齐 6.1.65 原始镜像 rootfs 中 modules/config 闭包，才能形成真正四版本统一矩阵。任何候选仍需有明确可控的单变量软件替换方案才进入实机验证。
+
+
+## 2026-11-24 GMAC1 RGMII CRU parent/gate/reset 依赖审计结项
+
+已完成 6.1.116 与 6.1.174 的 Panther X2 GMAC1 时钟树和 reset 只读源码对比，报告：`PANTHER-X2-GMAC-RGMII-CLOCK-CRU-PARENT-GATE-RESET-AUDIT-20261124.md`。
+
+- 两版 Panther DTS 的 125MHz external fixed-clock、assigned-clock-parents 与 RGMII clock chain 一致。
+- 两版 RK3568 CRU 的 GMAC1 专属 mux/divider/gate 定义一致；6.1.174 将父时钟 PCLK_USB 标记为 CLK_IS_CRITICAL，是实际差异，但目前只确认影响未被 consumer 引用时的早期/空闲 gate 状态，未证明影响 GMAC 正常运行。
+- 两版 Panther RGMII 实际需要的核心 clock 集合一致。6.1.174 的 XPCS clocks 不在 RGMII 获取分支；后续对 NULL clock 的 CCF enable/disable 是无效果操作。
+- 两版 GMAC1 reset ID、CRU hiword-mask register mapping 和 stmmac assert/deassert 顺序一致。
+- 6.1.116 bulk clock enable 会检查错误并中止；6.1.174 逐项 enable 未检查返回值，属于驱动错误处理差异，但尚未发现 Panther 专属必然失败条件。
+
+**结项：** 没有发现已证实的 CRU parent/gate/reset 根因。实机 mux/gate/reset 寄存器值与 125MHz 波形均未读取，保持未验证；不制作补丁、不操作设备。按路线转入下一项前，先对照已有 vendor-storage/MAC address 报告，避免重复已完成工作。
