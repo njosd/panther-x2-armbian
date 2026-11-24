@@ -748,3 +748,74 @@ IPv4 专用 `fib4_rule_match()`：
 对 DHCP Discover 而言，ARP 不是该广播报文的协议处理入口；ARP/neighbour 路径主要影响后续单播通信的下一跳解析。本轮静态审计不能替代历史运行时 ARP/neighbour 状态证据。
 
 本轮仅做固定源码端点、头文件及 Kconfig/Makefile 静态比较；未构建、未修改配置、未执行设备操作或实机网络试验。方向二仍未结项。
+
+## 21. 本轮追加核验：UDP IPv4 sendmsg 与 IP skb 构造/追加路径
+
+本轮继续核对普通 DHCP Discover/Request 所使用的 UDP IPv4 用户态发送入口，重点补齐此前只审过 checksum、UDP GSO 与部分 IP output helper、但尚未完整比较的 `udp_sendmsg()` → `ip_make_skb()/ip_append_data()` → `ip_send_skb()` 构造链。
+
+固定源码端点仍为第 2 节的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
+- `net/ipv4/udp.c`：`udp_sendmsg()`、`udp_send_skb()`、`udp_push_pending_frames()`、`udp_flush_pending_frames()`
+- `net/ipv4/ip_output.c`：`ip_make_skb()`、`__ip_make_skb()`、`ip_append_data()`、`__ip_append_data()`、`ip_send_skb()`、`ip_setup_cork()`
+- `include/net/route.h`：IPv4 route output helper。
+
+### 21.1 UDP sendmsg 主入口
+
+`udp_sendmsg()`：
+- 6.1.116 与 6.1.174 函数体一致。
+- 6.12 新增/调整内容：
+  - cgroup BPF sendmsg hook 调用增加 `msg_namelen` 指针参数；
+  - 新增 `ip_sendmsg_scope(inet, &ipc, msg)` 计算路由 scope，并在 scope 为 `RT_SCOPE_LINK` 时关闭 connected-route cache fast path；
+  - 将 `inet->uc_index` 快照保存到 `uc_index`，并对 multicast interface/address 字段使用 `READ_ONCE()`；
+  - route flow 初始化改为传入计算所得 scope，而不是固定 `RT_SCOPE_UNIVERSE`；
+  - connected route cast 改用 `dst_rtable()` accessor。
+- multicast/unicast interface 选择的主体条件保持一致；6.12 的 `READ_ONCE()` 属于并发读取语义整理。
+- **未闭环项：** 本轮已确认 `ip_sendmsg_scope()` 在 6.12 UDP sendmsg 中被调用，但在本轮读取的 `udp.c`、`ip_output.c`、`ip_sockglue.c`、`include/net/inet_sock.h` 和 `include/net/route.h` 中未定位到该 helper 定义。故不能仅凭调用点宣称它与 6.1 的 `SOCK_LOCALROUTE / MSG_DONTROUTE / strict-route → RTO_ONLINK` 逻辑完全等价。需在方向二后续子项中继续追踪 helper 定义及其调用语义，尤其确认普通 DHCP broadcast socket 的 scope 取值。
+
+### 21.2 UDP sendmsg 的条件性 cgroup BPF 路径
+
+6.1.116 与 6.1.174 调用 `BPF_CGROUP_RUN_PROG_UDP4_SENDMSG_LOCK()` 时传入 sockaddr 与源地址指针；6.12 另传入 `msg_namelen` 指针。这属于 cgroup BPF hook API 参数变化。只有启用相应 cgroup BPF 程序、且 socket 不走 connected fast path 时才会调用；当前没有 Panther DHCP socket 附着该类程序的运行时证据，不能将其写成默认路径差异。
+
+### 21.3 UDP checksum 与 GSO 发送尾段
+
+`udp_send_skb()`：
+- 6.1.116→6.1.174 的差异只在 `cork->gso_size` 非零的 UDP GSO 长度校验：使用 `min(datalen, gso_size)` 参与 MTU 判断，并将一类长度错误从 `-EINVAL` 改为 `-EMSGSIZE`。
+- 6.1.174→6.12 仍集中在 UDP GSO 条件分支和 socket 状态 accessor；移除一项 GSO 分支对 `CHECKSUM_PARTIAL` 的前置判断，并调整 payload checksum/segment 处理。
+- 非 GSO 普通 UDP datagram 的 checksum 生成、`udp4_hwcsum()` / `udp_csum()` 路径和最终 `ip_send_skb()` 调用未发现本轮相关变化；checksum helper 的既有差异已在第 8 节记录。
+- `udp_push_pending_frames()`、`udp_flush_pending_frames()` 三个端点函数体一致。
+
+因此，不能把 UDP GSO 分支变化外推为普通 DHCP 小 UDP datagram 的 checksum 或发送行为回归。
+
+### 21.4 IP skb 构造与发送
+
+- `ip_make_skb()`、`ip_send_skb()`、`ip_setup_cork()` 三个端点函数体一致。
+- `__ip_make_skb()`：
+  - 6.1.116→6.1.174 的差异仅涉及 ICMP raw socket 统计读取条件，不适用于 UDP；
+  - 6.12 使用 `dst_rtable()`、对 PMTU/TTL/TOS/priority 做 `READ_ONCE()` 快照，并将发送时间戳改为新的 delivery-time/type API；
+  - IPv4 header 基本字段构造、地址拷贝、ID 生成、options 构造、dst 交付与 cork release 主流程保持一致。
+- 这些 6.12 accessor/timestamp 变化没有显示普通 UDP datagram 的 IP header 构造或设备选择规则被改写。
+
+### 21.5 IP 数据追加与 skb 分配
+
+`ip_append_data()` 三个端点函数体一致；`__ip_append_data()` 的差异：
+- 6.1.116→6.1.174：主要是 timestamp key 的持有/错误回滚整理；失败时新增对 timestamp key 的回退，不改变普通数据拷贝、分片长度计算或 skb 排队主流程。
+- 6.1.174→6.12：
+  - 将 cork dst 转换改用 `dst_rtable()`；
+  - 新增 `MSG_SPLICE_PAGES` 数据路径，检查 HDRINCL、设备 SG 能力和 `ip_generic_getfrag`，并可通过 `skb_splice_from_iter()` 把用户页挂入 skb；
+  - 对 splice 分支增加 paged fragment 处理和迭代器边界检查。
+- 普通 `udp_sendmsg()` 的常规 datagram 路径没有设置 `MSG_SPLICE_PAGES`；该标志属于显式 splice/sendpage 类路径。故新增 splice fragment 分支不是普通 DHCP sendmsg 的默认路径。
+- 普通小 UDP datagram 的 skb 仍按既有分配、getfrag 拷贝、UDP header/checksum、IP header 构造及 `ip_send_skb()` 路径执行。内存分配失败仍可能返回 ENOBUFS/ENOMEM 等错误，这是既有资源条件，不是本轮发现的 6.12 新增普通 DHCP 丢弃点。
+
+### 21.6 本轮结论与待闭环项
+
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通 DHCP UDP 判断 |
+|---|---|---|---|
+| `udp_sendmsg()` 主流程 | 函数体一致 | scope helper、BPF hook 参数和 READ_ONCE 调整 | scope helper 定义尚待追踪，不提前下等价结论 |
+| cgroup BPF sendmsg | 一致 | 增加 msg_namelen 参数 | 仅实际附着相应 BPF 程序时生效 |
+| `udp_send_skb()` checksum | 仅 UDP GSO MTU/error code 变化 | 主要为 UDP GSO 分支变化 | 普通非 GSO datagram checksum 主路径未见变化 |
+| `ip_make_skb()` / `ip_send_skb()` | 一致 | 一致 | 普通构造/提交入口未见变化 |
+| `__ip_make_skb()` | ICMP raw 统计条件调整 | dst/accessor、READ_ONCE、timestamp API | 非 UDP 的变化或元数据读取调整 |
+| `__ip_append_data()` | timestamp key 回滚 | 新增 MSG_SPLICE_PAGES | 普通 DHCP sendmsg 不设置 splice flag |
+
+**阶段性结论：** 当前没有发现 6.1.116→6.1.174 在普通 UDP sendmsg、IP skb 构造和数据追加主路径上的已证实回归。6.12 新增的 MSG_SPLICE_PAGES 与 UDP GSO 变化均有明确条件，不能外推到普通 DHCP datagram。唯一保留为本方向未闭环项的是 6.12 `ip_sendmsg_scope()` helper 的定义及其对广播/单播路由 scope 的具体语义；在追到定义前，不将 UDP TX 路由选择差异判为等价或回归。
+
+本轮为源码静态审计；未修改代码/配置，未构建、未启动或操作 Panther X2 实机。方向二仍未结项。
