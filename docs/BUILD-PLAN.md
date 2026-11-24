@@ -169,7 +169,7 @@ Server 镜像预期使用 NetworkManager。首启配置应确保有线接口建�
 4. 如成功，核对 vermagic、depends、符号版本及源码/header provenance；
 5. DT overlay 警告单独处理，不把 DTBO 生成成功等同于 Panther X2 设备树兼容。
 
-仍须强调：Ophub 源码 commit 的 6.18.63 版本号并未证明它就是发布二进制内核包的精确源码。模块成功编译也不能单独证明 ABI 匹配。全部操作仍仅限 GitHub Actions 纯编译验证，不触碰 Panther X2（192.168.9.6）。
+仍须强调：Ophub 源码 commit 的 6.18.63 版本号并未证明它就是发布二进制内核包的精确源码。模块成功编译也不能单独证明 ABI 匹配。全部操作仍仅限 GitHub Actions 纯编译验证，不触碰 Panther X2（192.168.x.6）。
 
 
 ### 3.8 RKNPU 6.18.63 纯编译验证（第七轮：MODPOST 已运行，符号解析失败）
@@ -1362,7 +1362,7 @@ Artifact：`14139496861`。本轮完整语义比较失败，不能认定候选 D
 - 6.18.63 研究成果保留作备用参考，不再作为首版主线。
 - 首版优先采用已发布的原始 Panther X2 DTB；未经单独审查和授权，不把 NPU candidate DTB 混入基本系统镜像。
 - NPU/RKNN、GPU、VPU、RGA、MPP、Immich、Docker 和数据库均不属于本阶段必要条件。
-- 首轮只使用独立 TF 卡，不写入 eMMC，不替换 192.168.9.6 上的现有系统，不修改现有网络服务。
+- 首轮只使用独立 TF 卡，不写入 eMMC，不替换 192.168.x.6 上的现有系统，不修改现有网络服务。
 
 #### 最小系统验收项目
 
