@@ -178,3 +178,26 @@ B2 每个阶段均执行：**先源码对照 → 确认 Panther 路径是否命�
 - `PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md`
 - `PANTHER-X2-ETHERNET-6.12.81-TEST-RESULTS-2026-11-16.md`
 
+
+
+## 2026-11-24 B2-0 新增源码对照结果：早期正常 6.1.y
+
+新增只读审计报告：
+`PANTHER-X2-PROJECT-A-B2-0-EARLY-GOOD-6.1Y-SOURCE-COMPARISON-20261124.md`
+
+本轮确认：
+- 找到 `unifreq/linux-6.1.y` 中 6.1.79 commit `e77fb4335d38f79b66ab5e1e3c627f54140fcb2a`、6.1.112 commit `a29ec4768872f856a3a17326334d53482d25fcfa`；6.1.116 使用既有精确 commit `5eb841b59d6ead6e264163785a634e78f0253c8e`。
+- 6.1.79/112/116 三个正常历史端点的 `dwmac-rk.c`、`stmmac_mdio.c`、Panther X2 DTS 文件 blob 完全相同。
+- `stmmac_xmit()`、`stmmac_init_dma_engine()`、`stmmac_mac_link_up()`、`stmmac_tx_clean()` 三个正常端点函数体完全相同。
+- Rockchip GMAC 的 `gmac_clk_enable()`、`rk_gmac_powerup()`、`rk_fix_speed()`、`rk_gmac_clk_init()` 在 6.1.79/112/116 完全相同；stable 6.1.174 端点冷启动 enable 路径也未见功能性变化。
+- pinctrl 在 6.1.79→6.1.112 的变化是 rollback 阶段重新计算 bank；错误条件仍为 `if (ret)`。首 pin 错误不会被吞掉。
+- RTL8211F `config_init` 在 6.1.79 与 6.1.112/116 之间存在 reset 语义变化，但两个阶段均为用户确认的正常运行历史；6.1.116 与 stable 6.1.174 的 `realtek.c` 文件完全相同。
+- 因此，早期正常版本间已有的上述变化，不能单独解释后续网络故障。重点应转向实际首次异常版本的源码来源/patchset，而非把 stable 6.1.174 和 RK35xx BSP 候选混为一谈。
+
+下一步优先：
+1. 恢复 eMMC 备份中的 6.1.79/112 Image、DTB、config、modules 身份与哈希；
+2. 找出 6.1.116 之后首次出现网络故障的实际小版本和实际源码分支；
+3. 对该异常版本绑定精确 source commit、build inputs、patchset；
+4. 再映射至 6.12.81 与 6.18.63 的源码继承/重构差异。
+
+阶段仍为 B2-0；不放行 B2-1，不构建、不刷写、不改设备。
