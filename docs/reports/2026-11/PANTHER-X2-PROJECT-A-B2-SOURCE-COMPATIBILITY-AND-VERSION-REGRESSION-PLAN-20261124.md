@@ -488,3 +488,43 @@ Panther X2 runtime DTS 中 GMAC1 引用的 M0 pin groups 包含：
 - 6.1.65 实机网络全通是直接证据；4428... 是高置信度源码候选，不是原始 Image 的逐字节构建来源证明。
 
 版本矩阵必须以 6.1.65 与 6.1.116 双正常实机基线为两端，不得只以 6.1.116 代表正常历史。
+## 2026-11-24 B2-0 总账重整：固定研究方向、顺序与结项门
+
+本节为 B2-0 唯一研究总账。此前专项报告新增的时序、DMA reset、pinctrl、非网络组件等发现全部归入下列固定方向；新线索只能登记到所属方向，不得自动切换当前主线或另起并行排查。B2-0 必须按顺序逐项结项。
+
+### 固定的九个研究方向
+
+| 顺序 | 方向 | 范围 | 当前状态 |
+|---|---|---|---|
+| 1 | 版本基线与回归边界 | 6.1.65/79/112/116 正常线；后续 6.1.y 具体故障版本、6.1.174、6.12.81、6.18.63；镜像/DTB/config/source commit 绑定 | 未结项；当前主线 |
+| 2 | Rockchip GMAC glue 与 CCF/CRU/时钟/复位/电源 | probe/setup、clock 获取/使能、settle、GRF、PHY supply、runtime PM、TX clock callback | 已有多轮静态审计，尚未按结项条件封账 |
+| 3 | STMMAC core 与初始化交接 | platform handoff、PHY attach、DMA reset、reset error handling、DMA init、open/link-up 生命周期 | 已有多轮静态审计，尚未按结项条件封账 |
+| 4 | DWMAC4 DMA 与 TX 数据通路 | DMA mask、descriptor OWN、ring/tail、DMA address/buffer、barrier、AXI、DMA channel、MMC TX 统计位置 | 项目 B 部分审计已完成；需汇总证据并闭合 TX 边界，不重复实机实验 |
+| 5 | MDIO、PHYLIB/PHYLINK 与 RTL8211F | MDIO 注册、PHY attach/reset、RGMII delay、PHYCR、EEE/LPI、link 与生命周期 | 项目 B 单项审计大部已完成；只复核 6.18 命中关系 |
+| 6 | pinctrl/GPIO/regulator/reset provider | GMAC pin groups、首 pin 错误传播、供电/复位资源、deferred probe | P4 已结项；只做与 6.18 组合关系的收口，不重开实机调查 |
+| 7 | 非网络子系统间接影响 TX | DMA/cache coherency、IOMMU、AXI/interconnect/QoS、GIC/IRQ、内存/CMA、runtime PM、firmware/SCMI | 已建立方向和候选矩阵；尚未逐项审计结项 |
+| 8 | Linux 网络核心与协议栈 | netdev、TX queue、ARP/IPv4/ICMP、NAPI 和 6.18 API/生命周期变化 | 待审 |
+| 9 | 配置、DTS/DTB 与组件组合闭环 | 最终 Kconfig、DTS 资源、模块依赖、built-in/module、组件接口契约和最小依赖闭包 | 待审；只复合查漏，不重做项目 B 配置审计 |
+
+### 每个方向统一结项标准
+
+每个方向必须形成一份可复核的结项记录，至少包含：
+1. 正常版本与异常版本的精确源码差异及引入/修改提交；
+2. Panther X2 的 compatible、DTS 资源、硬件条件是否实际命中该路径；
+3. 与相邻组件的调用顺序、资源契约、时序、状态和错误传播组合；
+4. 与项目 B 已有实机证据及 TX 物理边界是否相符；
+5. 结论分级：已排除、低优先级保留、高价值候选、需后续实机验证；
+6. 组件决策：保留 6.18、使用同分支后续修复、单组件回退/最小修正或暂不改动；
+7. 明确列出未闭合事项、证据缺口和结项理由。
+
+“已经读过源码”或“某函数看起来正常”不构成结项。若存在未解释的高价值差异，该方向不得标记完成。
+
+### 研究纪律与顺序
+
+- 当前主线固定为方向 1。方向 1 结项后再依次推进方向 2、3、4……方向 9；此前已经做过的方向 2–6 工作作为已有证据，不丢弃、不重做，届时按结项标准补齐。
+- 新发现若属于后续方向，先登记为待办，不中断当前方向；若发现会推翻当前结论的直接证据，可记录为阻断项并说明理由，经用户确认后才调整顺序。
+- 一个方向内可以有多个子项，但必须在同一方向账本内逐项勾销；不得把同一问题换名字反复开启。
+- 项目 B 的 P1–P4 结论作为已完成输入复用；P5 的物理 TX 边界证据只复用已有材料，不重做硬件实验。
+- 不构建、不刷写、不启动网络镜像、不改实机；不读取 MMIO/MDIO，不做寄存器写入。进入后续验证阶段必须另行获得明确授权。
+
+**当前游标：方向 1（版本基线与回归边界）。B2-0 未完成；B2-1 不放行。**
