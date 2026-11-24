@@ -1,4 +1,4 @@
-Source: panther-emmc-uart-bidirectional-20261113.txt
+Source: private UART capture (original intentionally not published)
 Compression: gzip -6
 Encoding: Base64
 Chunk size: 350000 characters
@@ -6,5 +6,6 @@ Original SHA256:
 3d7eae6b7f6a4345df39055fcd44da5ce5a6edc2c1cffc408bafdc3e81da8dd2  panther-emmc-uart-bidirectional-20261113.txt
 Compressed SHA256:
 3ea30a1e50496c6c9564f5ba87790f227353f0eb504f631d32f1c7c5a3a8dd87  panther-emmc-uart-bidirectional-20261113.txt.gz
-Parts:
-      10
+Public archive status: original compressed capture and Base64 chunks removed pending privacy redaction.
+Public redacted derivative: not yet generated.
+Parts retained in private storage only: 10
