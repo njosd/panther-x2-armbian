@@ -159,7 +159,7 @@ rebuild 脚本的 `-u` 参数可以把默认 tag 从 stable 改为 rk35xx，但 
 1. 对两个 Panther X2 U-Boot 二进制下载并计算文件 SHA-256、字节数；核对 FIT 内容、U-Boot 版本、默认环境及启动介质支持。
 2. 审查 Ophub rebuild 的最小补丁：U-Boot / firmware 固定 commit，Panther X2 kernel tags 允许 6.12.y，并把 6.12.81 固定到 `kernel_rk35xx`。
 3. 检查 6.12.81 发布包内部实际 `.config` 与固定 config-6.12 的差异，确认上述内建驱动配置确实进入最终包。
-4. 完成上述静态闭包审计后，再进入镜像构建前检查；仍不刷机、不写卡、不修改 192.168.9.6。
+4. 完成上述静态闭包审计后，再进入镜像构建前检查；仍不刷机、不写卡、不修改 192.168.x.6。
 
 本报告只记录静态证据和构建阻塞，不代表完整系统已在 Panther X2 实机运行。
 
@@ -333,7 +333,7 @@ Ophub Issue #1319 的早期适配过程给出了以下直接证据：
 4. 对比当前 Ophub Panther X2 文件的 SHA-256；相同则建立强关联，不同则继续追踪替换提交和来源。
 5. 只有发现旧系统实际文件与当前候选不一致，或有明确硬件/启动问题证据，才评估重建 U-Boot。
 
-以上仍不授权写 TF 卡、eMMC 或修改 192.168.9.6。
+以上仍不授权写 TF 卡、eMMC 或修改 192.168.x.6。
 
 ## 12. A2 第一轮：GMAC1 网络与 USB 主机依赖（2026-11-15）
 
@@ -913,7 +913,7 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 
 本次 run 的首次登录报告生成步骤早于下载 Ophub Server workflow，因此报告中的 workflow grep 当时没有输入文件；命令使用 `|| true`，没有使工作流失败。后续 provenance 步骤成功下载了 workflow，且从该文件确认了 `-s true` 调用。结论已由 artifact 内的实际 workflow 文件复核，但报告编排应修正：先下载 Ophub workflow，再生成 first-login lifecycle 报告，避免报告缺少调用上下文。
 
-下一步应继续审计最终 rootfs 构建/打包流程，特别是 Armbian checkout 固定、包实际安装、`ssh.service` enable、Host Key 与防火墙文件状态；不重复本次已完成的源码检查，不操作 192.168.9.6 实机。
+下一步应继续审计最终 rootfs 构建/打包流程，特别是 Armbian checkout 固定、包实际安装、`ssh.service` enable、Host Key 与防火墙文件状态；不重复本次已完成的源码检查，不操作 192.168.x.6 实机。
 
 
 ## 17.11 第一版最小启动镜像构建工作流（2026-11-15）
@@ -959,7 +959,7 @@ IPv6 为模块（`=m`），但首版远程维护 P0 以 IPv4 DHCP + SSH 为验�
 - 最终静态镜像检查不能替代 Panther X2 实机启动、DHCP、SSH 首次登录和重启恢复验证。
 - 基础 rootfs 使用 Armbian Odroid N2 构建目标，是沿用 Ophub 官方 Server workflow 的构建模式；最终镜像由 Ophub rebuild 脚本替换成 Panther X2 DTB、6.12.81 内核和 Rockchip loader。仍需在实机确认没有残留板型特定服务影响启动。
 - Ophub 原始重建脚本有少量 CI 临时补丁，目的是阻止 U-Boot/firmware 从 moving branch 下载；不改动用户设备，也不修改仓库中的上游源码。
-- 没有构建或写入 eMMC；没有操作 192.168.9.6 实机。
+- 没有构建或写入 eMMC；没有操作 192.168.x.6 实机。
 
 
 ### 17.11.1 构建工作流收敛补充
