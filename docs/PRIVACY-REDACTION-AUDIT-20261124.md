@@ -126,3 +126,16 @@ A corrected workflow was committed at `.github/workflows/privacy-history-rewrite
 - keeps the force-push gated behind a successful verification step.
 
 The corrected workflow has not yet been dispatched. Remote history remains unchanged until a new run passes verification and reaches the force-push step.
+
+
+## 2026-11-24 workflow run 45334216117 review
+
+The second history-rewrite attempt fetched all 11 branch heads and rewrote 1,095 commits locally. The privacy verifier then correctly blocked publication after finding 63 reachable text blobs containing UUID-shaped values. The force-push step was skipped; remote branch/tag history remains unchanged.
+
+Root cause was confirmed from the workflow log: the UUID replacement expression in the blob callback was double-escaped (`\\b` in a raw bytes regex), so it searched for literal backslash-b rather than word boundaries and did not redact UUID values. The verifier's UUID expression was correctly escaped and therefore detected the remaining values.
+
+Workflow correction committed as `732669394f718086d4e9d5a7d92659c2aabb71b0`:
+- UUID replacement now uses correctly escaped word boundaries.
+- Private IPv4 and CGNAT replacement was broadened to match the verifier's target ranges.
+- The previous run did not push any refs.
+- This corrected version has not yet been run; do not claim history has been purged until a new run passes verification and the force-push step succeeds.
