@@ -2342,7 +2342,7 @@ Panther 的 MDIO firmware node 存在；`stmmac_mdio_setup()` 对存在 `mdio_no
 
 - eth0：`UP, LOWER_UP`，`Link detected: yes`。
 - 协商速率：1000 Mb/s，全双工。
-- ping `192.168.9.1`：10 transmitted、10 received、0% packet loss，平均 RTT 0.665 ms。
+- ping `192.168.x.1`：10 transmitted、10 received、0% packet loss，平均 RTT 0.665 ms。
 - ping 前后 netdev 计数：
   - TX packets：2243 → 2256（+13）
   - RX packets：4635 → 4667（+32）
