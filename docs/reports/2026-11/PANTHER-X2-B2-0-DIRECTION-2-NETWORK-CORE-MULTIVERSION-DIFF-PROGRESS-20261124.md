@@ -593,3 +593,78 @@ IPv4 fragment queue 在内存分配失败、超过内存阈值、队列超时、
 
 本轮仍为固定源码端点、Kconfig、Makefile 与候选配置模板的静态审计；未执行实机操作。6.12.81 最终 `.config`、模块清单和历史报文是否分片仍未由本轮新证据闭环。
 
+## 19. 本轮追加核验：IPv4 route lookup、FIB trie 与 policy routing
+
+承接第 18 节，继续核对 IPv4 入站路由、本机/转发分流、FIB trie、策略路由规则和源地址校验。固定源码端点仍为第 2 节列出的 6.1.116、6.1.174、6.12.81 commit。本轮读取并比较：
+- `net/ipv4/route.c`：`ip_route_input_slow()`、`ip_route_input_rcu()`、`ip_route_output_key_hash_rcu()`、`ip_route_output_key_hash()`
+- `net/ipv4/fib_frontend.c`：`fib_validate_source()`
+- `net/ipv4/fib_trie.c`：`fib_table_lookup()`
+- `net/ipv4/fib_rules.c`：`fib4_rule_match()`、`fib4_rule_configure()`、`fib4_rule_fill()`
+- `net/core/fib_rules.c`：`fib_rules_lookup()`
+- `net/ipv4/ip_forward.c`：`ip_forward()`
+- `include/net/ip_fib.h`、`include/linux/inetdevice.h`、相关 IPv4 Kconfig / Makefile。
+
+### 19.1 入站 IPv4 route lookup
+
+`ip_route_input_slow()`：
+- 6.1.116 与 6.1.174 函数体一致。
+- 6.12 保留地址合法性检查、flowi4 字段构造、`fib_lookup()` 调用、RTN_LOCAL 本机交付判定、转发开关检查及路由结果构造主流程。
+- 本轮发现的函数体差异是读取全局 `BC_FORWARDING` 时，从 `IPV4_DEVCONF_ALL(net, BC_FORWARDING)` 改为 `IPV4_DEVCONF_ALL_RO(net, BC_FORWARDING)`；6.12 对应头文件将后者定义为对配置值执行 `READ_ONCE()`。这是并发读取 accessor 调整，不是新增广播转发条件。
+- `ip_route_input_rcu()` 三个端点函数体一致；组播识别及转入慢速 FIB lookup 的条件未变。
+
+### 19.2 FIB trie 路由表查找
+
+`fib_table_lookup()`：
+- 6.1.116 与 6.1.174 函数体一致。
+- 6.12 将旧 DSCP 比较 `inet_dscp_to_dsfield(fa->fa_dscp) != flp->flowi4_tos` 改为调用 `fib_dscp_masked_match(fa->fa_dscp, flp)`。
+- 新 helper 使用 `RT_TOS(fl4->flowi4_tos)` 后再转换为 DSCP，配合 6.12 的 DSCP/TOS 区分，避免把 ECN 位混入 DSCP route selector 的匹配值。
+- trie 最长前缀搜索、leaf/alias 遍历、dead route 检查、scope 检查、nexthop 可用性选择及结果填充主流程没有发现其他本轮相关语义变化。
+
+该变化针对配置了 DSCP 路由选择器的 FIB entry；不能从 helper 抽取推断普通无 DSCP 策略的路由发生改变。
+
+### 19.3 IPv4 policy routing rule
+
+通用 `fib_rules_lookup()` 在三个端点函数体一致：规则链顺序、GOTO/NOP/action/suppress 处理及继续查找/最终返回结构未变。
+
+IPv4 专用 `fib4_rule_match()`：
+- 6.1.116 与 6.1.174 一致。
+- 6.12 增加 `dscp_full` 区分：完整 DSCP selector 按 flow DSCP 匹配；旧式 TOS selector 保留兼容匹配。
+- 6.12 的 `fib4_rule_configure()` 增加 `FRA_DSCP` netlink 属性解析；`fib4_rule_fill()` 在完整 DSCP 模式下输出 `FRA_DSCP`，旧式 TOS 模式仍使用 `frh->tos`。
+- 6.1.174 相对 6.1.116 的 `fib4_rule_configure()` 将 net namespace 来源由 `sock_net(skb->sk)` 改为 `rule->fr_net`。这是规则配置时取得目标 namespace 的上下文来源调整；rule match 与通用遍历没有相应变化，不是普通 skb 路由查找新增的丢弃条件。
+
+因此 6.12 扩展了策略路由 DSCP 表达能力；只有实际配置相应 DSCP rule 时才会影响匹配结果。当前没有 Panther 运行时 `ip rule` / DSCP route 快照，不能声称历史 DHCP 报文命中过该条件。
+
+### 19.4 FIB output lookup 与源地址校验
+
+- `ip_route_output_key_hash_rcu()` 三个端点函数体一致；源地址合法性、指定 output interface、local/broadcast 特殊处理、`fib_lookup()`、RTN_LOCAL 与 nexthop 选择主流程未见差异。
+- 外层 `ip_route_output_key_hash()` 的 TOS 归一化差异已在第 9 节登记：6.1 使用 `ip_rt_fix_tos()`，6.12 改为 `flowi4_tos &= INET_DSCP_MASK`。本轮 FIB trie / policy rule 检查表明，该变化属于 6.12 DSCP 与 ECN 分离调整的一部分，不重复计为独立故障点。
+- `fib_validate_source()` 三个端点函数体一致；RPFILTER、ACCEPT_LOCAL、自定义 local route/rule 时转入 full source validation 的条件未见版本变化。
+
+### 19.5 IPv4 forwarding 边界
+
+`ip_forward()`：
+- 6.1.116 与 6.1.174 函数体一致。
+- 6.12 在严格路由检查通过后新增 `IPSTATS_MIB_OUTFORWDATAGRAMS` 统计递增；TTL 检查、XFRM policy、MTU/fragmentation-needed 判断、skb COW、TTL decrement、redirect 与 FORWARD hook 顺序保持一致。
+- 新增项是转发统计，不是额外 drop 条件。该函数处理被路由为转发流量的 IPv4 skb；到本机的 DHCP/UDP 报文不会因为该统计变化进入转发路径。
+
+### 19.6 Kconfig / Makefile 与证据边界
+
+- 三版 `IP_ADVANCED_ROUTER`、`IP_MULTIPLE_TABLES` 的 Kconfig 依赖关系一致；`IP_MULTIPLE_TABLES` 仍依赖 `IP_ADVANCED_ROUTER` 并 select `FIB_RULES`。
+- IPv4 Makefile 仍以 `CONFIG_IP_MULTIPLE_TABLES` 控制 IPv4 `fib_rules.o` 的编译接入；未发现本轮相关入口变化。
+- 已核对的 6.1 general 模板与 6.12 RK35xx 候选模板均启用 `IP_ADVANCED_ROUTER` / `IP_MULTIPLE_TABLES`。这仍是模板证据，不替代 6.12.81 最终运行 `.config`，也不证明运行时配置了自定义 rule。
+
+### 19.7 本轮结论
+
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通无 DSCP 策略 DHCP/UDP 的判断 |
+|---|---|---|---|
+| 入站 route lookup | 核心函数一致 | BC_FORWARDING 改为 READ_ONCE accessor | 未发现新增普通入站路由丢弃条件 |
+| FIB trie lookup | 函数体一致 | DSCP selector 改用 DSCP/ECN-aware helper | 仅配置 DSCP route 时相关 |
+| policy rule traversal | 通用遍历一致 | 通用遍历一致 | 未发现规则执行顺序回归 |
+| IPv4 rule matching | 一致 | 增加完整 FRA_DSCP selector，保留旧式 TOS 匹配 | 需实际存在相应 DSCP rule 才影响 |
+| output route lookup | 一致 | 核心函数一致；TOS mask 变化见第 9 节 | 未发现普通无策略 UDP 的设备选择变化 |
+| source validation | 一致 | 一致 | 未发现 RPFILTER/源校验新增条件 |
+| IPv4 forwarding | 一致 | 仅新增转发统计递增 | 不适用于本机交付的 DHCP/UDP |
+
+**阶段性结论：** 本轮未发现 6.1.116→6.1.174 的 IPv4 FIB/policy-routing 数据路径回归。6.12 的主要真实差异集中在 DSCP/TOS selector 语义扩展和配置读取 accessor 整理；前者必须有相应 DSCP rule/route 才会改变路由匹配，后者不构成新增 drop。现有证据没有证明 Panther 历史 DHCP 报文命中 DSCP selector 或 IPv4 forwarding 路径。
+
+本轮仍为固定源码端点、Kconfig、Makefile 和候选配置模板的静态审计；未执行设备操作、构建、补丁或实机网络试验。方向二仍未结项。
