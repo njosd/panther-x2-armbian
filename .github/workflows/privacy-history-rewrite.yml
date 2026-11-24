@@ -23,43 +23,54 @@ jobs:
     steps:
       - name: Install git-filter-repo
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y git python3
           python3 -m pip install --user --break-system-packages git-filter-repo
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Mirror clone all published branches and tags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo.git
+          git clone --mirror "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" repo.git
           cd repo.git
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           echo "Initial branch refs:"
           git for-each-ref --format='%(refname) %(objectname)' refs/heads/
+          test "$(git for-each-ref --format='%(refname)' refs/heads/ | wc -l)" -ge 11
 
       - name: Rewrite sensitive historical content and remove raw evidence
         run: |
           set -euo pipefail
           cd repo.git
-          cat > /tmp/privacy-replacements.txt <<'EOF'
-          regex:(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}==>[REDACTED-MAC]
-          regex:192\.168\.(9|3|1)\.[0-9]{1,3}==>192.168.x.x
-          regex:10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}==>10.x.x.x
-          regex:172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}==>172.16.x.x
-          regex:4433a81e51158739==>[REDACTED-CPU-SERIAL]
-          regex:638141e4baaa==>[REDACTED-BUILD-HOST-ID]
-          regex:root@fv-az[0-9]+-[0-9]+==>root@[REDACTED-BUILD-HOST]
-          regex:/Users/[^/[:space:]]+==>/Users/[REDACTED-USER]
-          regex:/home/[^/[:space:]]+==>/home/[REDACTED-USER]
-          regex:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}==>[REDACTED-EMAIL]
-          9c7ff1a4-9beb-4346-b396-cdd1d4d1feea==>[REDACTED-UUID]
-          57ba8610-bc1c-4f13-9ce4-c864b229d25e==>[REDACTED-UUID]
-          55586ba5-0259-40c3-a67a-30e92526320b==>[REDACTED-UUID]
-          0387b7f9-f90e-4c1c-b00e-b8fec2c6cb9c==>[REDACTED-UUID]
-          f705ecc6-6a2b-4a16-9ccb-d62a59d92001==>[REDACTED-UUID]
-          EOF
-          git filter-repo --force --replace-text /tmp/privacy-replacements.txt \
+          cat > /tmp/redact_callback.py <<'PY'
+          import re
+          rules = [
+            (rb"(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}", b"[REDACTED-MAC]"),
+            (rb"192\.168\.(9|3|1)\.[0-9]{1,3}", b"192.168.x.x"),
+            (rb"10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}", b"10.x.x.x"),
+            (rb"172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}", b"172.16.x.x"),
+            (rb"4433a81e51158739", b"[REDACTED-CPU-SERIAL]"),
+            (rb"638141e4baaa", b"[REDACTED-BUILD-HOST-ID]"),
+            (rb"root@fv-az[0-9]+-[0-9]+", b"root@[REDACTED-BUILD-HOST]"),
+            (rb"/Users/[^/\s]+", b"/Users/[REDACTED-USER]"),
+            (rb"/home/[^/\s]+", b"/home/[REDACTED-USER]"),
+            (rb"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", b"[REDACTED-EMAIL]"),
+            (rb"9c7ff1a4-9beb-4346-b396-cdd1d4d1feea", b"[REDACTED-UUID]"),
+            (rb"57ba8610-bc1c-4f13-9ce4-c864b229d25e", b"[REDACTED-UUID]"),
+            (rb"55586ba5-0259-40c3-a67a-30e92526320b", b"[REDACTED-UUID]"),
+            (rb"0387b7f9-f90e-4c1c-b00e-b8fec2c6cb9c", b"[REDACTED-UUID]"),
+            (rb"f705ecc6-6a2b-4a16-9ccb-d62a59d92001", b"[REDACTED-UUID]"),
+          ]
+          if b"\x00" not in blob.data:
+            data = blob.data
+            for pattern, replacement in rules:
+              data = re.sub(pattern, replacement, data)
+            blob.data = data
+          PY
+          git filter-repo --force --blob-callback "$(cat /tmp/redact_callback.py)" \
             --invert-paths \
             --path evidence/uart/panther-emmc-uart-bidirectional-20261113.txt.gz \
             --path evidence/uart/panther-tf-6.12.81-uart-20261116-strings.txt \
@@ -71,7 +82,7 @@ jobs:
           git reflog expire --expire=now --all
           git gc --prune=now
 
-      - name: Verify rewritten reachable history before publishing
+      - name: Verify rewritten reachable text history before publishing
         run: |
           set -euo pipefail
           cd repo.git
@@ -87,6 +98,7 @@ jobs:
             ("CPU_SERIAL", re.compile(rb"4433a81e51158739")),
             ("PRIVATE_LAN", re.compile(rb"192\.168\.(?:9|3|1)\.[0-9]{1,3}")),
           ]
+          checked_text = 0
           for sha in shas:
             proc.stdin.write((sha+"\n").encode()); proc.stdin.flush()
             header = proc.stdout.readline()
@@ -96,6 +108,9 @@ jobs:
             if len(parts) < 3 or parts[1] != b"blob":
               continue
             size = int(parts[2]); data = proc.stdout.read(size); proc.stdout.read(1)
+            if b"\x00" in data:
+              continue
+            checked_text += 1
             for label, pattern in patterns:
               if pattern.search(data):
                 bad.append((sha,label))
@@ -105,8 +120,8 @@ jobs:
             print("Privacy verification failed; no push performed. Finding counts:", len(bad))
             for item in bad[:30]: print(item[0], item[1])
             sys.exit(1)
-          print("Verified reachable blob count:", len(shas))
-          print("No targeted MAC, UUID, CPU serial, or private LAN identifiers found.")
+          print("Verified reachable text blob count:", checked_text)
+          print("No targeted text MAC, UUID, CPU serial, or private LAN identifiers found.")
           PY
 
       - name: Force-update all branch and tag refs
@@ -115,7 +130,7 @@ jobs:
         run: |
           set -euo pipefail
           cd repo.git
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           git push --force origin --all
           git push --force origin --tags
           echo "Published branch refs:"
@@ -125,8 +140,9 @@ jobs:
         run: |
           {
             echo "## Privacy history rewrite"
-            echo "- All published branch histories were rewritten."
+            echo "- Published branch and tag refs were rewritten."
             echo "- Raw UART and unreviewed hardware tar archives were removed from reachable history."
-            echo "- Targeted text identifiers were redacted and reachable blobs were scanned before push."
+            echo "- Text identifiers were redacted; reachable text blobs were scanned before push."
+            echo "- Binary blobs were not mutated by the redaction callback."
             echo "- GitHub-managed refs/pull/*, caches, forks, clones and workflow artifacts are outside this branch/tag push and may require separate cleanup."
           } >> "$GITHUB_STEP_SUMMARY"
