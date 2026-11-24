@@ -504,3 +504,92 @@ Kconfig 结构变化：
 本轮完成 IPv4 conntrack hook 注册、confirm、tuple lookup、NAT hook 和 legacy filter/NAT Kconfig 差异核对。方向二仍未结项。
 
 下一项继续核对 netfilter 之外、但处于 IPv4 路由与本机交付边界的关键网络核心配置/代码：IPv4 defragmentation、IP checksum/fragment handling、local delivery 与相关 Kconfig/module 依赖，优先围绕普通 DHCP/UDP 包的实际路径。B2-0 继续限定为源码、Kconfig、配置及设备树静态差异审计，不涉及 B1 包的实机配置、构建、启动或网络试验。
+
+
+## 18. 本轮追加核验：IPv4 header checksum、分片重组与本机交付
+
+本轮继续使用第 2 节固定的三个源码端点，直接读取并比较：
+- `net/ipv4/ip_input.c`：`ip_rcv_core()`、`ip_rcv()`、`ip_local_deliver()`、`ip_local_deliver_finish()`、`ip_protocol_deliver_rcu()`
+- `net/ipv4/ip_fragment.c`：`ip4_frag_init()`、`ip_frag_queue()`、`ip_frag_reasm()`、`ip_defrag()`、`ipv4_frags_init_net()`
+- `net/ipv4/inet_fragment.c`：`inet_frag_find()`、`inet_frag_queue_insert()`、`inet_frag_reasm_finish()`、队列创建和释放路径
+- `net/ipv4/netfilter/nf_defrag_ipv4.c`：IPv4 conntrack defrag hook 的启用、注册与停用
+- `net/Kconfig`、`net/ipv4/Kconfig`、`net/ipv4/netfilter/Kconfig`、对应 Makefile，以及已固定来源的 6.1/6.12 配置模板。
+
+### 18.1 IPv4 header checksum 与长度检查
+
+`ip_rcv_core()` 三个端点均保留相同的基本检查顺序：
+1. 确保 skb 至少包含 IPv4 基本头；
+2. 检查 `ihl >= 5`、IPv4 version；
+3. 拉取完整 IPv4 header；
+4. 通过 `ip_fast_csum()` 校验 IPv4 header checksum；
+5. 检查 IP total length 不小于 header 长度，且 skb 实际长度足够；
+6. 按 IP total length 修剪以太网填充，并设置 transport header。
+
+6.1.116 与 6.1.174 的 `ip_rcv_core()` 源码一致。6.12 仍使用 `ip_fast_csum()`，但将长度读取从 `ntohs(iph->tot_len)` 改为 `iph_totlen(skb, iph)`。
+
+`iph_totlen()` helper 本身在 6.1.116 和 6.12 的 `include/linux/ip.h` 中均存在且实现一致：只有当 skb 是 TCP GSO、且 IPv4 `tot_len` 字段为 0 时，才以 skb 长度作为总长度回退值。普通 UDP/DHCP skb 不满足 TCP GSO 条件，仍使用 IPv4 header 的 `tot_len`。因此这是针对特殊 TCP GSO 表示方式的兼容处理，不是普通 UDP 新增或改变的长度校验条件。
+
+### 18.2 本机交付与 UDP 协议分派
+
+`ip_local_deliver()`、`ip_local_deliver_finish()`、`ip_protocol_deliver_rcu()` 三个端点函数体一致：
+- 只有 `ip_is_fragment(ip_hdr(skb))` 为真时，`ip_local_deliver()` 才调用 `ip_defrag(..., IP_DEFRAG_LOCAL_DELIVER)`；
+- 分片重组成功或报文未分片后，进入 `NF_INET_LOCAL_IN`；
+- LOCAL_IN hook 放行后，`ip_local_deliver_finish()` 去掉 IPv4 header，再由 `ip_protocol_deliver_rcu()` 按 IPv4 protocol number 分派到 UDP/TCP/raw handler。
+
+因此普通未分片 IPv4/UDP 包不进入 IPv4 fragment queue。LOCAL_IN 是否会改变报文命运仍取决于实际注册的 hook 与规则 verdict；函数本身三个版本没有变化。
+
+### 18.3 IPv4 分片队列与重组
+
+6.1.116 与 6.1.174：
+- `ip_frag_queue()`、`ip_frag_reasm()`、`ip_defrag()` 的函数体一致；
+- `inet_fragment.c` 的 blob SHA 相同：`834cdc57755f7f0cee83b495981427be904308cb`；
+- `nf_defrag_ipv4.c` 的 blob SHA 相同：`e61ea428ea1872077ec6c2917b8c511518a692d8`。
+
+6.1.116 的 `ip4_frag_init()` 使用旧式 `inet_getpeer_v4(..., 1)` 获取 peer；6.1.174 改为在 RCU read-side 临界区内获取 peer，并显式执行 `refcount_inc_not_zero()`，之后将引用写入队列。这是 fragment peer 对象生命周期/引用计数保护调整，不改变普通未分片报文路径。
+
+6.12 相比 6.1：
+- `ip_frag_queue()` 增加 SKB drop-reason 记录（例如重复 fragment），并使用新的 skb drop reason 释放接口；分片 offset/end 计算、末片长度一致性检查、fragment 插入、重组触发条件和 overlap 处理主逻辑保持一致。
+- `ip_frag_reasm()` 的核心重组、ECN 合并、最大长度检查、重建 IPv4 header checksum 的逻辑一致。
+- `ip_defrag()` 对目标设备的读取改用 `skb_dst_dev()` accessor；其查找队列、加锁、排队、返回结果结构一致。
+- `ip4_frag_init()` 延续 6.1.174 的 RCU/refcount peer 获取方式。
+- `inet_frag_queue_insert()` 三个端点函数体一致，仍区分重复 fragment 与 overlap；`inet_frag_find()` 的高水位检查、rhashtable 查找/创建和引用计数结构一致。
+- `inet_frag_reasm_finish()` 的时间戳字段从旧的 `mono_delivery_time` 改为 `tstamp_type`，属于 skb 时间戳元数据结构调整，不改变分片完整性判定或普通 UDP 交付。
+
+IPv4 fragment queue 在内存分配失败、超过内存阈值、队列超时、长度不一致、重复/重叠 fragment、ECN 组合非法或重组包超过 65535 字节时，仍可能丢弃该分片数据报。这些是分片报文本身的条件性失败路径；没有证据表明它们会处理普通未分片 DHCP/UDP 报文。
+
+### 18.4 Netfilter IPv4 defragmentation hook
+
+三个端点的 `nf_defrag_ipv4.c` 都在 IPv4 PRE_ROUTING 与 LOCAL_OUT 注册 defrag hook，优先级为 `NF_IP_PRI_CONNTRACK_DEFRAG`；仅当 `ip_is_fragment(ip_hdr(skb))` 为真时才收集分片。启用采用 users 引用计数，首次启用注册 hook，最后一次 disable 注销 hook。
+
+6.12 的差异：
+- 对 socket `nodefrag` 状态的读取改用 `inet_test_bit(NODEFRAG, sk)`；
+- 新增 `nf_defrag_hook` 描述对象，并通过 RCU 发布/撤销 `nf_defrag_v4_hook`，用于 defrag hook 的动态启用接口；
+- hook 位置、优先级、fragment 条件判断和用户计数注册/注销主流程保持一致。
+
+该 hook 并非因 `CONFIG_NF_DEFRAG_IPV4` 编译启用就必然对每个 skb 执行；需要相关 Netfilter/conntrack 使用者实际启用它。未分片 UDP 不进入 gather-fragments 分支。
+
+### 18.5 Kconfig / Makefile 依赖
+
+源码结构确认：
+- `CONFIG_INET` 是 IPv4/IPv6 Internet protocol stack 的基础 bool 入口。
+- `net/ipv4/Makefile` 将 `ip_input.o`、`ip_fragment.o`、`inet_fragment.o` 列入 `obj-y`；这些 IPv4 输入和核心分片实现属于 INET 核心构建对象，不由 `CONFIG_NF_DEFRAG_IPV4` 单独决定。
+- `CONFIG_NF_DEFRAG_IPV4` 在 `net/ipv4/netfilter/Kconfig` 中为 tristate，所在菜单依赖 `INET && NETFILTER`，默认 n。它控制 Netfilter conntrack defrag hook 支持，不等同于 IPv4 核心 `ip_defrag()` 本身。
+- `CONFIG_IP_MULTIPLE_TABLES` 为 bool，依赖 `IP_ADVANCED_ROUTER` 并 select `FIB_RULES`；它控制策略路由规则实现，不控制 IP header checksum、fragment queue 或 local-delivery 函数。
+- 6.1 general 模板 blob SHA `c5e4598301c3ef3675be0058b99b9b6044a14bbf` 与 6.12 RK35xx 候选模板 blob SHA `6c7714f5668362dd4ae9c4d1a7eb8249e6b23de5` 中，`INET`、`IP_ADVANCED_ROUTER`、`IP_MULTIPLE_TABLES`、`NETFILTER`、`NF_CONNTRACK`、`NF_DEFRAG_IPV4` 均为 y。
+- 以上仍是指定模板值，不冒充 6.12.81 最终构建 `.config`；实际模块/内建形态必须以最终配置和模块清单为准。
+
+### 18.6 本轮结论
+
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未分片 DHCP/UDP 的判断 |
+|---|---|---|---|
+| IPv4 header checksum | `ip_rcv_core()` 一致 | 仍调用 `ip_fast_csum()` | 未发现新 checksum 丢弃条件 |
+| IP total length | 一致 | 改用 `iph_totlen()`；仅 TCP GSO 且 tot_len=0 时回退 skb 长度 | 普通 UDP 仍读取 header tot_len |
+| 本机交付 / LOCAL_IN | 核心函数一致 | 核心函数一致 | 路径与 hook 入口未变 |
+| fragment queue | 主函数一致；peer 引用获取改为 RCU/refcount 安全方式 | drop-reason 与 skb 时间戳/accessor 调整，重组主逻辑一致 | 普通未分片包不进入 |
+| Netfilter defrag | hook 位置、优先级、启用计数一致 | 增加 RCU 动态 hook 发布及 NODEFRAG bit accessor | 只对实际启用 hook 且确为 fragment 的 skb 生效 |
+| Kconfig | 关键入口一致 | INET / policy routing / NF_DEFRAG_IPV4 入口语义一致 | 模板均启用；最终配置仍需独立闭环 |
+
+**阶段性结论：** 本轮没有发现 6.1.116→6.1.174 在 IPv4 header checksum、分片主处理或本机 UDP 交付路径上的新增丢包条件。6.12 的 `iph_totlen()` 调整针对特殊 TCP GSO；Netfilter defrag 的变化针对 hook 生命周期与 fragment 条件路径。当前均不能解释普通未分片 DHCP/UDP 故障。
+
+本轮仍为固定源码端点、Kconfig、Makefile 与候选配置模板的静态审计；未执行实机操作。6.12.81 最终 `.config`、模块清单和历史报文是否分片仍未由本轮新证据闭环。
+
