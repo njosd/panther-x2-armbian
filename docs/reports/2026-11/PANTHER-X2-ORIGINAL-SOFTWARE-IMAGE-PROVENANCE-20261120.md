@@ -597,7 +597,7 @@ Boot1 相关字符串仍分别为：
 
 - 分区起始 LBA：32768（偏移 16 MiB）；结束 LBA：555007。
 - 文件系统：ext4；卷标：`BOOT`。
-- UUID：`a5110630-ef2e-4941-9a22-15784ef687a5`。
+- UUID：`[REDACTED-UUID]`。
 - Block size：4096 bytes；inode size：256 bytes；descriptor size：64 bytes。
 - ext4 superblock magic：`0xef53`。
 - 根目录读取成功，包含 `armbianEnv.txt`、`boot.cmd`、`boot.scr`、`dtb/`、`extlinux/`、`Image`、`vmlinuz-6.1.65-ophub`、`uInitrd`、`uInitrd-6.1.65-ophub` 等文件。
@@ -610,7 +610,7 @@ Boot1 相关字符串仍分别为：
 ```text
 verbosity=7
 fdtfile=rockchip/rk3566-panther-x2.dtb
-rootdev=UUID=ddcbfa1d-95e7-4863-97c8-ec9b7767968b
+rootdev=UUID=[REDACTED-UUID]
 rootfstype=ext4
 earlycon=on
 console=both
