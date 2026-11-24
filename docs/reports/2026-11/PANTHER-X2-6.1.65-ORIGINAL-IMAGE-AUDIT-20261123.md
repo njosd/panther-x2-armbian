@@ -42,8 +42,8 @@ gzip header 支持内部镜像文件名及 2023-12-07 构建标识，但不能�
 | 展开镜像大小 | 约 2.8 GiB |
 | Boot 分区 | ext4，267,386,880 bytes |
 | Root 分区 | ext4，2,683,305,984 bytes |
-| Boot UUID | \`a5110630-ef2e-4941-9a22-15784ef687a5\` |
-| Root UUID | \`ddcbfa1d-95e7-4863-97c8-ec9b7767968b\` |
+| Boot UUID | \`[REDACTED-UUID]\` |
+| Root UUID | \`[REDACTED-UUID]\` |
 
 以上为用户本机只读提取结果；本轮未重新计算原始镜像与展开镜像 SHA-256。
 
@@ -55,7 +55,7 @@ gzip header 支持内部镜像文件名及 2023-12-07 构建标识，但不能�
 
 \`\`\`ini
 fdtfile=rockchip/rk3566-panther-x2.dtb
-rootdev=UUID=ddcbfa1d-95e7-4863-97c8-ec9b7767968b
+rootdev=UUID=[REDACTED-UUID]
 rootfstype=ext4
 rootflags=rw,errors=remount-ro
 earlycon=on
@@ -273,13 +273,13 @@ udev 相关脚本：
 从内核字符串中读取到的完整版本/构建标识：
 
 ```text
-Linux version 6.1.65-ophub (root@fv-az841-991)
+Linux version 6.1.65-ophub (root@[REDACTED-BUILD-HOST])
 (aarch64-none-linux-gnu-gcc (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 13.2.1 20231009,
 GNU ld (Arm GNU Toolchain 13.2.rel1 (Build arm-13.7)) 2.41.0.20231009)
 #1 SMP Sun Dec  3 05:14:23 EST 2023
 ```
 
-这说明该二进制记录的编译用户/主机字符串为 `root@fv-az841-991`，编译器为 Arm GNU Toolchain 13.2.1，链接器为 GNU ld 2.41.0.20231009，内核编译时间字符串为 2023-12-03 05:14:23 EST（10:14:23 UTC）。主机名形态与云端 runner 环境相符，但单凭字符串不能证明具体 GitHub Actions run、runner 身份或构建来源。
+这说明该二进制记录的编译用户/主机字符串为 `root@[REDACTED-BUILD-HOST]`，编译器为 Arm GNU Toolchain 13.2.1，链接器为 GNU ld 2.41.0.20231009，内核编译时间字符串为 2023-12-03 05:14:23 EST（10:14:23 UTC）。主机名形态与云端 runner 环境相符，但单凭字符串不能证明具体 GitHub Actions run、runner 身份或构建来源。
 
 #### 内嵌 IKCONFIG
 
