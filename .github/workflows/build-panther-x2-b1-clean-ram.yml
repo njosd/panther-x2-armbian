@@ -452,7 +452,7 @@ jobs:
           ROOT=work/initramfs
           mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
           install -m 0755 work/output/busybox "$ROOT/bin/busybox"
-          for applet in ash sh mount mkdir cat uname dmesg tail echo ls printf test '['; do
+          for applet in ash sh mount mkdir cat uname dmesg tail echo ls printf test; do
             ln -s busybox "$ROOT/bin/$applet"
           done
           install -m 0755 scripts/panther-x2-minimal-initramfs/init "$ROOT/init"
