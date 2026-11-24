@@ -2,7 +2,7 @@
 
 - 日期：2026-11-22
 - 阶段：B1
-- 状态：构建方案与文件已提交；尚未运行 CI、尚无 B1 artifact、尚未进行 Panther X2 实机启动
+- 状态：B1 构建流水线曾成功产出 PREPARE-ONLY artifact；经后续基线一致性复核，当前 Kernel/DTB 产物不予验收，需按未修改上游源码重新构建；实机启动未进行
 - 目标：建立与存储系统、网络系统完全解耦的最小 ARM64 RAM Linux，再以它作为后续有线千兆 Ethernet 逐项引入的干净起点
 
 ## 1. B1 范围冻结
@@ -159,3 +159,35 @@ clean-test DTB 移除 Wi-Fi/蓝牙 GPIO、SDIO power-sequence、Wi-Fi/BT pinctrl
 - **uevent：** 旧 kobject_uevent 补丁不再应用，仅保留历史审计；B1 使用未修改的锁定上游源码。
 
 当前仅完成仓库分支中的实现和静态文件审查；CI、artifact、eMMC 安全门和 Panther X2 实机结果均未验证。
+
+
+## 2026-11-24 CI 产物复核与基线修正
+
+### Run #62 的实际结果
+
+- Workflow Run：[#62 / 45291347822](https://github.com/njosd/panther-x2-armbian/actions/runs/45291347822)
+- Workflow checkout commit：`d6368734c2d02787b0f27ebc8d9fdc61ed724d3e`
+- Kernel/DTB：Job skipped，复用 Run #58（45201970736）的 `b1-kernel-dtb`，Artifact ID `14833674072`，大小 206,769,641 bytes，Artifact digest `sha256:4b6fc34cca657a50f1d9429872d0e4539e60ee1eee59a6264113fb2e1879e2ef`。
+- BusyBox：Run #62 构建成功并上传 `b1-busybox`，Artifact ID `14874457291`，大小 509,361 bytes，digest `sha256:d1ee511a3aeafed17daf88c72514bb59ea40230e8381f4bc9fd870f2db9e0087`。
+- 打包：Job 成功；PREPARE-ONLY artifact ID `14873613236`，大小 220,367,249 bytes，digest `sha256:05c8846df9c9a6961ec0d3dd7a52ed9bda7757d8e598bfb25b98b0df6cce0774`。
+- Job 结果：Kernel/DTB skipped（按复用输入执行）；BusyBox success；package success。initramfs gzip/cpio 检查、镜像分区与 ext4 检查、JP proper FIT 写入回读校验、最终 SHA256SUMS 校验均在该 Run 中通过。
+
+### 为什么 Run #62 不作为当前 B1 基线验收
+
+Run #58 的 Kernel/DTB 构建日志证明它使用了 2026-11-23 完整 RK35xx seed（blob `dee127c6c644f38426eeb28000d73536084d34a3`），并保留 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`，关闭 `CONFIG_NET`。因此配置 seed/主要配置方向与基线纠偏一致。
+
+但同一日志也证明构建前仍应用了历史 `0001-kobject_uevent-config-net-n.patch`（patch SHA-256 `2ca7ca9cb355d92e5cfe91fb605df3be9fb847c677e9b54864de2a02887276d9`）。2026-11-23 基线纠偏明确规定该补丁只保留为历史审计材料，B1 应使用未修改的锁定上游源码。故 Run #58 Kernel/DTB 与依赖它的 Run #62 镜像只能作为历史构建证据，不作为当前基线验收产物。
+
+### 已完成的修正
+
+- 2026-11-24 更新 `.github/workflows/build-panther-x2-b1-clean-ram.yml`：移除旧补丁的 dry-run、应用和针对补丁后源码的断言；新增工作区干净检查，确保固定 Linux commit 未被修改；manifest 明确记录 `kobject_uevent_patch=none; pinned upstream source unchanged`。
+- 修正提交：`e6d94d2d337fe6caaff1d743aca1aef77451159d`。
+- **没有触发新的 Actions。** Kernel/DTB 重新构建待用户手动运行；未重复执行已成功的设备树以外其他验证，也未触碰设备或介质。
+
+### 当前状态与下一步
+
+- 已验证：Run #62 的 CI job 关系、BusyBox 构建、镜像组装和 CI 内部完整性检查。
+- 不予当前基线验收：Run #58 复用的 Kernel/DTB（因使用了已废弃补丁）。
+- 待验证：按修正后 workflow、未修改上游源码重新构建 Kernel/DTB；之后再用新 Kernel/DTB 重新完成 BusyBox/打包的依赖链。已验证的阶段产物应继续复用，不得无故从头重建。
+- 未验证：eMMC pre-Linux 安全门、TF 写入、Panther X2 实机启动、UART shell、B1 运行时行为。
+- 安全边界保持不变：PREPARE-ONLY；不写 TF/eMMC，不启动实验固件；项目 A 只围绕板载有线千兆 Ethernet，Wi-Fi/无线和 Bluetooth 永久排除。
