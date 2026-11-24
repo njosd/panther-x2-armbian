@@ -197,17 +197,17 @@ devm_gpiod_put(priv->device, reset_gpio);
 
 /proc/cmdline 关键内容：
 
-~~~textroot=UUID=9c7ff1a4-9beb-4346-b396-cdd1d4d1feea
+~~~textroot=UUID=[REDACTED-UUID]
 rootwait rootfstype=ext4 rootflags=rw,errors=remount-ro
-ubootpart=57ba8610-bc1c-4f13-9ce4-c864b229d25e
+ubootpart=[REDACTED-UUID]
 ~~~
 
 | 分区 | UUID | PARTUUID | 用途 |
 |---|---|---|---|
-| mmcblk0p1 | 55586ba5-0259-40c3-a67a-30e92526320b | 57ba8610-bc1c-4f13-9ce4-c864b229d25e | TF BOOT |
-| mmcblk0p2 | 9c7ff1a4-9beb-4346-b396-cdd1d4d1feea | 87fd0694-5515-4644-b27f-a897a86a248d | TF ROOTFS |
-| mmcblk1p1 | a5110630-ef2e-4941-9a22-15784ef687a5 | 1ef0258e-6807-493d-bb0c-a2903d5d5988 | eMMC BOOT |
-| mmcblk1p2 | ddcbfa1d-95e7-4863-97c8-ec9b7767968b | 462e43d5-1545-4d14-b115-5515a12c7743 | eMMC ROOTFS |
+| mmcblk0p1 | [REDACTED-UUID] | [REDACTED-UUID] | TF BOOT |
+| mmcblk0p2 | [REDACTED-UUID] | [REDACTED-UUID] | TF ROOTFS |
+| mmcblk1p1 | [REDACTED-UUID] | [REDACTED-UUID] | eMMC BOOT |
+| mmcblk1p2 | [REDACTED-UUID] | [REDACTED-UUID] | eMMC ROOTFS |
 
 root UUID 精确对应 TF mmcblk0p2；ubootpart 精确对应 TF mmcblk0p1 PARTUUID。
 
@@ -228,7 +228,7 @@ armbianEnv.txt 关键配置：
 verbosity=7
 bootlogo=true
 fdtfile=rockchip/rk3566-panther-x2.dtb
-rootdev=UUID=9c7ff1a4-9beb-4346-b396-cdd1d4d1feea
+rootdev=UUID=[REDACTED-UUID]
 rootfstype=ext4
 rootflags=rw,errors=remount-ro
 earlycon=on
