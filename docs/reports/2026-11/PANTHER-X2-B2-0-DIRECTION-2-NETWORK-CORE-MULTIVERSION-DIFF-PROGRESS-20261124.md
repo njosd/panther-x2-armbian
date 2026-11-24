@@ -88,20 +88,19 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 - 6.1.174 起，`qdisc_restart()` / `dequeue_skb()` 增加 packet budget 参数，`try_bulk_dequeue_skb()` 增加按 budget 限制批量 dequeue 的逻辑；6.12 延续该实现。
 - 该差异控制 qdisc 批量出队/调度公平性，不改变单个 skb 的驱动调用和返回处理。
 
-### 4.4 TX checksum helper 与不可读 fragment 检查（位置更正）
+### 4.4 TX checksum helper 与不可读 fragment 检查（后续 TX 审计修正）
 
-本轮进一步逐函数比较 `net/core/dev.c`，确认 6.12 新增的 `skb_frags_readable(skb)` 检查**不在 `validate_xmit_skb()` 函数入口**，而是在它可能调用的 `skb_checksum_help()` 软件 checksum fallback 内。此前将该检查归到 `validate_xmit_skb()` 入口的表述不准确，以本节为准。
+本节原先把 6.12 的 `skb_frags_readable()` 检查仅定位到 `skb_checksum_help()`，这一表述不完整。第 22 节继续沿 TX 实际交付链核对后确认：6.12 在 `validate_xmit_skb()` 入口另有一处更早、无条件的可读性检查；`skb_checksum_help()` 内仍保留独立检查。具体调用路径和影响范围以第 22 节为准。
 
 `skb_checksum_help()`：
 - 6.1.116 与 6.1.174 函数体一致；
-- 6.12 在 `CHECKSUM_COMPLETE` 和 GSO 快速分支之后、实际读取 skb 数据计算 checksum 之前，增加：
-  `if (!skb_frags_readable(skb)) return -EFAULT;`
+- 6.12 在 `CHECKSUM_COMPLETE` 和 GSO 快速分支之后、实际读取 skb 数据计算 checksum 之前，增加 `skb_frags_readable(skb)` 检查，不可读时返回 `-EFAULT`；
 - `skb_frags_readable()` 实际检查 `!skb->unreadable`；
-- 6.12 的 `__skb_fill_netmem_desc()` 在 fragment 使用 `netmem_is_net_iov(netmem)` 时设置 `skb->unreadable=true`。因此该保护针对包含 host 不可直接读取的 net_iov/device-memory fragment 的 skb，而不是普通 page fragment 或普通线性 skb。
+- 6.12 的 `__skb_fill_netmem_desc()` 在 fragment 使用 `netmem_is_net_iov(netmem)` 时设置 `skb->unreadable=true`。该标记针对 host 不可直接读取的 net_iov/device-memory fragment，不是普通 page fragment 或普通线性 skb。
 
-调用关系：
+调用关系之一：
 `validate_xmit_skb()` → `skb_csum_hwoffload_help()` →（设备不支持当前 skb checksum offload 时）`skb_checksum_help()`。
-只有实际进入软件 checksum fallback 且 skb 带 unreadable fragment 时，新检查才会返回 `-EFAULT`，上层 TX 校验路径随后丢弃 skb。
+软件 checksum fallback 内的检查是第二道保护；不能把它误写成 6.12 唯一的 TX unreadable-fragment 检查。
 
 配置差异：
 - 6.1.116 与 6.1.174 的 `net/Kconfig` 没有 `NET_DEVMEM` 符号；
@@ -819,3 +818,91 @@ IPv4 专用 `fib4_rule_match()`：
 **阶段性结论：** 当前没有发现 6.1.116→6.1.174 在普通 UDP sendmsg、IP skb 构造和数据追加主路径上的已证实回归。6.12 新增的 MSG_SPLICE_PAGES 与 UDP GSO 变化均有明确条件，不能外推到普通 DHCP datagram。唯一保留为本方向未闭环项的是 6.12 `ip_sendmsg_scope()` helper 的定义及其对广播/单播路由 scope 的具体语义；在追到定义前，不将 UDP TX 路由选择差异判为等价或回归。
 
 本轮为源码静态审计；未修改代码/配置，未构建、未启动或操作 Panther X2 实机。方向二仍未结项。
+
+## 22. 本轮追加核验：TX queue → qdisc → validate → ndo_start_xmit 交付链
+
+本轮按用户要求将方向二重点转向 TX 发送环节，继续向下追踪普通 UDP skb 从 `__dev_queue_xmit()` 进入 netdevice TX queue、qdisc dequeue、发送前校验，直到 Linux 网络核心调用驱动 `ndo_start_xmit` 的边界。仍使用第 2 节固定的 6.1.116、6.1.174、6.12.81 源码端点。
+
+本轮读取：
+- `net/core/dev.c`：`__dev_queue_xmit()`、`netdev_core_pick_tx()`、`netdev_pick_tx()`、`netif_skb_features()`、`validate_xmit_skb()`、`validate_xmit_skb_list()`、`dev_hard_start_xmit()`、`xmit_one()`；
+- `net/sched/sch_generic.c`：`dequeue_skb()`、`qdisc_restart()`、`sch_direct_xmit()`、`__qdisc_run()`；
+- `include/linux/skbuff.h`：`skb_frags_readable()`、`__skb_fill_netmem_desc()`；
+- `net/Kconfig`：`NET_DEVMEM`、`ETHERNET_PACKET_MANGLE` 配置入口。
+
+### 22.1 TX queue 选择
+
+`netdev_core_pick_tx()`、`netdev_pick_tx()` 三个固定端点函数体一致：
+- 单 TX queue 设备直接使用 queue 0；
+- 多队列设备才调用驱动 `ndo_select_queue` 或通用 XPS/hash 选择；
+- 最终通过 `netdev_cap_txqueue()` 限制 queue index，并写入 skb queue mapping。
+
+Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue` 是否注册及运行时 queue mapping 不在本轮静态源码结论范围内；这些属于后续驱动/运行时证据。本轮未发现三个版本通用 TX queue 选择 helper 的函数体差异。
+
+### 22.2 qdisc 出队与 direct transmit
+
+- `sch_direct_xmit()` 三版函数体一致：先在 qdisc 锁外执行可选 skb 校验，再获取 TX queue 锁；若 TX queue 未 frozen/stopped，调用 `dev_hard_start_xmit()`；若驱动返回 `NETDEV_TX_BUSY`，将未完成 skb 重新入队。
+- `qdisc_restart()` / `dequeue_skb()`：6.1.116→6.1.174 增加 packet budget 参数，并将 budget 传给 bulk dequeue；6.12 延续该实现。
+- `__qdisc_run()`：6.1.116→6.1.174 将 quota 传入 qdisc restart；6.12 将 `dev_tx_weight` 移入 `net_hotdata`，仍使用相同 quota/budget 控制结构。
+- 上述变化是 qdisc 批量出队预算和调度公平性调整；`sch_direct_xmit()` 的单 skb 锁、队列停止判断、驱动调用及 BUSY 重排函数体没有变化。
+
+因此，在本轮覆盖的 generic qdisc 路径中，没有发现 6.1.116→6.1.174 或 6.1→6.12 改写单个普通 UDP skb 的驱动交付/返回处理。
+
+### 22.3 发送前校验：发现并明确 6.12 新增的 TX 丢弃门
+
+`validate_xmit_skb()`：
+- 6.1.116 与 6.1.174 函数体一致；
+- 6.12 在计算 `netif_skb_features()`、VLAN/GSO/linearize/checksum/XFRM 处理之前，新增：
+  `if (!skb_frags_readable(skb)) goto out_kfree_skb;`
+- 该分支会释放 skb，递增 `dev_core_stats_tx_dropped`，并返回 NULL；因此它是发送前校验入口的明确丢弃门，不依赖设备是否支持 checksum offload，也不要求进入软件 checksum fallback。
+- qdisc 正常 direct transmit 路径通过 `sch_direct_xmit()` → `validate_xmit_skb_list()` → `validate_xmit_skb()`；无队列直发路径也直接调用 `validate_xmit_skb()`。因此该检查覆盖这两类 generic TX 交付路径。
+
+`skb_frags_readable()` 返回 `!skb->unreadable`。6.12 的 `__skb_fill_netmem_desc()` 在 fragment backing memory 是 `net_iov` 时将 `skb->unreadable=true`；普通 page fragment 不触发该标记，普通线性 skb 也不触发。6.12 的 `NET_DEVMEM` Kconfig 依赖 `DMA_SHARED_BUFFER`、`GENERIC_ALLOCATOR` 和 `PAGE_POOL`，并以 `def_bool y` 定义。
+
+同一版本的 `skb_checksum_help()` 另有 unreadable-fragment 检查，属于软件 checksum 读取路径的第二道保护。必须区分：
+1. `validate_xmit_skb()` 入口：对 unreadable skb 直接拒绝 TX；
+2. `skb_checksum_help()`：只有进入软件 checksum fallback 时才会触发其内部检查。
+
+**对普通 DHCP UDP TX 的适用性：** 普通 `udp_sendmsg()` 创建的小型 DHCP datagram 使用常规 skb 数据构造路径；本轮已审计的普通 UDP 路径没有设置 `MSG_SPLICE_PAGES`，普通用户页/线性数据也不等于 `net_iov`。因此不能仅凭 6.12 `NET_DEVMEM=y` 就认定 DHCP skb 会被该门拒绝。该差异是真实的、位于驱动调用之前的条件性 TX drop；但是否可能命中 Panther 历史报文，需要 skb backing-memory 证据，当前没有该证据。
+
+### 22.4 6.1.174 的 GSO skb-list 返回语义修正
+
+`__dev_queue_xmit()`：
+- 6.1.116→6.1.174 增加 `is_list` 标志和 GSO segment list 的返回码处理：如果一个 skb 经 GSO 分段形成多个 frame，部分 frame 已交付后，避免将后续 `NETDEV_TX_BUSY` 误解释为原始 TCP 数据完全未发送；当 list 已部分处理时将返回状态归一为 `NETDEV_TX_OK`。
+- 6.12 保留该处理。
+- 该新增分支只在无 qdisc/noqueue 的直发分支中处理 GSO skb list；普通 DHCP 小型 UDP datagram 是单 skb、非 GSO，不命中 `is_list` 分支。
+- 对 qdisc 路径，驱动 BUSY 的 skb 仍按 `sch_direct_xmit()` 的原有机制重新入队。
+
+未发现这一变化改变单个普通 UDP skb 的发送返回语义。
+
+### 22.5 驱动调用边界与可选 Ethernet packet mangle hook
+
+`dev_hard_start_xmit()` 三版函数体一致：逐个处理 skb/list 节点，调用 `xmit_one()`，并按 `dev_xmit_complete(rc)` 判断是否继续；若 TX queue 已停止且仍有待发送 skb，则返回 `NETDEV_TX_BUSY` 与剩余 list。
+
+`xmit_one()`：
+- 6.1.116 与 6.1.174 函数体一致；
+- 6.12 移除了 `CONFIG_ETHERNET_PACKET_MANGLE` 条件下的 `dev->eth_mangle_tx` 可选发送前改写 hook；
+- 6.1 的 `net/Kconfig` 定义该隐藏 bool，说明它可由需要改写 Ethernet TX/RX 报文的 PHY driver 选择；6.12 的 `net/Kconfig` 不再定义该选项，`xmit_one()` 也不再调用该 hook。
+- 该差异属于可选 PHY/设备专用报文改写扩展的移除，不是通用 TX skb 处理或 DMA 提交算法变化。是否曾被 Panther 所用 PHY/驱动选择，需要方向三核对驱动 Kconfig/代码；本轮不提前展开或猜测。
+
+三版最终均通过 `netdev_start_xmit()` 调用设备的 `ndo_start_xmit`，并围绕调用发出 `net_dev_start_xmit` / `net_dev_xmit` trace。该处是本轮 Linux 网络核心审计的驱动边界；TX descriptor、DMA map、doorbell、completion/reclaim 不属于方向二，本轮不进入。
+
+### 22.6 TX 核心路径结论
+
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通单 skb UDP 判断 |
+|---|---|---|---|
+| TX queue selection | 三个 helper 一致 | 一致 | 未发现通用队列选择差异 |
+| qdisc dequeue budget | 增加 packet budget | 延续；quota 移入 net_hotdata | 调度/批量预算变化，不改单 skb 驱动调用 |
+| `sch_direct_xmit()` | 一致 | 一致 | 驱动交付及 BUSY 重排一致 |
+| `validate_xmit_skb()` | 一致 | 新增 unreadable-frag 入口拒绝 | 条件性新增 TX drop，需 skb 是否含 net_iov 证据 |
+| `__dev_queue_xmit()` noqueue GSO list | 新增 partial GSO list 返回码处理 | 延续 | 普通单 skb DHCP 不命中 |
+| `dev_hard_start_xmit()` | 一致 | 一致 | 单 skb 调用/返回处理一致 |
+| `xmit_one()` | 一致 | 移除可选 ETHERNET_PACKET_MANGLE hook | 需驱动 Kconfig 证据；非通用 DMA 差异 |
+| `ndo_start_xmit` 调用边界 | 一致 | 一致 | 本轮未发现通用驱动调用接口回归 |
+
+**本轮结论：**
+1. 6.1.116→6.1.174 的通用 TX 核心差异主要是 noqueue GSO list 的部分发送返回码修正；不命中普通 DHCP 单 skb。
+2. 6.1.174→6.12.81 的 qdisc budget、net_hotdata、TX queue selection 和单 skb driver handoff 没有发现新的通用行为回归。
+3. 6.12.81 确实新增 `validate_xmit_skb()` 对 unreadable net_iov fragment 的提前拒绝，是本轮最值得保留的 TX 条件性丢弃差异；但普通 DHCP skb 是否可能带此类 fragment 尚无证据，不能定为根因。
+4. 6.12 移除可选 `ETHERNET_PACKET_MANGLE` hook，是否与 Panther PHY driver 有关联留给方向三，不在本轮越界审计。
+
+本轮仅进行固定源码端点静态比较；没有构建、修改配置、执行设备操作或实机网络试验。方向二仍未结项；TX DMA descriptor/mapping/doorbell/completion/reclaim 留在后续既定驱动方向，不在本节提前展开。
