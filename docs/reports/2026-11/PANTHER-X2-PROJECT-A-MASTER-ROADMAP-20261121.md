@@ -580,3 +580,20 @@ B2 恢复顺序固定为：
 **当前状态：** B2-0 的黄金基线矩阵与恢复顺序已建立；源码依赖闭包、B1 DTB 差异和 B2-1 单项试验卡仍待静态审计，完成前不放行 B2-1。详见 [B2-0 专项报告](PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)。
 
 非阻断待办：B1 `/init` 的 BusyBox `[` applet/设备树型号显示问题，以及 MMC deferred-probe PMIC 依赖静态审计，安排在下次打包处理，不为此重建已通过的 B1。
+
+
+## 2026-11-24 B2 策略修订：源码适配与版本回归优先
+
+B2 的主要目标不是简单恢复 B1 关闭的网络配置。项目 B 已经分段审查过多项组件配置与实现；项目 A 应继承这些成果，避免重复检查。B2 应优先审查 Linux 6.18.y 组件源码是否存在版本回归、错误处理退化、时序/生命周期问题或不适合 Panther X2/RK3566 的实现，再根据源码审查结果决定保留、修复、单组件回退或暂不修改。配置审查定位为复合与查漏补缺。
+
+重点历史线索包括：
+- 6.1.116 与 6.1.174/6.12.81 的 STMMAC PHY/DMA workaround 差异；
+- Rockchip GMAC clock enable 返回值处理与 5ms 对 100–200µs settle delay 差异；
+- RK3566/RK3568 RGMII delay 写入顺序差异；
+- STMMAC PHY resume 上游修复的适用性边界；
+- DWMAC4 DMA 寄存器/队列路径与 TX 物理出线证据边界；
+- RTL8211F PHY driver 的寄存器 mask 和初始化行为。
+
+以上均是项目 B 已有研究输入，不能直接视为 6.18 根因。必须在 6.18.63 精确源码中逐项核实是否存在、是否命中 Panther 路径以及是否有证据支持修复。JL2xx1 专用 workaround 不得未经 PHY 语义证明直接移植到 RTL8211F。
+
+执行主计划：[B2 源码适配、版本回归与组件恢复审查计划](PANTHER-X2-PROJECT-A-B2-SOURCE-COMPATIBILITY-AND-VERSION-REGRESSION-PLAN-20261124.md)。此前 B2 按 Kconfig/驱动/DTB 线性恢复的初步顺序由该源码优先计划取代。当前仍处于 B2-0，完成源码账本和 6.18 对应差异审计前不放行 B2-1。
