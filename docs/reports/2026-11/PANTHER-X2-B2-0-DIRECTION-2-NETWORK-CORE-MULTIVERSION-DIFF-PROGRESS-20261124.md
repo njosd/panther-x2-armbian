@@ -170,3 +170,44 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 5. 目前这几项变化均未形成普通小 UDP/DHCP TX 故障的已证实解释。
 
 本轮仍是源码及配置模板静态审计；没有读取、改写或生成任何 B1 实机测试包，也没有执行任何设备侧操作。
+
+
+## 9. 本轮追加核验：netdevice feature negotiation、ARP/邻居输出与 IPv4 route key
+
+本轮继续沿网络核心的 TX 前置路径，比较：
+- `net/core/dev.c`：`netif_skb_features()`、`netdev_fix_features()`、`netdev_update_features()`、`validate_xmit_vlan()`、`netdev_features_change()`
+- `net/core/neighbour.c`：`neigh_resolve_output()`、`neigh_connected_output()`
+- `net/ipv4/arp.c`：`arp_solicit()`
+- `net/ipv4/route.c`：`ip_route_output_key_hash()`
+
+### 9.1 netdevice feature negotiation
+
+- `netif_skb_features()` 三个端点函数体一致。
+- `netdev_update_features()`、`validate_xmit_vlan()`、`netdev_features_change()` 三个端点函数体一致。
+- `netdev_fix_features()` 在 6.1.116 与 6.1.174 一致；6.12 新增对 `NETIF_F_GSO_UDP_L4` 的约束：设备没有 IP checksum（IPv4+IPv6）或通用硬件 checksum 能力时，清除 UDP L4 GSO feature。6.12 同时把 TLS TX checksum 依赖检查整理为共用 helper `netdev_has_ip_or_hw_csum()`。
+- 这些规则只影响设备声明的 offload feature 组合，尤其 UDP segmentation offload；不会清除普通 UDP checksum 能力本身，也不是普通 UDP datagram 的通用发送开关。
+- Panther RK3566 MAC 的具体 feature 位图属于后续驱动方向的审计对象；本节不根据 generic helper 推断该设备实际声明了哪些 feature。
+
+### 9.2 ARP / neighbour 输出
+
+`neigh_resolve_output()`、`neigh_connected_output()` 和 `arp_solicit()` 在三个源码端点函数体一致。
+
+因此，在本轮固定端点中，没有发现 Linux neighbour/ARP 核心的这三个关键函数发生 6.1.116→6.1.174 或 6.1→6.12 的实现变化。该结论只限这些函数，不代表整个 neighbour 子系统所有文件均已审计。
+
+### 9.3 IPv4 route TOS / DSCP key 归一化
+
+`ip_route_output_key_hash()`：
+- 6.1.116 与 6.1.174 一致，调用 `ip_rt_fix_tos(fl4)`；
+- 6.12 改为 `fl4->flowi4_tos &= INET_DSCP_MASK`，并在 route header 中使用 DSCP/ECN 分离后的 mask；socket scope 由 `ip_sock_rt_scope()` 提供。
+
+这属于 IPv4 route lookup key 对 DSCP 与 ECN 的归一化重构。普通 DHCP Discover 的 IPv4 TOS 通常为 0；目前没有证据表明该变化会改变 Panther 普通 DHCP 广播报文的路由设备选择。不能仅凭函数改写认定路由回归，也不把它标记为已排除的全部策略路由影响。
+
+## 10. 方向二当前覆盖范围更新
+
+本轮新增覆盖：
+- TX checksum helper / UDP checksum / UDP GSO / splice fragment；
+- netdevice generic feature negotiation；
+- neighbour / ARP 输出关键函数；
+- IPv4 route TOS/DSCP key 归一化。
+
+目前未发现普通 DHCP 小型 UDP 报文发送路径上已证实的网络核心回归点。仍需继续方向二剩余网络核心子系统和跨版本配置差异核对；本轮结论不代表方向二结项。
