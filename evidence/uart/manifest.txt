@@ -8,4 +8,4 @@ Compressed SHA256:
 3ea30a1e50496c6c9564f5ba87790f227353f0eb504f631d32f1c7c5a3a8dd87  panther-emmc-uart-bidirectional-20261113.txt.gz
 Public archive status: original compressed capture and Base64 chunks removed pending privacy redaction.
 Public redacted derivative: not yet generated.
-Parts retained in private storage only: 10
+Private original preservation: not verified in this session; the public repository copy was removed.
