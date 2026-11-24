@@ -29,6 +29,9 @@
 
 - [B2-0：6.1.174-rk35xx 原始构建源码身份结项（2026-11-24）](./PANTHER-X2-B2-0-6.1.174-BUILD-PROVENANCE-CLOSEOUT-20261124.md)：从原始 Actions run #296 job log 直接确认 source_hash 与实际构建参数，关闭此前的源码身份缺口。
 
+- [B2-0：四版本 GMAC 主链 built-in / modules 与启动资产闭包对照（2026-11-24）](./PANTHER-X2-B2-0-FOUR-VERSION-KERNEL-ASSET-CLOSURE-20261124.md)：对照 6.1.65、6.1.116、6.1.174、6.12.81 的内核主链编译形态、模块分布、initramfs 与替换边界。
+- [B2-0：6.1.174-rk35xx 原始构建源码身份结项（2026-11-24）](./PANTHER-X2-B2-0-6.1.174-BUILD-PROVENANCE-CLOSEOUT-20261124.md)：从原始 Actions run #296 job log 直接确认 source_hash 与实际构建参数，关闭此前的源码身份缺口。
+
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
