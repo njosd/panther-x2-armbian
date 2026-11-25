@@ -275,6 +275,27 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 **注意样本身份：** 6.1.65 的源码端点仍是高置信度候选，不是历史 Image source commit 的闭环证明；6.1.116 也保留其历史安装包 source binding 边界。故本矩阵中 6.1.65/6.1.116 的源码对照事实与历史二进制来源证明必须分开表述。
 
 
+## 6.7 CCF 对 CLK_IS_CRITICAL 的实际语义四版本复核
+
+本轮继续直接检查四版本 drivers/clk/clk.c，而不是只从 Rockchip provider flag 推断效果：
+
+- 四版本均在 clock core 注册阶段识别 CLK_IS_CRITICAL，对 critical clock 执行 prepare + enable；
+- 四版本 clk_core_disable() 均阻止将 critical clock 的最后一个 enable reference 降至 0；
+- 四版本 clk_core_unprepare() 均阻止将 critical clock 的最后一个 prepare reference 降至 0；
+- 6.12.81 的 trace helper 名称有调整，但上述 critical reference 保护语义保持一致。
+
+因此这不是一个“仅影响日志/unused 标记”的装饰性 flag，而是实际保持 clock prepare/enable reference 的机制。结合 §4.2 的 parent topology：
+- HCLK_USB critical 会保持 HCLK_USB 及其所选 parent 链；它不属于已确认的 GMAC1 ACLK/PCLK 依赖链。
+- PCLK_USB critical 会保持 PCLK_USB，并通过 parent recursion 保持 ACLK_USB parent；该 ACLK_USB 同时是 ACLK_GMAC1 的 parent。因此 PCLK_USB critical 确实可能改变 GMAC1 共用上游 ACLK_USB 在 CRU 初始化阶段的引用计数/启用状态。
+- GMAC1 probe 启用 ACLK_GMAC1/PCLK_GMAC1 时也会按 CCF parent recursion 启用对应 parent；所以在 MAC 正常 active 后，critical 与 consumer enable 是否导致额外硬件状态差异，不能从源码 flag 单独推出。
+
+**结论等级：**
+- **已验证：** 四版本 CCF critical flag 的 prepare/enable 与最后引用保护语义相同；后期 RK3568 provider 新增的 HCLK_USB/PCLK_USB flags 会触发这套既有机制。
+- **已验证：** HCLK_USB 不在 GMAC1 已确认 parent chain；PCLK_USB → ACLK_USB 与 ACLK_GMAC1 共用上游 parent。
+- **未验证：** 历史启动时 PCLK_USB/ACLK_USB 的实际 parent、enable_count、gate readback、CRU 初始化与 GMAC probe 的先后时序，以及该初始化差异是否影响故障发生窗口。
+- **不得推断：** 不把 PCLK_USB critical 标记直接认定为 TX 故障根因；不把 HCLK_USB critical 与 GMAC1 时钟链建立因果联系。
+
+
 ## 7. 安全与范围声明
 
 - 不访问 Panther X2，不执行设备命令，不读写寄存器，不进行网络测试。
