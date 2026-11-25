@@ -3,7 +3,7 @@
 - 阶段：R1
 - 基线：R0 PASS；6.18.63 B1 实际 artifact 已冻结
 - 本轮目标：只引入 Linux 通用网络核心、Ethernet framing/core 和 AF_PACKET 原始帧 socket 支持，为后续最小 MAC TX 路径准备用户态帧注入接口
-- 当前状态：**静态 Kconfig/Makefile 审计完成；R1 构建尚待 Actions 执行；未启用板载 GMAC/MDIO/PHY**
+- 当前状态：**R1 配置门、Kernel Image/modules 编译及 AF_PACKET 符号审计已通过；最终 DTB/完整 artifact 验收待恢复审计工作流完成；未启用板载 GMAC/MDIO/PHY**
 - 操作边界：不访问 Panther X2，不写 TF/eMMC，不修改运行系统，不恢复 GMAC DTB 节点
 
 ## 1. R0 已放行的基线身份
@@ -82,10 +82,10 @@ TX-PASS 的决定性证据仍然是局域网另一终端逐帧捕获 Panther 发
 - [x] R0 B1 artifact、配置、DTB 与实机 shell 基线已核验
 - [x] 6.18.63 NET/NETDEVICES/ETHERNET/PACKET Kconfig 和 Makefile 静态路径已核对
 - [x] R1 最小配置 fragment 已建立
-- [ ] R1 Actions 配置收敛与差异审计
-- [ ] R1 Kernel build
-- [ ] R1 built-in/module 对象闭包审计
-- [ ] R1 artifact 哈希与 DTB 原样复用核验
+- [x] R1 Actions 配置收敛与禁止项门（Run 45606030640）
+- [x] R1 Kernel Image/modules 编译（Run 45606030640）
+- [x] R1 built-in AF_PACKET/network-core 符号及模块隔离初审（Run 45606030640）
+- [ ] R1 最终 artifact 哈希、DTB 原样复用与完整归档验收（恢复审计工作流待运行）
 - [ ] 用户审阅 R1 构建结果后放行 R2
 
 当前不得进入 R2，更不得恢复 GMAC/MDIO/PHY 节点。R1 构建通过后，仍需单独审阅结果和授权，再进入 R2。
@@ -186,3 +186,20 @@ Job `139177002918`，head commit `e30e716c8b1da1cc44e4901b7f80ead9f2b8ae1c`。�
 - main 注册副本同步 commit：`0b8e855e379f30e339f435b9ca2fcf1b8cefb062`。
 
 下一轮必须新建 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，继续输入 R0 Run ID `45309219886`。不要重跑旧 Run 45606030640，因为旧 run 使用的 workflow commit 不含目录修复。新运行重点核验 DTB 原样复用、GMAC/MDIO/PHY 状态、哈希和完整 artifact 上传；然后再审阅 R1 最终状态。当前不得进入 R2，不访问设备、不写卡。
+
+
+## 13. R1 产物复用与断点恢复流程（2026-11-25）
+
+Run 45606030640 已经成功生成 Kernel Image、modules、最终 .config、System.map 和符号/配置审计材料；失败仅在最后 DTB 复制时因目标目录不存在而发生。该次 artifact（ID 15019831642，名称 `b2-1-r1-network-core`）必须作为既有构建成果复用，不再重新编译。
+
+新增专用恢复工作流：
+- 文件：`.github/workflows/resume-panther-x2-b2-1-r1-network-core.yml`
+- 功能分支提交：`dbd05115463323aa8bd0b561c3c15fd6a2ee8b4e`
+- main 注册副本提交：`01aef54f77689a994674b40081921d403fce9ce7`
+- 默认输入 R1 Build Run ID：`45606030640`；B1 Reference Run ID：`45309219886`。
+- 仅下载既有 R1 artifact 和冻结 B1 artifact；重新检查 R1 provenance、关键 .config 符号、已归档的 built-in 网络核心符号证据，并重新解包审计 modules.tar.zst。
+- 从 B1 artifact 原样复制 Panther DTB，校验 B1 最终配置及 DTB SHA256，生成最终 R1 verification 文件并上传 `b2-1-r1-network-core-final`。
+- 不 checkout 或下载 Linux 源码，不运行 merge_config/olddefconfig，不执行 Kernel Image 或 modules 编译，不访问设备、不写 TF/eMMC。
+- 恢复工作流只对历史 artifact 做验收与补齐；若历史 artifact 缺少预期文件或 provenance 不匹配，会明确失败，不会回退到重编译。
+
+工作流已同时提交到功能分支和 main。请从 Actions 选择 `resume-panther-x2-b2-1-r1-network-core.yml`，运行时选择功能分支 `project-a/b2-1-r1-network-core-build`，保持默认两个 Run ID。**当前只是流程已提交，尚未执行；R1 最终 PASS 仍以该恢复工作流成功及 artifact 审阅为准。** 不得提前进入 R2。
