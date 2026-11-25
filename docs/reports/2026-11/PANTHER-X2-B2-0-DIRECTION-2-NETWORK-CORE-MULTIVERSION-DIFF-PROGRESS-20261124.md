@@ -1619,3 +1619,33 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 6.1.65 黄金 A 与 6.1.116 黄金 B 在网络核心 RX dispatch、IPv4 input 与 UDP receive 的上述主入口没有发现实现差异；6.1.174 也保持相同。6.12 的 RX dispatch/UDP receive 变化属于接收方向，不构成当前出站 DHCP Discover TX 失败的直接解释。
 
 **本项结项：** §11 的 6.1.65 候选源码端点回溯已完成。下一项按原顺序进入 §12 网络核心 Kconfig 模板/符号对照；6.1.65 实际配置映射已在 §27 提供，但仍需核对本节及后续配置项对应的源码 Kconfig 定义和符号语义，不能把模板值当作最终配置。
+
+
+## 35. §12 网络核心 Kconfig：6.1.65 实际配置列补齐（2026-11-25）
+
+本节直接承接 §27 的原始 `config-6.1.65-ophub` 映射，不使用 general config 模板替代真实配置。对应符号的 6.1.65 实际值如下：
+
+| 符号 | 6.1.65 原始实际配置 | 与 §12 两个模板对照 |
+|---|---:|---|
+| `CONFIG_NET` / `CONFIG_INET` / `CONFIG_NETDEVICES` | y / y / y | 与 6.1.116、6.12 候选模板一致 |
+| `CONFIG_NET_NS` | y | 一致 |
+| `CONFIG_BPF` / `CONFIG_BPF_SYSCALL` | y / y | 一致 |
+| `CONFIG_XDP_SOCKETS` | y | 一致 |
+| `CONFIG_NET_RX_BUSY_POLL` | y | 一致 |
+| `CONFIG_PAGE_POOL` | y | 一致 |
+| `CONFIG_NET_DEVMEM` | 6.1.65 源码时代不存在该符号 | 不是实际配置 n；6.12 新增能力 |
+| `CONFIG_IP_PNP` | not set | 与 6.1.116 模板一致；6.12 候选模板为 y |
+| `CONFIG_IPV6` | y | 与 6.1.116 模板一致；6.12 候选模板为 m |
+| `CONFIG_VLAN_8021Q` | y | 与 6.1.116 模板一致；6.12 候选模板为 m |
+| `CONFIG_INET_DIAG` | y | 与 6.1.116 模板一致；6.12 候选模板为 m |
+| `CONFIG_NETFILTER` | y | 与两个模板一致 |
+| `CONFIG_BRIDGE` | m | 与两个模板一致 |
+| `CONFIG_NET_CLS_BPF` / `CONFIG_NET_ACT_BPF` | m / m | 与两个模板一致 |
+
+补充说明：
+- `CONFIG_IP_PNP_DHCP`、`CONFIG_IP_PNP_BOOTP`、`CONFIG_IP_PNP_RARP` 等子项在 6.1.65 原始配置文本中未出现；由于父项 `CONFIG_IP_PNP` 明确 not set，不能把这些未出现子项单独解释为配置缺失。
+- 6.1.65 `NET_DEVMEM` 归类为“该版本源码没有此 Kconfig 符号”，不是“存在但未启用”。
+- 上述是原始 config 证据与源码时代的组合判断；6.12 的 config-6.12 仍为候选模板，不能替代 6.12.81 最终运行配置。
+- 配置 y/m 只表示 built-in/module 编译形态；不证明模块实际加载、程序附着、内核 IP autoconfiguration 启动或 bridge/VLAN/netfilter 规则实际运行。
+
+**本项结项：** §12 表中 6.1.65 黄金 A 配置证据缺口已按原始配置归档补齐。下一项按原报告顺序进入 §14 AF_PACKET、VLAN/bridge RX 与 Netfilter ingress 的 6.1.65 回溯；不得跳到 §16 或其他专题。
