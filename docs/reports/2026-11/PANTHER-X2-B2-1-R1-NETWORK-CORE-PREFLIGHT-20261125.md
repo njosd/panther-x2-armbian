@@ -99,6 +99,6 @@ TX-PASS 的决定性证据仍然是局域网另一终端逐帧捕获 Panther 发
 - 因 R1 的最终 .config 改变，必须重新编译 Kernel Image 和 modules；不得错误复用 B1 Image。
 - Panther DTB 不变，直接从 R0 artifact 复用并强制校验原始 SHA256。
 - 工作流只上传 R1 Kernel/配置/模块和审计证据；不制作 TF 镜像，不写卡，不访问设备。
-- 工作流为 workflow_dispatch；当前环境没有可调用的 GitHub workflow dispatch 写操作，因此需要用户在 Actions 页面选择该分支并运行。此为启动工作流的 UI 步骤，不代表已经运行或通过。
+- 工作流为 workflow_dispatch；最初工作流文件只提交在功能分支，GitHub 默认分支的 Actions 列表因此显示 This workflow does not exist。现已将同一工作流文件注册到默认分支 main（提交 fcae75d9db6e10b2ad59bd0fe3470bf53641def1），同时保留功能分支版本供选择构建。现在 workflow_dispatch 入口应可见；运行时仍需选择功能分支 project-a/b2-1-r1-network-core-build。工作流尚未运行，不代表构建或验收通过。
 
 R1 构建完成后先审阅 config diff、对象符号、模块清单、Image 哈希和 DTB 哈希；不得自动放行 R2。
