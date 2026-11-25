@@ -1315,3 +1315,77 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 6. 本项完成了四版本源码差异筛查；最终配置层按上述证据等级保留缺口。方向二整体仍未结项，下一步须回到原始 B2-0 方向二待办顺序，核实剩余网络核心子项；不提前进入方向三或 B2-1。
 
 **本轮性质：** 只读多版本源码、Kconfig 与已归档配置证据审计；未构建、未安装软件、未访问设备、未修改系统/网络配置、未执行发包或实机试验。
+
+
+## 27. 按 §25.5 顺序补齐 6.1.65 黄金 A 的网络核心实际配置映射（2026-11-25）
+
+### 27.1 任务来源与边界
+
+本项不是新增专题，而是执行本报告 §25.5 第 1 项：对原始 6.1.65 镜像已经归档的 `config-6.1.65-ophub` 做只读提取，并映射此前 §3～§26 已审计子项涉及的网络核心 Kconfig 符号。
+
+证据来自 Dropbox 中既有 `/kernel-config-evidence.zip`（文件 ID `id:9qHOnx-HLYoAAAAAAAAAFQ`，原始归档不修改）。通过 Dropbox 文件内容读取接口取得压缩包内文本，逐行提取配置项；没有重新解压或修改原始镜像，没有访问 Panther X2，也没有构建或运行任何代码。
+
+### 27.2 6.1.65 实际配置：网络基础与协议入口
+
+以下均为归档的 `config-6.1.65-ophub` 实际配置行，不是候选模板：
+
+| 符号 | 6.1.65 实际值 | 说明 |
+|---|---:|---|
+| `CONFIG_NET` | y | 网络核心启用 |
+| `CONFIG_INET` | y | IPv4/IPv6 Internet 协议栈启用 |
+| `CONFIG_NETDEVICES` | y | 网络设备框架启用 |
+| `CONFIG_NET_CORE` | y | 网络核心设备支持启用 |
+| `CONFIG_PACKET` / `CONFIG_PACKET_DIAG` | y / y | AF_PACKET 与诊断支持启用 |
+| `CONFIG_UNIX` | y | Unix domain socket 启用 |
+| `CONFIG_NET_NS` | y | network namespace 启用 |
+| `CONFIG_IPV6` | y | IPv6 built-in |
+| `CONFIG_IP_ADVANCED_ROUTER` / `CONFIG_IP_MULTIPLE_TABLES` | y / y | 高级路由与多路由表启用 |
+| `CONFIG_BPF` / `CONFIG_BPF_SYSCALL` | y / y | BPF 基础能力与 syscall 启用 |
+| `CONFIG_XDP_SOCKETS` / `CONFIG_XDP_SOCKETS_DIAG` | y / y | AF_XDP 与诊断支持启用 |
+| `CONFIG_NET_RX_BUSY_POLL` | y | RX busy-poll 支持启用 |
+| `CONFIG_PAGE_POOL` | y | page-pool 支持启用 |
+| `CONFIG_NET_SCHED` | y | traffic-control/qdisc 框架启用 |
+| `CONFIG_BQL` | y | Byte Queue Limits 启用 |
+
+### 27.3 Netfilter、conntrack、VLAN/bridge 与调度配置
+
+| 符号 | 6.1.65 实际值 | 对照意义 |
+|---|---:|---|
+| `CONFIG_NETFILTER` | y | Netfilter 核心 built-in |
+| `CONFIG_NETFILTER_INGRESS` / `CONFIG_NETFILTER_EGRESS` | y / y | ingress/egress hook 支持启用 |
+| `CONFIG_NF_CONNTRACK` | y | conntrack built-in |
+| `CONFIG_NF_DEFRAG_IPV4` | y | IPv4 conntrack defrag 支持 built-in |
+| `CONFIG_NF_NAT` | m | NAT 核心为模块 |
+| `CONFIG_NETFILTER_XTABLES` / `CONFIG_NETFILTER_XT_NAT` | m / m | xtables 核心及 NAT glue 为模块 |
+| `CONFIG_IP_NF_IPTABLES` / `CONFIG_IP_NF_FILTER` / `CONFIG_IP_NF_NAT` | m / m / m | legacy IPv4 iptables/filter/NAT 为模块 |
+| `CONFIG_NF_TABLES` | m | nftables 核心为模块 |
+| `CONFIG_BRIDGE` / `CONFIG_BRIDGE_NETFILTER` | m / m | bridge 与 bridge-netfilter 为模块 |
+| `CONFIG_VLAN_8021Q` | y | 802.1Q VLAN built-in |
+| `CONFIG_BRIDGE_VLAN_FILTERING` | y | bridge VLAN filtering 支持启用 |
+| `CONFIG_NET_CLS_BPF` / `CONFIG_NET_ACT_BPF` | m / m | BPF classifier/action 为模块 |
+| `CONFIG_NET_SCH_INGRESS` | y | ingress qdisc 支持 built-in |
+
+### 27.4 与此前章节关键配置差异的直接关系
+
+1. **§12 网络核心 Kconfig：** 6.1.65 的实际配置确认 `NET`、`INET`、`NETDEVICES`、`NET_NS`、`BPF`、`XDP_SOCKETS`、`NET_RX_BUSY_POLL`、`PAGE_POOL`、`NETFILTER`、`BRIDGE`、`VLAN_8021Q` 等入口均有真实配置值。此前将 6.1.65 整列留空的配置证据缺口，现已在这些符号范围内补齐。
+2. **§14 AF_PACKET/VLAN/bridge/Netfilter ingress：** `PACKET=y`、`VLAN_8021Q=y`、`BRIDGE=m)、`BRIDGE_VLAN_FILTERING=y)、`NETFILTER_INGRESS=y) 均为 6.1.65 实际值。它们表示功能构建形态，不证明运行时加载 bridge、创建 VLAN、注册 ingress hook 或安装过滤规则。
+3. **§16 conntrack/NAT：** `NF_CONNTRACK=y)、`NF_DEFRAG_IPV4=y)，而 `NF_NAT=m)、`NETFILTER_XTABLES=m)、`NETFILTER_XT_NAT=m)、`IP_NF_IPTABLES=m)、`IP_NF_FILTER=m)、`IP_NF_NAT=m)。这确认 6.1.65 采用“conntrack/defrag built-in，NAT/iptables 相关功能模块化”的实际组合；是否有模块加载和 hook 生效仍是运行时问题。
+4. **§18 IPv4 defrag：** `NF_DEFRAG_IPV4=y) 是实际配置证据；它不改变普通未分片 UDP 不进入 fragment queue 的源码判断。
+5. **§19 FIB/policy routing：** `IP_ADVANCED_ROUTER=y)、`IP_MULTIPLE_TABLES=y) 确认相关构建能力启用；不证明运行时存在自定义 rule 或 DSCP selector。
+6. **§22～§24 TX/qdisc/BQL：** `NET_SCHED=y)、`NET_SCH_INGRESS=y)、`BQL=y) 确认调度框架、ingress qdisc 与 BQL 均启用；具体 qdisc 选择及驱动是否调用 BQL helper，仍不能由配置单独推断。
+7. **§26 TX 统计/drop reason：** `BQL=y) 与本节此前记录一致。对 `NET_DROP_MONITOR`，在本次取得的 6.1.65 配置文本中未找到对应配置行；按证据纪律只记录“未找到配置行”，不将其擅自解释为 n。对 6.1.65 不存在于该源码时代的 `NET_DEVMEM`，本配置未出现该符号；不能把 6.12 的 unreadable net_iov 路径外推到 6.1.65。
+
+### 27.5 仍然保留的配置证据边界
+
+- 本项只映射了 §3～§26 中明确涉及、且已从归档配置文本提取的网络核心符号；不等于对 6.1.65 全部 7,000+ 配置符号重新做全量差异分析。
+- `NET_DROP_MONITOR`、`ETHERNET_PACKET_MANGLE` 等未在配置文本中找到行的符号，均保留为“未找到配置行”；需要结合该符号在对应源码 Kconfig 中是否存在、是否为隐藏符号及生成配置规则判断，不能一律视为 n。
+- 配置值只说明编译形态；模块是否实际存在、装载、注册 hook、运行规则和历史 skb 状态，必须分别依赖相应资产或运行证据。
+- 6.1.65 源码身份仍为高置信度候选 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc)，不是原始 Actions checkout SHA 的已证实构建来源。本节配置证据来自原始 Kernel 配置归档，不会因此提升源码 commit 的证据等级。
+
+### 27.6 本项结论与下一顺序
+
+**本项结项：6.1.65 黄金 A 的网络核心配置映射已按 §25.5 第 1 项完成。** 这补齐了 §12、§14、§16、§18、§19、§22～§26 多个章节中 6.1.65 配置栏的真实证据基础，但没有补齐 6.1.65 的函数级源码比较。
+
+按 §25.5 原顺序，下一项是第 2 项：继续追溯 6.1.65 原始源码身份，优先复核镜像构建时间、release 字符串、内嵌 IKCONFIG、包元数据及 Armbian/Ophub 对应发行版源码线索；若仍不能取得可验证的精确 commit，继续明确保留“源码端点未锁定”，不得用 6.1.116 代替。该项完成后，才按 §3～§24 顺序补入能够可靠锁定的 6.1.65 函数级比较。
+
+**方向二仍进行中。** 本轮仅读取既有 Dropbox 配置归档、源码报告与 Kconfig/配置证据；未访问设备、未构建、未修改系统/网络配置、未执行网络试验，也未新增审计专题。
