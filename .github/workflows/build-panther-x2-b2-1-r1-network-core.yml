@@ -168,6 +168,7 @@ jobs:
             echo "::error::Unexpected built-in network hardware/PHY/Bluetooth driver in R1"
             exit 1
           fi
+          mkdir -p work/output/dtb/rockchip
           cp work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
           cp work/b1-reference/output/dtb-verification.txt work/output/dtb-verification.txt
           test "$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
