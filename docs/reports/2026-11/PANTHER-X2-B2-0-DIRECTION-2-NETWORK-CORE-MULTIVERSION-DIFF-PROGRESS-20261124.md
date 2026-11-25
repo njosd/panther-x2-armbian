@@ -14,7 +14,7 @@
 
 | 版本 | 基线角色 | 实机证据 | 当前可用源码端点/证据边界 |
 |---|---|---|---|
-| **6.1.65** | **黄金基准 A** | 正常实机；原始 Armbian Panther X2 镜像，2026-11-24 TF 启动与有线 IPv4 实测通过 | 原始镜像、内核配置、modules.builtin、DTB、uInitrd 及实机网络证据已归档；精确构建源码 commit / Actions checkout SHA 尚未锁定。必须纳入比较，但不能用 6.1.116 源码代替 |
+| **6.1.65** | **黄金基准 A** | 正常实机；原始 Armbian Panther X2 镜像，2026-11-24 TF 启动与有线 IPv4 实测通过 | 原始镜像、内核配置、modules.builtin、DTB、uInitrd 及实机网络证据已归档；源码强候选为 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`（与 2023-12-03 Kernel build 时间及 `up to 6.1.65` 提交吻合），但精确构建源码 commit / Actions checkout SHA 仍未锁定。可作为明确标注的高置信度候选源码端点参与差异筛查，不得称为已验证构建源码，也不能用 6.1.116 源码代替 |
 | **6.1.116** | **黄金基准 B** | 正常实机；历史稳定运行基线 | `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`；当前源码比较端点，精确安装包构建 source commit 尚未闭环 |
 | **6.1.174-rk35xx** | **故障对照 A** | 已确认网络故障；目前最早有明确故障实机证据的 6.1.y 样本 | `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`；原始 Actions run #296 日志确认的构建 source_hash |
 | **6.12.81-rk35xx** | **故障对照 B** | 已确认网络故障；跨系列故障样本 | `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；原始 Actions 构建日志锁定的 source commit |
@@ -1189,3 +1189,129 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 5. 方向二仍未结项；不进入方向三、B2-1 或任何实机试验。
 
 **修订性质：** 本次为既有方向二报告的证据等级与比较矩阵纠偏。没有执行构建、设备操作、配置修改或网络测试。
+
+
+## 26. TX 统计、skb drop reason 与相关 Kconfig：四版本横向审计（2026-11-25）
+
+### 26.1 审计范围与四版本源码身份
+
+本项只审计 Linux 网络核心的 TX 统计记账、generic `tx_dropped` 计数、skb 释放原因传递、统计读取接口及相关 Kconfig。**不进入 STMMAC 驱动私有统计、DMA descriptor、completion/reclaim 或硬件计数器**；这些不是 generic network core 的职责。
+
+| 样本 | 本项使用的源码端点 | 证据等级 |
+|---|---|---|
+| 6.1.65 黄金 A | `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` | 高置信度候选；与原始 Kernel build 时间和版本提交吻合，但不是原始 Actions / 二进制构建证明 |
+| 6.1.116 黄金 B | `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` | 固定源码比较端点；6.1.116 原始 Image 的精确构建 source SHA 仍未闭环 |
+| 6.1.174 故障 A | `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633` | 原始 Actions run #296 job log 确认 |
+| 6.12.81 故障 B | `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` | 原始 Actions 构建来源已锁定 |
+
+本项直接读取的关键源码文件及 Git blob SHA：
+
+| 文件 | 6.1.65 候选 | 6.1.116 | 6.1.174 | 6.12.81 |
+|---|---|---|---|---|
+| `net/core/dev.c` | `0f4a91f0bef343719707bc9e88ee5eb7ced9e9d6` | `3c3eacad5e9e539b92135c44074dc9ddec57cf61` | `9ad32aa60c2c8864fff81845adfdb51538a8584f` | `6788518e52b8b368248b40ab6f4cac739bfcf73f` |
+| `include/linux/netdevice.h` | `d1f2f6dba96ab95c2aed7d6444f491aa26a843d7` | `3c6663ed3cf6e4482c434dfa350a3a55a73c58ce` | `54793dc5c6c4724dae00d4615e463e2ecf9e7edb` | `23e5367df4cf23d2ce43f321ce3aa8ad5e6363c6` |
+| `net/core/skbuff.c` | `73b1e0e53534ed914b70b5e60a1ae80bd92e0330` | `e5436c5f52399290be27d3c40dbb95dcff63c774` | `c4b982a90f63f2f606f87aac860067e4375e5722` | `c3e1395d8ac5c43377ca0717ead756d530aaafa2` |
+| `include/trace/events/skb.h` | `50a974f7dfb4759db0417bdfb4cc473f912f930c` | 同左 | 同左 | `b877133cd93a80f6b130fab64f334ecdeab8c8fd` |
+| `net/Kconfig` | `73b06c41cdedb971a927a48fc9d4d7c30b195048` | `12699f98453c32be863d6434f20d5b9192aabf3e` | 同 6.1.116 | `fc0ee6d81a74b28d47b8d69af5cfbae8cdb2a7b9` |
+
+### 26.2 TX packets / bytes 统计记账
+
+核对函数：
+- `include/linux/netdevice.h:dev_sw_netstats_tx_add()`
+- `net/core/dev.c:dev_fetch_sw_netstats()`
+- `net/core/dev.c:dev_get_stats()`
+- `net/core/dev.c:dev_get_tstats64()`
+- `net/core/net-procfs.c:dev_seq_printf_stats()`
+
+结果：
+
+1. 四端点的 `dev_sw_netstats_tx_add()` 函数体一致：在当前 CPU 的 `pcpu_sw_netstats` 上通过 `u64_stats_update_begin/end()` 更新 `tx_bytes` 与 `tx_packets`。未发现 6.1.65→6.1.116→6.1.174→6.12.81 的 generic TX 计数增加/累加语义变化。
+2. 6.1.65、6.1.116、6.1.174 的 `dev_fetch_sw_netstats()` 使用 `u64_stats_fetch_begin_irq()` / `u64_stats_fetch_retry_irq()`；6.12 改为 `u64_stats_fetch_begin()` / `u64_stats_fetch_retry()`。读取字段、每 CPU 遍历及累加到 `rtnl_link_stats64` 的语义相同；这是统计读取同步 API 的演进，不是发送路径改变。
+3. 6.1 三端点的 `dev_get_stats()` 先按 `ndo_get_stats64`、`ndo_get_stats`、再退回 `dev->stats` 的顺序取得设备统计，之后汇总 generic per-CPU `rx_dropped/tx_dropped/rx_nohandler/rx_otherhost_dropped`。
+4. 6.12 的 `dev_get_stats()` 在没有 `ndo_get_stats64`、`ndo_get_stats` 时新增 `pcpu_stat_type` 分支：`NETDEV_PCPU_STAT_TSTATS` 调用 `dev_get_tstats64()`，`NETDEV_PCPU_STAT_DSTATS` 调用 `dev_get_dstats64()`，否则仍回退 `dev->stats`。该变化改变部分设备的 generic 统计取值来源，不改变 TX skb 的构造、排队或驱动交付。对 Panther 实际设备是否命中该 fallback，必须以对应驱动是否提供 `ndo_get_stats64` 为准；不能仅凭 generic core 代码推断。
+5. 四端点 `dev_get_tstats64()` 与 `dev_sw_netstats_tx_add()` 的核心累计字段保持一致。
+6. 四端点 `dev_seq_printf_stats()` 的 `/proc/net/dev` 输出字段和顺序一致：TX bytes、packets、errors、dropped 等仍来自 `rtnl_link_stats64`。该接口显示聚合计数，不显示 skb drop reason。
+
+**判断：** 没有发现 generic TX packets/bytes 记账变化会阻断普通 UDP/DHCP 报文发送。6.12 的差异属于统计读取 fallback 与同步 API 调整。
+
+### 26.3 generic TX dropped 计数器
+
+四端点均保留 `dev_core_stats_tx_dropped_inc(dev)` 的四处调用点，函数所在路径及计数职责一致：
+
+| 调用场景 | 四版本对照 | 含义 |
+|---|---|---|
+| 发送前 skb 校验失败路径（`out_null`） | 四端点均有 | skb 未通过 generic TX validation，计入 TX dropped |
+| netdevice/qdisc 发送队列异常退出并释放 skb list | 四端点均有 | generic TX 队列路径丢弃 skb |
+| qdisc/direct-transmit 的 drop 返回路径 | 四端点均有 | 发送调度路径返回 `NET_XMIT_DROP` 并释放 skb |
+| generic XDP TX 失败释放路径 | 四端点均有 | XDP_TX 失败后释放 skb 并记 TX dropped |
+
+6.1.65、6.1.116、6.1.174 的 `include/linux/netdevice.h` 通过 `dev_core_stats()` 读取 per-CPU 指针；指针为空时调用 `netdev_core_stats_alloc()`，成功后 `this_cpu_inc(p->FIELD)`。6.12 将其改为 `netdev_core_stats_inc(dev, offsetof(...))`，在 `net/core/dev.c` 中完成相同的 READ_ONCE、按需分配和当前 CPU 计数增加。分配失败时不增加该统计值；这是计数记录失败，不是丢弃或阻断数据包的新条件。
+
+**判断：** 6.12 的 helper 重构没有改变 TX dropped 的四个 generic 计数触发点，也没有新增普通单 skb UDP 的通用丢弃点。计数器的增加表示 skb 已在相应 software drop 分支被丢弃，不能反过来将计数本身解释成导致丢包的原因。
+
+### 26.4 skb drop reason 与 deferred free
+
+#### 6.1.65 / 6.1.116 / 6.1.174
+
+- 核心 drop reason 定义位于 `include/net/dropreason.h`；三个源码端点文件 blob SHA 相同。
+- `kfree_skb_reason()` 在 skb 最后一个引用释放时，将调用位置与 `enum skb_drop_reason` 传给 `kfree_skb` tracepoint，再释放 skb。
+- deferred completion queue 使用 `enum skb_free_reason` 区分较粗的 dropped / consumed 生命周期原因；`__dev_kfree_skb_irq()` 将该值存入 skb cb，之后由 `NET_TX_SOFTIRQ` completion_queue 处理。
+
+#### 6.12.81
+
+- drop reason 核心枚举移至 `include/net/dropreason-core.h`，`include/net/dropreason.h` 另行提供 subsystem 扩展注册接口；新增 subsystem reason list 注册/注销能力，并扩充部分 reason 枚举。
+- deferred free API 改为 `dev_kfree_skb_irq_reason()` / `dev_kfree_skb_any_reason()`，使用 `enum skb_drop_reason` 传递更具体的释放原因，而不是旧版较粗的 `enum skb_free_reason`。
+- `kfree_skb` tracepoint 增加 `rx_sk` 字段；`consume_skb` tracepoint 增加调用位置，提升释放路径诊断信息。
+
+这些改动增强了丢弃原因表达和延迟释放追踪能力。它们发生在 skb 已经进入释放/记录阶段，不改变是否将普通 UDP skb 放入 TX queue，也不改变 `ndo_start_xmit` 的调用条件。此前 §22 已审计的 6.12 unreadable-fragment 新丢弃门属于另一项发送前校验条件，不能与本节 drop-reason API 重构混为一谈。
+
+### 26.5 Kconfig 与最终配置证据
+
+#### BQL
+
+四版本 `net/Kconfig` 的 `BQL` 定义：
+- 6.1.65 候选、6.1.116、6.1.174：`bool`，依赖 `SYSFS`，select `DQL`，`default y`；
+- 6.12.81：增加 `prompt "Enable Byte Queue Limits"`，其 `depends on SYSFS`、`select DQL`、`default y` 保持不变。
+
+可确认的配置证据：
+- 6.1.65 原始 Kernel 内嵌 IKCONFIG：`CONFIG_BQL=y`；
+- 6.1.116 实际完整配置与 general `config-6.1` 模板 7,677 个符号零差异，模板值 `CONFIG_BQL=y`；
+- 6.1.174 官方包确实包含实际 `config-6.1.174-rk35xx-ophub`（已有包内文件 SHA256 记录），但现有归档摘要没有逐项抄录 `CONFIG_BQL`；同一时点的 RK35xx config-6.1 候选模板为 y，不能冒充已核对的包内最终值；
+- 6.12.81 RK35xx config-6.12 候选模板为 `CONFIG_BQL=y`；此前审计未取得完整 6.12.81 最终 `.config`，因此不将模板值升级为最终构建值。
+
+BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送队列 stop/wake 已在 §23 审计；本节未发现 BQL Kconfig 依赖或默认值变化导致的版本回归。
+
+#### NET_DROP_MONITOR
+
+四端点 `net/Kconfig` 的 `NET_DROP_MONITOR` 定义一致：tristate，依赖 `INET && TRACEPOINTS`，作为向用户空间 netlink 广播网络丢包告警的可选服务。它不参与报文转发、TX 排队或驱动交付。
+
+配置证据边界：
+- 6.1.116 实际配置与对应 general 模板完全一致，模板明确为 `# CONFIG_NET_DROP_MONITOR is not set`；
+- 6.12.81 RK35xx 候选模板也明确为 not set，但不是完整最终构建配置；
+- 6.1.65 实际内嵌 config 中未找到该符号配置行，故只记录“未见启用证据”，不把缺失行擅自解释为最终 n 值；
+- 6.1.174 官方包内最终 config 文件已存在并归档 SHA256，但现有报告没有记录此符号的具体值；当前 RK35xx 候选模板为 not set，不代替包内最终配置。
+
+**配置结论：** 没有证据表明四个实际系统都启用了 NET_DROP_MONITOR；它即使启用也只提供告警，不改变数据面。6.1.174 与 6.12.81 的该项最终配置值仍是配置证据缺口，不能从模板推定。
+
+### 26.6 四版本结论矩阵
+
+| 审计点 | 6.1.65 黄金 A | 6.1.116 黄金 B | 6.1.174 故障 A | 6.12.81 故障 B |
+|---|---|---|---|---|
+| `dev_sw_netstats_tx_add()` | 候选源码与 B 相同；实际配置 BQL=y | 固定源码端点；实际配置 BQL=y | 固定源码端点；BQL 最终配置待从包内 config 补录 | 固定源码端点；模板 BQL=y，最终配置未闭环 |
+| generic `tx_dropped` 四处调用点 | 候选源码四处 | 四处 | 四处 | 四处 |
+| per-CPU core stats increment | 旧 inline helper | 旧 inline helper | 旧 inline helper | helper 外移，按需分配/this_cpu_inc 语义保持 |
+| `dev_get_stats()` | 旧 fallback | 旧 fallback | 旧 fallback | 新增 TSTATS/DSTATS fallback，属统计读取 |
+| `/proc/net/dev` TX 字段 | 相同 | 相同 | 相同 | 相同 |
+| skb drop reason / deferred free | 旧枚举与粗粒度 free reason | 同左 | 同左 | 枚举拆分/扩展，传递更细 reason |
+| NET_DROP_MONITOR | 配置行未找到 | 实际配置 not set | 包内最终值待补 | 模板 not set，最终配置待补 |
+
+### 26.7 本项结论与剩余边界
+
+1. **未发现 generic TX 统计、drop reason 或 BQL 代码变化构成普通 UDP/DHCP 发送失败的解释。** TX packet/byte 计数更新一致，generic TX dropped 的四处调用点一致。
+2. 6.12 的主要差异是统计读取 fallback、per-CPU 统计 helper 外移、drop reason 枚举/接口扩展和 tracepoint 诊断字段增强；它们不改变普通 UDP skb 的发送/交付决策。
+3. `NET_DROP_MONITOR` 是可选告警服务，不是数据面过滤器；不能把其 Kconfig 存在等同于运行时启用或丢包。
+4. BQL Kconfig 默认和依赖保持一致；6.12 增加 prompt 不代表 BQL 算法或默认状态发生回归。
+5. 6.1.65 的源码仍是高置信度候选端点；6.1.174 包内 config 与 6.12.81 最终 `.config` 的个别符号值仍待从原始最终配置补录。不得用候选模板代替实际构建配置。
+6. 本项完成了四版本源码差异筛查；最终配置层按上述证据等级保留缺口。方向二整体仍未结项，下一步须回到原始 B2-0 方向二待办顺序，核实剩余网络核心子项；不提前进入方向三或 B2-1。
+
+**本轮性质：** 只读多版本源码、Kconfig 与已归档配置证据审计；未构建、未安装软件、未访问设备、未修改系统/网络配置、未执行发包或实机试验。
