@@ -21,7 +21,7 @@ B2-1 不重新开展 B2-0 已完成的多版本审计，而是把其结论转换
 
 1. 版本与源码输入冻结规则；
 2. B1 基线资产清单及差异盘点表；
-3. R0–R8 组件引入的精确 Kconfig/Makefile/对象依赖清单，以及 R7 真实网络双向收发验收矩阵；
+3. R0–R8 组件引入的精确 Kconfig/Makefile/对象依赖清单，以及 R7 最小 TX-only 原始 Ethernet 广播帧验收及 R8 后续逐层网络功能放行矩阵；
 4. 每一步唯一变量、构建产物、静态验收、实机验收和停止条件；
 5. 失败后的回退点及证据保留要求；
 6. 进入原计划 B2.1 的放行清单；
@@ -129,6 +129,48 @@ G1 未通过时，不允许用 6.1.65 的正常网络结果代替 B1 验收，�
 - `phy_lb_scan` 会写入 GRF RGMII delay，不作为常规首测，只有前序证据指向时钟/时序边界且获得单独授权后才考虑。
 - 不以 U-Boot 网络结果替代 Linux 网络验收，也不把 U-Boot 的异常直接推断为 Linux GMAC 根因。
 
+
+
+## 4B. 实施方法再次修订：先 TX-only、逐项向外证明（2026-11-25）
+
+用户明确要求网络组件不得一次性全部加入。第一项实机网络验收不是 DHCP、IP、ARP、ping 或双向网络，而是在最小必要网络组件集合下，Panther X2 发出的特定 Ethernet 测试帧/广播帧必须被局域网另一终端真实接收。该项通过后，才允许逐步引入后续网络组件。
+
+**采用 TX-first、one-component-at-a-time 原则：**
+1. 按 Kconfig/Makefile 依赖闭包逐个引入组件；每次构建差异只增加一个组件或不可拆分的最小依赖闭包。
+2. 最小发送路径未闭合前，只做静态依赖和构建验收，不虚称已经验证网络发送。
+3. 最小 TX 路径闭合后，第一项实机网络测试必须是无 IP 依赖的原始 Ethernet 测试帧发送；对端真实抓到正确帧才算 TX 通过。
+4. TX 未通过时，不加入 ARP、IPv4、ICMP、DHCP、DNS、路由或其他更高层协议。先冻结证据，针对最近引入的唯一组件做单变量修正/替换，再重复相同 TX 测试。
+5. TX 通过后，才按单组件增量顺序引入 RX 上层处理、ARP、IPv4、ICMP、路由、TCP/UDP，最后才考虑 DHCP/DNS。每一层均设置独立放行门。
+
+### 4B.1 第一项外部发送测试
+
+- Panther 不配置 IPv4 地址；不依赖 DHCP、DNS、ARP、ICMP 或默认路由。
+- 使用专用最小发送程序通过 Linux packet socket（AF_PACKET/SOCK_RAW）发送自定义 EtherType 测试帧；建议使用本地实验 EtherType 0x88B5，payload 放入固定项目标识、递增序列号、长度和校验字段。
+- 首轮目标 MAC 使用 Ethernet 广播地址 ff:ff:ff:ff:ff:ff，使同一二层广播域内的测试终端可观察；指定单播另作独立测试，不混在首轮。
+- iMac 或另一台局域网终端使用现有抓包能力，在指定接口观察并过滤该 EtherType，记录时间、源/目标 MAC、序列号、长度及帧数量。对端抓包不要求 Panther 启用 promiscuous mode。
+- 每个序列号必须由对端实际捕获并核对；仅 Panther TX counter 增长、驱动返回发送成功、DMA descriptor 完成或 PHY link up 均不构成通过。
+- 先用另一台已知正常设备向同一对端发送相同格式测试帧，确认对端抓包路径、交换机广播域和过滤规则有效；这是测试夹具校验，不改变 Panther。
+- 优先单独构建专用 C 测试程序，不为此引入完整 iproute2、DHCP/DNS 客户端、NetworkManager 或 tcpdump 到 Panther。
+
+### 4B.2 TX-only 的技术边界
+
+Linux 标准网卡发送路径至少需要网络核心、net_device、Ethernet framing、packet socket 或等价最小帧注入机制，以及 STMMAC/DWMAC4、Rockchip platform glue、DMA、时钟/复位、MDIO/PHY 和 DTB 硬件资源闭包。准确 Kconfig 符号和对象依赖必须以冻结的 6.18.63 源码逐项审计为准。
+
+“TX-only”指测试目标和验收范围只考核发出帧能否到达对端，不代表驱动可以完全不初始化 RX descriptor：标准 net_device 的 open 路径可能同时准备 TX/RX ring，须通过源码确认。测试阶段不配置 IP，不要求 Panther 处理入站上层协议；对端抓包独立验证线侧发送。
+
+组件静态准备仍按 R1–R6 依赖关系逐项推进，但这些阶段的构建通过不等于 TX 通过。硬件 DTB 节点恢复后先做 TX-only 实测；TX 通过之前，不得引入更高层网络协议组件。
+
+### 4B.3 TX-PASS 与后续逐层放行
+
+**TX-PASS 必须同时满足：**
+- PHY 线侧 link、协商速率/双工及对端交换机端口状态有证据；
+- 对端捕获 Panther 发出的自定义 EtherType 广播帧；
+- 源/目标 MAC、EtherType、payload 标识、序列号、长度均正确；
+- 多轮发送 N 帧，对端捕获数与预期一致；丢帧为零或差异已解释；
+- Panther TX counters、驱动发送完成/错误统计与对端捕获相互印证；
+- 全程无需 IPv4、ARP、ICMP、DHCP 或 DNS。
+
+失败时按证据边界定位 net_device/packet injection → ndo_start_xmit → TX queue/descriptor/DMA mapping → MAC TX → RGMII → PHY → MDI/网线/交换机 → 对端抓包。此为定位框架，不预设根因；每轮只改一个组件。
 
 ## 5. R0–R8 分阶段实施卡
 
@@ -256,75 +298,52 @@ G1 未通过时，不允许用 6.1.65 的正常网络结果代替 B1 验收，�
 
 **失败/停止：** 依赖引入必须修改多处驱动行为、时钟配置或 DTB 才能继续时，停止并提交独立决策，不在 R6 混合处理。
 
-### R7 — 单独恢复 Panther GMAC1/MDIO/PHY DTB 节点并完成首次真实网络验收
+### R7 — 恢复 GMAC1/MDIO/PHY 硬件路径，并只做 TX-first 实测
 
-**前置：** R0–R6 组件准备通过；B1 完整验收通过；R8-test-harness 已预备；测试端点与 LAN 参数已确认；本步骤另行取得实机启动和网络测试授权。
+**前置：** R0–R6 组件依赖闭包分别通过静态/构建验收；B1 完整验收通过；专用 TX 测试程序及对端抓包夹具准备完成；测试端点、线缆、交换机端口已确认；本步骤另行取得实机启动和发送测试授权。
 
-**唯一变量：** 仅目标 Panther X2 DTB 中 GMAC1、MDIO bus、PHY address 0 及其必要资源节点状态/引用的恢复。不得同时修改 Kernel commit、Kconfig、驱动源码、bootargs 或 initramfs。
+**唯一变量：** 仅恢复目标 Panther X2 DTB 中 GMAC1、MDIO bus、PHY address 0 及其必要资源节点状态/引用。不得同时修改 Kernel commit、Kconfig、驱动源码、bootargs、initramfs 或发送程序。
 
-**实施前静态核对：**
-- GMAC1 compatible、reg、interrupt、clock/clock-names、resets、GRF、pinctrl；
-- RGMII interface/delay 属性；
-- MDIO bus 与 PHY address；
-- PHY reset GPIO、reset timing；
-- `phy-supply` 对 RK809 regulator 的引用；
-- 所有 phandle/provider 均存在且状态正确；
-- DTB 编译、反编译差异和哈希可复查。
+**实施前静态核对：** GMAC1 compatible/reg/interrupt/clock/reset/GRF/pinctrl；RGMII interface/delay；MDIO bus/PHY address；PHY reset GPIO/timing；phy-supply 对 RK809 regulator 的引用；所有 phandle/provider；DTB 编译、反编译差异和哈希。
 
-**实机验收必须按顺序逐项执行，前一项通过后才进入下一项：**
-1. 启动/probe：记录 platform probe、deferred probe、clock/reset/provider、regulator、MDIO 注册、PHY ID/attach；这一项只是进入数据面前提，不是网络通过。
-2. 物理链路：确认 carrier、PHY link、速率/双工/autoneg；接口 UP 但无 carrier 判失败。
-3. 双向 MAC 收发：固定对端发包/回包，核对 Panther 与对端 TX/RX packets/bytes/errors/dropped 增量；必须分别证明 Panther TX 到达对端、对端 TX 到达 Panther。
-4. 静态 IPv4 与 ARP：仅配置一个经现场确认不冲突的临时地址，核对邻居解析及同网段 peer 双向 ping。
-5. 网关：单独 ping hEX LAN 网关，核对 hEX 侧邻居和回包。
-6. 外部 IP：仅在网关双向通过后，以已知公网 IP 验证路由；不依赖 DNS。
-7. TCP/UDP：使用局域网受控端点，分别验证双向 payload，不以 ping 代替传输层验收。
+**实机步骤（严格顺序）：**
+1. 只确认启动、platform probe、provider、MDIO、PHY attach 和 PHY link/协商状态；这些仅为 TX 前置条件，不是网络通过。
+2. Panther 不配置 IPv4 地址、不启用 DHCP/ARP/ICMP；将接口置为驱动发送所需的最小运行状态，记录接口 MAC、carrier、TX/RX ring 初始化状态及计数器基线。
+3. 对端先验证抓包夹具：另一台已知正常设备发送同格式测试帧，对端确认能捕获；随后标记 Panther 测试时间窗。
+4. Panther 使用专用最小 AF_PACKET 原始帧发送程序，向 ff:ff:ff:ff:ff:ff 发送 EtherType 0x88B5 测试广播帧。payload 含固定项目标识、序列号、长度和校验字段。
+5. 对端逐帧捕获并核对源 MAC、广播目标 MAC、EtherType、payload、序列号和帧数；同步采集 Panther TX counters、驱动发送完成/错误计数及对端接口计数。
+6. 完成多轮、多个固定帧长度的重复发送；首轮不加入指定单播、IP 地址、ARP、ICMP、DHCP、DNS 或 TCP/UDP。
 
-每个步骤单独记录命令、退出码、两端观察、counter 前后值、丢包率和重复次数。任一步失败立即停在该层，不运行后续层级；保存完整现场并根据 A/B-规则选择一个组件进行静态定位。任何组件/补丁/DTB 变更后，从第 1 项重新执行同一固定矩阵，不允许只复测曾失败的单个命令。
+**TX-PASS 标准：** 对端真实捕获所有预期广播帧，帧内容和序列号完全匹配；多轮重复结果可复现；TX counter 与驱动完成/错误计数相符；丢帧为零或差异有可复核解释。只有对端真实收到才算发送成功。probe 成功、link up、TX counter 增长、驱动返回成功均不够。
 
-**通过标准分级：**
-- R7-PROBE：驱动/PHY probe 成功；仅为准备状态。
-- R7-LINK：物理链路稳定、速率/双工符合预期；仍非网络连通通过。
-- R7-LAN：双向 MAC 收发、ARP、同网段双向 ICMP 和网关双向 ICMP 均成功，counter 与对端证据一致；这是局域网基本连通通过。
-- R7-IP：外部已知 IP 可达；这是 IP 路由连通通过。
-- R7-TRANSPORT：TCP 与 UDP 双向 payload 均成功；这是基础传输层通过。
+**失败/停止：** 任一预期帧未被对端捕获或内容错误，立即停止；不得继续加入 RX 上层、ARP、IPv4、ICMP 或 DHCP。保存源码/配置/DTB 哈希、启动日志、PHY 状态、两端抓包、两端计数器和发送程序输出。依据最后成功边界只选择一个组件做修改/替换，重新执行相同发送矩阵。
 
-只有达到用户确认的最终目标级别才可宣布网络验收通过；单纯 R7-PROBE 或 R7-LINK 不得结项。
+### R8 — TX-PASS 后的逐层网络功能引入与验收
 
-**失败/停止：** 任一供电、clock、reset、MDIO、PHY attach、link 或数据面层级失败，立即停止后续测试。不得加入无关组件、同时回移多个补丁或宣称网络正常。
+**执行时点：** 只有 R7 达到 TX-PASS 并归档后才允许启动。R8 不是一次性打开完整网络栈，而是后续各层的逐项放行总阶段；每个子阶段单独提交配置/构建/测试记录。
 
-### R8 — 最小网络测试工具与证据采集工具（测试准备必须先于 R7）
+**固定递进顺序：**
+1. RX 基础接收：先从对端向 Panther 发送带固定 EtherType/序列号的测试帧，证明帧到达 Panther MAC/RX DMA，并由驱动计数或最小内核观察点确认；不先加入 IP。
+2. 二层协议处理：仅加入/验证所需 Ethernet protocol dispatch；再单独验证 ARP 请求/应答及邻居解析。
+3. IPv4：单独启用/验证 IPv4 地址和本机协议处理；先同网段，不配置默认路由。
+4. ICMP：单独验证同网段双向 ping；每次请求/响应都由两端证据确认。
+5. 网关与路由：单独加入路由配置，再验证 hEX 网关；通过后才测已知外部 IP。
+6. TCP 与 UDP：分别独立验证连接/报文及双向 payload，不能合并为一次通过。
+7. DHCP、DNS：最后独立验证，不能作为底层 TX/RX 的替代证明。
 
-**执行时点：** R6 完成后、R7 恢复 GMAC DTB 节点之前，先完成本阶段工具准备；R7 真实网络验收后再完成工具输出与证据链复核。该安排是明确的阶段依赖例外：不允许因 R8 编号在 R7 之后，就让网卡首次启用时没有验证实际连通性的工具。
+**唯一变量：** 每个子阶段只引入一个网络组件、协议功能或不可拆分的最小依赖闭包。精确符号以 6.18.63 源码审计为准；不得因为某个 Kconfig select 自动打开其他功能就跳过配置 diff 和运行时验收。
 
-**最小工具范围：**
-- BusyBox `ip`：只需支持 link/address/route/neigh 的查询和必要的接口启用、临时地址配置；逐项核验 applet 实际功能。
-- BusyBox `ping`：用于同网段、网关和已知外部 IP 的 ICMP 验证。
-- `/sys/class/net/<if>/statistics/*`、carrier、operstate 等内核 sysfs：读取 packets/bytes/errors/dropped；若 BusyBox `ip` 无法读取某字段，优先用已有 shell/cat，不扩大工具链。
-- `ethtool` 仅在确认 link speed/duplex/autoneg 没有其他只读来源时，另行评估最小引入；不得与 ip 工具同时作为一个不可解释的变更。
-- TCP/UDP 测试优先由局域网对端提供现有测试服务；若 Panther 端缺少客户端/服务端工具，单独论证最小实现，不默认引入 netcat、完整 iproute2 或抓包套件。
+**通过标准：** 当前子阶段专属测试报文/行为由对端或 Panther 端真实观察到，计数器/日志/抓包互相印证；只有当前层通过，才放行下一层。TX-PASS 作为永久回归测试，每次后续修改均须重跑 TX 广播帧测试，防止新增组件破坏已通过的发送路径。
 
-**禁止默认引入：** DHCP client、DNS、SSH、NetworkManager、systemd、完整 iproute2、tcpdump 及后台网络服务。DHCP/DNS 留作基础静态 IP 网络通过后的独立功能验证。
+**失败/停止：** 当前层未通过立即停止，不引入下一层；保存证据并只针对最近新增的组件提出单变量修正/替换。任何修改后至少重跑 TX 回归测试及当前层测试。
 
-**唯一变量：** 优先单独启用 BusyBox ip applet；再单独启用 BusyBox ping applet；其他工具逐个审查，不能把整个工具集合打包成一次无差别变化。
+## 6. TX-first 阶段与原计划 B2.2 的衔接
 
-**通过标准：** 在 RAM 系统中实际运行并证明所需子命令可用；测试工具不会改变网络状态（除明确安排的 ip link/address/route 子测试）；所有测试输出能与内核、对端日志及 counters 对照。
+R0–R6 是最小发送路径的组件依赖逐项准备；R7 是首次启用板载 GMAC 后的 TX-only 外部帧验收；R8 仅在 TX-PASS 后逐层引入 RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS。不得将原计划 B2.2 理解为先启用完整网络再一次性综合测试。
 
-**失败/停止：** 工具依赖扩大、静态链接/架构不匹配或引入后台服务时停止，保留已通过的内核/驱动基线，不以工具失败归因网卡硬件。
+每个层级都必须先定义专属测试报文/动作、对端观察点、计数器预期和失败边界。TX 广播帧是后续所有阶段的强制回归项。任何新组件导致 TX 回归失败，立即停止当前层并回到 TX 故障定位，不得继续叠加。
 
-## 6. R7 网络真实连通验收与原计划 B2.2 的衔接
-
-R0–R6 只建立组件准备条件；R8 提前准备最小测试工具；R7 是首次真实网络数据面验收。不能把原计划 B2.2 延后到“所有组件都通过后再测”，而应在 R7 中按固定测试矩阵逐层实测。R7 的每次代码/配置/DTB 修改后都要从 L0 重新复测。
-
-在 R7 的基础网络测试通过后，回到原分阶段实施计划 B2.2 继续完成尚未覆盖的独立功能项，顺序为：
-
-1. 确认 RAM 中临时配置，重启不持久化；
-2. 若家庭使用场景需要 DHCP，单独验证 DHCP discover/offer/request/ack 和 lease；不能用 DHCP 失败掩盖静态 IP 数据面，也不能用静态 IP 成功宣称 DHCP 通过；
-3. 若需要 DNS，单独验证 DNS query/response；
-4. 依据项目目标独立验证持续 TCP/UDP 传输、双向 payload、稳定时长和计数器；
-5. 所有步骤都需固定端点和参数、保留两端证据，前一项通过才进入下一项。
-
-任何一步失败都停止在该层，先根据双端证据定位方向，再提出一个组件/补丁/配置的单变量修改方案。不得一次性改动接口状态、地址、路由、MTU、offload、PHY 参数和驱动源码。
+原计划 B2.2 中与家庭使用相关的 DHCP/DNS、持续传输和稳定性测试，安排在基础 Ethernet TX、RX、ARP、IPv4、ICMP 和路由逐层通过之后，仍须拆成独立测试，不得提前。
 
 ## 7. 每一步必须保存的证据
 
@@ -356,30 +375,34 @@ R0–R6 只建立组件准备条件；R8 提前准备最小测试工具；R7 是
 
 回退只恢复到最后已知通过的资产，不删除失败报告、不覆盖原始日志、不改写历史证据。若构建工作流失败，应优先从失败步骤恢复并复用已验证 artifact；前提是依赖链、输入哈希和缓存身份可验证。
 
-## 9. 进入 B2.1 的最终检查表
+## 9. 进入后续网络层级的放行检查表
 
-只有全部满足，才可另行提出 B2.1 的具体操作计划：
-
+**TX 阶段放行门：**
 - [ ] B1 完整实机验收正式归档；
-- [ ] R0 基线资产清单及哈希冻结；
-- [ ] R1 网络核心配置与构建验收通过；
-- [ ] R2 缺失共享 provider 闭包验收通过；
-- [ ] R3 PHY 电源 provider 闭包验收通过；
-- [ ] R4 MDIO/PHY 框架与 RTL8211F 构建验收通过；
-- [ ] R5 STMMAC/DWMAC4 core 验收通过；
-- [ ] R6 Rockchip glue 验收通过；
-- [ ] R8-test-harness 在 R7 前准备完成：ip/link/address/route/neigh、ping、TX/RX counters 可用；
-- [ ] R7 GMAC1/MDIO/PHY DTB 恢复后，PHY link 与协商速率/双工有证据；
-- [ ] R7 双向 MAC TX/RX 有 Panther 与对端 counters/日志相互印证；
-- [ ] R7 同网段 ARP、双向 ICMP、网关双向 ICMP 全部通过；
-- [ ] R7 已知外部 IP 路由通过（若项目验收范围要求）；
-- [ ] R7 TCP/UDP 双向 payload 验证通过（若项目验收范围要求）；
-- [ ] 每次网络相关修改均完成相同矩阵 A/B 复测；
-- [ ] 原计划 B2.2 的 DHCP/DNS/持续传输等剩余独立项目已复核；
-- [ ] 测试端点、LAN 参数、专用 TF 目标和恢复路径已确认；
+- [ ] R0 基线资产及哈希冻结；
+- [ ] R1–R6 各组件按最小依赖闭包逐项静态审查、构建并归档；
+- [ ] 专用最小 AF_PACKET 测试发送程序构建并审计；
+- [ ] 对端抓包夹具已由已知正常设备校验；
+- [ ] R7 GMAC1/MDIO/PHY DTB 恢复及 probe/link 前置条件通过；
+- [ ] Panther 未配置 IPv4/DHCP/ARP/ICMP 时发出 0x88B5 广播测试帧；
+- [ ] 对端逐帧捕获并核验源/目标 MAC、EtherType、payload、序列号和长度；
+- [ ] 多轮发送结果、TX counters、驱动统计与对端抓包一致；
+- [ ] TX-PASS 证据归档，用户确认后才放行 RX 阶段。
+
+**TX 通过后的逐层放行门：**
+- [ ] RX 原始帧接收通过；
+- [ ] ARP 独立通过；
+- [ ] IPv4 同网段独立通过；
+- [ ] ICMP 双向独立通过；
+- [ ] 网关/路由及外部 IP 按顺序通过；
+- [ ] TCP 独立通过；
+- [ ] UDP 独立通过；
+- [ ] DHCP、DNS 最后分别通过；
+- [ ] 每次新增组件后 TX 广播帧回归仍通过；
+- [ ] 每一层失败均停止、归档并只修改最近引入的一个组件；
 - [ ] 每次拟执行的设备操作已取得明确授权。
 
-该清单是阶段放行门，不得将未完成项标记为通过。B2.1 的实机动作必须另开执行记录，逐次报告，不由本计划自动授权。
+任何未完成项均不得标记为通过；每一层放行均须有单独执行记录和授权。B2-1 计划本身不授权实机操作。
 
 ## 10. 单阶段执行记录模板
 
@@ -420,7 +443,7 @@ DTB 是否变化：
 - 本文件建立 B2-1 实施计划框架，待用户审阅并冻结；
 - B1 已有 6.18.63 Kernel banner/早期启动证据，但 `/init`、UART ash shell 和完整隔离验收尚未形成正式通过记录；
 - B1 尚未正式通过；
-- R0–R8 尚未执行；本次新增真实网络验收矩阵及 R8-test-harness 前置安排；
+- R0–R8 尚未执行；本次明确 TX-first、专用原始 Ethernet 广播帧外部接收为首项实机网络验收，并规定 TX-PASS 后才逐层引入 RX/ARP/IPv4/ICMP/路由/TCP/UDP/DHCP/DNS；
 - 原计划 B2.1 尚未启动。
 
 本次归档不授权：访问 Panther X2、运行 U-Boot 命令、写入 TF/eMMC、启动实验固件、构建/安装内核、修改 Kconfig/DTB/驱动/网络配置、读写寄存器、启用 GMAC/MDIO/PHY、运行网络连通性测试。
