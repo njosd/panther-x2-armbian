@@ -168,3 +168,107 @@ Panther 地址 0 在合法范围内，STMMAC MDIO bus 提供 read/write callback
 - [6.12.81-rk35xx Realtek PHY driver](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/phy/realtek.c)
 - [6.18.63 target Realtek PHY driver](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9f/drivers/net/phy/realtek/realtek_main.c)
 - [6.18.63 target STMMAC MDIO](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9f/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c)
+
+
+## 9. 既有专项报告交叉审校与关键边界澄清（2026-11-25）
+
+本节重新读取 15 份既有专题报告，并与方向三 D3-2、方向四结项报告交叉核对。核心目的是区分 Realtek PHY driver 局部 config_init 与完整 MDIO/PHY 初始化序列，避免把两者混为一谈。
+
+### 9.1 Realtek config_init 相近，不代表完整 PHY 初始化序列相同
+
+四版本普通 RTL8211F-CG 的 Realtek driver config_init 主体具有共同点：
+- RGMII PHY 内部 TX/RX delay 均关闭；
+- PHYCR2 CLKOUT bit 0 由 probe 缓存状态及 DT 属性决定；
+- config_init 对 PHYCR2 的软件 mask 仅包含 bit 0；
+- 6.1.65、6.1.116、6.1.174、6.12.81 普通 CG 路径均会执行 generic PHY soft reset（6.12 对错误返回显式检查）。
+
+但四版本完整 PHY 初始化序列并不相同。方向三 D3-2 与既有执行顺序报告已确认：
+- 6.1.65 / 6.1.116 在 of_mdiobus_register() 返回后执行 JL2xx1 workaround 四次 MDIO 写入，其中 PHY address 0 / page 0xa43 / reg 0x19 写入 0x1801，随后 BMCR 写入 0x8000；
+- 该动作发生在 PHY driver probe 之后、后续 stmmac_phy_setup() / phylink attach / config_init() 之前；
+- 6.1.174 精确故障源码 c2f148d 与 6.12.81 均没有该四次写入段；
+- 后续 Realtek config_init 的 PHYCR2 mask 只包含 bit 0，不会通过软件 RMW 主动恢复 bit 1、bit 5、bit 11 或 bits[13:12]。
+
+正确表述是：四版本 Realtek 普通 CG driver 的局部 config_init 主路径大体相近，但黄金版本与故障版本的完整 PHY 初始化序列确有一个位于 STMMAC MDIO 注册阶段的额外 PHYCR2/BMCR 写入差异。该差异已由方向三结项，方向五只把它作为 PHY 状态与后续 driver 行为之间的关联输入，不重复审计。
+
+### 9.2 0x1801 完整位域影响：以已修正结论为准
+
+按仓库 2026-11-19 PHYCR2 完整位域报告及 RTL8211F-CG datasheet Table 38：
+- bit 0：CLKOUT enable；
+- bit 1：RXC enable；
+- bit 5：PHY-mode EEE enable；
+- bit 11：CLKOUT 125/25 MHz frequency select；
+- bits[13:12]：CLKOUT SSC capability。
+
+0x1801 不只是设置 CLKOUT 125MHz / enable；按完整 16-bit 写入，它同时清除 bit 1（RXC enable）和 bit 5（PHY-mode EEE enable），并写入 bits[13:12]=01 的非标准/保留编码。该位域解码已在既有报告完成，不重复查表。
+
+必须保留一个尚未闭环的矛盾：6.1.116 曾正常建立 1Gbps link 并有正常网络基线，但源码确实发起 0x1801 写入；若该写入按字面完全生效且 reset 后保持，bit 1 被清零与 Panther 所需 RXC 路径之间存在明显张力。当前缺少 6.1.116 写入后的完整 PHYCR2 回读、BMCR reset 后回读及 RXC/CLKOUT 实际波形，不能任选“写入失败”“reset 恢复”或“RXC pin 不相关”作为事实。
+
+历史报告中任何较早的“0x1801 只配置 125MHz CLKOUT”简化表述，均以 2026-11-18/19 完整位域更正为准；早期记录只保留研究时间线意义。
+
+### 9.3 6.18.63 的 bit 5 清除不能等同于恢复 0x1801
+
+6.18.63 目标驱动 realtek_main.c 的 rtl8211f_config_phy_eee() 仅对 PHYCR2 bit 5 做 mask-RMW 清零，源码注释为禁用 PHY-mode EEE，使 LPI 传递给 MAC。
+
+与历史 6.1.65/6.1.116 workaround 整字写 0x1801 相比：
+- 6.18.63 只清 bit 5，不清 bit 1 RXC enable；
+- 不写 bits[13:12] 的 01 保留编码；
+- 不设置/清除 bit 11 或 bit 0 的 CLKOUT 选择/使能；
+- 其余 PHYCR2 位由 mask-RMW 保留；
+- Panther 默认 DTS 没有 realtek,clkout-disable，因此 rtl8211f_config_clk_out() 不执行该分支中的 PHY soft reset；普通 config_init() 末尾执行 EEE bit 5 清除，不再无条件执行旧版 genphy_soft_reset()。
+
+因此，6.18.63 的 bit 5 清除与 6.1.116 的 0x1801 在单个位层面的结果存在重合，但两者写入范围、RXC 影响、CLKOUT/SSC 影响和 reset 时序均不同。不能把 6.18.63 描述为重新引入 JL2xx1 workaround，也不能用 6.1.116 的 RXC 矛盾直接否定 6.18.63 的单 bit EEE 配置。
+
+6.18.63 的 rtlgen_read_status() 另改为读取 MII_RESV2（源码常量 RTL_PHYSR）解码 speed/duplex；旧四版本读取 Page 0xa43 / Reg 0x12。该变化属于链路状态读取/报告路径，当前没有证据证明它影响普通 TX descriptor 发出。
+
+### 9.4 既有专题报告交叉审校结果
+
+| 专题 | 复核结果 | 当前有效结论/边界 |
+|---|---|---|
+| PHY ID / CG vs VD | 与既有报告一致 | Panther 完整 ID 0x001cc916 对应普通 RTL8211F-CG 编码；不重复安排 PHYID2 读取 |
+| PHYCR2 bitfield / 0x1801 | 与完整位域更正一致 | bit1 RXC、bit5 EEE 均被整字写清零；bits[13:12]=01 不可视为已知有效 SSC 配置 |
+| workaround 执行顺序 | 与方向三 D3-2 一致 | probe → 6.1.65/116 workaround → 后续 PHY setup/attach/config_init；6.1.174/6.12 缺失 workaround |
+| PHYCR2 paged read API | 与 11/18 API 审计一致 | 内核 helper 的 save/select/read/restore 在 MDIO bus lock 下完成；无已确认的用户态原子 paged-read 接口 |
+| 外部模块安全性 | 与 refcount/teardown 审计一致 | PHY refcount 不等于 STMMAC MDIO hardware lifetime；remove/unbind 排他同步仍未证明，不加载模块 |
+| MDIO trace | 与 trace 审计一致 | tracepoint 只记录成功的 bus transactions，不记录失败事务；未启用、未执行现场追踪 |
+| CLKOUT / RXC / U-Boot handoff | 与既有 P2 报告一致 | DTS/软件时钟声明不能证明物理引脚波形；JP/Ophub U-Boot 对 PHYCR2 的实际写入来源仍有限制 |
+| PHY suspend/resume / WOL | 与源码差异一致 | 6.12 及 6.18 的 PM 分支演进不能外推为普通 cold-probe/TX 故障 |
+| 6.18.63 EEE / speed status | 与目标源码一致 | bit5 单独清除；speed status 改读 MII_RESV2；均需保持目标内核专项，不混入历史四版本根因矩阵 |
+
+### 9.5 方向五当前差异总矩阵
+
+| 子项 | 6.1.65 | 6.1.116 | 6.1.174-rk35xx | 6.12.81-rk35xx | Panther 适用性 |
+|---|---|---|---|---|---|
+| 普通 RTL8211F-CG 精确 PHY ID | 0x001cc916 match | 同 | 同 | 同 | Panther 实际命中 |
+| PHY driver RGMII 内部 delay | TX/RX=0 | 同 | 同 | 同 | 四版本一致；SoC GRF delay 属方向四 |
+| PHYCR2 driver mask | 仅 bit0 | 仅 bit0 | 仅 bit0 | 仅 bit0 | 不覆盖 bit1/bit5/bits[13:12] |
+| 普通 CG driver soft reset | config_init 执行 | 执行 | 执行 | 执行（显式检查错误） | 与 STMMAC 前置 workaround 是不同 reset |
+| STMMAC JL2xx1 PHYCR2/BMCR workaround | 有 | 有 | 无 | 无 | 黄金/故障版本分组差异；效果未知 |
+| paged PHY helper 锁保护 | save/select/read/restore 在锁内 | 同语义 | 同语义 | 同语义 | 未发现锁保护回归 |
+| MDIO bus callback/地址检查 | 基础检查 | 基础检查 | 增加 addr/callback 防御检查 | 同后期方向 | Panther 地址 0/callback 正常，不命中异常路径 |
+| PHYLIB polling state machine | 旧 state machine | 6.1 共同实现 | 6.1 共同实现 | 拆分锁内/锁外 post-work，引入 PHY_ERROR | 仅 MDIO/PHY 操作错误路径；无历史错误证据 |
+| PHYLINK MLO_AN_PHY resolve | 使用 phy_state | PHY mode 语义相同 | PHY mode 语义相同 | 按 act_link_an_mode 重构，PHY mode 仍用 phy_state | 未发现 Panther 被改走 PCS in-band |
+| PHY interrupt | driver 支持配置/handler | 同 | 同 | 同 | Panther IRQ=POLL，非当前主路径 |
+| suspend/resume | genphy suspend/resume | 同 | 同 | RTL821x 专用 suspend/resume、PHY_ERROR 相关清理 | PM 条件路径，不等同普通 cold boot |
+| LED framework | 无后续 DT LED 支持 | 增加 realtek,led-data | 调整 LED 写入位置 | LED framework / DT trigger | Panther 无 LED 属性/子节点，不命中 |
+
+固定四版本源码 blob SHA：
+- drivers/net/phy/realtek.c：6.1.65 cd4e6e4919539f69b515c70974f3f71a7de38c5f；6.1.116 3d29f78108e746b7a2f99772dabb8374fd78f278；6.1.174 9221cae79ea0f538d1a0cd5150052ee1fca4b605；6.12.81 ff15239ee63d137be5b4c9ba8538c3b02e414aa5。
+- drivers/net/phy/phy-core.c：6.1.65 2c8bf438ea617aeae2e0d247a3d84ab29dd897df；6.1.116/6.1.174 相同 7e5dd14ec6994e76e85609f6412d717505e56a93；6.12.81 1f98b6a96c15355e5c318de0f161e426639c483c。
+- phy_device.c、mdio_bus.c、phylink.c 四版本 blob 均不同；文件 SHA 本身不能证明 Panther 路径行为变化，结论必须以已核对的具体函数和条件分支为准。
+
+### 9.6 方向五阶段判断
+
+已完成：
+- 首轮 Realtek 普通 CG driver 四版本差异；
+- MDIO paged API 锁保护和错误恢复；
+- PHYLIB state machine 与 PHYLINK MLO_AN_PHY resolver；
+- 6.18.63 目标驱动 EEE、soft reset、speed status 补充差异；
+- 15 份既有专题报告复核及与方向三/方向四的层级一致性审校；
+- 方向五当前差异矩阵和适用性边界。
+
+仍未完成：
+- 对四版本 PHYLIB/PHYLINK 其他与 Panther 外接 PHY 路径直接相关的状态/协商回调，完成最后一次“是否有遗漏函数/分支”的覆盖确认；
+- 汇总方向五证据等级、首次观察到的版本边界、普通 TX 相关性和不可验证事项；
+- 更新方向五正式结项评估，明确哪些未决项属于静态范围内可完成、哪些必须保留为运行时/硬件证据限制。
+
+**当前状态仍为方向五进行中，尚未结项。** 本轮只读仓库源码与报告；未访问 Panther X2、未读取或写入 PHY/MDIO 寄存器、未构建/安装/修改任何系统内容，未启动 B2.1。
