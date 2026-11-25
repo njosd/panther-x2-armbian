@@ -252,3 +252,23 @@ Current verification boundary:
 - Kernel compile/link, DTB, BusyBox, package artifact and hardware boot: not verified by Run #64.
 - No workflow was triggered by the correction, and no storage write or hardware boot was performed.
 
+
+
+## 2026-11-25 B1 实机结果回填与 applet 定点修复
+
+权威增量记录见 [B1 用户空间 applet 修复与实机状态](PANTHER-X2-PROJECT-A-B1-USERSPACE-APPLET-FIX-AND-REAL-HARDWARE-STATUS-20261125.md)。
+
+- Run #73 `45309219886` 完成 Kernel/DTB；Run #77 `45328201244` 复用 Run #73 Kernel/DTB，完成 BusyBox 与 PREPARE-ONLY image。
+- Run #77 artifact ID `14890817693`；解压镜像 SHA256 `26b35287d0f1b952d5d97fc0e89763751d237e490f35bd5120c7ffb3bdc29eb`；压缩镜像 SHA256 `9a03ab47e9fc6222d46060ea90823b14e6665713ce40fb7e90f5906ef97bd511`。
+- 用户已将该镜像写入专用 SU08G TF，并实机确认 U-Boot 自动执行 boot.scr、Linux 6.18.63、Panther X2 DTB、initramfs、/init 和 BusyBox 交互 shell 均启动成功。
+- 余留用户空间提示 `/init: line 18: [: not found`。源码与 initramfs 清单核对后确认，BusyBox 已包含 `test` applet，但 initramfs applet symlink 循环漏掉字面名称 `[`，导致 /bin/[ 不存在。不是 Kernel/DTB/boot chain 故障。
+- 提交 `00f062de06eeea94c42870e7b1ec58673785c72a` 在 initramfs applet 链接清单增加 `[`；提交 `c3a35823d06bda8cccb1bd7e01241fad1c3bad21` 在验证脚本中要求 `[` applet 并用固定字符串匹配。
+- Run #79 `45635993338` 在最近核查时正在执行 Kernel/DTB build；后续待 BusyBox/package 与 artifact 验证完成。
+- Run #80/#81 因 workflow expression 配置无效，在创建 Job 前失败，没有运行构建步骤或生成 artifact；Run #78 被并发取消。它们不是源代码或 Kernel 构建失败证据。
+
+### 下一步
+
+1. 完成 Run #79 并审查 applet 清单、initramfs 文件清单（必须有 `bin/[`）、uInitrd、TF image 和 SHA256。
+2. 新 artifact 审查通过后，才将新镜像写入 SU08G；不写 SN64G，不写 eMMC。
+3. 仅做针对性实机复验：/init 的 `[` 条件分支、设备型号显示、proc/sysfs 诊断和 BusyBox shell；不重复 U-Boot、Kernel banner、PSCI 已通过项目。
+4. 该遗留项关闭后，再回到既定 B2-0/B2-1 主线；不得将 B1 启动通过等同于 Ethernet 通过。
