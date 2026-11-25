@@ -39,7 +39,8 @@
 - [B2-0 方向三：STMMAC / DWMAC4 / DMA 驱动核心静态审计计划](./PANTHER-X2-B2-0-DIRECTION-3-STMMAC-DWMAC4-DMA-AUDIT-20261125.md)：方向三阶段边界、四版本样本、子项顺序及禁止重复项；当前执行 D3-1。
 - [B2-0 方向三 D3-1：STMMAC platform probe / resource parsing 四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md)：已完成首轮四版本源码对照；发现 pclk/pclk_mac 名称及 MDC CSR clock source 变化，D3-1 已结项；确认 6.1.65/6.1.116 与 6.1.174/6.12.81 的 pclk/MDC CSR clock source 差异。
 - [B2-0 方向三 D3-2：STMMAC MDIO / PHY attach 四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-2-MDIO-PHY-ATTACH-DIFF-20261125.md)：确认四版本 MDIO parser 在 Panther DTS 上的最终 bus/PHY 结果等价；发现四次 PHYCR2/BMCR 写入存在于 6.1.65/6.1.116、缺失于实际 6.1.174-rk35xx/6.12.81 源码；并记录 mac_requires_rxc 版本变化。D3-2 静态审计已结项，进入 D3-3。
-- [B2-0 方向三 D3-3：DWMAC4 DMA core 初始化四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-3-DWMAC4-DMA-INIT-DIFF-20261125.md)：使用实际 6.1.174-rk35xx 构建源码 c2f148d 校正旧 stable 对照；发现黄金版本有 1500ms DMA reset 前延时、故障版本缺失，且 reset poll interval 从 10ms 缩短至 0.5ms。DWMAC4 DMA/AXI/channel init 算法整体相同；D3-3 仍进行中。
+- [B2-0 方向三 D3-3：DWMAC4 DMA core 初始化四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-3-DWMAC4-DMA-INIT-DIFF-20261125.md)：使用实际 6.1.174-rk35xx 构建源码 c2f148d 校正旧 stable 对照；发现黄金版本有 1500ms DMA reset 前延时、故障版本缺失，且 reset poll interval 从 10ms 缩短至 0.5ms。DWMAC4 DMA/AXI/channel init 算法整体相同；D3-3 静态审计已结项；硬件 addr64 实际值与 DMA reset 运行时完成时间保留为证据限制。
+- [B2-0 方向三 D3-4：STMMAC TX descriptor 未覆盖分支](./PANTHER-X2-B2-0-DIRECTION-3-D3-4-TX-DESCRIPTOR-REMAINING-BRANCHES-20261125.md)：当前开始盘点既有 TSO/context/fragment/mapping failure/completion 报告，严格避免重复普通 skb mapping/OWN/barrier/tail pointer 主路径。
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
