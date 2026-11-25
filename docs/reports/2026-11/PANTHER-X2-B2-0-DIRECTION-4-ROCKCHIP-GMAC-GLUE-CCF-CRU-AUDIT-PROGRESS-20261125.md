@@ -71,9 +71,11 @@
 - `CLK_MAC1_2TOP`、`SCLK_GMAC1`、RGMII speed mux、RX/TX mux 的寄存器位置和 parent 列表一致；
 - RGMII 125MHz 输入 parent chain 对应 Panther DTS 的 `gmac1_clkin → SCLK_GMAC1 → SCLK_GMAC1_RGMII_SPEED → SCLK_GMAC1_RX_TX`。
 
-四版本中确实存在的 CRU 差异不是 GMAC1 专属 mux/gate 定义，而是其上游公共 `PCLK_USB` provider flag：
-- 6.1.65 / 6.1.116：`PCLK_USB` 无 `CLK_IS_CRITICAL`；
-- c2f148d / 6.12.81：`PCLK_USB` 增加 `CLK_IS_CRITICAL`。
+四版本中确实存在的 CRU 差异不是 GMAC1 专属 mux/gate 定义，而是其上游公共 USB clock provider flags：
+- 6.1.65 / 6.1.116：`HCLK_USB`、`PCLK_USB` 均无 `CLK_IS_CRITICAL`；
+- c2f148d / 6.12.81：`HCLK_USB`、`PCLK_USB` 均带 `CLK_IS_CRITICAL`。
+
+这是对既有报告中仅突出 `PCLK_USB` 的补充修正：实际后期源码两个公共 USB clock 都增加了 critical 标记，不能只记录 PCLK。该差异仍属于 provider 注册/unused-clock 管理语义，尚无证据证明它改变 Panther GMAC1 正常运行时 gate 或 TX clock。
 
 该 flag 的作用边界仍按既有报告限定：它影响 clock provider 注册阶段的 critical/unused clock 管理语义；不能据此声称 GMAC1 正常运行时 gate 或 TX clock 被改变。GMAC1 是 PCLK_USB 的 consumer 时，是否发生实际运行时差异仍不能仅凭该 flag 推断。
 
@@ -94,7 +96,7 @@
 既有 `PANTHER-X2-GMAC-RGMII-CLOCK-CRU-PARENT-GATE-RESET-AUDIT-20261124.md` 的 6.1.174 CRU 源码链接使用 `5483dc4f...`，并非已由原始 Actions run #296 直接确认的实际构建源码 `c2f148de...`。因此：
 - 该旧报告的 6.1.116 侧证据和拓扑梳理可复用；
 - 其 6.1.174 CRU provider 结论不能不加说明地视为对实际故障构建源码的精确审计；
-- 本报告已直接读取 c2f148d 的 `clk-rk3568.c`，确认上述 GMAC1 专属定义与公共 PCLK_USB flag；
+- 本报告已直接读取 c2f148d 的 `clk-rk3568.c`，确认上述 GMAC1 专属定义与公共 HCLK_USB/PCLK_USB flags；
 - reset provider、reset ID 已在本报告 §6.1 按实际 c2f148d 完成四版本精确核对；旧报告仅作为历史线索，不再作为该结论的唯一来源。
 
 ## 6. 当前覆盖状态与下一步
@@ -103,7 +105,7 @@
 |---|---|---|
 | 历史报告/禁止重复项清点 | 已完成第一轮 | 已回读八份相关报告；仍需与 B2-0 原始任务顺序核对 |
 | 四版本 `dwmac-rk.c` clocks enable / powerup 主路径 | 已完成第一轮 | clocks enable 差异已确认；probe/setup/power handoff 的实际 RGMII 路径已补核，见 §6.3 |
-| 四版本 GMAC1 CRU mux/divider/gate | 已完成第一轮 | 专属定义一致；PCLK_USB critical flag 为两黄金/两故障分组差异 |
+| 四版本 GMAC1 CRU mux/divider/gate | 已完成第一轮 | 专属定义一致；HCLK_USB/PCLK_USB critical flags 为两黄金/两故障分组差异 |
 | Panther 四版本 GMAC1 DTS 关键时钟输入 | 已完成第一轮 | 形成两组相同 blob，RGMII input 主配置语义一致 |
 | 四版本 CRU reset ID / reset controller 精确核对 | 已完成（源码静态范围） | 四版本 ID 236、provider 注册参数与映射一致；另发现 STMMAC core 10µs delay 的版本差异，见 §6.1 |
 | RK3568 CCF/PLL provider 与父链回调 | 已完成第一轮 | 6.1.65/6.1.116 PLL provider blob 相同；c2f148d/6.12.81 使用后期 mux 切换实现，见 §6.2 |
@@ -250,22 +252,22 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 | 审计点 | 6.1.65 黄金 A | 6.1.116 黄金 B | 6.1.174 故障 A（c2f148d） | 6.12.81 故障 B | 首次分组差异与解释 |
 |---|---|---|---|---|---|
 | Rockchip glue 文件 | blob 与 6.1.116 相同 | blob 与 6.1.65 相同 | 后期重构 | 后期重构 | 黄金与故障源码形成两组 |
-| GMAC clocks 获取/enable | bulk 获取、bulk enable | 同 6.1.65 | 逐项获取、逐项 enable | 同后期路径 | 6.1.174 故障源码组首次出现；逐项 enable 返回值未检查，clock 获取失败主要只记录错误 |
-| clock settle | 5ms | 5ms | 100–200µs | 100–200µs | 黄金→故障组差异；静态证据不能证明等待时间不足 |
-| RGMII callback 写序 | CON0 delay value → CON1 interface/enable | 同 6.1.65 | CON1 interface/enable → CON0 delay value | 同 c2f148d | 6.1.174 故障源码组首次出现；最终数值/enable 语义相同，只有写入顺序不同 |
+| GMAC clocks 获取/enable | bulk 获取、bulk enable | 同 6.1.65 | 逐项获取、逐项 enable | 同后期路径 | 本矩阵最早观察到于 c2f148d；逐项 enable 返回值未检查，clock 获取失败主要只记录错误 |
+| clock settle | 5ms | 5ms | 100–200µs | 100–200µs | 本矩阵最早观察到于 c2f148d；静态证据不能证明等待时间不足 |
+| RGMII callback 写序 | CON0 delay value → CON1 interface/enable | 同 6.1.65 | CON1 interface/enable → CON0 delay value | 同 c2f148d | 本矩阵最早观察到于 c2f148d；最终数值/enable 语义相同，只有写入顺序不同 |
 | PHY regulator helper | 失败只日志、返回 0 | 同左 | 同左 | 同左 | 四版本共同弱点，不是版本回归 |
 | runtime-PM get | pm_runtime_get_sync 返回值未检查 | 同左 | 同左 | 同左 | 四版本共同弱点，不是版本回归 |
 | GMAC1 CRU mux/divider/gate | 与其他三版相同 | 相同 | 相同 | 相同 | 未发现 GMAC1 专属定义回归 |
-| PCLK_USB critical flag | 无 | 无 | 有 | 有 | 故障源码组差异；仅确认 provider critical 语义变化，未证明改变 GMAC1 工作态 |
+| HCLK_USB / PCLK_USB critical flags | 均无 | 均无 | 均有 | 均有 | 本矩阵最早观察到于 c2f148d；provider critical 语义变化，未证明改变 GMAC1 工作态 |
 | GMAC1 reset ID/provider | ID 236；30 regs；HIWORD | 相同 | 相同 | 相同 | 未发现 reset ID/provider 回归 |
 | STMMAC reset 后 10µs delay | 无 | 有 | 有 | 有 | 6.1.116 已存在，不能解释 6.1.116→6.1.174 首发故障 |
-| GPLL provider callback | wait lock 后返回；disable PWRDOWN | 同左 | wait lock 后切 NORMAL；disable 前切 SLOW | 后期实现 | 后期 provider 变化；是否命中 GMAC1 实际 parent chain 未验证 |
+| GPLL provider callback | wait lock 后返回；disable PWRDOWN | 同左 | wait lock 后切 NORMAL；disable 前切 SLOW | 后期实现 | 本矩阵最早观察到于 c2f148d；是否命中 GMAC1 实际 parent chain 未验证 |
 | Panther GMAC1 DTS | RGMII/input/125MHz/0x30/0x10 | 同 6.1.65 | 同关键语义 | 同 c2f148d | DTS 关键配置保持一致 |
 
 ### 6.6.1 本轮审校后的优先级与边界
 
 - **已确认且与故障版本分组一致的 glue 差异：** bulk→逐项 clock enable、错误检查减弱、5ms→100–200µs settle、RGMII CON0/CON1 写入顺序反转。它们是静态源码回归候选，不等于已经证明硬件因果。
-- **已确认但当前不能证明影响 GMAC 工作态：** PCLK_USB critical flag、GPLL provider callback 变化。
+- **已确认但当前不能证明影响 GMAC 工作态：** HCLK_USB/PCLK_USB critical flags、GPLL provider callback 变化。
 - **已确认但不是 6.1.116→6.1.174 新增：** regulator helper 错误吞并、runtime-PM get 返回值未检查；STMMAC 10µs reset delay 在 6.1.116 已存在。
 - **已排除为当前源码差异解释：** GMAC1 专属 CRU mux/divider/gate、reset ID/provider 映射、Panther DTS RGMII 输入配置。
 - **保留未验证：** 历史实际 clock enable 返回值、clock rate/gate readback、GRF 写事务与寄存器值、PHY 电源轨、runtime-PM 状态、PLL parent/mode、RGMII 波形。
