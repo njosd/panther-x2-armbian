@@ -166,3 +166,23 @@ Job `139149992105` 的源码准备步骤已全部通过：
 - 补充 fragment commit：`77c8fda3420775dcc55c216f7c1a894a7323ba8a`；补充 workflow gate commit：`87da2bfb1b48135bfc09ec30a4c4e65035b92a8d`。两份文件均已同步到 main（fragment commit `b081b723d5945be39ca6b490dc5c9bb79c1739b1`；workflow commit `dac40520a15650f7e97e9378d72df8cca59c3126`）。
 
 这项修正尚未由新的 Actions 运行验证。下一次必须新建 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，输入仍为冻结的 R0 Run ID `45309219886`。不得对旧 Run 45598258364 使用 Re-run。新运行首先只审阅 merge/olddefconfig 日志、最终配置差异及全部禁止项；只有配置门通过后才允许进入 Kernel build。当前 R1 仍未 PASS，不得进入 R2。
+
+## 12. 第三次 R1 Actions 运行结果与目录修复（Run 45606030640）
+
+Job `139177002918`，head commit `e30e716c8b1da1cc44e4901b7f80ead9f2b8ae1c`。结论：**R1 配置门通过、内核与模块编译成功；最后的 DTB 产物审计因目标目录未创建而失败。R1 仍不 PASS。**
+
+已审阅完整 job log 和 artifact `15019831642`：
+- R0 frozen B1 config/DTB artifact 恢复及 SHA256 核验通过。
+- R1 merge log 明确显示以 `work/b1-reference/output/kernel.config` 为基线，仅叠加 R1 fragment；没有重新合并旧 seed。
+- `olddefconfig` 完成；最终配置门日志为 `R1 Kconfig gate checks: PASS`。
+- 最终 `.config` 中 `CONFIG_NET=y`、`NETDEVICES=y`、`NET_CORE=y`、`ETHERNET=y`、`PACKET=y`；`MDIO_BUS)、`PHYLIB)、`DNET)、`ETHOC` 等禁用门通过。注意部分选项在最终 .config 中表现为 absent（该源码树中无该符号定义），不应误报为启用。
+- Linux 6.18.63 Kernel Image 和 modules 均成功构建；AF_PACKET/network core 符号检查通过。
+- 解包 modules.tar.zst 后检查，未发现 `drivers/net/{ethernet,phy,usb,wireless}` 或 Bluetooth 驱动模块路径。
+- 失败只发生于 `cp work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb work/output/dtb/rockchip/...`：`work/output/dtb/rockchip` 目录未创建。并非 DTB 内容或哈希错误；失败前 DTB 复用检查尚未执行。
+
+已修正：
+- 在 DTB copy 前增加 `mkdir -p work/output/dtb/rockchip`。
+- 功能分支修正 commit：`c1b0b608d4282d297fac51cbab3eb951972f9187`。
+- main 注册副本同步 commit：`0b8e855e379f30e339f435b9ca2fcf1b8cefb062`。
+
+下一轮必须新建 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，继续输入 R0 Run ID `45309219886`。不要重跑旧 Run 45606030640，因为旧 run 使用的 workflow commit 不含目录修复。新运行重点核验 DTB 原样复用、GMAC/MDIO/PHY 状态、哈希和完整 artifact 上传；然后再审阅 R1 最终状态。当前不得进入 R2，不访问设备、不写卡。
