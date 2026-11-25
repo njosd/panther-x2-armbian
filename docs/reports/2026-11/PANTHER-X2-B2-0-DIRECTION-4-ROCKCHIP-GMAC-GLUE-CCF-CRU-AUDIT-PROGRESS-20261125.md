@@ -298,6 +298,60 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 - **不得推断：** 不把 PCLK_USB critical 标记直接认定为 TX 故障根因；不把 HCLK_USB critical 与 GMAC1 时钟链建立因果联系。
 
 
+## 8. 与方向二、方向三的交叉一致性审校（2026-11-25）
+
+本节只核对边界、术语、版本端点和跨层结论是否冲突；不重做方向二 generic network-core 或方向三 STMMAC/DWMAC4/DMA 已结项的函数审计。
+
+### 8.1 三方向职责边界
+
+| 方向 | 已批准审计层 | 本方向可引用内容 | 不在本方向重复的内容 |
+|---|---|---|---|
+| 方向二 | Linux generic network-core | 普通 DHCP/UDP TX 的 generic queue/qdisc/validate/ndo 之前适用性、generic TX queue/watchdog 证据限制 | Rockchip glue、STMMAC 私有 descriptor/DMA、CRU/CCF |
+| 方向三 | STMMAC / DWMAC4 / DMA | platform probe/resource parsing、MAC/DMA reset、descriptor/DMA/IRQ/NAPI 证据 | Rockchip glue 的完整 clocks/power/CRU/PLL provider 专题、PHYLIB/PHYLINK/RTL8211F |
+| 方向四 | Rockchip GMAC glue / CCF / CRU / clock / reset | glue clocks enable、RGMII GRF callback、公共/专属 clock parent/gate、PLL callback、reset provider | generic network-core TX、STMMAC descriptor/DMA lifecycle、MDIO/PHY driver 专题 |
+
+### 8.2 方向二交叉核对
+
+方向二 §53～§56 已正式有条件结项。其“未发现已证实且无条件命中普通 DHCP/UDP TX 的 generic network-core 回归”只覆盖 Linux generic network-core 层，不是对 Rockchip glue 或 STMMAC 私有路径的排除。
+
+方向四发现的 bulk→逐项 clock enable、错误检查变化、5ms→100–200µs settle 和 RGMII GRF 写入顺序变化均发生在 Rockchip glue/平台初始化层，不与方向二结论冲突，也不能被方向二的普通 DHCP/UDP 适用性结论排除。
+
+方向二记录的 generic TX queue stop/watchdog、可选 packet-mangle hook 和 6.12 unreadable-fragment 条件门，继续保持方向二原有证据等级；本方向不把它们移入 CRU/clock 根因链。
+
+### 8.3 方向三交叉核对
+
+方向三 D3-1～D3-8 已按证据边界明确的有条件结项归档。方向四只复用其 platform resource 与 reset 相关事实，不重做 STMMAC/DWMAC4/DMA 函数审计。
+
+特别区分以下两组时间差异：
+
+- **方向三 DMA reset 时序：** 黄金版本在 DWMAC4 DMA reset 前有 1500ms delay，故障源码缺失；reset poll interval 从 10ms 缩短至 0.5ms。它属于 MAC/DMA core reset sequence。
+- **方向四 GMAC glue clocks settle：** 黄金版本 bulk clock enable 后等待 5ms；故障源码逐项 enable 后等待 100–200µs。它属于 Rockchip glue clock initialization。
+
+二者的调用层、等待对象和执行位置不同。现有静态证据不允许把两者合并成一个“总初始化延时不足”结论，也没有证据证明任一等待时间单独导致历史 TX 故障。
+
+方向三报告中关于 pclk / pclk_mac 资源名称及 MDC CSR clock source 的差异，属于 STMMAC platform resource / MDC 配置证据；方向四的 ACLK_GMAC1/PCLK_GMAC1 与 ACLK_USB/PCLK_USB 是 RK3568 CRU 总线 clock provider 层。命名相似不代表同一 clock handle 或同一硬件时钟，禁止将二者直接等同。
+
+方向三的四次 PHYCR2/BMCR MDIO workaround 写入差异继续作为方向三保留的 PHY 初始化候选；方向四不据此推断 regulator、PLL 或 RGMII GRF 写入的因果关系。
+
+### 8.4 版本端点和证据等级一致性
+
+方向二、方向三、方向四继续使用同一四版本比较矩阵：
+- 6.1.65：高置信度源码候选，未与历史 Image 精确绑定；
+- 6.1.116：源码比较端点，历史 Image source commit 绑定仍有限制；
+- 6.1.174-rk35xx：实际构建源码 c2f148dece4b67ebd30aefad1bdd1990f41e5633；
+- 6.12.81-rk35xx：已确认源码端点 661b2d8bf1284556f8876d5ed5fb80c64b22f94c。
+
+本轮未发现三个方向对上述样本身份的表述冲突。方向四的“本矩阵最早观察到于 c2f148d”仅表示四个锁定源码端点中的分组首次差异，不宣称上游真实引入版本或最早故障小版本。
+
+### 8.5 交叉审校结论
+
+- **未发现方向二与方向四的层级结论冲突。**
+- **未发现方向三与方向四的 reset / clock 概念可直接合并的依据；两组 delay 必须分别记录。**
+- **未发现四版本源码端点和来源证据等级冲突。**
+- **跨方向未决事项继续按原报告归属，不因引用而转移结项状态。**
+- 本节只完成一致性检查，不代表方向四已经完成所有原计划审计或正式结项。
+
+
 ## 7. 安全与范围声明
 
 - 不访问 Panther X2，不执行设备命令，不读写寄存器，不进行网络测试。
