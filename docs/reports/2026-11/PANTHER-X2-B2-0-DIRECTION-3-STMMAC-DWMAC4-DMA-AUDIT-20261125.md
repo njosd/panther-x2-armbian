@@ -52,38 +52,35 @@
 | D3-5 | RX descriptor/buffer/page-pool | 已完成（静态源码范围） | 四版本 RX refill/page-pool/DMA sync/OWN/status/NAPI 对照 |
 | D3-6 | DMA API/coherency/IOMMU | 已完成（静态源码/Kconfig/DTS 范围） | 四版本 DMA map/sync、ARM64 cache maintenance、DMA_NEED_SYNC/bounce、coherency/IOMMU 交叉矩阵 |
 | D3-7 | IRQ/NAPI/watchdog/recovery | 已完成（静态源码范围） | 四版本 IRQ status/NAPI schedule/timeout/recovery 对照 |
-| D3-8 | 总矩阵与一致性审校 | 进行中 | 汇总 D3-1～D3-7、核对范围/来源/结论一致性 |
+| D3-8 | 总矩阵与一致性审校 | 已完成（静态范围） | 四版本总矩阵、普通 DHCP 适用性和证据边界一致性审校 |
 
-## 5. 当前唯一工作项：D3-8
+## 5. 方向三总体结项状态（2026-11-25）
 
-D3-1 至 D3-6 已在配套报告中按静态源码范围结项。本轮当前只做 D3-7：核对 STMMAC IRQ registration/mask/unmask、NAPI schedule/complete、DMA abnormal/fatal bus error、watchdog 与 recovery；generic network-core 层的 NET_TX_SOFTIRQ 已在方向二完成，不重做。
-- 回读 D3-1～D3-7 报告与方向三总计划；
-- 建立四版本差异总矩阵，区分无条件差异、条件性差异、仅统计/API 变化与未验证运行时事项；
-- 逐项检查 6.1.174 使用实际构建 source_hash c2f148d，不混用 upstream stable 3f06ed3e；
-- 检查普通 DHCP/UDP 单 skb 的适用性结论与方向二结论是否一致；
-- 形成方向三结项评估，不自动启动方向四或 B2.1。
+D3-1～D3-8 已全部按原定顺序完成静态源码/Kconfig/DTS 审计。详细四版本矩阵和一致性结论见：
+PANTHER-X2-B2-0-DIRECTION-3-D3-8-SYNTHESIS-CLOSEOUT-20261125.md。
 
-回读 D3-1～D3-7 七份子项报告和方向二 §53/§55，建立总矩阵并做最终一致性审校。
+| 子项 | 结项要点 | 仍保留的证据限制 |
+|---|---|---|
+| D3-1 Probe/platform | pclk 与 MDC CSR clock source 的版本差异确认 | pclk_mac 实际频率、CSR divider、clock enable/refcount 未验证 |
+| D3-2 MDIO/PHY attach | MDIO parser 在 Panther 上等价；黄金版本有四次 PHYCR2/BMCR 写入，故障版本缺失 | 无 PHYCR2/BMCR readback、MDC/CLKOUT/RXC 波形；0x1801 Reserved bit 不应直接恢复 |
+| D3-3 DMA init | 黄金版本 reset 前有 1500ms delay，故障版本缺失；reset poll interval 10ms→0.5ms；DMA/AXI/PBL/channel 算法总体相同 | 无 reset status/完成时间、硬件 addr64 feature dump |
+| D3-4 TX descriptor | 6.1.65 TSO mapping first-descriptor 记录风险已在 6.1.116 修复；TX coalescing timer 1000→5000us | 无历史 TSO、NAPI/timer 触发和 ring-full 运行记录 |
+| D3-5 RX descriptor/page-pool | page-pool create/refill、DMA sync、RX OWN/status 主路径一致 | 历史 rx_dropped 具体来源和 NAPI budget trace 未知 |
+| D3-6 DMA API/coherency/IOMMU | streaming cache sync 四版本一致；GMAC1 无 dma-coherent/iommus；6.12 bounce 条件不命中普通 TX | 6.12 DMA_BOUNCE_UNALIGNED_KMALLOC 运行时值未单独核实；无历史 SWIOTLB counters |
+| D3-7 IRQ/NAPI/recovery | IRQ status、NAPI gate、timeout/global reset/per-channel recovery 顺序一致 | 缺 6.1.174 c2f148d 历史 IRQ/FBE/NAPI trace |
+| D3-8 总矩阵 | 四版本端点、适用条件、证据等级和方向二结论一致 | 不新增运行时证据 |
 
-### D3-1 结项结果（2026-11-25）
-- 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
-- 6.1.65/6.1.116 的关键 probe/resource 函数逐行一致；6.1.174-rk35xx 与 6.12.81 的变化及 Panther 分支适用性已记录。
-- pclk/pclk_mac 名称与 MDC CSR clock source 变化已确认；运行时频率、寄存器值和 enable/refcount 未验证，明确保留为运行时证据限制。
-- D3-1 已按静态源码范围结项，详见 PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md。
+### 方向三总体判断
 
-### D3-2 结项结果（2026-11-25）
-- 四版本 MDIO parser 在 Panther DTS 输入下得到相同的 MDIO bus、PHY node、bus_data 和 bus_id 结果。
-- 黄金版本 6.1.65/6.1.116 存在四次 PHYCR2/BMCR MDIO 写入，实际故障源码 6.1.174 c2f148d/6.12.81 缺失；P1 已有寄存器语义报告，本阶段只补齐精确四版本端点。
-- 6.1.174/6.12 的 mac_requires_rxc 及 PHY resume/attach 语义变化已记录；没有运行时 RXC/PHY 状态证据，不认定根因。
-- D3-2 已按静态源码范围结项，详见 PANTHER-X2-B2-0-DIRECTION-3-D3-2-MDIO-PHY-ATTACH-DIFF-20261125.md。
+- 最值得后续关联的是黄金版本保留、两个故障版本缺失的 JL2xx1 初始化补丁族：四次 MDIO 写入与 DMA SW reset 前 1500ms delay；另有 MDC CSR clock source 从 stmmac_clk 改为 pclk。
+- 这些差异可能影响 PHY 初始化和 DMA 启动时序，但没有现场 PHY register、clock、reset 状态证据，不能认定根因，也不直接提出恢复补丁。
+- 普通 DHCP/UDP IPv4 单 skb 的 TX mapping/cache clean、DWMAC4 descriptor、DMA IRQ/NAPI/recovery 主路径没有发现故障版本新增的无条件阻断回归。
+- 6.12-only coherent prep、unaligned kmalloc bounce、VLAN/TSO/EST/AF_XDP 等差异有明确触发条件，不可外推到普通 DHCP。
+- 6.1.174 所有结论均以实际构建 source_hash c2f148d 为准；旧 upstream stable 3f06ed3e 报告只作历史参考，不替代实际故障源码。
 
-### D3-3 当前结果（2026-11-25）
-- 6.1.65/6.1.116 在 stmmac_init_dma_engine() 的 DMA SW reset 前有 1500ms delay；实际 6.1.174 c2f148d/6.12.81 缺失。
-- dwmac4_dma_reset() 的 polling interval 从黄金版本 10ms 变为故障版本 0.5ms，timeout 均为 1s。
-- DWMAC4 DMA/AXI/channel init 算法总体相同；address map abstraction 对 Panther 使用 NULL default offsets。
-- DMA feature/address-width 软件逻辑已对照；硬件 feature register 实际值、DMA mask 成功状态及 platform PBL/AXI/queue 最终值未闭环。
-- D3-3 继续进行中；详细结果见 PANTHER-X2-B2-0-DIRECTION-3-D3-3-DWMAC4-DMA-INIT-DIFF-20261125.md。
-- 本轮没有设备访问、构建、安装、驱动/DTB/系统配置修改。
+**方向三状态：静态技术审计已完成，具备证据边界明确的结项条件，等待正式归档确认。** 不代表根因已确认，不代表 Panther X2 实机网络驱动通过；不自动启动方向四或 B2.1。
+
+本阶段未访问设备、未构建、未安装软件、未修改系统/驱动/DTB/网络配置，未执行任何网络实测。
 
 ## 6. 记录格式
 
