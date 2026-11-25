@@ -121,3 +121,29 @@ R1 构建完成后先审阅 config diff、对象符号、模块清单、Image �
 - 修正已提交功能分支，commit `dedb591b40bf76d30eb2cc4f36e0d49e4113f2b9`；同步到 main，commit `768e6748e40393fe5b03be78df04c93d37fabb54`。
 
 重要：不能对 Run 45596384034 使用 Re-run failed jobs 来验证这个修复，因为重跑仍使用旧的 workflow commit。必须新建一次 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，输入仍为 R0 Run ID `45309219886`。这是从失败步骤修正后重新启动；R0 artifact 会复用，不会重跑 R0，也不会访问设备或写卡。
+
+## 10. 第二次 Actions 运行与配置根因（Run 45598258364）
+
+Job `139149992105` 的源码准备步骤已全部通过：
+- R0 artifact 恢复及 .config/DTB 哈希核验 PASS；
+- 6.18.63 固定 commit fetch/checkout PASS；
+- B1 compatibility patch 检查和应用 PASS；
+- 进入 B1 + R1 merge_config 与 olddefconfig。
+
+失败发生在配置验收门：
+`Forbidden CONFIG_MDIO_BUS enabled`，最终收敛配置为 `CONFIG_MDIO_BUS=y`。Kernel build 和对象审计均未执行。该次上传 artifact `15013982661` 只含配置/日志等审计文件，不含可用 Image 或 modules。
+
+根因不是 R1 fragment 直接开启 MDIO，而是 B1 使用的广泛 Ophub seed 中仍保留多个网络设备选择项；B1 fragment 关闭网络总门控，但 seed 中的子系统选项仍在。R1 重新打开 `NETDEVICES` 与 `ETHERNET` 后，旧选择项重新参与 Kconfig：
+- `CONFIG_PHYLINK=y` 会 select `PHYLIB`，而 PHYLIB select `MDIO_BUS`；
+- `CONFIG_NET_DSA_REALTEK=m` 及 Realtek DSA 相关选项也留在 seed；
+- `CONFIG_SHORTCUT_FE=y` 由 Qualcomm Ethernet vendor group 暴露，并 select `NF_CONNTRACK*`，与 R1 禁止 IPv4/NETFILTER 的目标发生 unmet dependency warning；
+- 多个 `CONFIG_NET_VENDOR_*` 仍为 y，导致不必要的硬件驱动 Kconfig 子树重新可见。
+因此只检查 STMMAC/PHYLIB/MDIO_BUS 几个目标符号不足以证明 R1 是最小网络闭包。
+
+修正已提交到功能分支：
+- R1 fragment commit：`e7cb1449a5c0fbe687e8c4f8167ec82efe64b659`。新增显式关闭 DSA、Shortcut FE、PHYLINK/PHYLIB、MDIO、netdevsim/failover/netconsole/netpoll，以及全部 72 个 `CONFIG_NET_VENDOR_*` 厂商组。
+- workflow gate commit：`103d4e4b48c81d5a07a1b1f41145c286ae8bc251`，扩展禁止项检查。
+- workflow vendor gate 修正 commit：`70583a2efa288ac2b5e5c685ded5df342d4e901a`，通过 fragment 中列出的 vendor 符号逐项检查最终 .config，防止厂商组选项悄然恢复。
+- 当前 workflow 与 fragment 均已在功能分支更新；尚需同步 main 的 workflow 注册副本和主报告。
+
+下次 R1 运行必须是新的 workflow_dispatch（不能重跑旧 run），继续引用同一个 R0 Run ID `45309219886`。重点观察 olddefconfig 警告、全部 72 个 vendor group、MDIO/PHY/DSA/Shortcut FE gates。只有配置门全部通过后才允许编译。即使编译通过，R1 仍不代表有物理 TX 能力。
