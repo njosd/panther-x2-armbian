@@ -77,7 +77,7 @@
 
 这是对既有报告中仅突出 `PCLK_USB` 的补充修正：实际后期源码两个公共 USB clock 都增加了 critical 标记，不能只记录 PCLK。该差异仍属于 provider 注册/unused-clock 管理语义，尚无证据证明它改变 Panther GMAC1 正常运行时 gate 或 TX clock。
 
-两条 critical 分支必须分别解释：HCLK_USB 的 parent list 是 GPLL 派生时钟/XIN24M，与 GMAC1 已确认的 ACLK/PCLK parent chain 无直接关系；PCLK_USB 的 parent 是 aclk_usb，而 ACLK_GMAC1 也以 aclk_usb 为 parent、PCLK_GMAC1 以 pclk_usb 为 parent。因此 PCLK_USB critical 会在 provider 注册阶段保持 PCLK_USB 及其 ACLK_USB parent 的引用/启用状态，属于 GMAC1 共用上游时钟树的真实初始化差异。ACLK_USB 的四个候选 parent 为 GPLL300/GPLL200/GPLL100/XIN24M；Panther DTS 没有为 ACLK_USB 设置 assigned-clock-parent，因此历史实际选择未知。若其选择 GPLL，则后期 PCLK_USB critical 的注册期 enable 可能提前触发 GPLL enable callback；后期 GPLL callback 又从黄金版本的“清 PWRDOWN→wait lock→返回”变为“wait lock→切 NORMAL”，disable 前还切 SLOW。此为两项后期源码变化在同一条件下可能联动的路径，不是已证实的历史执行事实。若 ACLK_USB 选择 XIN24M，则该 GPLL callback 联动不成立。GMAC1 probe 正常 enable ACLK_GMAC1/PCLK_GMAC1 时也会递归启用对应父链，故不能仅凭源码推断 MAC active 后的 TX 时钟差异。它可能改变 GMAC probe 前的 early/unused-clock 状态和时钟引用基线，历史 parent/gate readback 缺失，仍需保留为未验证候选。HCLK_USB critical 则不在已确认的 GMAC1 parent chain 内，不应与 PCLK_USB 等同处理。
+两条 critical 分支必须分别解释：HCLK_USB 的 parent list 是 GPLL 派生时钟/XIN24M，与 GMAC1 已确认的 ACLK/PCLK parent chain 无直接关系；PCLK_USB 的 parent 是 aclk_usb，而 ACLK_GMAC1 也以 aclk_usb 为 parent、PCLK_GMAC1 以 pclk_usb 为 parent。因此 PCLK_USB critical 会在 provider 注册阶段保持 PCLK_USB 及其 ACLK_USB parent 的引用/启用状态，属于 GMAC1 共用上游时钟树的真实初始化差异。ACLK_USB 的四个候选 parent 为 GPLL300/GPLL200/GPLL100/XIN24M；Panther DTS 没有为 ACLK_USB 设置 assigned-clock-parent，因此历史实际选择未知。若其选择 GPLL 且 GPLL 当时 enable reference 为 0，则后期 PCLK_USB critical 的注册期 parent recursion 可能触发 GPLL enable callback；后期 GPLL callback 又从黄金版本的“清 PWRDOWN→wait lock→返回”变为“wait lock→切 NORMAL”，disable 前还切 SLOW。此为两项后期源码变化在同一条件下可能联动的路径，不是已证实的历史执行事实。若 ACLK_USB 选择 XIN24M，则该 GPLL callback 联动不成立。GMAC1 probe 正常 enable ACLK_GMAC1/PCLK_GMAC1 时也会递归启用对应父链，故不能仅凭源码推断 MAC active 后的 TX 时钟差异。它可能改变 GMAC probe 前的 early/unused-clock 状态和时钟引用基线，历史 parent/gate readback 缺失，仍需保留为未验证候选。HCLK_USB critical 则不在已确认的 GMAC1 parent chain 内，不应与 PCLK_USB 等同处理。
 
 ### 4.3 Panther DTS 的 GMAC1 关键输入
 
@@ -342,6 +342,15 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 - 6.12.81-rk35xx：已确认源码端点 661b2d8bf1284556f8876d5ed5fb80c64b22f94c。
 
 本轮未发现三个方向对上述样本身份的表述冲突。方向四的“本矩阵最早观察到于 c2f148d”仅表示四个锁定源码端点中的分组首次差异，不宣称上游真实引入版本或最早故障小版本。
+
+### 8.6 GPLL 是否自身 critical：条件链的进一步排除
+
+再次核对四版本 RK3568 CRU PLL descriptor：
+- GPLL descriptor 四版本的 flags 均为 0，GPLL 自身没有 CLK_IS_CRITICAL；
+- NPLL 在 6.1.65/6.1.116 flags 为 0，在 c2f148d/6.12.81 增加 CLK_IS_CRITICAL；NPLL 不属于 ACLK_USB 已确认的 parent candidates；
+- 因而不能以“GPLL 自身已被 critical 保持”为理由排除 PCLK_USB parent recursion；但也不能据此断言 PCLK_USB 注册必然触发 GPLL callback。
+
+更精确的条件是：若 PCLK_USB 注册时实际 parent chain 选中 GPLL，且当时 GPLL 的 CCF enable reference 尚为 0，则 parent recursion 的 0→1 transition 会触发对应 GPLL enable callback；若 GPLL 已由其他 consumer 持有 enable reference，则不会因 PCLK_USB 注册再次执行 0→1 callback。历史 enable_count、ACLK_USB mux readback 与 provider 注册时序均缺失，因此该路径仍为条件性推论。
 
 ### 8.5 交叉审校结论
 
