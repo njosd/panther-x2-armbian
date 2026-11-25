@@ -52,6 +52,8 @@
 - 6.1.116 stmmac_main.c 的 stmmac_clk_csr_set() 约第 304 行按 priv->plat->stmmac_clk 的频率计算 MDC CSR divider；6.1.174 c2f148d 约第 321 行改为按 priv->plat->pclk；6.12.81 约第 306 行同样按 priv->plat->pclk。
 - 因此 6.1.174/6.12.81 的 MDC divider 输入时钟来源与 6.1.65/6.1.116 不同，而且新的 pclk_mac 名称与 Panther SoC DTSI 匹配。该变化直接涉及 MDIO MDC 时钟配置，不是 Ethernet 数据帧 TX descriptor 路径。
 
+进一步确认调用条件：Panther DTS 没有提供 snps,clk-csr，platform parser 将 plat->clk_csr 保持为默认 -1；6.1.116 stmmac_main.c 约第 7326–7329 行、6.1.174 c2f148d 约第 7601–7604 行、6.12.81 约第 7811–7814 行均会进入 stmmac_clk_csr_set() 动态选择分支。因此 pclk/stmmac_clk source 的差异不是被固定 CSR 属性绕过的死分支，而是实际源码会执行的分支。
+
 边界：本项只确认 DTS clock-name、platform parser 的获取名称、stmmac_clk_csr_set() 选择的 clock handle 来源。尚未确认各版本运行时 pclk_mac 的实际频率、clock enable/refcount 交接及最终 CSR divider 寄存器值；这些需要既有 Rockchip glue 证据和后续对应阶段交叉核对。不得仅凭静态代码认定它造成 DHCP/TX 故障。已知 6.1.174/6.12.81 曾能识别 RTL8211F 并建立 1Gbps link，这说明 MDIO 初始化并非完全失效，但不能证明 MDC divider/时序在所有场景等价。
 
 ## 5. 本项结论与状态
