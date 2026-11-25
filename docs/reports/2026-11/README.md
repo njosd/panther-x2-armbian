@@ -52,6 +52,9 @@
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
 
+- [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：已完成 Actions artifact 实体哈希、最终 .config、DTB 资源隔离和 BusyBox ash 实机启动证据核验，R0 PASS。
+- [B2-1 / R1：最小网络核心准备与验收（2026-11-25）](./PANTHER-X2-B2-1-R1-NETWORK-CORE-PREFLIGHT-20261125.md)：只启用 NET/NETDEVICES/NET_CORE/ETHERNET/PACKET，不启用 IPv4、MAC/PHY 驱动；待 Actions 构建和对象审计。
+
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
