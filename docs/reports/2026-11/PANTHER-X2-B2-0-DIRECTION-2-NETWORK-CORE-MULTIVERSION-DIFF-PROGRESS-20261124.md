@@ -1923,3 +1923,67 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 6.1.65 与 6.1.116 在 NET_TX_SOFTIRQ 的 completion_queue/output_queue 处理顺序、qdisc schedule/reschedule、IRQ-context skb 延迟释放入队及 qdisc 重新运行路径上没有发现差异。6.1.174 与 6.12.81 的已有变化分别为 qdisc packet budget、softirq 回调 API 和 skb drop-reason/free helper 演进，均未发现改变 generic output_queue 调度职责或将 completion_queue 变成硬件 DMA completion 的证据。
 
 **本项结项：** §24 的 6.1.65 候选源码回溯完成。至此 §3～§24 已有 6.1.65 候选源码覆盖补齐；但这不代表方向二已完成：仍须复核 §25.5 之外可能存在的原始方向二剩余任务，特别是 §26 TX 统计/drop reason/Kconfig 的 6.1.65 真实配置缺口与四版本符号映射，并检查是否存在尚未列入 §3～§24 的网络核心子项。
+
+
+## 45. 回读 B2-0 原始路线与方向二剩余任务清单（2026-11-25）
+
+### 45.1 原始路线与阶段边界复核
+
+回读以下仓库原始文档：
+- PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md：B2 定义为板载有线千兆网口分层验证；B2.1 工具范围、B2.2 单项顺序为接口/link → 启用 → 静态 IPv4 → 路由 → ARP/邻居 → 同网段 ICMP → 网关 ICMP → 可选外部 IP 路由；B2.3 规定通过标准。B3 才是 TCP/UDP 端到端验证。
+- PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md：要求先完成网络协议栈、MAC/GMAC、MDIO、PHY/PCS 及共享依赖的静态独立变更集审计，再按单变量顺序引入；B2 实机阶段必须在 B1 通过后，且每项单独执行。
+- 本方向二进度报告 §1、§2、§7、§25.5：方向二严格是 B2-0 的 Linux 网络核心多版本源码/Kconfig/已有配置静态审计；四个代表版本固定为 6.1.65、6.1.116、6.1.174、6.12.81。方向三 STMMAC/DWMAC4/DMA、后续 Rockchip GMAC glue/CCF/CRU，以及 B2.1/B2.2/B3 实机验证均不属于本轮。
+
+### 45.2 已按原顺序完成的网络核心子项
+
+以下不是新专题，而是原进度报告已列明并逐项补入 6.1.65 高置信度候选源码/原始配置后的状态：
+
+| 原报告章节 | 网络核心子项 | 当前状态 |
+|---|---|---|
+| §3 | NET/INET Kconfig、网络初始化、loopback | 四端点候选源码覆盖；6.1.65 实际配置已映射 |
+| §4 | IPv4 output、IP append、generic TX 前置 helper | 四端点候选源码覆盖 |
+| §5 | NAPI skb allocator、GRO/shared-frag | 复用既有报告并补齐 6.1.65 |
+| §8 | checksum、fragment helper、UDP GSO/splice | 四端点候选源码覆盖 |
+| §9 | netdevice feature、ARP/neighbour output、route key | 四端点候选源码覆盖 |
+| §11 | RX dispatch、IPv4 input、UDP receive | 四端点候选源码覆盖 |
+| §12 | 网络核心 Kconfig 符号与实际配置映射 | 6.1.65 原始配置已补齐；6.12 保留候选模板边界 |
+| §14 | AF_PACKET、VLAN/bridge RX、Netfilter ingress | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §16 | IPv4 conntrack/NAT hook、filter/NAT 注册 | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §18 | IPv4 header checksum、defrag、fragment/local delivery | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §19 | FIB trie、policy routing、route lookup | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §20 | ARP RX 与 neighbour NUD 状态机 | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §21 | UDP sendmsg、IP skb 构造/追加 | 四端点候选源码覆盖 |
+| §22 | TX queue、qdisc、validate、ndo_start_xmit 边界 | 四端点候选源码与 6.1.65 实际配置已补齐 |
+| §23 | TX queue stop/wake、BQL、watchdog、skb consume/free | 四端点候选源码覆盖；补出 6.1.65→6.1.116 内存序差异 |
+| §24 | NET_TX_SOFTIRQ、qdisc reschedule、completion_queue、TX trace | 四端点候选源码覆盖 |
+| §26 | TX 统计、generic tx_dropped、drop reason、BQL/NET_DROP_MONITOR Kconfig | 四端点源码筛查已完成；最终配置层保留明确缺口 |
+
+§6、§7、§10、§13、§15、§17、§25 是阶段结论、覆盖摘要或修订顺序，不是遗漏的独立源码专题。§27～§44 是对上述原有子项的证据补齐记录，不是擅自新增方向。
+
+### 45.3 方向二仍未闭环的事项（按证据依赖顺序）
+
+1. **源码身份等级仍有限制。**
+   - 6.1.65 的 4428b96f... 仍是高置信度候选源码端点，原始 Image 与 Actions checkout SHA 尚未建立可验证绑定；本轮不能将候选函数比较升级为“原始二进制精确源码证明”。
+   - 6.1.116 的源码比较端点已固定，但原始 Image/安装包精确 source commit 仍未闭环。
+   - 6.1.79、6.1.112 是辅助正常实机样本；没有精确源码端点，不能凭版本号插入四版本矩阵。它们不是当前四个核心代表样本，也不应阻塞已定义四样本子项的静态比较。
+2. **最终配置资产仍有缺口。**
+   - 6.1.174 官方包内 config-6.1.174-rk35xx-ophub 已有资产 SHA256，但本报告尚未从该原始文件逐项补录 CONFIG_BQL、CONFIG_NET_DROP_MONITOR 等值。
+   - 6.12.81 尚未取得可逐项核对的完整最终配置；现有 RK35xx config-6.12 是候选模板。历史报告所记录模板 blob SHA 966f4b6a... 与本轮候选模板 6c7714f5... 不同，必须先核对模板快照身份，不能直接互相替代。
+   - 6.1.65 的 CONFIG_NET_DROP_MONITOR 行未找到；保持“未找到配置行”，不擅自写成 n。
+3. **6.12 unreadable-fragment 条件的历史可达性未证明。**
+   - 源码已确认 skb->unreadable 在 net_iov backing memory 路径形成，并在 generic validate_xmit_skb() 入口构成 TX drop 门。
+   - 但现有历史证据没有证明 6.12.81 故障窗口的 DHCP skb 曾带 net_iov/unreadable fragment。不能从 CONFIG_NET_DEVMEM 的候选模板值推断运行时发生过该路径。
+   - 该问题只能用已经归档的历史 skb/运行证据判断；本轮不访问设备、不创建探针、不启用 tracing。
+4. **方向二范围完整性最后复核尚未执行。**
+   - 当前已逐项覆盖原方向二进度报告 §3～§24 与 §26 明确列出的 Linux 网络核心子项。
+   - 回读的主路线图/实施计划没有另列一份比该进度报告更细的“方向二剩余子项”列表。不能为了填充待办而擅自新增 IPv6、TCP、socket memory 等专题；若原始 B2-0 组件差异账本中存在额外明确项目，必须先从原文找出并按其顺序执行。
+
+### 45.4 下一步执行顺序
+
+不切换方向、不做实机操作。下一步按现有证据链顺序：
+1. 先从已归档 6.1.174 官方包配置资产补录 §26 最终配置值（只读）；如文件内容不可从现有资产接口读取，记录阻塞原因，不改用候选模板冒充。
+2. 再核对 6.12.81 两个候选 config 模板 blob SHA 的来源差异，并确认是否有可读取的最终配置资产；没有则保留缺口。
+3. 回读原始 B2-0 组件差异账本，确认是否另有明确列出的网络核心子项；只执行原文明确存在且尚未完成的条目。
+4. 最后更新方向二总矩阵：分别标注源码候选/精确来源、实际配置/候选模板、函数级差异、是否命中普通 DHCP/UDP TX。满足证据条件后再讨论方向二是否可以结项；在此之前方向二状态保持“进行中”。
+
+**当前状态：方向二未结项。** 本轮已完成 §3～§24 的 6.1.65 候选端点回溯和 §26 已定义源码差异筛查；剩余工作是最终配置资产闭环、来源等级核验，以及查明原始 B2-0 组件差异账本是否另有未列入 §3～§24 的明确网络核心子项。方向三、B2.1/B2.2/B3 均未启动。
