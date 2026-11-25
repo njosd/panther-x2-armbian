@@ -1538,3 +1538,35 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 | `skb_segment()` | GSO partial 旧实现 | 增加长度上限处理 | shared-frag 传播修正 | 延续并演进 |
 
 **结论：** 本项补齐了 §5 的 6.1.65 候选源码比较。NAPI allocator 在两条 6.1 黄金/故障线之间没有发现变化；GRO/shared-frag 变化有明确接收聚合或 GSO 分段适用条件，当前不命中普通 DHCP 小 UDP TX。仍按 §25.5 顺序继续后续章节，不提前进入方向三。
+
+
+## 32. §8 checksum / fragment / UDP GSO：补入 6.1.65 候选源码端点（2026-11-25）
+
+### 32.1 四端点函数补查
+
+本次只读比较：
+- `net/ipv4/udp.c`：`udp4_hwcsum()`、`udp_send_skb()`；
+- `net/core/dev.c`：`skb_checksum_help()`、`skb_csum_hwoffload_help()`；
+- `include/linux/skbuff.h` / `net/core/skbuff.c`：fragment readable/netmem helper 与 `skb_segment()`；
+- `net/Kconfig`：`NET_DEVMEM` 入口。
+
+### 32.2 UDP checksum 与普通 UDP datagram
+
+- `udp4_hwcsum()` 四端点函数体一致；6.1.65 与 6.1.116 黄金基准没有 UDP IPv4 checksum 生成差异。
+- `udp_send_skb()`：6.1.65 与 6.1.116 函数体一致；6.1.174 的变化集中在 `cork->gso_size` 非零的 UDP GSO 长度/MTU 错误处理分支；6.12 继续调整 UDP GSO 条件分支。普通非 GSO UDP datagram 的 checksum 与最终 IP 提交路径未发现本项新增差异。
+- `skb_checksum_help()`：6.1.65、6.1.116、6.1.174 一致；6.12 增加 unreadable-fragment 保护，只有 skb 标记为 unreadable 且进入软件 checksum fallback 时相关。
+- `skb_csum_hwoffload_help()`：6.1.65 与 6.1.116 有差异；已定位为 IPv6 extension/jumbo-header checksum offload 判定调整，不适用于 IPv4 DHCP。6.1.174 延续相应变化。
+- `skb_frags_readable()` / `__skb_fill_netmem_desc()` 与 `NET_DEVMEM` 均为 6.12 新增机制；前三个 6.1 端点不存在这些接口/配置入口。6.12 `NET_DEVMEM` 依赖 `DMA_SHARED_BUFFER`、`GENERIC_ALLOCATOR`、`PAGE_POOL`，定义为 `def_bool y`。6.1.65 实际 config 未出现这些新符号，符合该源码时代不存在 NET_DEVMEM 的事实。
+
+### 32.3 GSO / fragment 处理边界
+
+`skb_segment()` 在 6.1.65 与 6.1.116 已有 GSO partial 长度上限处理差异；6.1.174 进一步修正 `SKBFL_SHARED_FRAG` 标记传播，6.12 延续演进。该函数处理 GSO skb 分段；普通小型 DHCP UDP datagram 不属于 GSO skb，不能把这些差异外推为普通 UDP checksum 或发送回归。
+
+### 32.4 本项结论
+
+1. 两条黄金基准的普通 UDP IPv4 checksum helper `udp4_hwcsum()` 和 `udp_send_skb()` 主体一致。
+2. 6.1.65→6.1.116 的 checksum offload helper 差异限于 IPv6 extension/jumbo header 分支，不命中 IPv4 DHCP。
+3. 6.1.174 的 UDP GSO 改动和 shared-frag/GSO segment 差异有明确特殊条件，不构成普通非 GSO UDP 的已证实回归。
+4. 6.12 新增 unreadable net_iov fragment 的 generic TX 拒绝门已在 §22 记录；它与普通 UDP 用户数据构造不同，当前没有历史 DHCP skb 使用 net_iov fragment 的证据。
+
+**本项结项：** §8 中 6.1.65 候选源码端点的 checksum、UDP GSO 与 fragment helper 对照已补齐。方向二仍进行中；下一项严格按原报告顺序转到 §9 netdevice feature negotiation、ARP/neighbour output 与 IPv4 route key 的 6.1.65 回溯，不跳过章节。
