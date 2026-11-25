@@ -150,7 +150,7 @@ G1 未通过时，不允许用 6.1.65 的正常网络结果代替 B1 验收，�
 - iMac 或另一台局域网终端使用现有抓包能力，在指定接口观察并过滤该 EtherType，记录时间、源/目标 MAC、序列号、长度及帧数量。对端抓包不要求 Panther 启用 promiscuous mode。
 - 每个序列号必须由对端实际捕获并核对；仅 Panther TX counter 增长、驱动返回发送成功、DMA descriptor 完成或 PHY link up 均不构成通过。
 - 先用另一台已知正常设备向同一对端发送相同格式测试帧，确认对端抓包路径、交换机广播域和过滤规则有效；这是测试夹具校验，不改变 Panther。
-- 优先单独构建专用 C 测试程序，不为此引入完整 iproute2、DHCP/DNS 客户端、NetworkManager 或 tcpdump 到 Panther。
+- 发送进程须具备 `CAP_NET_RAW`（测试 RAM 系统以 root 运行即可），优先单独构建专用静态 C 测试程序；确认 libc/静态链接依赖后再冻结产物，不为此引入完整 iproute2、DHCP/DNS 客户端、NetworkManager 或 tcpdump 到 Panther。
 
 ### 4B.2 TX-only 的技术边界
 
@@ -196,19 +196,19 @@ Linux 标准网卡发送路径至少需要网络核心、net_device、Ethernet f
 
 ### R1 — Linux 网络核心
 
-**目标配置范围：** 以 6.18.63 精确 Kconfig 为准，审查并逐步满足 `NET`、`INET`、`NETDEVICES` 及实际必要 generic network-core 依赖。
+**目标配置范围：** 以 6.18.63 精确 Kconfig 为准，先审查并逐步满足最小 Ethernet 发送路径所需的 `NET`、`NETDEVICES`、Ethernet 核心和 `PACKET`（AF_PACKET）依赖。`INET`/IPv4 不属于首轮 TX 测试前置项，必须留到 TX-PASS 后的 R8-IPv4 子阶段单独引入。
 
 **边界：**
 - GMAC1/MDIO/PHY DTB 节点继续 disabled；
 - 不启用 STMMAC、DWMAC4、Rockchip GMAC glue 或 RTL8211F；
-- 不添加 DHCP、DNS、SSH、ping、tcpdump 或完整 iproute2；
+- 首轮不启用 `INET`/IPv4，不添加 ARP、ICMP、DHCP、DNS、SSH、ping、tcpdump 或完整 iproute2；
 - B1 已存在的共享 SoC provider 不随网络核心一起改动。
 
 **静态核验：** 精确记录每个新增符号的 depends/select/choice 关系、相关对象文件和最终 `.config` 差异。确认 B1 no-NET 兼容补丁在 `CONFIG_NET=y` 下的条件分支；不要把删除补丁与 NET 启用捆绑。如确需删除，另立单独变更。
 
 **唯一变量：** 网络核心配置及其不可拆分的最小 Kconfig 依赖闭包。
 
-**通过标准：** 配置收敛无 unmet dependency；构建成功；网络核心对象与预期一致；最终配置差异仅限批准闭包；GMAC/MDIO 仍未 probe。
+**通过标准：** 配置收敛无 unmet dependency；构建成功；最小 Ethernet/packet socket 发送所需对象与预期一致；最终配置差异仅限批准闭包；`INET`/IPv4 尚未启用；GMAC/MDIO 仍未 probe。此处仅为 TX 基础组件准备通过，不是 TX 实测通过。
 
 **失败/停止：** Kconfig 无法收敛、构建失败、意外引入网卡驱动/无线功能或其他无关对象时停止，保留日志，不进入 R2。
 
@@ -325,7 +325,7 @@ Linux 标准网卡发送路径至少需要网络核心、net_device、Ethernet f
 **固定递进顺序：**
 1. RX 基础接收：先从对端向 Panther 发送带固定 EtherType/序列号的测试帧，证明帧到达 Panther MAC/RX DMA，并由驱动计数或最小内核观察点确认；不先加入 IP。
 2. 二层协议处理：仅加入/验证所需 Ethernet protocol dispatch；再单独验证 ARP 请求/应答及邻居解析。
-3. IPv4：单独启用/验证 IPv4 地址和本机协议处理；先同网段，不配置默认路由。
+3. IPv4：此时才单独引入 `INET`/IPv4 配置，验证 IPv4 地址和本机协议处理；先同网段，不配置默认路由。
 4. ICMP：单独验证同网段双向 ping；每次请求/响应都由两端证据确认。
 5. 网关与路由：单独加入路由配置，再验证 hEX 网关；通过后才测已知外部 IP。
 6. TCP 与 UDP：分别独立验证连接/报文及双向 payload，不能合并为一次通过。
