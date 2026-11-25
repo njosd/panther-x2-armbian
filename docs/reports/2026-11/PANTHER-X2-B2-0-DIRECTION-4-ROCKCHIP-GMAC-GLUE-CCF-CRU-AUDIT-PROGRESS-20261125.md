@@ -102,12 +102,12 @@
 | 审计领域 | 状态 | 说明 |
 |---|---|---|
 | 历史报告/禁止重复项清点 | 已完成第一轮 | 已回读八份相关报告；仍需与 B2-0 原始任务顺序核对 |
-| 四版本 `dwmac-rk.c` clocks enable / powerup 主路径 | 已完成第一轮 | 6.1.65 与 6.1.116 文件 blob 相同；两故障源码分组差异已确认 |
+| 四版本 `dwmac-rk.c` clocks enable / powerup 主路径 | 已完成第一轮 | clocks enable 差异已确认；probe/setup/power handoff 的实际 RGMII 路径已补核，见 §6.3 |
 | 四版本 GMAC1 CRU mux/divider/gate | 已完成第一轮 | 专属定义一致；PCLK_USB critical flag 为两黄金/两故障分组差异 |
 | Panther 四版本 GMAC1 DTS 关键时钟输入 | 已完成第一轮 | 形成两组相同 blob，RGMII input 主配置语义一致 |
 | 四版本 CRU reset ID / reset controller 精确核对 | 已完成（源码静态范围） | 四版本 ID 236、provider 注册参数与映射一致；另发现 STMMAC core 10µs delay 的版本差异，见 §6.1 |
 | RK3568 CCF/PLL provider 与父链回调 | 已完成第一轮 | 6.1.65/6.1.116 PLL provider blob 相同；c2f148d/6.12.81 使用后期 mux 切换实现，见 §6.2 |
-| 最终四版本差异矩阵与一致性审校 | 待完成 | 以上完成后再汇总，不提前结项 |
+| 最终四版本差异矩阵与一致性审校 | 待完成 | 已补齐 glue 实际路径与 RGMII callback 四版本核对；仍需整合证据等级、排除项与报告一致性 |
 
 本轮完成 reset ID/provider 的四版本闭环，并补齐 6.1.65 的 CCF/PLL 对照。下一步进入方向四总矩阵的一致性审校；不再重复 CRU reset ID 计算或 PLL provider 函数审计。
 
@@ -170,6 +170,79 @@ c2f148d / 6.12.81 还将 NPLL 标记为 `CLK_IS_CRITICAL`，而 6.1.65 / 6.1.116
 - **已验证：** CCF mux/common 引用计数机制没有与上述差异同源的新增回归。
 - **未验证：** 故障启动时 ACLK_USB 实际 parent、PLL wrapper mode、PLL callback 实际调用次数与时间。
 - **定级：** PLL provider 差异是后期 BSP 分组变化，不能单凭静态代码证明影响 Panther GMAC TX；不安排设备读取或实机验证。
+
+
+## 6.3 Rockchip glue probe / setup / power handoff 四版本实际路径复核（2026-11-25）
+
+### 6.3.1 Panther 实际命中的设备与 PHY 条件
+
+四版本 Panther DTS 的 GMAC1 节点内容一致（SoC DTS blob 分组已见 §3）：
+- compatible = "rockchip,rk3568-gmac"，命中驱动 rk3568_ops；
+- phy-mode = "rgmii"，命中 plain RGMII case；
+- clock_in_out = "input"；
+- tx_delay = <0x30>、rx_delay = <0x10> 均显式提供，setup 中的缺省 delay 值不命中；
+- phy-supply = <&vcc_3v3>；
+- phy-handle = <&rgmii_phy1>，PHY 节点为标准外接 Clause 22 PHY，未声明 phy-is-integrated；
+- rockchip,grf 与 reset GPIO 等板级资源在 DTS 中提供。
+
+因此下文只把 plain-RGMII、外部 PHY、clock-input 分支作为实际路径。Integrated PHY、RMII、SGMII/QSGMII 和缺省 delay 分支均不作为 Panther 当前路径结论。
+
+### 6.3.2 probe 与 setup 的分组差异及适用性
+
+- 6.1.65 / 6.1.116：dwmac-rk.c blob 完全相同，probe 顺序为 match → resources → stmmac_probe_config_dt() → rk_gmac_setup() → clock init → powerup → stmmac_dvr_probe()。
+- c2f148d：probe 增加 sph_disable、get_eth_addr、integrated_phy_power 等 platform-data 设置，调用 rk_gmac_csu_init()，并创建 loopback sysfs；这些是后期 glue 功能变化。对 Panther 当前外接 PHY/plain-RGMII 路径，integrated-PHY 专属处理不命中；SPH 和 MAC address source 不等同于 RGMII TX clock/data path；CSU 处理已由既有 CSU 报告覆盖，不重复扩展。
+- 6.12.81：延续上述后期 probe 结构，使用 devm_stmmac_probe_config_dt() 与 STMMAC_FLAG_SPH_DISABLE；这些差异不改变 Panther DTS 的 RGMII 选择条件。
+- c2f148d 与 6.12.81 的 setup 增加/扩展了对 GRF handle 的处理；6.12.81 对 rockchip,grf lookup 失败会直接返回错误，c2f148d 的对应路径仍以旧式 handle 检查/回调处理。Panther 四版 DTS 均提供 GRF phandle，静态 DTS 不显示缺失，因此不能把该错误路径作为当前已发生故障的解释。
+
+### 6.3.3 regulator 与 runtime-PM handoff
+
+四版本 rk_gmac_phy_power_on() 的错误处理语义相同：
+- 调用 regulator_enable() / regulator_disable()；
+- 失败时只输出错误日志；
+- 函数最终仍返回 0。
+
+因此 regulator enable/disable 失败会被 glue helper 屏蔽，rk_gmac_powerup() 不会因 regulator helper 返回值获知该失败。这是四版本共同存在的错误传播弱点，不是 6.1.116→6.1.174 新增差异。四版本 rk_gmac_powerup() 也均调用 pm_runtime_get_sync() 而不检查其返回值；该点同样是共同风险，不可归为后期单独回归。
+
+四版本外部 PHY 路径的主 handoff 顺序均为：
+1. rk_gmac_check_ops()；
+2. GMAC clocks enable；
+3. plain-RGMII callback 写入 GRF interface/delay；
+4. rk_gmac_phy_power_on(..., true)；
+5. pm_runtime_get_sync()；
+6. stmmac_dvr_probe()。
+
+当 regulator helper 返回失败时，当前代码仍会继续 runtime-PM get 与 STMMAC probe。现有历史记录没有 regulator return code 或电源轨测量，不能推断历史启动时确实发生过失败。
+
+### 6.3.4 probe 错误回滚边界
+
+四版本在 rk_gmac_powerup() 失败时均通过 probe 错误路径移除 DT config；若 stmmac_dvr_probe() 失败，则调用 rk_gmac_powerdown()。后期版本增加 loopback sysfs 创建/清理步骤；这不是正常网络收发路径。早期与后期 devm_stmmac_probe_config_dt() 资源管理差异需结合 STMMAC core 生命周期看待，不应简单视为 GMAC TX 差异。
+
+### 6.3.5 本子项结论
+
+- **已验证：** 四版本 Panther 都命中 rk3568_ops 的 plain-RGMII、外部 PHY、clock-input 路径；显式 delay 值使 setup 缺省值分支不适用。
+- **已验证：** 6.1.65 与 6.1.116 的 glue 文件完全相同；c2f148d/6.12.81 有后期 probe 功能扩展。
+- **已验证：** regulator helper 屏蔽 regulator enable/disable 错误、runtime-PM get 返回值未检查，是四版本共有弱点，不是故障版本新增差异。
+- **未验证：** 历史 regulator 操作返回值、PM runtime 实际状态、GRF 写入返回值与运行时寄存器状态。
+- **定级：** 未发现 probe/handoff 顺序在 6.1.116→c2f148d 之间整体重排；共同错误传播弱点不能解释版本分组回归，保留为代码风险背景。
+
+## 6.4 RK3568 RGMII callback 写寄存器顺序：四版本补齐
+
+既有 2026-11-19 报告已比较 6.1.116 与 6.12.81。本轮补齐 6.1.65 与实际故障源码 c2f148d：
+- 6.1.65 / 6.1.116：rk3568_set_to_rgmii() 先写 GMAC1_CON0 的 delay 数值，再写 GMAC1_CON1 的 RGMII interface 与 RX/TX delay enable。
+- c2f148d / 6.12.81：先写 GMAC1_CON1 的 interface 与 delay enable，再写 GMAC1_CON0 的 delay 数值；后期实现通过 DELAY_ENABLE() / DELAY_VALUE() 宏支持负值 sentinel。
+
+Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择的 RGMII interface、delay 数值及 RX/TX delay enable 语义相同；差异在寄存器写入顺序。该顺序变化首次出现在本矩阵的故障源码 c2f148d 相对黄金基准 6.1.116，因此是一个真实的版本回归候选，不能因最终值相同而删除。
+
+但四版本 rk_gmac_powerup() 都先完成 clocks enable，再执行 RGMII callback，之后才打开 PHY regulator。没有 GRF 总线事务时间、PHY 上电瞬间波形或 RGMII 信号测量，故尚不能判断“先 enable、后写 delay”是否导致外部 PHY 可见异常。沿用既有报告的低至中优先级，不升级为根因结论。
+
+## 6.5 本轮总判断与后续审校任务
+
+本轮补核没有发现四版本 probe/powerup 主流程整体重排，也没有发现 regulator helper 的错误传播语义在故障版本发生变化。实际版本差异仍集中于：
+1. clocks enable API、错误检查与稳定等待（§4.1）；
+2. RGMII GRF 两寄存器写入顺序（§6.4）；
+3. 相关 CRU/CCF provider 变化及其尚未证实的调用条件（§6.2）。
+
+下一步只做方向四最终矩阵一致性审校：统一所有差异的首次出现版本、适用分支、证据等级和“已验证/未验证”措辞；检查本报告与既有专题报告之间的版本端点和结论边界。方向四仍不结项。
 
 
 ## 7. 安全与范围声明
