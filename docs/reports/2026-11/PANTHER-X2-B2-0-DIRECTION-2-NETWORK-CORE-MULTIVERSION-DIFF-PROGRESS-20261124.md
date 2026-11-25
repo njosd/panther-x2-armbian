@@ -1002,3 +1002,95 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 5. 至此方向二 TX 通用网络核心已覆盖到驱动调用封装、队列流控、watchdog 与 skb completion/free 边界；但方向二整体仍需按原计划核对剩余网络核心子项，不能据此宣布方向二结项，也不提前进入方向三。
 
 本轮仅做固定源码端点静态比较；没有构建、修改配置、执行设备操作或实机网络试验。
+
+## 24. 本轮追加核验：NET_TX_SOFTIRQ、qdisc reschedule、completion_queue 与 TX trace
+
+本轮继续按 TX 方向核对第 23 节之后的软中断调度和 skb 延迟释放路径，重点确认 `NET_TX_SOFTIRQ` 的两条工作队列分别承担什么职责，以及 6.12 的改动是否可能影响普通 UDP 报文继续进入 qdisc/驱动。
+
+固定源码端点仍为第 2 节的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
+- `net/core/dev.c`：`net_tx_action()`、`__netif_schedule()`、`__netif_reschedule()`、`netif_schedule_queue()`、`netif_schedule()`、`netif_tx_wake_queue()`，以及 IRQ-context skb free helper；
+- `net/sched/sch_generic.c`：`qdisc_run()`、`__qdisc_run()`、`qdisc_restart()`、`dequeue_skb()`；
+- `kernel/softirq.c`：softirq dispatch/raise 框架；
+- `include/trace/events/net.h`、`include/trace/events/skb.h`：TX 与 skb free/consume tracepoint。
+
+### 24.1 NET_TX_SOFTIRQ 的两个队列不可混为一谈
+
+三版 `net_tx_action()` 均按顺序处理当前 CPU 的 `softnet_data`：
+1. `completion_queue`：取出 IRQ-context 延迟释放的 skb，完成 trace 后释放 skb backing resources；
+2. `output_queue`：取出被标记为需要调度的 qdisc 链表，清除 qdisc scheduled bit 并调用 `qdisc_run(q)`；
+3. 处理 XFRM device backlog。
+
+必须明确：**completion_queue 不是网卡 TX DMA completion ring，也不负责 reclaim TX descriptor。** 它是 skb 生命周期的延迟 free/consume 队列。真正的硬件 TX completion、descriptor 回收及 DMA unmap 由具体网卡驱动的 IRQ/NAPI 路径处理，不属于本轮 generic softirq 的 completion_queue。
+
+### 24.2 qdisc reschedule 到 NET_TX_SOFTIRQ 的触发链
+
+三版以下 helper 函数体一致：
+- `__netif_schedule()` / `netif_schedule()`：通过 `test_and_set_bit(__QDISC_STATE_SCHED)` 避免重复排队；
+- `__netif_reschedule()`：在本地 IRQ 保护下，将 qdisc 追加到当前 CPU 的 `softnet_data.output_queue`，更新 tail pointer，并调用 `raise_softirq_irqoff(NET_TX_SOFTIRQ)`；
+- `netif_schedule_queue()`：仅在 TX queue 未 stopped 时取出 qdisc 并 schedule；
+- `netif_tx_wake_queue()`：只有成功清除 driver XOFF 状态时才重新 schedule qdisc。
+
+`net_tx_action()` 从 output_queue 摘取链表时，三版都先在关闭本地 IRQ 的短临界区内摘取并重置 tail pointer，再在 RCU 读侧逐个处理 qdisc；对非 NOLOCK qdisc 获取 root lock，对已 deactivate 的 NOLOCK qdisc 清除 scheduled bit 后跳过，正常情况清除 scheduled bit 并调用 `qdisc_run()`。
+
+以上 schedule bit、per-CPU output_queue 入队、softirq raise、qdisc deactivate 保护和重新运行逻辑，在三个固定端点没有发现行为差异。未发现 6.12 改变 qdisc 被唤醒后重新进入 TX 主路径的通用机制。
+
+### 24.3 qdisc_run 的 budget 差异属于前述调度预算项
+
+- 6.1.116→6.1.174：`qdisc_restart()` / `dequeue_skb()` 增加 packet budget 参数；`qdisc_run()` 和 `__qdisc_run()` 将 quota 传入 restart/dequeue。
+- 6.1.174→6.12.81：该 budget 传递实现一致；6.12 仅将 `dev_tx_weight` 的读取改为 `net_hotdata.dev_tx_weight`。
+- `qdisc_run()` 在 quota 耗尽时，对 NOLOCK qdisc 设置 MISSED bit；普通锁定 qdisc 重新调用 `__netif_schedule()`，以便后续 softirq 再次推进。
+- `qdisc_restart()` 在 dequeue 成功后按 skb queue mapping 选择 TX queue，再进入 `sch_direct_xmit()`。
+
+这些变化与第 22 节的 qdisc budget 结论一致：影响单轮批量出队/调度公平性，不改变普通单 skb 的最终 driver handoff 规则。未发现新增的单包 drop 条件。
+
+### 24.4 completion_queue 的 IRQ 延迟释放语义与版本变化
+
+6.1.116 与 6.1.174 使用 `__dev_kfree_skb_irq()` 将最后一个 skb 引用放入当前 CPU 的 `softnet_data.completion_queue`，并 raise `NET_TX_SOFTIRQ`。其关键步骤为：
+- 检查/递减 skb users refcount；
+- 将 free reason 写入 skb control block；
+- 在本地 IRQ 保护下将 skb 链入 completion_queue；
+- raise NET_TX_SOFTIRQ。
+
+6.12 将相关 API 改为显式 reason 形式（例如 `dev_kfree_skb_irq_reason(skb, reason)`），并使用 `enum skb_drop_reason` 传递释放原因。其入队、refcount 处理、IRQ 临界区、completion_queue 链接和 softirq raise 主体保持一致。
+
+`net_tx_action()` 对 completion_queue 的版本差异：
+- 6.1.116 与 6.1.174：根据旧 free-reason 标记区分 consume/free trace；fclone skb 直接 `__kfree_skb()`，普通 skb 使用 `__kfree_skb_defer()`，释放资源后进入 NAPI skb cache。
+- 6.12：reason 改用 `enum skb_drop_reason`；consume/free trace 增加 caller/location 信息；fclone skb 仍直接 `__kfree_skb()`，普通 skb 改用 `__napi_kfree_skb(skb, reason)`，将 reason 传入 `skb_release_all()` 后进入 NAPI skb cache。
+
+这属于 IRQ 延迟 skb 释放与 drop-reason 诊断 API 的演进。没有发现其改变 output_queue 的 qdisc 调度链，也没有发现它承担或取代网卡 DMA completion。不能把 6.12 的 helper 重命名/参数变化误判成 TX descriptor completion 算法改变。
+
+### 24.5 NET_TX_SOFTIRQ 注册与 generic softirq 框架
+
+三个版本均在网络核心初始化时将 `NET_TX_SOFTIRQ` 注册到 `net_tx_action`，并将 `NET_RX_SOFTIRQ` 注册到 `net_rx_action`。IRQ-context skb free 和 qdisc reschedule 都通过 `raise_softirq_irqoff(NET_TX_SOFTIRQ)` 请求处理。
+
+6.12 的 `net_tx_action` 回调签名从接收 `struct softirq_action *` 改为无参数回调，属于 softirq action API 的版本接口变化；其内部仍读取当前 CPU 的 `softnet_data` 并处理相同的 completion_queue、output_queue 与 XFRM backlog。没有发现 generic softirq 的 raise/dispatch 改动导致 NET_TX_SOFTIRQ 被移除、延迟条件改变或队列处理顺序变化。
+
+### 24.6 TX tracepoint 对比
+
+`include/trace/events/net.h`：
+- `net_dev_start_xmit`、`net_dev_xmit`、`net_dev_xmit_timeout` 三版的主要事件字段与语义保持一致；`net_dev_xmit` 仍记录 skb 地址、长度、驱动返回码和设备名。
+- 这组 trace 可用于区分“进入 ndo_start_xmit”与“驱动返回 OK/BUSY”，但事件本身不能证明 PHY 已将帧实际发送到线缆。
+
+`include/trace/events/skb.h`：
+- 6.1.116 与 6.1.174 的 `kfree_skb` 记录 skb、释放位置和 drop reason；`consume_skb` 只记录 skb 地址。
+- 6.12 的 `kfree_skb` 增加 `rx_sk` 字段；`consume_skb` 增加调用位置字段，并以符号形式输出位置。
+- 这些是 skb 生命周期追踪信息增强，不改变 TX packet 发送动作。尤其 `consume_skb` 表示 skb 被消费/释放，不等于硬件 TX success；硬件发送结果仍需结合 `net_dev_xmit` 返回码、驱动统计和具体驱动 completion 证据判断。
+
+### 24.7 本轮结论
+
+| 子项 | 6.1.116→6.1.174 | 6.1.174→6.12.81 | TX 判断 |
+|---|---|---|---|
+| `NET_TX_SOFTIRQ` output_queue | 一致 | 一致 | qdisc reschedule 机制无变化 |
+| qdisc schedule bit / per-CPU queue | 一致 | 一致 | 未发现唤醒链回归 |
+| qdisc_run budget | 增加 packet budget | 延续；dev_tx_weight 迁移 | 调度预算变化，不是单包 drop |
+| completion_queue | 一致 | free-reason API 改为 skb_drop_reason | 延迟 skb free，不是 DMA completion |
+| `net_tx_action()` | 一致 | 回调签名、reason trace 与 free helper 调整 | 队列处理职责/顺序保持 |
+| net TX tracepoints | 一致 | skb trace 增加 rx_sk/caller location | 诊断信息增强，不代表物理发送成功 |
+
+**本轮结论：**
+1. generic `NET_TX_SOFTIRQ` 的 qdisc output_queue 调度与重新运行路径在三个版本保持一致。
+2. completion_queue 负责 IRQ-context skb 延迟释放，不负责硬件 TX DMA completion；6.12 的变化主要是 drop reason 类型和释放 helper/API 演进。
+3. 本轮未发现 6.1.116→6.1.174 或 6.1→6.12 的 generic TX softirq 调度回归，也未发现普通单 skb UDP 的新增丢弃门。
+4. TX tracepoint 可帮助建立软件交付证据链，但 `net_dev_xmit rc=NETDEV_TX_OK` 或 `consume_skb` 均不能单独证明 Ethernet PHY 已完成物理发送。
+
+本轮仅做固定源码端点静态比较；未构建、未修改系统配置、未执行实机操作。方向二仍未结项；尚需按原定顺序完成 TX 统计/drop reason/Kconfig 等剩余网络核心子项，再回读 B2-0 原始计划确认方向三。
