@@ -75,14 +75,14 @@ Panther RK356x SoC DTSI 定义 snps,axi-config，blen=<0 0 0 0 16 8 4>、rd_osr_
 
 ## 5. DMA address width / EAME 条件
 
-四版本 stmmac_main.c 的 DMA mask/address-width 主体逻辑一致：
+四版本 dwmac4_get_hw_feature() 均从 GMAC_HW_FEATURE1 的 GMAC_HW_ADDR64 字段解码 addr64：0→32 bit、1→40 bit、2→48 bit、其他值→32 bit。6.12 额外解码 MAC additional address entries 字段，但 addr64 的解码方式未变。四版本 stmmac_main.c 的 DMA mask/address-width 主体逻辑一致：
 
 1. 先从硬件 feature/capability 取得 DMA address width 信息；
 2. 若报告可寻址宽度大于 32 bit，则尝试按硬件报告宽度设置 DMA mask/coherent mask；
 3. 若 CONFIG_ARCH_DMA_ADDR_T_64BIT 启用，则设置 dma_cfg->eame=true；
 4. DWMAC4 DMA init 根据 eame 设置 DMA_SYS_BUS_MODE_EAME；TX/RX channel init 仅在 CONFIG_ARCH_DMA_ADDR_T_64BIT 且 eame 为真时写入 descriptor base address high 32 bits。
 
-四版本该逻辑未见功能差异。ARM64 架构满足 64-bit DMA address type 的编译条件，但硬件 feature register 实际报告的 addr64/host_dma_width 及运行时 dma_set_mask_and_coherent 成功结果，不能仅由 SoC 型号或 CONFIG_ARCH_DMA_ADDR_T_64BIT 推定；当前没有历史硬件 feature dump 或运行时 DMA mask 记录。因此 EAME 是否实际置位、是否写 high address registers 保持未验证。
+四版本该逻辑未见功能差异。6.1.65 约第 7210 行、6.1.116 约第 7238 行、6.1.174 约第 7513 行、6.12.81 约第 7707 行，均优先采用 plat->host_dma_width，否则采用硬件解码的 dma_cap.addr64，再调用 dma_set_mask_and_coherent()；若失败则回退 32-bit mask。ARM64 架构满足 64-bit DMA address type 的编译条件，但硬件 feature register 实际报告的 addr64/host_dma_width 及运行时 dma_set_mask_and_coherent 成功结果，不能仅由 SoC 型号或 CONFIG_ARCH_DMA_ADDR_T_64BIT 推定；当前没有历史硬件 feature dump 或运行时 DMA mask 记录。因此 EAME 是否实际置位、是否写 high address registers 保持未验证。
 
 ## 6. 当前 D3-3 初步结论
 
