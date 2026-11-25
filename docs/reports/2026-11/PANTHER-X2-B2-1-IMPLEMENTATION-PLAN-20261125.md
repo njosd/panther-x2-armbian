@@ -463,3 +463,16 @@ DTB 是否变化：
 - 本轮没有修改 R1 产物、没有构建、没有操作 Panther、没有写入任何存储介质，也没有授权后续硬件操作。
 
 **前置门不变：** B1 完整验收仍未正式通过。该修订只完善后续计划和验收方法，不提前启动 R0–R7。
+
+
+## 4D. Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）
+
+新增只读研究报告：[PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md](PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)。
+
+本次下载并核验 R1 实际 Actions artifact，而非根据配置模板推断。确认 R1 最终构建包含 tracepoint/tracing/event tracing、kprobe/kretprobe、debugfs、DWARF5 等基础能力；System.map 中存在网络发送、DMA mapping、skb 生命周期和 NAPI tracepoint 对象。Linux 6.18.63 源码确认可用 `net_dev_queue/start_xmit/xmit`、`dma_map_phys/unmap_phys`、`kfree_skb/consume_skb` 等事件。
+
+STMMAC/DWMAC4 的进一步追踪候选已确定：`stmmac_xmit` 入口读取 payload；`dma_map_page_attrs` 记录 mapping 返回；`dwmac4_set_tx_owner` 观察 descriptor OWN；`dwmac4_wrback_get_tx_status` 观察 completion/status；`dwmac4_dma_start_tx` 和 `dwmac4_set_tx_tail_ptr` 分别观察 DMA start 与 tail-pointer 软件写入；`stmmac_tx_clean`、DMA unmap 与 skb consume 串联完成回收。
+
+关键限制：R1 未启用 FUNCTION_TRACER，但 KPROBE_EVENTS/KRETPROBES 已启用；R1 artifact 未提供带 DWARF 的 vmlinux，故目标内核构建时必须额外归档同构建 vmlinux 或结构偏移清单。tracefs/debugfs 运行时挂载、目标 kprobe 注册、描述符实时状态和任何实机 TX 均未验证。
+
+本报告没有启用任何 tracing、没有注册探针、没有构建诊断补丁、没有访问 Panther。它只补足观测设计，不改变 B1/R0 前置门，也不放行 R2 或实机操作。
