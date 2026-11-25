@@ -50,6 +50,8 @@
 - [B2-0 决策阶段：版本选择与组件恢复顺序（第一轮，2026-11-25）](./PANTHER-X2-B2-0-VERSION-AND-COMPONENT-RECOVERY-DECISION-PROGRESS-20261125.md)：汇总方向一至五，提出 6.18.63 连续基线候选、历史候选差异分级和 B1 通过后的 R0–R8 组件依赖引入顺序；作为 B2-1 实施计划的技术决策依据。
 - [B2-1：实施计划与执行归档基准（2026-11-25）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：将 B2-0 决策转化为可审计实施步骤；2026-11-25 修订为 TX-first：最小 Ethernet/AF_PACKET 发送路径先发自定义 EtherType 广播帧，由局域网对端逐帧确认；TX-PASS 后才逐项引入 RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS。首轮不启用 INET/IPv4；本文件仅为计划，不授权设备访问、构建、写卡或实测。
 
+- [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
+
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
