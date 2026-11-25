@@ -343,7 +343,7 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 
 本轮未发现三个方向对上述样本身份的表述冲突。方向四的“本矩阵最早观察到于 c2f148d”仅表示四个锁定源码端点中的分组首次差异，不宣称上游真实引入版本或最早故障小版本。
 
-### 8.6 GPLL 是否自身 critical：条件链的进一步排除
+### 8.4.1 GPLL 是否自身 critical：条件链的进一步排除
 
 再次核对四版本 RK3568 CRU PLL descriptor：
 - GPLL descriptor 四版本的 flags 均为 0，GPLL 自身没有 CLK_IS_CRITICAL；
