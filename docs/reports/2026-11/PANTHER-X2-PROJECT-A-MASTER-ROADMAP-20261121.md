@@ -156,7 +156,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 - B1 不使用预编译 Image/DTB；必须从锁定源码自建 Kernel，并以独立 allnoconfig + 最小 fragment 生成最终 config。
 - clean-test DTB 从同一源码 commit 的 Panther X2 DTS 派生；自动核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 节点隔离状态。
 - 最终 config 必须证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用；最终二进制与 DTB 需分别提供证据。
-- 首轮源码候选只有在 CI 构建、artifact 审查和目标硬件启动安全门完成后，才可锁定为 B1 Kernel+DTB。
+- 首轮源码候选只有在 CI 构建、artifact 审查和目标硬件启动前检查完成后，才可锁定为 B1 Kernel+DTB；TF 写入须核对目标介质身份并取得相应授权。
 
 ### 5.2 Initramfs 与 BusyBox
 
@@ -190,7 +190,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 - workflow 从锁定源码构建 Kernel、派生 clean-test DTB、构建静态 BusyBox 和 gzip initramfs；旧的预编译包/hybrid workflow 已禁用并仅留作历史记录。
 - 6.18.63 在 CONFIG_NET=n 下的 kobject_uevent stub 需应用一项最小兼容补丁：无网络分支拒绝非空 skb、对空指针直接返回，不引用网络 skb 释放函数；该补丁不启用网络栈或修改 Ethernet 驱动，必须随构建输入和哈希一起审计。
 - 产物仅包括 Kernel、DTB、initramfs/uInitrd、boot.scr、JP proper 参考文件、manifest、文件清单、SHA-256 和构建日志；不生成 raw/hybrid 磁盘镜像，不写 TF/eMMC。
-- eMMC pre-Linux 安全门未通过前，CI artifact 只能标记 PREPARE-ONLY，不得写卡或实机启动。
+- CI artifact 在审查前保持 PREPARE-ONLY；写入专用 TF 前核对介质身份、容量、挂载状态并取得相应授权。全面 eMMC WP/Rescue 研究已由用户明确取消为 B1 前置阻塞项；任何 eMMC 修改仍须另行授权。
 
 ## 6. 启动介质、Vendor 数据与安全边界
 
@@ -221,7 +221,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 | 阶段 | 名称 | 目标 | 当前状态 |
 |---|---|---|---|
-| B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和 eMMC 安全边界 | 部分完成；安全门未通过 |
+| B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和必要安全边界 | 部分完成；全面 eMMC WP/Rescue 不再作为 B1 阻塞项 |
 | B1 | 最小 RAM Linux 干净基线 | 进入 `/init`，UART shell 可交互；Linux 不启用网络、Ethernet、MMC/block、USB、无线/蓝牙和模块，根文件系统完全在 RAM | 构建流程已提交；CI/实机未验证 |
 | B2 | 板载有线千兆网口分层验证 | 仅对板载 Ethernet 的内核网络基础、MAC、MDIO/PHY 依赖按单项引入；再验证 link、静态地址、ARP、同网段与网关 ICMP | 未开始 |
 | B3 | 板载有线千兆网口 TCP/UDP 验证 | 仅通过板载有线千兆网口进行 TCP 与 UDP 双向端到端验证，分开测试且结果可重复 | 未开始 |
@@ -260,7 +260,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - JP proper 新系统重复启动稳定性；
 - 长期 U-Boot 候选完整板级适配。
 
-**当前唯一优先事项：** 静态审查并运行新 B1 clean RAM workflow，审查构建 artifact；同时独立完成 B0.4 eMMC pre-Linux 写入安全门。安全门未通过前，不写 SU08G、不启动实验固件、不进行 Panther X2 实机启动。
+**当前优先事项：** 复核 B1 PREPARE-ONLY artifact、SU08G 目标身份和 U-Boot 启动地址，按用户已授权的混合启动链完成 B1 RAM Linux 启动验收。全面 eMMC WP/Rescue 研究不再作为前置阻塞项；不擅自写 eMMC，任何 eMMC 修改均须另行明确授权。
 
 ## 9. 关联文档与维护
 
@@ -328,7 +328,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 现场初步证据：help dhcp、help mii、help mdio 已核对；mdio list 实际输出 ethernet@fe010000:，证明一个 MDIO bus 已注册，但 PHY、link、DHCP、IP 连通尚未验证。完整过程见 [U-Boot 网络基准实测记录](PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md)。
 
-本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来重新启动和写介质仍受 B0.4 安全门约束。
+本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来 TF 写入须重新核对目标卡身份并取得相应授权；任何 eMMC 写入/修改须另行说明并取得明确授权。全面 eMMC WP/Rescue 研究不再作为 B1/B2 的通用阻塞项。
 
 ## 13. 新增 U0：U-Boot proper 启动完成后的恢复检查点
 
@@ -381,7 +381,7 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 
 ### 15.6 B1 启动脚本与 TF 旧版本隔离（2026-11-22）
 
-静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定，且不能绕过 eMMC pre-Linux 写入安全门和单独授权。
+静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定；写入专用 TF 前必须重新核对介质身份并取得单独授权。不得写 eMMC；若确需修改 eMMC，另行说明风险和恢复方式并取得明确授权。
 
 旧 U-Boot 会话记录的 Kernel/FDT/initramfs 地址在 DHCP异常后断电重启，尚未绑定当前会话；旧 TF Kernel/uInitrd 的文件身份哈希也未闭环。因此 PRE-HANDOFF READY 仍未通过。B1 首次启动保持暂停，先完成新 artifact 与当前启动地址/内存布局审计。
 
@@ -529,6 +529,6 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 - 不直接回移 PHYCR2=0x1801、DMA reset 前 1500ms、clock enable/settle、RGMII GRF 写入顺序或 MDC CSR source 补丁；这些只保留为候选，必须有单变量证据才能讨论改动。
 - B1 通过后，建议按网络核心 → 缺失的共享 SoC provider → PHY 电源 provider → MDIO/PHY → STMMAC/DWMAC4 → Rockchip glue → 单独恢复 GMAC1 DTB 节点 → 最小只读 ip 工具的顺序，逐项审查和引入。
 - 首轮优先 built-in，避免模块装载顺序成为额外变量；具体 Kconfig/Makefile 依赖必须按 6.18.63 精确源码核对。REALTEK_PHY、ETHTOOL_NETLINK 与 RK809 PMIC provider 等不能漏项或假定自动 select。
-- 所有网络组件实机引入均以 B1 完整通过、B0.4 eMMC pre-Linux 安全门和另行授权为前置条件。
+- 所有网络组件实机引入均以 B1 完整通过和另行授权为前置条件；不把全面 eMMC WP/Rescue 研究作为阻塞项，任何 eMMC 修改仍须另行明确授权。
 
 **阶段状态：** B2-0 决策第一轮建议已归档，尚待逐项审议和最终冻结。B1 当前状态不因本决策而改变；B2.1 未启动。本阶段不访问设备、不构建、不安装、不修改系统/驱动/DTB/Kconfig/网络配置、不读写寄存器、不写 TF/eMMC。
