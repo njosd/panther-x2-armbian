@@ -1,0 +1,27 @@
+# Panther X2 B2-1 R1: minimum generic Ethernet transmit software path.
+# Delta is intentionally limited to generic networking core + AF_PACKET.
+# No board MAC/MDIO/PHY driver is enabled in R1.
+CONFIG_NET=y
+CONFIG_NETDEVICES=y
+CONFIG_NET_CORE=y
+CONFIG_ETHERNET=y
+CONFIG_PACKET=y
+
+# Keep all higher-layer protocols and board Ethernet hardware isolated.
+# CONFIG_INET is not set
+# CONFIG_IPV6 is not set
+# CONFIG_NETFILTER is not set
+# CONFIG_STMMAC_ETH is not set
+# CONFIG_STMMAC_PLATFORM is not set
+# CONFIG_DWMAC_ROCKCHIP is not set
+# CONFIG_MDIO_BUS is not set
+# CONFIG_PHYLIB is not set
+# CONFIG_REALTEK_PHY is not set
+
+# Project A permanently excludes wireless and Bluetooth.
+# CONFIG_BT is not set
+# CONFIG_WIRELESS is not set
+# CONFIG_WLAN is not set
+# CONFIG_CFG80211 is not set
+# CONFIG_MAC80211 is not set
+# CONFIG_RFKILL is not set
