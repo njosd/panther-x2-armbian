@@ -1967,9 +1967,9 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
    - 6.1.116 的源码比较端点已固定，但原始 Image/安装包精确 source commit 仍未闭环。
    - 6.1.79、6.1.112 是辅助正常实机样本；没有精确源码端点，不能凭版本号插入四版本矩阵。它们不是当前四个核心代表样本，也不应阻塞已定义四样本子项的静态比较。
 2. **最终配置资产仍有缺口。**
-   - 6.1.174 官方包内 config-6.1.174-rk35xx-ophub 已有资产 SHA256，但本报告尚未从该原始文件逐项补录 CONFIG_BQL、CONFIG_NET_DROP_MONITOR 等值。
+   - 6.1.174 历史官方包的 config 文件 SHA256 已知，但 §50 已确认原始 Release asset ID 731478275 返回 404，原始 Actions run 42812333074 没有 workflow artifact；当前同名资产 SHA 不同。故历史包 CONFIG_BQL、CONFIG_NET_DROP_MONITOR 两值无法从现存公开资产闭环，不能用新包/模板替代。
    - 6.12.81 最终配置已从既有 artifact 14143082992 的 extracted/kernel.config 读取（SHA256 dd9f6b316171eabd4b18f3e9799d2f40dbf6211d3a49540fdb50837b5e07f5c2）；BQL=y、NET_DROP_MONITOR not set、NET_DEVMEM=y 等值以 §47 为准。候选 config-6.12 模板 blob SHA 966f4b6a... 与 6c7714f5... 的差异仍未解释，但不再阻塞最终包配置结论。
-   - 6.1.65 的 CONFIG_NET_DROP_MONITOR 行未找到；保持“未找到配置行”，不擅自写成 n。
+   - 6.1.65 的 CONFIG_NET_DROP_MONITOR 行未找到。§51 已按 6.1.65 候选源码 Kconfig 与原始 config 交叉检查：INET=y，但 FTRACE 未设置、TRACEPOINTS 为无 prompt 的隐藏符号且由 TRACING 选择；现有 config 未显示 TRACEPOINTS/TRACING，缺行与依赖未满足相符。保留“未找到显式配置行/未见启用证据”，不伪造显式 not set 行。
 3. **6.12 unreadable-fragment 条件的历史可达性未证明。**
    - 源码已确认 skb->unreadable 在 net_iov backing memory 路径形成，并在 generic validate_xmit_skb() 入口构成 TX drop 门。
    - 6.12.81 最终配置确认 CONFIG_NET_DEVMEM=y，但现有历史证据没有证明故障窗口的 DHCP skb 曾带 net_iov/unreadable fragment；编译配置启用不等于运行时实际创建或使用了该类 skb。
@@ -1981,8 +1981,8 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 ### 45.4 下一步执行顺序
 
 不切换方向、不做实机操作。下一步按现有证据链顺序：
-1. 继续寻找并只读提取 6.1.174 官方包原始 config 的 CONFIG_BQL 与 CONFIG_NET_DROP_MONITOR 两项；现有 audit artifact 不含完整配置，不能以候选模板替代。
-2. 6.12.81 最终配置已由 §47 闭合；模板 blob SHA 差异只作为模板快照来源问题归档，不再阻塞方向二最终配置矩阵。
+1. 6.1.174 历史包配置已达到当前公开证据上限：旧 asset ID 不可取、run #296 无 artifact、当前同名包 hash 不同。除非发现历史原始包副本或同 hash 备份，否则停止重复检索并保留缺口。
+2. 6.12.81 最终配置已由 §47 闭合；模板 blob SHA 差异只作为模板快照来源问题归档，不再阻塞方向二最终配置矩阵。6.1.65 的 NET_DROP_MONITOR 依赖解释见 §51。
 3. 回读原始 B2-0 组件差异账本，确认是否另有明确列出的网络核心子项；只执行原文明确存在且尚未完成的条目。
 4. 最后更新方向二总矩阵：分别标注源码候选/精确来源、实际配置/候选模板、函数级差异、是否命中普通 DHCP/UDP TX。满足证据条件后再讨论方向二是否可以结项；在此之前方向二状态保持“进行中”。
 
@@ -2070,3 +2070,81 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 两者 SHA256 不同，不能把当前 release 上的 6.1.174.tar.gz 当成 2026-11-20 审计所固定的历史故障样本，也不能从当前包提取 CONFIG_BQL / CONFIG_NET_DROP_MONITOR 后回填到旧样本矩阵。当前 release 资产只作为“同名资产已变化”的旁证，不替代历史原始包。
 
 **结论：** 6.1.174 历史样本的完整 config 仍需从原始历史包副本、旧 workflow 缓存或其他已归档的同 hash 资产读取；当前公开 release 已无法作为等价替代。§46 的证据缺口保持有效。本项只核对公开 release 元数据，没有下载、构建或修改任何系统。
+
+
+## 50. 6.1.174 历史原始配置资产可恢复性：已达到公开证据上限（2026-11-25）
+
+### 50.1 原始资产身份再次核验
+
+历史审计固定的原始官方包：
+- Release：ophub/kernel，tag kernel_rk35xx
+- 原始 asset ID：731478275
+- 原始文件：6.1.174.tar.gz
+- 原始 SHA256：49e2e81132b249b2b1e55fa18fa1fa002ddf9c91dc433cd672f914ab17af668a
+- 大小：135,267,299 bytes
+
+对 GitHub REST 原始资产端点 `GET /repos/ophub/kernel/releases/assets/731478275` 进行只读核验，返回 HTTP 404 Not Found。当前 release tag 的同名资产为 asset ID 782657747，创建于 2026-11-23，大小 135,249,660 bytes，SHA256 671508f46aa4b2aa7bd01fe9d021a1875b4a575d30393422c24fc948c713832a。两者不是同一文件。
+
+### 50.2 原始 Actions run 是否保留构建 artifact
+
+核对原始构建 run #296（ID 42812333074）：
+- 唯一 build job：129816642520，结论 success；
+- 步骤包括 Checkout、Initialize、Get kernel source commit hash、Cache ccache、Compile the kernel [6.1.y]、Upload Kernel to Release；
+- GitHub Actions API 返回该 run 的 workflow artifacts 列表为空；
+- 因此不存在可从该 run 下载的 config/build artifact。
+
+此前审计 run 44728503121 的 artifact 14625845189 仍可读，但其中只有 `kernel-config-and-module-findings.txt` 的少量选定配置项；没有完整 config 文件。它记录的原始包内 config SHA256 为 8bbb46648ed7e28e0a49d16fe895802657a53f8ad788a9023ed730033473cf83，但不能由 SHA256 反推出 BQL/NET_DROP_MONITOR 值。
+
+### 50.3 结论与后续处理
+
+**6.1.174 历史包的完整 config 在当前可用公开资产中不可恢复。** 不是尚未找到一个可用下载链接，而是原始 asset ID 已返回 404，构建 run 没有 artifact，现存同名 Release 资产已更换内容。当前没有证据支持从新包、普通 stable 6.1.174、或 config-6.1 模板回填历史样本配置。
+
+方向二矩阵对 6.1.174 的 CONFIG_BQL 与 CONFIG_NET_DROP_MONITOR 继续标记“历史最终配置未知（原始文件 SHA 已知）”。除非用户原始备份、同 hash 私有副本或其他已归档证据出现，否则不再重复检索同一公开 Release 资产。
+
+本项只读取 GitHub Release/Actions 元数据，没有下载新包、构建、访问设备或修改系统。
+
+## 51. 6.1.65 CONFIG_NET_DROP_MONITOR 缺行的 Kconfig 依赖解释（2026-11-25）
+
+### 51.1 原始配置文本事实
+
+从 Dropbox 已归档 `kernel-config-evidence.zip` 只读提取 `config-6.1.65-ophub`，复核：
+- `CONFIG_INET=y`
+- `CONFIG_BQL=y`
+- `# CONFIG_FTRACE is not set`
+- 文本中没有 `CONFIG_TRACEPOINTS`、`CONFIG_TRACING`、`CONFIG_EVENT_TRACING` 或 `CONFIG_NET_DROP_MONITOR` 的显式配置行。
+
+这份配置文本是既有原始镜像证据，不是候选模板。
+
+### 51.2 6.1.65 候选源码的 Kconfig 依赖
+
+在 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`：
+- `net/Kconfig` 中 `NET_DROP_MONITOR` 为 tristate，依赖 `INET && TRACEPOINTS`；
+- `init/Kconfig` 中 `TRACEPOINTS` 是无 prompt 的隐藏 bool；
+- `kernel/trace/Kconfig` 中 `TRACING` 选择 `TRACEPOINTS`；
+- 同一 Kconfig 中 `FTRACE` 是 tracing 菜单入口；原始配置明确 `# CONFIG_FTRACE is not set`，并且没有 `TRACING` / `EVENT_TRACING` 的启用行。
+
+因此，现有配置缺少 NET_DROP_MONITOR 行，与其 TRACEPOINTS 依赖未启用、该选项在 Kconfig 配置界面中不可见的情况一致。另需注意 `CONFIG_NETFILTER_XT_TARGET_TRACE=m`（若出现）是 iptables TRACE target 模块，不等同于内核 TRACEPOINTS，也不能证明 NET_DROP_MONITOR 可用。
+
+### 51.3 证据等级与矩阵用语
+
+- **直接事实：** 原始配置有 INET=y、FTRACE not set；没有 NET_DROP_MONITOR、TRACEPOINTS、TRACING 的显式行。
+- **Kconfig 推断：** 在本报告锁定的 6.1.65 候选源码中，TRACEPOINTS 由 TRACING 选择；当前配置没有启用 tracing framework 的证据，因此 NET_DROP_MONITOR 的依赖很可能不满足、无法启用。
+- **不升级的结论：** 仍不把缺失行改写为一条并不存在的 `# CONFIG_NET_DROP_MONITOR is not set`，也不把“依赖未满足”的源码推断伪装成最终配置文件中的显式 n 行。
+
+本项将 §26/§45 的描述精确化为“未找到显式配置行；FTRACE 未设置且 TRACEPOINTS/TRACING 无启用证据，故 NET_DROP_MONITOR 不具备已证实的启用条件”。它不是 TX 数据面阻断因素，且不改变方向二对普通 UDP/DHCP 的结论。
+
+## 52. 原始 B2-0 方向二范围复核：未发现额外明确的 generic network-core 子项（2026-11-25）
+
+再次交叉回读：
+- 项目 A 总路线图第 7、8、9、11、15～19 节；
+- 项目 A 分阶段实施计划 B2.1～B2.3（确认这些是后续分层实机验证，不属于 B2-0 静态审计）；
+- 本方向报告 §1～§26 及逐项补齐记录 §27～§44；
+- `docs/reports/2026-11/README.md` 的项目 A 网络范围与 B2-0 文件索引。
+
+范围结论：
+1. 本方向报告明确列出的 generic Linux network-core 源码/Kconfig 子项为 §3～§24 与 §26；§5 是复用既有 NAPI/GRO 审计，不要求重做。其余 §6、§7、§10、§13、§15、§17、§25 为阶段结论、范围摘要或顺序管理，不是新的待审专题。
+2. README 中的 B2-0 方向1版本来源、四版本 built-in/modules 资产闭包、GMAC glue/clock/power 与 Linux 6.18.63 Kconfig/Makefile 报告属于各自明确标注的独立证据资产；不能因为同处 B2-0 归档目录就将它们重新拼成 generic network-core 方向二的新增任务。
+3. B2.1 的接口/link、IPv4、路由、ARP、ICMP 等分层实机检查，以及 B2.3 的验收，属于后续 B2 实机阶段；B3 TCP/UDP 端到端验证更在后续阶段。均不在本轮授权范围。
+4. 没有在已回读的总路线、实施计划、方向二进度报告和报告索引中发现另一份明确列出但尚未执行的 generic network-core 专题清单。因此不擅自增加 IPv6、TCP、socket memory 或其他主题。
+
+**范围复核结论：** generic network-core 已列专题的源码比较覆盖完成；当前未闭环项是历史配置/源码 provenance/运行时可达性等证据边界，而不是等待扩张网络协议专题。方向二保持进行中，直到总矩阵按统一证据标准整理完成；本项不构成方向二结项，也不进入方向三或 B2.1。
