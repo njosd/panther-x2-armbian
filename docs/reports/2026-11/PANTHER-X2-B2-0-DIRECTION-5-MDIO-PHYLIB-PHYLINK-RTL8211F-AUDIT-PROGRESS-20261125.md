@@ -317,3 +317,16 @@ Panther 地址 0 在合法范围内，STMMAC MDIO bus 提供 read/write callback
 **覆盖结论：** Panther 外接 PHY 的 autoneg 配置、genphy status 读取、PHY start、phylink connect/disconnect、PHY mode link-state source 与 link-up/down callback 已完成最后一轮函数覆盖。没有发现 6.1.174 相对两个黄金版本新增的、在普通 PHY polling/autoneg 成功路径无条件阻断 link 或普通 TX 的 PHYLIB/PHYLINK 回归。6.12 的差异主要集中于 PHY error state/post-work、EEE/LPI bookkeeping、link_failed/retrigger 与 API 结构重构；均需相应错误、EEE 或 link-failure 条件，不应外推为已证实 TX 根因。
 
 本轮未把 generic PHYLIB/PHYLINK 的其他 Clause 45、SFP、fixed-link、PCS in-band、cable-test、loopback、WOL 等非 Panther 路径扩展成新专题。
+
+
+### 9.8 与方向三 D3-2 关联的 mac_requires_rxc / PHY_F_RXC_ALWAYS_ON 核对
+
+方向三 D3-2 已发现故障源码起始版本新增 mac_requires_rxc；本轮沿 PHYLINK/PHYLIB 路径补齐其实际调用范围，避免遗漏 RXC 相关通用 PHY 管理行为。
+
+- 6.1.65 / 6.1.116：STMMAC phylink_config 未设置 mac_requires_rxc；PHYLINK 没有 Panther 会命中的 phylink_prepare_resume 调用。
+- 6.1.174（精确源码 c2f148d）：STMMAC 设置 mac_requires_rxc=true；在 system/runtime resume 路径调用 phylink_prepare_resume()。该 helper 只在 PHY 已 suspended 时调用 phy_resume()，源码注释解释其目的是某些 MAC resume 需要 RXC 先恢复。它不是普通 cold-probe / netdev open / 常规 TX 路径。
+- 6.12.81：继续设置 mac_requires_rxc=true；phylink 在 PHY attach 时将 PHY_F_RXC_ALWAYS_ON 传给 phy_attach_direct()，并在 PCS pre-init 传递 rxc_always_on。phy_attach_direct() 将 flags OR 入 phydev->dev_flags。
+- 6.12.81 实际 RTL8211F driver realtek.c 不引用 PHY_F_RXC_ALWAYS_ON，也不读取 phydev->dev_flags；Panther 是外接 RTL8211F-CG，不是需要 PCS pre-init 的 SFP/SerDes 路径。因此当前没有证据表明这个 flag 会改变 Panther RTL8211F 的普通 RGMII config_init 或普通发送行为。
+
+**适用性判断：** 6.1.174 新增 mac_requires_rxc / resume 前恢复 PHY，与 RXC 时钟恢复语义有关，必须作为版本差异保留；但该 helper 的调用仅位于 resume 流程，不能解释首次冷启动阶段的 DHCP Discover 无法发出。6.12 将该能力扩展为 attach flag / PCS pre-init 传递，当前 Panther RTL8211F driver 不消费该 flag。该项与 6.1.116 workaround 清除 PHYCR2 bit1 RXC 的历史矛盾存在概念关联，但二者不是同一操作，也不能用一个源码 flag 推断历史 PHYCR2 实际值或 RXC 引脚波形。
+
