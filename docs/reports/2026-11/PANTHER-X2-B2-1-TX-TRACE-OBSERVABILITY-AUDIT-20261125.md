@@ -354,3 +354,105 @@ R1 artifact 没有 DWARF-bearing `vmlinux`，因此未来 R5/R6 构建必须额�
 - [ ] 任何 Panther 实机 tracing、接口 UP、发包或对端捕获：均未执行。
 
 本报告只完成观测能力研究，不改变 B1/R0 前置门，不放行 R2，也不授权 Panther 实机操作。
+
+
+## 11. 补充审计：descriptor 交接与 completion 的低扰动观测（2026-11-25）
+
+### 11.1 不把 ring 连续轮询作为主证据
+
+再次核对 `stmmac_main.c` 与 `dwmac4_descs.c` 后，明确以下边界：
+
+- STMMAC `descriptors_status` 通过 `stmmac_rings_status_show()` 遍历 TX ring，并直接读取每个 descriptor 的 des0..des3；没有对整个 ring 加锁，也没有建立与 DMA 更新之间的一致性快照协议。
+- 该文件在接口未 IFF_UP 时直接返回，不输出 ring；接口 UP 后读取也可能与 DMA 对 descriptor 的写回并发。
+- 因此不允许用高频读取 `descriptors_status` 的方式追踪 OWN 翻转；不把某次快照中的瞬时混合值判为硬件故障。
+- 该文件保留为发送前/发送后辅助快照，或在停止队列并确认 DMA quiescent 后的静态检查；不作为活动 TX 的主要验收依据。
+
+### 11.2 交接点：利用驱动真实顺序做事件式记录
+
+固定源码 `stmmac_main.c`：
+
+- `stmmac_flush_tx_descriptors(priv, queue)` 的注释明确要求 OWN bit 是 descriptor 最后设置的字段；
+- 随后执行 `wmb()`；
+- 再调用 `stmmac_set_queue_tx_tail_ptr()`；
+- 后者计算 `tx_q->dma_tx_phy + index * desc_size`，再调用硬件回调 `stmmac_set_tx_tail_ptr()`。
+
+普通 skb TX 路径在调用 flush 前已完成 DMA mapping、descriptor address/length/control 写入和 OWN 设置。因此首选诊断补丁不是轮询 ring，而是在如下精确位置发出 trace event：
+
+1. descriptor 内容已填好、OWN 已设置之后，记录 queue、ring index、descriptor CPU pointer、descriptor DMA address、des0..des3、关联 skb pointer、skb len、DMA buffer address/len；
+2. 在 `stmmac_flush_tx_descriptors()` 的 `wmb()` 之后、tail-pointer callback 之前记录发布事件；
+3. 在 `stmmac_set_queue_tx_tail_ptr()` / DWMAC4 callback 记录 tail pointer 目标地址与 channel。
+
+交接记录应以单帧、单队列、单 descriptor 的第一轮测试为基准。记录 descriptor 指针和 DMA address 的关系，不把 descriptor 当成 ABCD payload 的副本。
+
+注意：tracepoint 在 OWN 设置后增加少量执行时间，仍然会改变时序；它比连续轮询更可控，但不是零扰动。若现有静态 tracepoint + 可用 kprobe 已能可靠捕获同一数据，则优先不加补丁；只有目标函数不可探测或关联字段不足时才引入该补丁。
+
+### 11.3 Completion 点：跟随驱动自己的 OWN 判断和 DMA barrier
+
+固定源码 `dwmac4_descs.c`：
+
+- `dwmac4_wrback_get_tx_status(x, p, ioaddr)` 首先读取 `p->des3`；
+- 若 OWN 仍置位，返回 `tx_dma_own`；
+- OWN 清除且不是 last descriptor 时返回 `tx_not_ls`；
+- last descriptor 根据 ERROR_SUMMARY 及具体错误位生成完成/错误状态。
+
+固定源码 `stmmac_main.c` 的 `stmmac_tx_clean()`：
+
+1. 调用 descriptor status callback；
+2. 若返回 `tx_dma_own`，停止清理；
+3. OWN 清除后执行 `dma_rmb()`；
+4. 检查最后 segment 的错误状态；
+5. 对成功帧增加 packet 统计；
+6. DMA unmap；
+7. `dev_consume_skb_any(skb)`；
+8. 释放 descriptor 并推进 dirty_tx。
+
+推荐 completion trace event 在驱动得到 status 后记录：
+- queue / ring index / descriptor pointer / descriptor DMA address；
+- status enum；
+- OWN、LAST、ERROR_SUMMARY 及原始 descriptor word；
+- skb pointer、sequence marker、DMA mapping address/length；
+- 随后是否成功 unmap、consume skb、计入 tx_packets。
+
+最小补丁可放在 `stmmac_tx_clean()` 中，紧跟 `stmmac_tx_status()` 返回之后记录 status；如果要记录 dma_rmb 后的 descriptor word，则在 OWN 清除分支、`dma_rmb()` 之后记录。这样不会额外抢先读取尚未归还的 descriptor。错误和 OWN 仍置位的分支必须分别记录，不能只记录成功完成。
+
+### 11.4 关于 static 函数与 kprobe 可解析性：新增限制
+
+R1 实际配置中 `CONFIG_KALLSYMS_ALL` 未启用。Linux kprobe event 按符号名解析时，不能假定所有 static/local 函数都能从运行时 kallsyms 找到。
+
+以下目标均为 static 函数或可能被编译器内联/优化，必须在目标 R5/R6 构建中检查：
+- `stmmac_xmit`
+- `stmmac_tx_clean`
+- `dwmac4_set_tx_owner`
+- `dwmac4_wrback_get_tx_status`
+
+因此：
+- 不能仅因函数在源码中存在，就宣称 kprobe 一定能注册；
+- 同构建 DWARF 用于结构字段偏移和源码行/局部变量分析，不会自动让 static 函数成为运行时 kprobe 可解析符号；
+- 每个候选必须经过同构建 System.map、`/proc/kallsyms`、`available_filter_functions`（若可用）及实际 kprobe 注册结果核验；
+- 如果 static 函数不可探测，首选在 STMMAC 公共驱动路径加入最小静态 tracepoint，而不是为了观测而开启全局 function tracer；
+- 可将 `CONFIG_KALLSYMS_ALL=y` 作为备选构建配置评估，但不能保证所有优化/内联后的函数都能被探测，也不能替代实际验证。
+
+### 11.5 更新后的最小诊断补丁建议
+
+如需补丁，优先仅新增三个 trace event，不改原有逻辑、寄存器值、descriptor 顺序、DMA barrier、queue flow 或错误处理：
+
+| Event | 插入时点 | 必需字段 |
+|---|---|---|
+| panther_tx_submit | skb 与 descriptor 已关联、OWN 设置后 | skb、marker/sequence、skb len、queue/index、desc ptr、desc DMA addr、DMA buf addr/len、des0..3 |
+| panther_tx_doorbell | `wmb()` 后、tail pointer callback 前 | queue/channel、ring index、tail DMA address |
+| panther_tx_complete | status 已读取；OWN 清除分支在 `dma_rmb()` 后 | queue/index、desc ptr/DMA addr、status、des0..3、skb、DMA mapping、completion/error |
+
+实际补丁应避免在 tracepoint 内做动态内存分配、复制整帧、打印大量日志或执行寄存器读写。payload ABCD 仍由发送程序和 `stmmac_xmit` 入口的少量 marker 字节核对；descriptor event 负责把同一 skb 与 DMA buffer/descriptor 对上。若 kprobe 已能安全读取 marker，则先采用 kprobe；否则只在 skb 入口补一个固定长度 marker event。
+
+### 11.6 结论更新
+
+- [x] 确认 STMMAC ring snapshot 不具备活动 DMA 场景下的全 ring 一致性保证。
+- [x] 确认 OWN → `wmb()` → tail pointer 的源码顺序。
+- [x] 确认 completion 路径的 OWN 检查 → `dma_rmb()` → 状态判断 → DMA unmap → skb consume 顺序。
+- [x] 明确 static/local 函数的 kprobe 符号可见性风险（R1 未启用 KALLSYMS_ALL）。
+- [x] 将事件式、驱动内精确时点记录作为必要时的最小补丁方案。
+- [ ] 实际运行时探针注册与 trace event：未验证。
+- [ ] 诊断补丁构建与时序扰动评估：未执行。
+- [ ] Panther 实机 DMA descriptor 状态和线侧 TX：未执行。
+
+本补充不改变 B1 前置门，不授权或执行实机 TX。
