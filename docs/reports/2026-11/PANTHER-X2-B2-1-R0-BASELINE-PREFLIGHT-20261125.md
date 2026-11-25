@@ -2,7 +2,7 @@
 
 - 阶段：B2-1 / R0
 - 本轮性质：只读仓库、Actions 日志与既有报告核查
-- 状态：**R0 未通过；已识别基线来源/分支差异，等待补齐证据**
+- 状态：**R0 通过（2026-11-25 复核）；B1 有一条非致命 init 脚本 applet 提示，留档**
 - 目标：锁定实际 B1 资产及其源码输入，避免后续网络组件引入建立在错误基线上
 - 本轮未访问 Panther X2；未构建新 Kernel；未修改配置、驱动、DTB、网络服务；未写 TF/eMMC；未进行网络测试
 
@@ -97,7 +97,7 @@ Actions 日志还记录历史运行使用的 DTB 派生结果保留 eMMC、TF/SD
 | Panther X2 `/init` 与 ash 交互 shell | 现有证据不足 | 未通过 |
 | B1 网络隔离及非目标硬件保留状态 | 需按实际 artifact DTB/config 核验 | 未完成 |
 
-**R0 结论：不通过，停留 R0。** 这不是网络组件失败，而是基线身份和 B1 完整验收门尚未闭合。
+**2026-11-25 追加证据后，R0 结论更新为 PASS。** Artifact 身份、最终配置、DTB 隔离边界、镜像哈希以及 /init/BusyBox ash 实机验收现已闭环。/init 第 18 行出现的 [: not found 是 init 脚本 applet 提示；脚本继续执行并进入交互 shell，不影响 B1 启动及网络隔离验收。不为此重建 B1 或改写当前基线。
 
 ## 7. 下一步严格顺序
 
@@ -109,3 +109,65 @@ Actions 日志还记录历史运行使用的 DTB 派生结果保留 eMMC、TF/SD
 6. R7 首次真实网络测试仅发送 0x88B5 自定义 Ethernet 广播帧，由对端逐帧捕获；TX-PASS 前不加入 RX 上层、ARP、IPv4、ICMP、DHCP、DNS。
 
 任何阶段都不得把静态审计、配置收敛或构建成功写成“TX 已通”。只有对端真实捕获正确测试帧才是 TX-PASS。
+
+## 8. 2026-11-25 追加：artifact 实体内容与 B1 实机验收闭环
+
+本节基于本轮实际下载并展开的 GitHub Actions artifacts，以及用户 2026-11-24 已提供的 UART 实机记录。
+
+### 8.1 Artifact 实体文件核验
+
+- Kernel/DTB artifact：Run 45309219886 / Artifact 14884706818
+- PREPARE-ONLY artifact：Run 45328201244 / Artifact 14890817693
+- 两份 artifact 的 Image、DTB、最终 .config、config seed、config fragment、DTS 和 modules archive SHA256 完全一致。
+- 工具链：aarch64-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+
+| 文件 | SHA256 |
+|---|---|
+| Image | 9c99d1e36d553774a52f314e87f6866656b02d8f299c75d227e13f8e8a798955 |
+| DTB | 7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d |
+| kernel.config | 7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731 |
+| kernel.config.seed | dd9f6b316171eabd4b18f3e9799d2f40dbf6211d3a49540fdb50837b5e07f5c2 |
+| kernel.config.fragment | a432620750662dd40e90835684e920248ad3995c06ab265cdf882659ac89737f |
+| DTS | 0d8b668a467f642cb32142d1d25588604fe0b14d1f1e873f6b9fea5e44cee959 |
+| modules.tar.zst | ae4812905177c32c88a9b702fbb85ff7583056e4e634c93eab2da78b37d5d06e |
+| uInitrd | 0eee97fabb867ca8b1024fbf89fb9897e2b4ee6f2a5740f0bb8282c7ec795518 |
+| initramfs.cpio.gz | 5c84123a177ca67d8af617369703a6dd04a0f2152e07a227e05a83c74a3850e6 |
+| boot.scr | 15940e422c07cf410f26e15c164a4f9411b17ef22d20148d73fcca50920bf6d4 |
+| PREPARE-ONLY image compressed | 9a03ab47e9fc6222d46060ea90823b14e6665713ce40fb7e90f5906ef97bd511 |
+| PREPARE-ONLY image expanded, 2 GiB | 26b35287d0f1b952d5cd97fc0e89763751d237e490f35bd5120c7ffb3bdc29eb |
+
+用户已确认实际写入 SU08G TF 卡的 2 GiB 镜像 SHA256 与展开镜像哈希一致。
+
+### 8.2 最终 .config 与 built-in/module 证据
+
+- # CONFIG_NET is not set；NETDEVICES、ETHERNET、PACKET、INET 均未启用。
+- MMC、USB、Rockchip clock/CRU、pinctrl、GPIO、reset、GRF、syscon、I2C_RK3X 和 regulator 基础支持已启用。
+- modules.builtin 未发现 STMMAC、DWMAC 或 Ethernet MAC/PHY 驱动 built-in 项；模块清单也未发现板载 GMAC 驱动模块。
+- B1 没有提前带入网络驱动。
+
+### 8.3 实际 DTB 硬件资源状态
+
+- TF 对应 &sdhci：okay；eMMC 对应 &sdmmc0：okay；SDIO 对应 &sdmmc1：disabled。
+- USB host &usb_host0_xhci：okay；UART1/UART2：okay。
+- GMAC1：disabled；MDIO1：disabled；RTL8211F PHY address 0：disabled。
+- GMAC 的 RGMII、clock、reset、phy-supply 和 pinctrl 描述仍保留，但 GMAC/MDIO/PHY 节点 disabled，不触发目标网卡 probe。
+- 这符合 B1 边界：保留 TF/eMMC、USB Host、必要 UART 和共享 SoC providers；隔离板载有线 MAC/MDIO/PHY；无线 SDIO 与蓝牙不纳入项目 A。
+
+### 8.4 B1 实机启动验收
+
+用户 2026-11-24 UART 记录确认：
+1. U-Boot 自动发现并执行 TF 上的 boot.scr；
+2. 从 mmc 1:1 加载 Image、uInitrd 和 Panther X2 DTB；
+3. Linux 6.18.63 成功启动并解包 initramfs；
+4. /init 成功执行，挂载 procfs 与 sysfs；
+5. 输出 B1 network-isolated baseline ready. Interactive shell follows.；
+6. BusyBox v1.37.0 ash 交互提示符 (panther-x2-b1-clean) # 实际出现；
+7. /init 第 18 行出现 [: not found，但脚本继续运行并进入交互 shell。这是 initramfs 用户态脚本 applet/调用提示，不是 Kernel 启动失败，也不是网络功能失败。
+
+**B1 完整启动验收：通过（带一条非致命脚本提示）。** 不要求重复烧卡、重启或重复 B1 测试。
+
+### 8.5 R0 最终结论与放行
+
+R0 原先未闭合的三项现已完成：artifact 的实际内容、manifest、工具链、哈希及复用链闭环；最终配置和模块/内建驱动隔离状态闭环；B1 /init 与 BusyBox ash 交互 shell 实机验收闭环。
+
+**R0：PASS。允许进入 R1 静态配置/依赖复核及受控构建。** 这不表示任何网络功能已经启用或 TX 已经打通。
