@@ -176,6 +176,41 @@ B1 未通过时，停留在 B1，不开始网络组件恢复。
 6. 6.12 的 DWMAC_ROCKCHIP_TOOL、STMMAC_FULL 等 vendor 专有配置不能照搬到 6.18.63。
 7. MFD_RK8XX_I2C / MFD_RK8XX / REGULATOR_RK808 是 6.18.63 实际 PMIC provider 依赖，不能沿用旧版 Kconfig 名称想当然。
 
+
+### 5.4 B1 已有共享 provider 的复用核对（2026-11-25）
+
+本轮直接回读当前仓库的 scripts/panther-x2-b1/kernel.config.fragment 与 scripts/panther-x2-b1/verify-b1-config.sh，发现 B1 并非把所有 SoC provider 都关闭。为保障 UART/SoC 启动，B1 已明确启用以下共享基础设施：
+
+| 配置符号 | B1 fragment 状态 | 对后续 GMAC 依赖的意义 |
+|---|---|---|
+| CONFIG_COMMON_CLK | y | 通用 CCF 基础 |
+| CONFIG_COMMON_CLK_ROCKCHIP | y | Rockchip clock provider |
+| CONFIG_CLK_RK3568 | y | RK3568/RK3566 CRU clock provider |
+| CONFIG_PINCTRL | y | 通用 pinctrl 框架 |
+| CONFIG_PINCTRL_ROCKCHIP | y | Rockchip pinctrl provider |
+| CONFIG_GPIOLIB | y | GPIO descriptor 基础设施 |
+| CONFIG_RESET_CONTROLLER | y | CRU reset framework |
+| CONFIG_ROCKCHIP_GRF | y | Rockchip GRF provider |
+| CONFIG_GPIO_ROCKCHIP | fragment 未显式设置 | 最终 .config 值待核验；不能仅凭 Kconfig default 推定 |
+| CONFIG_MFD_SYSCON | fragment 未显式设置 | 最终 .config 值待核验；6.18.63 STMMAC/平台驱动依赖闭包需核对 |
+
+因此，R2 不应被执行成“重新加入全部 clock/pinctrl/GPIO/reset/GRF”。正确动作是先读取 B1 构建 artifact 的最终 .config 和 built-in 对象清单，以已存在的 provider 为基线，只补实际缺项。特别是 GPIO_ROCKCHIP 与 MFD_SYSCON，不能只看 fragment，也不能把 Kconfig default/select 直接当作最终配置事实。
+
+这也意味着：
+- R1 网络核心启用时不应顺带修改上述已在 B1 存在的 provider；
+- 后续 R2 若需要增加 GPIO_ROCKCHIP 或 MFD_SYSCON，必须作为单独配置闭包并说明实际 consumer；
+- B1 中 GMAC/MDIO 节点仍 disabled，provider 已编入并不等于 GMAC 已 probe，也不构成网络功能已验证；
+- B1 clean-test DTB 继续禁用 GMAC/MDIO，不能为了“提前验证 provider”而同时恢复网卡节点。
+
+### 5.5 B1 no-NET 兼容补丁的过渡处理
+
+B1 当前 6.18.63 构建输入包含 0001-kobject-uevent-config-net-n.patch，其目的仅是解决 CONFIG_NET=n 时 uevent stub 的编译依赖。进入未来 R1（启用 NET）时：
+- 先核对补丁修改的条件编译分支在 CONFIG_NET=y 时是否完全不参与编译；
+- 不要在同一次 R1 变更中顺手删除补丁、升级源码或调整其他组件；
+- 若补丁在 CONFIG_NET=y 下为无效条件分支，可暂时保持相同源码输入，以减少变量；若源码审计证明必须移除，则把移除补丁作为独立、可审计的源代码输入变化，不与 NET 配置启用捆绑。
+
+当前未执行上述配置转换或补丁修改。
+
 ## 6. 当前明确不采纳的方案
 
 | 方案 | 决定 | 原因 |
@@ -219,38 +254,3 @@ B1 未通过时，停留在 B1，不开始网络组件恢复。
 本轮仅回读仓库内路线图、实施计划、方向一至方向五报告及 6.18.63 Kconfig/Makefile 审计，形成决策建议。没有访问 Panther X2，没有构建、安装、触发 Actions，没有修改系统/驱动/DTB/Kconfig/网络配置，没有读取或写入设备寄存器，没有写入 TF/eMMC，没有启动 B2.1。
 
 下一步严格继续本决策阶段的剩余项，不提前进入 B2.1。
-
-
-### 5.4 B1 已有共享 provider 的复用核对（2026-11-25）
-
-本轮直接回读当前仓库的 scripts/panther-x2-b1/kernel.config.fragment 与 scripts/panther-x2-b1/verify-b1-config.sh，发现 B1 并非把所有 SoC provider 都关闭。为保障 UART/SoC 启动，B1 已明确启用以下共享基础设施：
-
-| 配置符号 | B1 fragment 状态 | 对后续 GMAC 依赖的意义 |
-|---|---|---|
-| CONFIG_COMMON_CLK | y | 通用 CCF 基础 |
-| CONFIG_COMMON_CLK_ROCKCHIP | y | Rockchip clock provider |
-| CONFIG_CLK_RK3568 | y | RK3568/RK3566 CRU clock provider |
-| CONFIG_PINCTRL | y | 通用 pinctrl 框架 |
-| CONFIG_PINCTRL_ROCKCHIP | y | Rockchip pinctrl provider |
-| CONFIG_GPIOLIB | y | GPIO descriptor 基础设施 |
-| CONFIG_RESET_CONTROLLER | y | CRU reset framework |
-| CONFIG_ROCKCHIP_GRF | y | Rockchip GRF provider |
-| CONFIG_GPIO_ROCKCHIP | fragment 未显式设置 | 最终 .config 值待核验；不能仅凭 Kconfig default 推定 |
-| CONFIG_MFD_SYSCON | fragment 未显式设置 | 最终 .config 值待核验；6.18.63 STMMAC/平台驱动依赖闭包需核对 |
-
-因此，R2 不应被执行成“重新加入全部 clock/pinctrl/GPIO/reset/GRF”。正确动作是先读取 B1 构建 artifact 的最终 .config 和 built-in 对象清单，以已存在的 provider 为基线，只补实际缺项。特别是 GPIO_ROCKCHIP 与 MFD_SYSCON，不能只看 fragment，也不能把 Kconfig default/select 直接当作最终配置事实。
-
-这也意味着：
-- R1 网络核心启用时不应顺带修改上述已在 B1 存在的 provider；
-- 后续 R2 若需要增加 GPIO_ROCKCHIP 或 MFD_SYSCON，必须作为单独配置闭包并说明实际 consumer；
-- B1 中 GMAC/MDIO 节点仍 disabled，provider 已编入并不等于 GMAC 已 probe，也不构成网络功能已验证；
-- B1 clean-test DTB 继续禁用 GMAC/MDIO，不能为了“提前验证 provider”而同时恢复网卡节点。
-
-### 5.5 B1 no-NET 兼容补丁的过渡处理
-
-B1 当前 6.18.63 构建输入包含 0001-kobject-uevent-config-net-n.patch，其目的仅是解决 CONFIG_NET=n 时 uevent stub 的编译依赖。进入未来 R1（启用 NET）时：
-- 先核对补丁修改的条件编译分支在 CONFIG_NET=y 时是否完全不参与编译；
-- 不要在同一次 R1 变更中顺手删除补丁、升级源码或调整其他组件；
-- 若补丁在 CONFIG_NET=y 下为无效条件分支，可暂时保持相同源码输入，以减少变量；若源码审计证明必须移除，则把移除补丁作为独立、可审计的源代码输入变化，不与 NET 配置启用捆绑。
-
-当前未执行上述配置转换或补丁修改。
