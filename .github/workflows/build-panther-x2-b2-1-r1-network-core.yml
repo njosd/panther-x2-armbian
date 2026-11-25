@@ -78,11 +78,12 @@ jobs:
           git -C work/linux checkout --detach FETCH_HEAD
           test "$(git -C work/linux rev-parse HEAD)" = "${KERNEL_SOURCE_COMMIT}"
           test -z "$(git -C work/linux status --porcelain)"
-          PATCH="scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          PATCH="$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          test -s "$PATCH"
           git -C work/linux apply --check "$PATCH"
           git -C work/linux apply "$PATCH"
           PATCH_SHA="$(sha256sum "$PATCH" | awk '{print $1}')"
-          SEED="scripts/panther-x2-b1/kernel.config.seed"
+          SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
           test "$(git hash-object "$SEED")" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
           grep -qx 'VERSION = 6' work/linux/Makefile
           grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
