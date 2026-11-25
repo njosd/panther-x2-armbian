@@ -2148,3 +2148,94 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 4. 没有在已回读的总路线、实施计划、方向二进度报告和报告索引中发现另一份明确列出但尚未执行的 generic network-core 专题清单。因此不擅自增加 IPv6、TCP、socket memory 或其他主题。
 
 **范围复核结论：** generic network-core 已列专题的源码比较覆盖完成；当前未闭环项是历史配置/源码 provenance/运行时可达性等证据边界，而不是等待扩张网络协议专题。方向二保持进行中，直到总矩阵按统一证据标准整理完成；本项不构成方向二结项，也不进入方向三或 B2.1。
+
+## 53. 方向二四版本综合差异矩阵与普通 DHCP/UDP TX 适用性总核对（2026-11-25）
+
+### 53.1 源码身份与证据等级
+
+| 版本 | 角色 | 源码端点 | 证据等级 |
+|---|---|---|---|
+| 6.1.65 | 黄金 A | unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc | 高置信度候选；无原始 Actions run、checkout SHA 与产物绑定 |
+| 6.1.116 | 黄金 B | §2 固定源码端点 | 端点固定；精确构建 commit 未由原始 build run 绑定 |
+| 6.1.174 | 故障 A | ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633 | 原始 Actions run #296/job #129816642520 直接记录 |
+| 6.12.81 | 故障 B | ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c | 原始构建来源已锁定 |
+
+构建源码身份不等于历史实机安装文件逐字节等同官方包。6.1.65、6.1.116 的来源等级不得提升。
+
+### 53.2 逐专题四版本综合矩阵
+
+| 原计划专题 | 6.1.65 黄金 A | 6.1.116 黄金 B | 6.1.174 故障 A | 6.12.81 故障 B | 普通 DHCP/UDP TX 适用性 |
+|---|---|---|---|---|---|
+| §3 NET/INET 初始化、loopback | 候选端点；loopback 与 6.1.116/174 相同 | loopback 相同 | 6.1 初始化函数相同 | net_dev_init/inet_init 结构重构 | 未发现普通 TX 阻断差异 |
+| §4 IPv4 output、TX queue、qdisc | 单 skb 主路径与 6.1.116 大体相同 | 黄金 B 基准 | packet budget；noqueue GSO-list 返回语义修正 | 延续 budget；新增 unreadable-fragment TX 校验门 | budget/GSO 不命中普通单 skb；unreadable 门需特殊 skb backing |
+| §5 NAPI/GRO/shared-frag | allocator 与 6.1.116/174 相同；GRO ownership 差异 | 6.1 旧 allocator/GRO | shared-frag 标记传播修正 | local_lock/API、GRO list/frag0 演进 | RX GRO/GSO 专用，不解释出站 DHCP |
+| §8 checksum/fragment/UDP GSO | 普通 UDP checksum 与 6.1.116 相同；IPv6 offload helper 差异 | 普通 IPv4 UDP checksum 基准 | UDP GSO 条件处理、shared-frag/GSO 变化 | NET_DEVMEM/unreadable-fragment 与 GSO 演进 | IPv6/GSO 不适用普通 DHCP；特殊 unreadable skb 未证实 |
+| §9 netdevice feature、ARP/neighbour、route key | 主要函数与 6.1.116/174 相同 | 黄金 B 基准 | 主要函数保持一致 | GSO feature 约束、DSCP route-key 演进 | DSCP policy 命中未证实 |
+| §11 RX dispatch、IPv4 input、UDP receive | 主入口与 6.1.116/174 相同 | 黄金 B 基准 | 主入口相同 | RX dispatch/UDP receive 后续调整 | 接收方向变化，不解释出站 Discover |
+| §12 Kconfig/实际配置 | 原始 config：NET/INET/NETDEVICES=y；NET_DEVMEM 不存在 | 完整 config 与 general 模板 7677 项零差异 | 历史 config 两项最终值不可恢复 | 最终 kernel.config 已读取 | 未发现普通 TX 必需网络基础能力缺失 |
+| §14 AF_PACKET/VLAN/bridge/ingress | packet/VLAN/ingress 主函数相同；bridge RX bookkeeping 差异 | AF_PACKET/VLAN/ingress 基准 | bridge MST 后续调整 | packet snaplen unreadable-frag、NF verdict 演进 | bridge 差异需实际 bridge port |
+| §16 conntrack/NAT | hook、普通 entry、NAT 主函数与 6.1.116 相同 | 黄金 B 基准 | init_conntrack 分配错误传播变化 | confirm/debug/state/API 演进 | 未发现普通 DHCP 默认新增 drop |
+| §18 IPv4 checksum/fragment/local delivery | 主入口/本机交付一致；fragment queue 内部差异 | 黄金 B 基准 | peer 获取安全实现变化 | fragment/hook 演进 | 未分片 DHCP 不命中 fragment queue 差异 |
+| §19 FIB/policy routing | 正常 route lookup/FIB/rule 主函数与 6.1.116 相同；in_dev 防御分支差异 | 黄金 B 基准 | 延续 6.1.116 | DSCP selector/forwarding 演进 | 异常 in_dev 或实际 DSCP policy 才可能命中 |
+| §20 ARP/neighbour NUD | 与 6.1.116/174 关键函数一致 | 黄金 B 基准 | 关键函数一致 | ARP filter helper 显式传入原默认 scope | 未发现普通 ARP 新增默认 drop |
+| §21 UDP sendmsg/IP skb 构造 | 普通 UDP 构造主函数与 6.1.116 相同；cork/pending 访问差异 | 黄金 B 基准 | UDP GSO 专用变化 | MSG_SPLICE_PAGES 等后续演进 | 普通无 cork/MSG_MORE datagram 未见功能差异 |
+| §22 TX queue/qdisc/validate/driver handoff | 主路径与 6.1.116 相同；无 ETHERNET_PACKET_MANGLE hook | 有可选 ETHERNET_PACKET_MANGLE hook | 保留可选 hook；GSO-list 返回语义修正 | 移除 hook；新增 unreadable-fragment drop 门 | hook 启用/注册未证实；unreadable 门需特殊 skb |
+| §23 queue stop/wake/BQL/watchdog/free | 旧 timestamp/watchdog 观察方式 | 增加 WRITE_ONCE/READ_ONCE 与配对 memory barrier | 延续 6.1.116 修正 | skb reason/free API 演进 | 唯一明确触及通用 TX queue 并发状态观察的黄金差异；缺历史状态证据 |
+| §24 NET_TX_SOFTIRQ/reschedule/completion/trace | 调度与 completion 主路径与 6.1.116 相同 | 黄金 B 基准 | packet budget 等已归 §22 | softirq API/drop-reason trace 扩展 | 未发现改变普通 output_queue 职责的证据 |
+| §26 TX stats/drop reason/Kconfig | 旧统计 helper；BQL=y；NET_DROP_MONITOR 无显式行 | 计数更新相同；BQL=y；NET_DROP_MONITOR not set | 历史 BQL/NET_DROP_MONITOR 最终值未知 | stats helper/fallback/drop reason 演进；BQL=y、NET_DROP_MONITOR not set | 统计/诊断重构不是发送决策 |
+
+### 53.3 真实差异分类
+
+**与普通单 skb IPv4 UDP/DHCP 主链直接相邻：**
+
+1. **6.1.65→6.1.116 queue stop/watchdog 内存序修正（§43）。** 发送记账/stop 使用 WRITE_ONCE 与写屏障，watchdog 使用读屏障与 READ_ONCE。改变并发状态观察，不改变普通 skb 构造、checksum 或 ndo_start_xmit ABI。需要历史 queue state、trans_start、watchdog timeout 证据才能判断相关性。
+2. **ETHERNET_PACKET_MANGLE 可选 hook（§29/§42）。** 6.1.65 候选源码无该符号/调用点，6.1.116/174 有可选 TX callback，6.12 删除。最终配置和驱动 callback 注册状态未由本方向证明；驱动侧按后续既定方向处理，不提前扩展。
+3. **6.12 unreadable-fragment TX 防护（§30/§32/§42）。** generic TX 新增条件性提前释放路径。NET_DEVMEM=y 已确认，但没有历史 DHCP skb 的 net_iov/unreadable backing-memory 证据。
+
+**有明确特殊条件、不能外推普通 DHCP：** IPv6 extension/jumbo checksum offload；UDP GSO/GSO skb-list/shared-frag；GRO/NAPI RX；IPv4 fragment queue；bridge port/offload；DSCP selector/非默认策略路由；条件性 BPF/AF_PACKET/VLAN/Netfilter；conntrack 分配失败和异常 in_dev 防御分支。
+
+**统计/诊断而非发送决策：** 6.12 per-CPU stats helper 与 stats fallback、drop reason/deferred-free API、tracepoint 字段扩展、NET_DROP_MONITOR 告警、BQL Kconfig prompt 变化、NET_TX_SOFTIRQ completion/output queue 职责。
+
+### 53.4 普通 DHCP/UDP 路径适用性
+
+以本机发出的 IPv4 UDP、单 skb、无 UDP_CORK/MSG_MORE、无 GSO、未分片、常规 Ethernet netdevice 为边界：
+
+1. 主要发送链为 UDP sendmsg → UDP skb/checksum → IPv4 output/route → __dev_queue_xmit() → TX queue/qdisc → validate_xmit_skb() → xmit_one()/ndo_start_xmit。
+2. 四版本普通 UDP checksum、udp_send_skb、IP make/append/push、正常 route output、TX queue 选择、qdisc direct-xmit、单 skb 驱动交付主函数，没有发现可直接解释故障版本普通 DHCP 发送失败的已证实通用功能回归。
+3. queue stop/watchdog 内存序变化可能影响并发状态观察，但缺少历史运行时证据；保留为未决差异，不定根因。
+4. ETHERNET_PACKET_MANGLE 是否启用/注册 callback 未知；不在本方向越界审计。
+5. unreadable-fragment 门需要特定 skb backing memory；NET_DEVMEM=y 不等于历史 DHCP 命中。
+6. 因而没有证据表明普通 DHCP 必然进入故障版本新增的通用丢弃分支。这不是对根因的最终否定，也不替代后续驱动/运行时证据。
+
+### 53.5 配置证据总表
+
+| 配置项 | 6.1.65 | 6.1.116 | 6.1.174 | 6.12.81 |
+|---|---|---|---|---|
+| NET/INET/NETDEVICES | y/y/y（原始 config） | y/y/y（完整 config） | 包内 config 存在；相关值未全部提取 | y/y/y（最终 config） |
+| BQL | y（原始 config） | y（完整 config） | 历史最终值未知；原始 config SHA 已知但文件不可恢复 | y（最终 config） |
+| NET_DROP_MONITOR | 无显式行；FTRACE not set，TRACEPOINTS/TRACING 无启用证据 | not set（实际 config） | 历史最终值未知 | not set（最终 config） |
+| NET_DEVMEM | 该源码时代不存在 | 该源码时代不存在 | 该源码时代不存在 | y（最终 config） |
+| ETHERNET_PACKET_MANGLE | 候选源码无符号/调用点 | 有隐藏可选符号；实际 callback 启用需另证 | 有可选 hook；实际 callback 启用需另证 | hook 已移除 |
+
+### 53.6 未决证据清单
+
+| 编号 | 未决事项 | 当前证据上限 | 矩阵处理 |
+|---|---|---|---|
+| U1 | 6.1.65 精确构建 source commit | 版本/时间/仓库链相容，无原始 run 与产物绑定 | 保留“高置信度候选端点” |
+| U2 | 6.1.116 精确构建 source commit | 固定端点与完整实际配置；无原始 build run 绑定 | 不等同原始产物精确来源 |
+| U3 | 6.1.174 历史最终 config 的 BQL/NET_DROP_MONITOR | 原始 config SHA 已知；旧 asset 404、原 run 无 artifact、当前同名包 hash 不同 | 标“历史最终配置未知” |
+| U4 | 6.12 历史 DHCP skb backing memory | NET_DEVMEM=y；无 skb->unreadable/net_iov 运行时证据 | unreadable 门标条件性 |
+| U5 | queue stop/watchdog 是否命中故障 | 静态函数差异确认；缺 queue state/trans_start/watchdog 日志 | 保留最重要通用 TX 未决差异 |
+| U6 | ETHERNET_PACKET_MANGLE 是否生效 | hook 存在性已审；未审驱动 callback 注册/最终配置 | 只标可选 hook，后续驱动方向处理 |
+| U7 | 历史实机安装文件是否与官方包逐字节相同 | 构建来源与版本可用；非每份安装包均有同 hash 证明 | 不扩大 build source identity |
+
+### 53.7 综合判断与状态
+
+1. 方向二已列 generic network-core 专题 §3～§24、§26 已完成四版本横向源码/配置审计及 6.1.65 候选端点回溯；范围复核见 §52。
+2. 普通 IPv4 UDP/DHCP 单 skb 常规路径，未发现可直接解释故障版本 TX 失败的已证实、无条件触发的 generic network-core 功能回归。
+3. 最值得保留的真实通用 TX 差异是 §43 queue stop/watchdog 内存序配对修正；需历史运行时队列状态证据判断相关性。
+4. 6.12 unreadable-fragment 提前 drop 是实际新增的条件性 TX 门，但无历史 DHCP skb 命中证据。
+5. 6.1.65 源码 provenance 仍为候选；6.1.174 最终两项 config 无法从当前公开历史资产恢复。
+6. 本节完成四版本总矩阵及普通 DHCP/UDP 适用性核对，**不宣布方向二结项**。下一步仅做最终报告一致性审校：逐项核对 §3～§24、§26 与本矩阵是否矛盾，检查 §45/§48/§50/§51/§52 与索引措辞；之后再判断方向二是否具备结项条件。不得新增专题、不得进入方向三或 B2.1。
+
+本轮仅复用已归档源码、Kconfig、kernel.config、构建来源与历史报告做静态综合；未访问设备、未构建、未安装软件、未修改系统/网络配置、未执行网络测试。
