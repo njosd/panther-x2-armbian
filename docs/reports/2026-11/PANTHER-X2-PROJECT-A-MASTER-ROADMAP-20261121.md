@@ -247,10 +247,9 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - Linux block-layer RO 与 pre-Linux 写保护属于不同保护层。
 
 ### B2-0 方向二：Linux 网络核心静态审计状态（2026-11-25）
-- 已按四个固定版本完成方向二原定 §3～§24、§26 generic network-core 源码/Kconfig/已有实际配置横向审计，并补入 6.1.65 高置信度候选源码端点；四版本综合矩阵与普通 DHCP/UDP 单 skb 适用性核对见 `PANTHER-X2-B2-0-DIRECTION-2-NETWORK-CORE-MULTIVERSION-DIFF-PROGRESS-20261124.md` §53。
-- 当前未发现可直接解释普通 IPv4 DHCP/UDP 单 skb TX 失败的、已证实无条件触发的 generic network-core 回归；保留 6.1.65→6.1.116 queue stop/watchdog 内存序修正、ETHERNET_PACKET_MANGLE 可选 hook、6.12 unreadable-fragment 条件性 TX drop 三项待关联差异。
-- 证据限制：6.1.65 源码端点仍为高置信度候选；6.1.116 精确构建 commit 未闭环；6.1.174 历史包 BQL/NET_DROP_MONITOR 最终配置不可从现存公开资产恢复；6.12 unreadable-fragment 是否命中历史 DHCP skb 未知。
-- 已完成报告范围复核及内部一致性初审；方向二仍为“进行中”，尚未宣布结项。不得将本静态审计结论视为 B1/B2 实机通过，也不得提前进入方向三或 B2.1。
+- 原始范围内明确列出的 generic network-core 子项 §3～§24、§26 已完成四版本源码/Kconfig/已有配置静态审计；四版本矩阵、普通 DHCP/UDP TX 适用性与证据等级见方向二报告 §53。
+- §54 完成报告内部一致性审校；§55 完成按原始范围的结项条件评估：技术审计范围已完成，剩余问题均为来源、历史配置或运行时证据限制，不是尚未执行的 generic network-core 专题。
+- **当前状态：方向二进行中（技术审计范围已完成，具备证据边界明确的有条件结项条件，等待用户正式确认）。** 未经确认不改为已结项；不进入方向三或 B2.1，不进行设备操作或构建。
 
 ### 尚未验证
 - B1 clean Kernel/DTB/BusyBox/initramfs workflow 能否成功构建；
