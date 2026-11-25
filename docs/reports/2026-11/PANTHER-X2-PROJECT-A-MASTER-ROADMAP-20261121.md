@@ -552,3 +552,11 @@ B2-0 方向一至五静态审计及第一轮版本/组件决策已形成归档�
 用户明确要求网络组件不得一次性全部加入。首项网络实测应在最小必要网络组件集合下，验证 Panther X2 发出的特定 Ethernet 广播帧能否被局域网对端真实接收；未通过不得引入更高层组件。B2-1 已据此修订为 TX-first、one-component-at-a-time：首轮不配置 IPv4，不依赖 DHCP/DNS/ARP/ICMP/路由；通过最小 AF_PACKET/SOCK_RAW 发送程序发送自定义 EtherType（计划采用实验 EtherType 0x88B5）广播帧，携带项目标识、序列号、长度和校验字段，由 iMac/局域网对端抓包逐帧核对。明确核验 CONFIG_PACKET；INET/IPv4 延后到 TX-PASS 后单独引入。TX-PASS 必须以对端实际捕获、帧内容准确、多轮重复、两端计数器与驱动统计相互印证为依据；probe、link up 或 Panther TX counter 增长均不足以通过。TX 通过后再按 RX、ARP、IPv4、ICMP、路由、TCP、UDP、DHCP、DNS 顺序逐层放行，每次只增加一个组件/最小依赖闭包，且 TX 广播测试作为后续回归项。
 
 本次仅修订计划、索引和路线图，没有访问设备、构建、写卡、修改系统或启动网络实测。
+
+### 2026-11-25 B2-1 R0 通过，R1 最小网络核心启动
+
+R0 已通过实际 Actions artifact 实体核验和 B1 实机记录闭环。Kernel/DTB Run 45309219886 的 artifact 14884706818 与 PREPARE-ONLY Run 45328201244 的 artifact 14890817693 中 Image、DTB、最终 .config、seed、fragment、DTS、modules archive 哈希一致；用户确认实际 SU08G TF 镜像展开 SHA256 为 `26b35287d0f1b952d5cd97fc0e89763751d237e490f35bd5120c7ffb3bdc29eb`。UART 记录确认 /init 执行并到达 BusyBox ash 交互 shell。B1 .config 为 `# CONFIG_NET is not set`；DTB 保留 TF/eMMC/USB host/UART 与 SoC provider，GMAC1/MDIO1/RTL8211F 仍 disabled。R0 详细报告已更新为 PASS。
+
+R1 已建立最小配置片段：`CONFIG_NET=y`、`CONFIG_NETDEVICES=y`、`CONFIG_NET_CORE=y`、`CONFIG_ETHERNET=y`、`CONFIG_PACKET=y`。明确不启用 INET/IPv4、IPv6、STMMAC、DWMAC_ROCKCHIP、MDIO_BUS、PHYLIB、REALTEK_PHY、Wi-Fi 或 Bluetooth。R1 workflow 以冻结的 R0 artifact 为 DTB/.config 对照，重新构建新的 6.18.63 Kernel（因 .config 已变化，不能复用旧 Image），原样复用 B1 DTB，并检查 AF_PACKET/Ethernet core 符号及禁止的网卡驱动对象。
+
+当前状态：R0 PASS；R1 静态审计与构建工作流已提交到 `project-a/b2-1-r1-network-core-build` 分支，等待用户在 Actions 手动运行并审阅产物。没有设备访问、写卡或网络 TX 实测。R1 构建成功也只代表通用网络核心准备通过，不代表 TX 已通；R1 审核通过后才考虑 R2。
