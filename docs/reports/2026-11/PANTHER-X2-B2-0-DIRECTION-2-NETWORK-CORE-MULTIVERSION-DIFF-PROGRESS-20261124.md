@@ -302,22 +302,22 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 ### 12.2 两个候选模板中已核对的网络符号
 
-| 符号 | 6.1.116 general config-6.1 | 当前读取的 6.12 RK35xx config-6.12 | 差异含义 / 证据边界 |
-|---|---|---|---|
-| `CONFIG_NET` / `CONFIG_INET` / `CONFIG_NETDEVICES` | y | y | 核心网络支持均启用 |
-| `CONFIG_NET_NS` | y | y | network namespace 均启用 |
-| `CONFIG_BPF` / `CONFIG_BPF_SYSCALL` | y | y | BPF 基础能力均启用，不代表有程序附着 |
-| `CONFIG_XDP_SOCKETS` | y | y | AF_XDP 支持均编入 |
-| `CONFIG_NET_RX_BUSY_POLL` | y | y | RX busy-poll 支持均启用 |
-| `CONFIG_PAGE_POOL` | y | y | page-pool 支持均启用 |
-| `CONFIG_NET_DEVMEM` | 不存在 | y | 6.12 新增 netdev memory 相关能力；是否进入特定 skb 路径仍取决于运行时使用 |
-| `CONFIG_IP_PNP` / DHCP / BOOTP / RARP | 全部 not set | y | 6.12 候选模板增加内核启动阶段 IP autoconfiguration 能力；与用户空间 DHCP 客户端是不同机制，是否实际生效还取决于最终配置和启动参数 |
-| `CONFIG_IPV6` | y | m | IPv6 从 built-in 变为 module（候选模板） |
-| `CONFIG_VLAN_8021Q` | y | m | VLAN 802.1Q 从 built-in 变为 module（候选模板） |
-| `CONFIG_INET_DIAG` | y | m | inet diagnostics 从 built-in 变为 module（候选模板） |
-| `CONFIG_NETFILTER` | y | y | 两套模板均启用 |
-| `CONFIG_BRIDGE` | m | m | 两套模板均为模块 |
-| `CONFIG_NET_CLS_BPF` / `CONFIG_NET_ACT_BPF` | m / m | m / m | 两套模板一致 |
+| 符号 | 6.1.116 general config-6.1 | 当前读取的 6.12 RK35xx config-6.12 | 差异含义 / 证据边界 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| `CONFIG_NET` / `CONFIG_INET` / `CONFIG_NETDEVICES` | y | y | 核心网络支持均启用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_NET_NS` | y | y | network namespace 均启用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_BPF` / `CONFIG_BPF_SYSCALL` | y | y | BPF 基础能力均启用，不代表有程序附着 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_XDP_SOCKETS` | y | y | AF_XDP 支持均编入 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_NET_RX_BUSY_POLL` | y | y | RX busy-poll 支持均启用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_PAGE_POOL` | y | y | page-pool 支持均启用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_NET_DEVMEM` | 不存在 | y | 6.12 新增 netdev memory 相关能力；是否进入特定 skb 路径仍取决于运行时使用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_IP_PNP` / DHCP / BOOTP / RARP | 全部 not set | y | 6.12 候选模板增加内核启动阶段 IP autoconfiguration 能力；与用户空间 DHCP 客户端是不同机制，是否实际生效还取决于最终配置和启动参数 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_IPV6` | y | m | IPv6 从 built-in 变为 module（候选模板） | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_VLAN_8021Q` | y | m | VLAN 802.1Q 从 built-in 变为 module（候选模板） | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_INET_DIAG` | y | m | inet diagnostics 从 built-in 变为 module（候选模板） | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_NETFILTER` | y | y | 两套模板均启用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_BRIDGE` | m | m | 两套模板均为模块 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `CONFIG_NET_CLS_BPF` / `CONFIG_NET_ACT_BPF` | m / m | m / m | 两套模板一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 以上表格是两个指定配置模板之间的静态差异，不等于 6.12.81 运行 Image 的最终符号差异。尤其 `CONFIG_IP_PNP_DHCP` 只表示内核 IP autoconfiguration 功能可用，不应与 initramfs/userspace DHCP client 混为一谈。
 
@@ -392,29 +392,29 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 - 6.1：`ophub/kernel@8f6eb6e392d68b89a4708c8c45caf9d3f46eadaa`，`kernel-config/release/general/config-6.1`，blob SHA `c5e4598301c3ef3675be0058b99b9b6044a14bbf`。
 - 6.12 候选：`ophub/kernel@bfc9b24f64cf30c3499295b484bbcabddbcc18b6`，`kernel-config/release/rk35xx/config-6.12`，blob SHA `6c7714f5668362dd4ae9c4d1a7eb8249e6b23de5`。
 
-| 符号 | 6.1 模板 | 6.12 候选模板 | 判断 |
-|---|---:|---:|---|
-| `NET_INGRESS` / `NET_EGRESS` | y / y | y / y | 一致 |
-| `NETFILTER_INGRESS` / `NETFILTER_EGRESS` | y / y | y / y | 一致 |
-| `PACKET` / `PACKET_DIAG` | y / y | y / y | 一致 |
-| `BRIDGE` | m | m | 一致 |
-| `BRIDGE_VLAN_FILTERING` | y | y | 一致 |
-| `VLAN_8021Q` | y | m | 模块形态变化 |
-| `BRIDGE_NETFILTER` | m | m | 一致 |
-| `NF_CONNTRACK` | y | y | 一致 |
-| `NF_TABLES` | m | y | nftables 核心从模块变为 built-in |
+| 符号 | 6.1 模板 | 6.12 候选模板 | 判断 | 6.1.65 黄金 A 状态 |
+|---|---:|---:|---| --- |
+| `NET_INGRESS` / `NET_EGRESS` | y / y | y / y | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NETFILTER_INGRESS` / `NETFILTER_EGRESS` | y / y | y / y | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `PACKET` / `PACKET_DIAG` | y / y | y / y | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `BRIDGE` | m | m | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `BRIDGE_VLAN_FILTERING` | y | y | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `VLAN_8021Q` | y | m | 模块形态变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `BRIDGE_NETFILTER` | m | m | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NF_CONNTRACK` | y | y | 一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NF_TABLES` | m | y | nftables 核心从模块变为 built-in | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 模板差异本身不证明 nftables 规则集内容、hook 是否注册或规则是否实际加载。尤其 `NF_TABLES=y` 仅代表内核具备相应功能，不代表有一条规则会丢弃 DHCP/UDP。
 
 ### 14.6 本轮结论
 
-| 子系统 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未桥接、未打 VLAN 标签 IPv4/UDP 的判断 |
-|---|---|---|---|
-| AF_PACKET | packet_rcv 核心行为一致 | unreadable fragment 时限制抓包 snaplen | 用户态抓包可见性变化，不是协议栈通用 drop |
-| VLAN RX | vlan_do_receive 一致 | vlan_do_receive 一致 | 无 VLAN tag 不走该子设备切换路径 |
-| Bridge RX | MST helper 改为 port-aware | bridge offload/TC miss bookkeeping 调整 | 仅 bridge port 条件路径 |
-| Netfilter ingress | hook dispatch 结构一致 | NF_STOLEN 错误返回处理整理 | 实际 hook 注册和规则 verdict 才会影响报文 |
-| Kconfig | ingress/egress 与 packet 功能相同 | VLAN 模块化、NF_TABLES built-in 化 | 配置能力差异，不等于运行时规则差异 |
+| 子系统 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未桥接、未打 VLAN 标签 IPv4/UDP 的判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| AF_PACKET | packet_rcv 核心行为一致 | unreadable fragment 时限制抓包 snaplen | 用户态抓包可见性变化，不是协议栈通用 drop | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| VLAN RX | vlan_do_receive 一致 | vlan_do_receive 一致 | 无 VLAN tag 不走该子设备切换路径 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Bridge RX | MST helper 改为 port-aware | bridge offload/TC miss bookkeeping 调整 | 仅 bridge port 条件路径 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Netfilter ingress | hook dispatch 结构一致 | NF_STOLEN 错误返回处理整理 | 实际 hook 注册和规则 verdict 才会影响报文 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Kconfig | ingress/egress 与 packet 功能相同 | VLAN 模块化、NF_TABLES built-in 化 | 配置能力差异，不等于运行时规则差异 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 当前没有发现能够解释“未桥接、未打 VLAN 标签、普通 IPv4/UDP”收包故障的已证实 AF_PACKET/VLAN/bridge/Netfilter 核心回归点。条件性变化已保留，待结合对应最终配置和既有运行证据判断。
 
@@ -492,18 +492,18 @@ NAT 表初始化先建立表，再逐项调用 `nf_nat_ipv4_register_fn()` 注�
 - 6.1 模板 blob SHA：`c5e4598301c3ef3675be0058b99b9b6044a14bbf`；
 - 6.12 RK35xx 候选模板 blob SHA：`6c7714f5668362dd4ae9c4d1a7eb8249e6b23de5`。
 
-| 符号 | 6.1 模板 | 6.12 候选模板 | 说明 |
-|---|---:|---:|---|
-| `NF_CONNTRACK` | y | y | 核心 conntrack 均内建 |
-| `NF_CONNTRACK_MARK/ZONES/PROCFS/EVENTS` | y | y | 选定子功能一致 |
-| `NF_NAT` | m | y | NAT 核心从模块变为内建 |
-| `NETFILTER_XTABLES` | m | y | xtables 核心从模块变为内建 |
-| `NETFILTER_XT_NAT` | m | y | xtables NAT glue 从模块变为内建 |
-| `IP_NF_IPTABLES` | m | m | legacy iptables 顶层仍为模块 |
-| `IP_NF_IPTABLES_LEGACY` | 无独立符号 | m | 6.12 拆分出 legacy 实现符号 |
-| `IP_NF_FILTER` | m | m | filter 表仍为模块 |
-| `IP_NF_NAT` | m | m | iptables NAT 表仍为模块 |
-| `NF_DEFRAG_IPV4` | y | y | IPv4 defrag 均内建 |
+| 符号 | 6.1 模板 | 6.12 候选模板 | 说明 | 6.1.65 黄金 A 状态 |
+|---|---:|---:|---| --- |
+| `NF_CONNTRACK` | y | y | 核心 conntrack 均内建 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NF_CONNTRACK_MARK/ZONES/PROCFS/EVENTS` | y | y | 选定子功能一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NF_NAT` | m | y | NAT 核心从模块变为内建 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NETFILTER_XTABLES` | m | y | xtables 核心从模块变为内建 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NETFILTER_XT_NAT` | m | y | xtables NAT glue 从模块变为内建 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `IP_NF_IPTABLES` | m | m | legacy iptables 顶层仍为模块 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `IP_NF_IPTABLES_LEGACY` | 无独立符号 | m | 6.12 拆分出 legacy 实现符号 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `IP_NF_FILTER` | m | m | filter 表仍为模块 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `IP_NF_NAT` | m | m | iptables NAT 表仍为模块 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `NF_DEFRAG_IPV4` | y | y | IPv4 defrag 均内建 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 Kconfig 结构变化：
 - 6.12 的 `IP_NF_FILTER`、`IP_NF_NAT` 显式 select `IP_NF_IPTABLES_LEGACY`，将旧式 iptables 实现拆分成单独符号；这是构建/模块依赖关系变化，不代表 hook 优先级或规则匹配语义变化。
@@ -513,15 +513,15 @@ Kconfig 结构变化：
 
 ### 16.6 本轮阶段性结论
 
-| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 结论 |
-|---|---|---|---|
-| IPv4 conntrack hook 位置/优先级 | 一致 | 一致 | 未发现普通 PREROUTING/LOCAL_IN 顺序变化 |
-| conntrack tuple lookup | 一致 | debug 输出和状态读取方式整理 | 未发现普通 UDP tuple 匹配语义变化 |
-| conntrack allocation failure | 错误指针传播语义已存在 | 延续既有行为 | 不是 6.12 新增的资源压力 drop |
-| conntrack confirm | 一致 | IPv4 wrapper 并入通用 nf_confirm | 普通 IPv4 无 helper/seqadj 路径等价 |
-| iptables filter hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 |
-| iptables NAT hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 |
-| Kconfig | 本轮未见该窗口核心配置逻辑变化 | legacy 拆分及核心模块化形态变化 | 需结合最终配置与模块打包核验 |
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 结论 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| IPv4 conntrack hook 位置/优先级 | 一致 | 一致 | 未发现普通 PREROUTING/LOCAL_IN 顺序变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| conntrack tuple lookup | 一致 | debug 输出和状态读取方式整理 | 未发现普通 UDP tuple 匹配语义变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| conntrack allocation failure | 错误指针传播语义已存在 | 延续既有行为 | 不是 6.12 新增的资源压力 drop | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| conntrack confirm | 一致 | IPv4 wrapper 并入通用 nf_confirm | 普通 IPv4 无 helper/seqadj 路径等价 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| iptables filter hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| iptables NAT hook | 一致 | 一致 | 规则表/模块是否加载决定是否执行 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Kconfig | 本轮未见该窗口核心配置逻辑变化 | legacy 拆分及核心模块化形态变化 | 需结合最终配置与模块打包核验 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **对普通未桥接、无 VLAN 标签的 IPv4/UDP 流量：** 当前没有发现 6.1.116→6.1.174 的 conntrack/NAT hook 核心回归，也没有发现 6.12 在普通 PREROUTING/LOCAL_IN 顺序上引入新的丢包点。保留的主要差异是 6.12 Netfilter/iptables 组件的 built-in/module 组合变化，后续需与确切最终配置及模块打包证据对齐。
 
@@ -608,14 +608,14 @@ IPv4 fragment queue 在内存分配失败、超过内存阈值、队列超时、
 
 ### 18.6 本轮结论
 
-| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未分片 DHCP/UDP 的判断 |
-|---|---|---|---|
-| IPv4 header checksum | `ip_rcv_core()` 一致 | 仍调用 `ip_fast_csum()` | 未发现新 checksum 丢弃条件 |
-| IP total length | 一致 | 改用 `iph_totlen()`；仅 TCP GSO 且 tot_len=0 时回退 skb 长度 | 普通 UDP 仍读取 header tot_len |
-| 本机交付 / LOCAL_IN | 核心函数一致 | 核心函数一致 | 路径与 hook 入口未变 |
-| fragment queue | 主函数一致；peer 引用获取改为 RCU/refcount 安全方式 | drop-reason 与 skb 时间戳/accessor 调整，重组主逻辑一致 | 普通未分片包不进入 |
-| Netfilter defrag | hook 位置、优先级、启用计数一致 | 增加 RCU 动态 hook 发布及 NODEFRAG bit accessor | 只对实际启用 hook 且确为 fragment 的 skb 生效 |
-| Kconfig | 关键入口一致 | INET / policy routing / NF_DEFRAG_IPV4 入口语义一致 | 模板均启用；最终配置仍需独立闭环 |
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通未分片 DHCP/UDP 的判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| IPv4 header checksum | `ip_rcv_core()` 一致 | 仍调用 `ip_fast_csum()` | 未发现新 checksum 丢弃条件 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| IP total length | 一致 | 改用 `iph_totlen()`；仅 TCP GSO 且 tot_len=0 时回退 skb 长度 | 普通 UDP 仍读取 header tot_len | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| 本机交付 / LOCAL_IN | 核心函数一致 | 核心函数一致 | 路径与 hook 入口未变 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| fragment queue | 主函数一致；peer 引用获取改为 RCU/refcount 安全方式 | drop-reason 与 skb 时间戳/accessor 调整，重组主逻辑一致 | 普通未分片包不进入 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Netfilter defrag | hook 位置、优先级、启用计数一致 | 增加 RCU 动态 hook 发布及 NODEFRAG bit accessor | 只对实际启用 hook 且确为 fragment 的 skb 生效 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| Kconfig | 关键入口一致 | INET / policy routing / NF_DEFRAG_IPV4 入口语义一致 | 模板均启用；最终配置仍需独立闭环 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **阶段性结论：** 本轮没有发现 6.1.116→6.1.174 在 IPv4 header checksum、分片主处理或本机 UDP 交付路径上的新增丢包条件。6.12 的 `iph_totlen()` 调整针对特殊 TCP GSO；Netfilter defrag 的变化针对 hook 生命周期与 fragment 条件路径。当前均不能解释普通未分片 DHCP/UDP 故障。
 
@@ -685,15 +685,15 @@ IPv4 专用 `fib4_rule_match()`：
 
 ### 19.7 本轮结论
 
-| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通无 DSCP 策略 DHCP/UDP 的判断 |
-|---|---|---|---|
-| 入站 route lookup | 核心函数一致 | BC_FORWARDING 改为 READ_ONCE accessor | 未发现新增普通入站路由丢弃条件 |
-| FIB trie lookup | 函数体一致 | DSCP selector 改用 DSCP/ECN-aware helper | 仅配置 DSCP route 时相关 |
-| policy rule traversal | 通用遍历一致 | 通用遍历一致 | 未发现规则执行顺序回归 |
-| IPv4 rule matching | 一致 | 增加完整 FRA_DSCP selector，保留旧式 TOS 匹配 | 需实际存在相应 DSCP rule 才影响 |
-| output route lookup | 一致 | 核心函数一致；TOS mask 变化见第 9 节 | 未发现普通无策略 UDP 的设备选择变化 |
-| source validation | 一致 | 一致 | 未发现 RPFILTER/源校验新增条件 |
-| IPv4 forwarding | 一致 | 仅新增转发统计递增 | 不适用于本机交付的 DHCP/UDP |
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 对普通无 DSCP 策略 DHCP/UDP 的判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| 入站 route lookup | 核心函数一致 | BC_FORWARDING 改为 READ_ONCE accessor | 未发现新增普通入站路由丢弃条件 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| FIB trie lookup | 函数体一致 | DSCP selector 改用 DSCP/ECN-aware helper | 仅配置 DSCP route 时相关 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| policy rule traversal | 通用遍历一致 | 通用遍历一致 | 未发现规则执行顺序回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| IPv4 rule matching | 一致 | 增加完整 FRA_DSCP selector，保留旧式 TOS 匹配 | 需实际存在相应 DSCP rule 才影响 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| output route lookup | 一致 | 核心函数一致；TOS mask 变化见第 9 节 | 未发现普通无策略 UDP 的设备选择变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| source validation | 一致 | 一致 | 未发现 RPFILTER/源校验新增条件 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| IPv4 forwarding | 一致 | 仅新增转发统计递增 | 不适用于本机交付的 DHCP/UDP | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **阶段性结论：** 本轮未发现 6.1.116→6.1.174 的 IPv4 FIB/policy-routing 数据路径回归。6.12 的主要真实差异集中在 DSCP/TOS selector 语义扩展和配置读取 accessor 整理；前者必须有相应 DSCP rule/route 才会改变路由匹配，后者不构成新增 drop。现有证据没有证明 Panther 历史 DHCP 报文命中 DSCP selector 或 IPv4 forwarding 路径。
 
@@ -766,14 +766,14 @@ IPv4 专用 `fib4_rule_match()`：
 
 ### 20.6 本轮结论
 
-| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 当前判断 |
-|---|---|---|---|
-| ARP RX 入口 `arp_rcv()` | 一致 | 一致 | 未发现新增入口丢弃条件 |
-| ARP request/reply `arp_process()` | 一致 | 一致 | 核心处理语义一致 |
-| ARP filter | 一致 | 显式传入原默认 RT_SCOPE_UNIVERSE | 调用签名变化，默认 scope 语义等价 |
-| ARP solicit | 一致 | 一致 | 未发现探测报文构造变化 |
-| neighbour NUD 状态机 | 本节关键函数一致 | 本节关键函数一致 | 未发现状态转换/重试回归 |
-| neighbour output | 第 9 节已核对 | 第 9 节已核对 | 不重复计数 |
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 当前判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| ARP RX 入口 `arp_rcv()` | 一致 | 一致 | 未发现新增入口丢弃条件 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| ARP request/reply `arp_process()` | 一致 | 一致 | 核心处理语义一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| ARP filter | 一致 | 显式传入原默认 RT_SCOPE_UNIVERSE | 调用签名变化，默认 scope 语义等价 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| ARP solicit | 一致 | 一致 | 未发现探测报文构造变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| neighbour NUD 状态机 | 本节关键函数一致 | 本节关键函数一致 | 未发现状态转换/重试回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| neighbour output | 第 9 节已核对 | 第 9 节已核对 | 不重复计数 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **阶段性结论：** 本轮未发现 ARP RX 或 neighbour NUD 状态机在 6.1.116→6.1.174 的回归，也未发现 6.12 新增普通 ARP request/reply 的丢弃条件。6.12 的 ARP filter 变化是 route helper 新增显式 scope 参数，调用处传入原先零初始化所代表的 `RT_SCOPE_UNIVERSE`，不是已证实的语义变化。
 
@@ -841,14 +841,14 @@ IPv4 专用 `fib4_rule_match()`：
 
 ### 21.6 本轮结论与待闭环项
 
-| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通 DHCP UDP 判断 |
-|---|---|---|---|
-| `udp_sendmsg()` 主流程 | 函数体一致 | scope helper、BPF hook 参数和 READ_ONCE 调整 | scope helper 定义尚待追踪，不提前下等价结论 |
-| cgroup BPF sendmsg | 一致 | 增加 msg_namelen 参数 | 仅实际附着相应 BPF 程序时生效 |
-| `udp_send_skb()` checksum | 仅 UDP GSO MTU/error code 变化 | 主要为 UDP GSO 分支变化 | 普通非 GSO datagram checksum 主路径未见变化 |
-| `ip_make_skb()` / `ip_send_skb()` | 一致 | 一致 | 普通构造/提交入口未见变化 |
-| `__ip_make_skb()` | ICMP raw 统计条件调整 | dst/accessor、READ_ONCE、timestamp API | 非 UDP 的变化或元数据读取调整 |
-| `__ip_append_data()` | timestamp key 回滚 | 新增 MSG_SPLICE_PAGES | 普通 DHCP sendmsg 不设置 splice flag |
+| 核验项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通 DHCP UDP 判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| `udp_sendmsg()` 主流程 | 函数体一致 | scope helper、BPF hook 参数和 READ_ONCE 调整 | scope helper 定义尚待追踪，不提前下等价结论 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| cgroup BPF sendmsg | 一致 | 增加 msg_namelen 参数 | 仅实际附着相应 BPF 程序时生效 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `udp_send_skb()` checksum | 仅 UDP GSO MTU/error code 变化 | 主要为 UDP GSO 分支变化 | 普通非 GSO datagram checksum 主路径未见变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `ip_make_skb()` / `ip_send_skb()` | 一致 | 一致 | 普通构造/提交入口未见变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `__ip_make_skb()` | ICMP raw 统计条件调整 | dst/accessor、READ_ONCE、timestamp API | 非 UDP 的变化或元数据读取调整 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `__ip_append_data()` | timestamp key 回滚 | 新增 MSG_SPLICE_PAGES | 普通 DHCP sendmsg 不设置 splice flag | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **阶段性结论：** 当前没有发现 6.1.116→6.1.174 在普通 UDP sendmsg、IP skb 构造和数据追加主路径上的已证实回归。6.12 新增的 MSG_SPLICE_PAGES 与 UDP GSO 变化均有明确条件，不能外推到普通 DHCP datagram。唯一保留为本方向未闭环项的是 6.12 `ip_sendmsg_scope()` helper 的定义及其对广播/单播路由 scope 的具体语义；在追到定义前，不将 UDP TX 路由选择差异判为等价或回归。
 
@@ -925,16 +925,16 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 
 ### 22.6 TX 核心路径结论
 
-| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通单 skb UDP 判断 |
-|---|---|---|---|
-| TX queue selection | 三个 helper 一致 | 一致 | 未发现通用队列选择差异 |
-| qdisc dequeue budget | 增加 packet budget | 延续；quota 移入 net_hotdata | 调度/批量预算变化，不改单 skb 驱动调用 |
-| `sch_direct_xmit()` | 一致 | 一致 | 驱动交付及 BUSY 重排一致 |
-| `validate_xmit_skb()` | 一致 | 新增 unreadable-frag 入口拒绝 | 条件性新增 TX drop，需 skb 是否含 net_iov 证据 |
-| `__dev_queue_xmit()` noqueue GSO list | 新增 partial GSO list 返回码处理 | 延续 | 普通单 skb DHCP 不命中 |
-| `dev_hard_start_xmit()` | 一致 | 一致 | 单 skb 调用/返回处理一致 |
-| `xmit_one()` | 一致 | 移除可选 ETHERNET_PACKET_MANGLE hook | 需驱动 Kconfig 证据；非通用 DMA 差异 |
-| `ndo_start_xmit` 调用边界 | 一致 | 一致 | 本轮未发现通用驱动调用接口回归 |
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | 普通单 skb UDP 判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| TX queue selection | 三个 helper 一致 | 一致 | 未发现通用队列选择差异 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| qdisc dequeue budget | 增加 packet budget | 延续；quota 移入 net_hotdata | 调度/批量预算变化，不改单 skb 驱动调用 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `sch_direct_xmit()` | 一致 | 一致 | 驱动交付及 BUSY 重排一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `validate_xmit_skb()` | 一致 | 新增 unreadable-frag 入口拒绝 | 条件性新增 TX drop，需 skb 是否含 net_iov 证据 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `__dev_queue_xmit()` noqueue GSO list | 新增 partial GSO list 返回码处理 | 延续 | 普通单 skb DHCP 不命中 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `dev_hard_start_xmit()` | 一致 | 一致 | 单 skb 调用/返回处理一致 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `xmit_one()` | 一致 | 移除可选 ETHERNET_PACKET_MANGLE hook | 需驱动 Kconfig 证据；非通用 DMA 差异 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `ndo_start_xmit` 调用边界 | 一致 | 一致 | 本轮未发现通用驱动调用接口回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **本轮结论：**
 1. 6.1.116→6.1.174 的通用 TX 核心差异主要是 noqueue GSO list 的部分发送返回码修正；不命中普通 DHCP 单 skb。
@@ -1024,14 +1024,14 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 
 ### 23.6 本轮结论
 
-| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | TX 判断 |
-|---|---|---|---|
-| `netdev_start_xmit()` / driver return | 一致 | 调用封装一致 | 无通用交付/返回码变化 |
-| `xmit_more` 状态 | 一致 | PREEMPT_RT 下改为 task-local；非 RT 仍 per-CPU | 条件性执行上下文适配 |
-| queue stop/wake | 一致 | 一致 | 未发现队列状态机回归 |
-| BQL sent/completed | 一致 | 可执行逻辑一致 | 未发现记账/唤醒变化 |
-| watchdog | 一致 | 一致 | 未发现 timeout 判定变化 |
-| skb consume/free | 一致 | reason/caller tracing、dataref helper、small-head cache | 生命周期诊断/内存管理重构，未发现普通 TX handoff 回归 |
+| 子项 | 6.1.116→6.1.174 | 6.1→6.12 | TX 判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| `netdev_start_xmit()` / driver return | 一致 | 调用封装一致 | 无通用交付/返回码变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `xmit_more` 状态 | 一致 | PREEMPT_RT 下改为 task-local；非 RT 仍 per-CPU | 条件性执行上下文适配 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| queue stop/wake | 一致 | 一致 | 未发现队列状态机回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| BQL sent/completed | 一致 | 可执行逻辑一致 | 未发现记账/唤醒变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| watchdog | 一致 | 一致 | 未发现 timeout 判定变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| skb consume/free | 一致 | reason/caller tracing、dataref helper、small-head cache | 生命周期诊断/内存管理重构，未发现普通 TX handoff 回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **本轮结论：**
 1. 从 `netdev_start_xmit()` 到 `ndo_start_xmit` 的通用封装和返回码处理，三个版本一致。
@@ -1119,14 +1119,14 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 
 ### 24.7 本轮结论
 
-| 子项 | 6.1.116→6.1.174 | 6.1.174→6.12.81 | TX 判断 |
-|---|---|---|---|
-| `NET_TX_SOFTIRQ` output_queue | 一致 | 一致 | qdisc reschedule 机制无变化 |
-| qdisc schedule bit / per-CPU queue | 一致 | 一致 | 未发现唤醒链回归 |
-| qdisc_run budget | 增加 packet budget | 延续；dev_tx_weight 迁移 | 调度预算变化，不是单包 drop |
-| completion_queue | 一致 | free-reason API 改为 skb_drop_reason | 延迟 skb free，不是 DMA completion |
-| `net_tx_action()` | 一致 | 回调签名、reason trace 与 free helper 调整 | 队列处理职责/顺序保持 |
-| net TX tracepoints | 一致 | skb trace 增加 rx_sk/caller location | 诊断信息增强，不代表物理发送成功 |
+| 子项 | 6.1.116→6.1.174 | 6.1.174→6.12.81 | TX 判断 | 6.1.65 黄金 A 状态 |
+|---|---|---|---| --- |
+| `NET_TX_SOFTIRQ` output_queue | 一致 | 一致 | qdisc reschedule 机制无变化 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| qdisc schedule bit / per-CPU queue | 一致 | 一致 | 未发现唤醒链回归 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| qdisc_run budget | 增加 packet budget | 延续；dev_tx_weight 迁移 | 调度预算变化，不是单包 drop | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| completion_queue | 一致 | free-reason API 改为 skb_drop_reason | 延迟 skb free，不是 DMA completion | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| `net_tx_action()` | 一致 | 回调签名、reason trace 与 free helper 调整 | 队列处理职责/顺序保持 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
+| net TX tracepoints | 一致 | skb trace 增加 rx_sk/caller location | 诊断信息增强，不代表物理发送成功 | 未纳入该表的函数/模板逐项比较；源码端点待锁定，不能由 6.1.116 代替 |
 
 **本轮结论：**
 1. generic `NET_TX_SOFTIRQ` 的 qdisc output_queue 调度与重新运行路径在三个版本保持一致。
