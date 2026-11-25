@@ -102,3 +102,22 @@ TX-PASS 的决定性证据仍然是局域网另一终端逐帧捕获 Panther 发
 - 工作流为 workflow_dispatch；最初工作流文件只提交在功能分支，GitHub 默认分支的 Actions 列表因此显示 This workflow does not exist。现已将同一工作流文件注册到默认分支 main（提交 fcae75d9db6e10b2ad59bd0fe3470bf53641def1），同时保留功能分支版本供选择构建。现在 workflow_dispatch 入口应可见；运行时仍需选择功能分支 project-a/b2-1-r1-network-core-build。工作流尚未运行，不代表构建或验收通过。
 
 R1 构建完成后先审阅 config diff、对象符号、模块清单、Image 哈希和 DTB 哈希；不得自动放行 R2。
+
+## 9. 首次 Actions 运行失败与修正（Run 45596384034）
+
+用户提交的 Job：`139143446592`。结论：R1 尚未构建，失败发生在源码准备步骤，不是 Kconfig 或编译失败。
+
+已从完整日志确认：
+- R0 artifact 下载成功，artifact ID `14884706818`，下载 ZIP digest `dd67ac049775898f3793fc6524d70437630eeb46d64bca8bc79b8b6ae038cee9`。
+- B1 .config SHA256 与冻结值一致：`7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731`。
+- B1 DTB SHA256 与冻结值一致：`7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d`。
+- Linux 源码 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f` fetch/checkout 成功。
+- 失败点：`git -C work/linux apply "$PATCH"` 会令 Git 在 `work/linux` 目录解释相对补丁路径；原脚本却把仓库根目录相对路径 `scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch` 传给它，因此报 `No such file or directory`。文件本身确实存在于项目仓库根目录下，并非补丁缺失。
+- 后续 config merge、Kernel build、对象审计均被跳过。上传的 335-byte artifact 只有空目录/元数据，不含可用构建产物。
+
+修正：
+- 工作流现在用 `$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch` 绝对路径传给 `git -C work/linux apply`。
+- seed 文件也改为明确的 workspace 绝对路径，避免再次发生 cwd 歧义。
+- 修正已提交功能分支，commit `dedb591b40bf76d30eb2cc4f36e0d49e4113f2b9`；同步到 main，commit `768e6748e40393fe5b03be78df04c93d37fabb54`。
+
+重要：不能对 Run 45596384034 使用 Re-run failed jobs 来验证这个修复，因为重跑仍使用旧的 workflow commit。必须新建一次 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，输入仍为 R0 Run ID `45309219886`。这是从失败步骤修正后重新启动；R0 artifact 会复用，不会重跑 R0，也不会访问设备或写卡。
