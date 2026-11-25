@@ -272,3 +272,48 @@ Panther 地址 0 在合法范围内，STMMAC MDIO bus 提供 read/write callback
 - 更新方向五正式结项评估，明确哪些未决项属于静态范围内可完成、哪些必须保留为运行时/硬件证据限制。
 
 **当前状态仍为方向五进行中，尚未结项。** 本轮只读仓库源码与报告；未访问 Panther X2、未读取或写入 PHY/MDIO 寄存器、未构建/安装/修改任何系统内容，未启动 B2.1。
+
+
+### 9.7 PHYLIB / PHYLINK 剩余 Panther 相关回调覆盖（补充完成）
+
+为关闭“是否遗漏普通 PHY polling / autoneg / link callback”的缺口，本轮补读四版本：
+- drivers/net/phy/phy.c
+- drivers/net/phy/phy_device.c
+- drivers/net/phy/phylink.c
+并沿 Panther 实际 MLO_AN_PHY + 外接 Clause 22 PHY 路径检查关键函数。
+
+#### PHYLIB 函数级对照
+
+| 函数/范围 | 四版本结果 | 差异意义 |
+|---|---|---|
+| phy_config_aneg() | 四版本函数体一致 | driver config_aneg / genphy_config_aneg 分派无变化 |
+| genphy_config_aneg() | 四版本函数体一致 | 通用 Clause 22 autoneg 配置主路径无变化 |
+| genphy_read_status() | 四版本函数体一致 | 通用链路状态、autoneg、LPA 读取主路径无变化 |
+| genphy_update_link() | 四版本函数体一致 | link status 更新 helper 无变化 |
+| phy_start_aneg() | 四版本函数体一致 | mutex 保护与 _phy_start_aneg() 调用顺序无变化 |
+| phy_check_link_status() | 6.1 三版本相同；6.12 增加 link-up 后 EEE active 检查及 enable_tx_lpi 状态更新 | 仅 EEE/LPI 管理状态；不改变 link read 或普通 TX 发帧函数 |
+| _phy_start_aneg() | 6.1 三版本内部 helper；6.12 改为可导出函数，核心 sanitize→config_aneg→check_link_status 顺序一致 | 符号可见性/API 变化，不构成 Panther 正常 autoneg 功能回归 |
+| phy_start()/phy_stop() | phy_start 四版本一致；phy_stop 在 6.12 配合 PHY_ERROR 与锁外 post-work 调整 | 与 state-machine 错误处理变化同属错误/停止路径 |
+| phy_state_machine() | 6.1.65/116/174 的 phy.c 文件 blob 完全相同；6.12 拆分锁内 _phy_state_machine 与锁外 post-work | 6.12 对 MDIO/PHY 错误记录、PHY_ERROR、suspend 执行位置有变化；成功 polling 主路径仍执行 phy_check_link_status |
+
+6.12 phy_check_link_status() 在 PHY 从非 RUNNING 变为 RUNNING 时额外调用 genphy_c45_eee_is_active()，并更新 enable_tx_lpi；link down 时清除该状态。这是 EEE/LPI 功能路径，不改变 phy_read_status() 的调用顺序，也不构成普通 IPv4 UDP/DHCP TX 必然阻断条件。结合 6.18.63 对 PHY-mode EEE bit 5 的单 bit 配置，应把它们作为 EEE/LPI 专项，而不是与 PHYCR2 整字 0x1801 或 TX descriptor 路径混为一谈。
+
+#### PHYLINK 函数级对照
+
+| 函数/范围 | 四版本结果 | 差异意义 |
+|---|---|---|
+| phylink_connect_phy() | 四版本函数体一致 | 外接 PHY attach 接口主体无变化 |
+| phylink_disconnect_phy() | 四版本函数体一致 | disconnect 主体无变化 |
+| phylink_stop() | 四版本函数体一致 | stop 主体无变化 |
+| phylink_start() | 6.1 三版本相同；6.12 主要使用 req_link_an_mode 输出当前配置日志，PHY start / resolve / polling 的主体顺序相同 | 未发现 Panther PHY start 被跳过或延迟的分支变化 |
+| phylink_phy_change() | 6.1 三版本相同；6.12 在 PHY link down 时记录 link_failed | 与 resolver 的 link-down/retrigger 状态管理配套 |
+| phylink_resolve() | 6.1 三版本的 MLO_AN_PHY 分支相同；6.12 重构为 act_link_an_mode 分支，PHY mode 仍直接使用 pl->phy_state | Panther 外接 PHY 状态来源未切换到 PCS/in-band |
+| manual flow control | 6.1 在 MLO_AN_PHY 分支内调用；6.12 移至非-fixed mode 的共同分支 | PHY mode 仍会应用 manual flow control；不是 Panther 的分支丢失 |
+
+6.12 phylink_resolve() 还把旧 mac_link_dropped 状态调整为 link_failed，并将 MLO_AN_PHY、MLO_AN_FIXED 与 PCS 状态解析改为按 act_link_an_mode 分支。PHY mode 仍然直接使用 PHY state，PHY link down 会触发 link-down/retrigger 处理。该变化属于状态机组织和链路失败重试管理。
+
+另核对 STMMAC 的 stmmac_mac_config()：6.1.116、6.1.174、6.12.81 均为空实现（注释为 Nothing to do, xpcs_config() handles everything）。因此 phylink resolver 中旧版本在某些 legacy 条件下对同接口 speed/duplex/pause 变化调用 mac_config()，对 Panther 当前 STMMAC callback 不会产生额外寄存器写入；不能把该通用 phylink API 变化直接推定为 Panther GMAC 配置回归。
+
+**覆盖结论：** Panther 外接 PHY 的 autoneg 配置、genphy status 读取、PHY start、phylink connect/disconnect、PHY mode link-state source 与 link-up/down callback 已完成最后一轮函数覆盖。没有发现 6.1.174 相对两个黄金版本新增的、在普通 PHY polling/autoneg 成功路径无条件阻断 link 或普通 TX 的 PHYLIB/PHYLINK 回归。6.12 的差异主要集中于 PHY error state/post-work、EEE/LPI bookkeeping、link_failed/retrigger 与 API 结构重构；均需相应错误、EEE 或 link-failure 条件，不应外推为已证实 TX 根因。
+
+本轮未把 generic PHYLIB/PHYLINK 的其他 Clause 45、SFP、fixed-link、PCS in-band、cable-test、loopback、WOL 等非 Panther 路径扩展成新专题。
