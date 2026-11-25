@@ -50,20 +50,20 @@
 | D3-3 | DWMAC4 DMA 初始化/寄存器编程 | 已完成（静态源码范围） | 四版本 reset timing、DMA/AXI/PBL/channel/address-width 对照 |
 | D3-4 | TX descriptor 其余分支 | 已完成（静态源码范围） | 四版本 TSO mapping lifecycle、mapping error/ring shortage、completion/reclaim、TX timer/recovery 条件差异 |
 | D3-5 | RX descriptor/buffer/page-pool | 已完成（静态源码范围） | 四版本 RX refill/page-pool/DMA sync/OWN/status/NAPI 对照 |
-| D3-6 | DMA API/coherency/IOMMU | 进行中 | 复用既有 32/32 DMA width 与无 GMAC IOMMU 结论，只补四版本源码及实际 c2f148d 边界 |
-| D3-7 | IRQ/NAPI/watchdog/recovery | 待开始 | 中断与恢复路径矩阵 |
+| D3-6 | DMA API/coherency/IOMMU | 已完成（静态源码/Kconfig/DTS 范围） | 四版本 DMA map/sync、ARM64 cache maintenance、DMA_NEED_SYNC/bounce、coherency/IOMMU 交叉矩阵 |
+| D3-7 | IRQ/NAPI/watchdog/recovery | 进行中 | 复用既有 IRQ/NAPI 研究，只补四版本 STMMAC/DWMAC4 差异和实际 c2f148d |
 | D3-8 | 总矩阵与一致性审校 | 待开始 | 方向三总结报告 |
 
-## 5. 当前唯一工作项：D3-6
+## 5. 当前唯一工作项：D3-7
 
-D3-1 至 D3-5 已在配套报告中按静态源码范围结项。本轮当前只做 D3-6：核对 DMA API/coherency/IOMMU 交叉关系；复用既有 32/32 DMA host/device width 与 GMAC DTS 无 IOMMU 结论，不重复设备测试或缓存同步泛化推断。
-- 核对四版本 dma_set_mask_and_coherent()/dma_set_mask()、dma_map_single/page、dma_sync_single_for_cpu/device 与 page_pool DMA mapping 的调用契约；
-- 对照 CONFIG_ARCH_DMA_ADDR_T_64BIT、CONFIG_DMA_NEED_SYNC、IOMMU 相关配置，但不由单个 Kconfig 符号推断实际 cache maintenance；
-- 核对 Panther gmac1 DTS 是否声明 iommus/dma-coherent，以及四版本 DMA ops/平台设备 DMA attributes 的交接；
-- 复用既有 6.1.116/6.12.81 32/32 host/device width 与无 GMAC IOMMU 结论，只补 6.1.65 和实际 c2f148d；
-- 不重复 D3-3 已完成的 EAME software logic，不访问设备或进行 DMA mapping 实测。
+D3-1 至 D3-6 已在配套报告中按静态源码范围结项。本轮当前只做 D3-7：核对 STMMAC IRQ registration/mask/unmask、NAPI schedule/complete、DMA abnormal/fatal bus error、watchdog 与 recovery；generic network-core 层的 NET_TX_SOFTIRQ 已在方向二完成，不重做。
+- 先回读既有 STMMAC IRQ/NAPI/WDG 报告，列明已经完成的部分；
+- 四版本比较 stmmac_interrupt()/NAPI schedule/complete、TX/RX IRQ mask/unmask、DMA abnormal/fatal bus error handling；
+- 对照 TX watchdog timer、DMA reset/recovery、queue wake/stop 的驱动侧调用顺序；
+- 特别区分 6.1.174 upstream stable 与实际 c2f148d；
+- 不重复方向二 NET_TX_SOFTIRQ，也不访问设备或启用 tracing。
 
-先回读 PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md §14.2/§14.3 与 D3-3 §5；然后逐版本核对 DMA API 调用和 DTS/config 证据，重点避免把 DMA_NEED_SYNC=y 误判为驱动漏同步。
+先回读已有 IRQ/NAPI/watchdog/recovery 相关报告与 6.1.116/6.12.81 运行日志；再以四版本精确源码端点检查 STMMAC 层剩余差异，优先核对实际 c2f148d。
 
 ### D3-1 结项结果（2026-11-25）
 - 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
