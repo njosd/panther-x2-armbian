@@ -147,3 +147,18 @@ Job `139149992105` 的源码准备步骤已全部通过：
 - 当前 workflow 与 fragment 均已在功能分支更新；尚需同步 main 的 workflow 注册副本和主报告。
 
 下次 R1 运行必须是新的 workflow_dispatch（不能重跑旧 run），继续引用同一个 R0 Run ID `45309219886`。重点观察 olddefconfig 警告、全部 72 个 vendor group、MDIO/PHY/DSA/Shortcut FE gates。只有配置门全部通过后才允许编译。即使编译通过，R1 仍不代表有物理 TX 能力。
+
+
+## 11. R1 配置基线修正（2026-11-25）
+
+针对第二次 Actions 的 `CONFIG_MDIO_BUS=y` 失败，重新检查了工作流输入和冻结的 B1 artifact，发现原工作流虽然下载并校验了 R0 的最终 `.config`，却没有用它作为 R1 的配置合并基线；实际仍从原始 Ophub 6.12.81 seed + B1 fragment + R1 fragment 重新合并。这会重新引入已经在 B1 形成过程中处理过的历史配置状态，增加 Kconfig 隐式选择和旧选项复活的风险。
+
+已修正工作流：
+- R1 的 merge_config 输入改为冻结 artifact 中的 `work/b1-reference/output/kernel.config` + R1 fragment。
+- B1 最终配置 SHA256 必须等于 `7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731`，且必须确认 `# CONFIG_NET is not set`，否则停止。
+- 原始 Ophub seed 仍做来源哈希校验并作为审计材料保存，但不再作为 R1 的直接合并输入；B1 fragment 也保留归档，不再重复叠加。
+- 最终仍执行 Linux 6.18.63 `olddefconfig`，以收敛后的 `.config` 作为唯一验收对象；禁止项检查和 B1/R1 config diff 保留。
+- 功能分支工作流修正 commit：`928cb011bbe75a81ed4f27297b508f46d3030b93`。
+- 默认分支 main 的 workflow_dispatch 注册副本同步 commit：`cf00e4f313d0f43f44e660462e17ec0c4eaa7b38`。
+
+这项修正尚未由新的 Actions 运行验证。下一次必须新建 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，输入仍为冻结的 R0 Run ID `45309219886`。不得对旧 Run 45598258364 使用 Re-run。新运行首先只审阅 merge/olddefconfig 日志、最终配置差异及全部禁止项；只有配置门通过后才允许进入 Kernel build。当前 R1 仍未 PASS，不得进入 R2。
