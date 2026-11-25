@@ -1,0 +1,162 @@
+name: Panther X2 B2-1 R1 resume and artifact audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      r1_build_run_id:
+        description: "Existing R1 build run whose compiled outputs must be reused"
+        required: true
+        type: string
+        default: "45606030640"
+      b1_reference_run_id:
+        description: "Frozen B1 reference run supplying the unchanged Panther DTB"
+        required: true
+        type: string
+        default: "45309219886"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-b2-1-r1-resume-audit
+  cancel-in-progress: false
+
+jobs:
+  resume-audit:
+    name: Reuse existing R1 build and complete artifact audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      R1_BUILD_RUN_ID: ${{ inputs.r1_build_run_id }}
+      B1_REFERENCE_RUN_ID: ${{ inputs.b1_reference_run_id }}
+      EXPECTED_KERNEL_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+      EXPECTED_B1_CONFIG_SHA256: "7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731"
+      EXPECTED_DTB_SHA256: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+    steps:
+      - name: Checkout audit scripts and report templates only
+        uses: actions/checkout@v6
+
+      - name: Download the already-built R1 artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1-previous
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.r1_build_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the frozen B1 reference artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work/b1-reference
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.b1_reference_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify reused R1 build provenance and required files
+        run: |
+          set -euo pipefail
+          R1=work/r1-previous
+          test -s "$R1/output/Image"
+          test -s "$R1/output/System.map"
+          test -s "$R1/output/kernel.config"
+          test -s "$R1/output/modules.tar.zst"
+          test -s "$R1/logs/r1-vmlinux-symbols.txt"
+          test -s "$R1/logs/r1-config-gates.txt"
+          test -s "$R1/source-lock.txt"
+          test -s "$R1/toolchain-version.txt"
+          grep -Fq "kernel_commit=${EXPECTED_KERNEL_COMMIT}" "$R1/source-lock.txt"
+          grep -Fq "kernel_version=6.18.63" "$R1/source-lock.txt"
+          grep -Fq "b1_reference_run_id=${B1_REFERENCE_RUN_ID}" "$R1/source-lock.txt"
+          grep -Fq "R1 Kconfig gate checks: PASS" "$R1/logs/r1-config-gates.txt"
+          grep -qx "CONFIG_NET=y" "$R1/output/kernel.config"
+          grep -qx "CONFIG_NETDEVICES=y" "$R1/output/kernel.config"
+          grep -qx "CONFIG_NET_CORE=y" "$R1/output/kernel.config"
+          grep -qx "CONFIG_ETHERNET=y" "$R1/output/kernel.config"
+          grep -qx "CONFIG_PACKET=y" "$R1/output/kernel.config"
+          for key in CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO CONFIG_MDIO_DEVICE CONFIG_MDIO_BUS CONFIG_MDIO_DEVRES CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_FIXED_PHY CONFIG_NET_DSA CONFIG_NET_DSA_REALTEK CONFIG_NET_DSA_REALTEK_MDIO CONFIG_SHORTCUT_FE CONFIG_NETDEVSIM CONFIG_NET_FAILOVER CONFIG_NETCONSOLE CONFIG_NETPOLL CONFIG_NET_POLL_CONTROLLER CONFIG_DNET CONFIG_ETHOC CONFIG_OA_TC6 CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do
+            if grep -Eq "^$key=[ym]$" "$R1/output/kernel.config"; then
+              echo "::error::Forbidden configuration enabled: $key"
+              exit 1
+            fi
+          done
+          if grep -E '^CONFIG_NET_VENDOR_[A-Z0-9_]+=[ym]$' "$R1/output/kernel.config"; then
+            echo "::error::A NET_VENDOR option is enabled in R1"
+            exit 1
+          fi
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 "$R1/output/Image" | tr -d ' \\n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+          grep -q 'packet_create' "$R1/logs/r1-vmlinux-symbols.txt"
+          grep -q 'packet_sendmsg' "$R1/logs/r1-vmlinux-symbols.txt"
+          grep -q 'eth_type_trans' "$R1/logs/r1-vmlinux-symbols.txt"
+          grep -q 'dev_queue_xmit' "$R1/logs/r1-vmlinux-symbols.txt"
+          sha256sum "$R1/output/Image" "$R1/output/kernel.config" "$R1/output/modules.tar.zst" | tee work/r1-reused-build-sha256.txt
+          echo "R1 reused build provenance and built-in network-core evidence: PASS"
+
+      - name: Re-audit the reused modules archive
+        run: |
+          set -euo pipefail
+          mkdir -p work/modules-check
+          tar --zstd -tf work/r1-previous/output/modules.tar.zst > work/modules-archive-list.txt
+          tar --zstd -xf work/r1-previous/output/modules.tar.zst -C work/modules-check
+          MODULE_DIR="$(find work/modules-check/lib/modules -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$MODULE_DIR"
+          if find "$MODULE_DIR" -type f -name '*.ko*' | grep -E '/kernel/drivers/net/(ethernet|phy|usb|wireless)/|/kernel/drivers/bluetooth/'; then
+            echo "::error::Unexpected network hardware/PHY/Bluetooth module in reused R1 archive"
+            exit 1
+          fi
+          if grep -E 'kernel/drivers/net/(ethernet|phy|usb|wireless)/|kernel/drivers/bluetooth/' "$MODULE_DIR/modules.builtin"; then
+            echo "::error::Unexpected built-in network hardware/PHY/Bluetooth driver in reused R1 archive"
+            exit 1
+          fi
+          echo "Reused R1 module archive isolation audit: PASS" | tee work/r1-modules-audit.txt
+
+      - name: Verify B1 reference and assemble final R1 artifact without rebuilding
+        run: |
+          set -euo pipefail
+          B1=work/b1-reference
+          R1=work/r1-previous
+          test -s "$B1/output/kernel.config"
+          test -s "$B1/output/dtb/rockchip/rk3566-panther-x2.dtb"
+          test "$(sha256sum "$B1/output/kernel.config" | awk '{print $1}')" = "$EXPECTED_B1_CONFIG_SHA256"
+          test "$(sha256sum "$B1/output/dtb/rockchip/rk3566-panther-x2.dtb" | awk '{print $1}')" = "$EXPECTED_DTB_SHA256"
+          grep -qx '# CONFIG_NET is not set' "$B1/output/kernel.config"
+          mkdir -p work/final-r1/output/dtb/rockchip work/final-r1/logs
+          cp -a "$R1/output/." work/final-r1/output/
+          cp -a "$R1/logs/." work/final-r1/logs/
+          cp "$R1/source-lock.txt" work/final-r1/source-lock.txt
+          cp "$R1/toolchain-version.txt" work/final-r1/toolchain-version.txt
+          cp "$B1/output/dtb/rockchip/rk3566-panther-x2.dtb" work/final-r1/output/dtb/rockchip/
+          if test -s "$B1/output/dtb-verification.txt"; then
+            cp "$B1/output/dtb-verification.txt" work/final-r1/output/dtb-verification.txt
+          fi
+          {
+            echo "result=PASS"
+            echo "mode=resume-audit-only; no kernel source checkout, Kconfig merge, kernel build, or modules build"
+            echo "reused_r1_build_run_id=$R1_BUILD_RUN_ID"
+            echo "b1_reference_run_id=$B1_REFERENCE_RUN_ID"
+            echo "kernel_version=6.18.63"
+            echo "kernel_commit=$EXPECTED_KERNEL_COMMIT"
+            echo "b1_config_sha256=$EXPECTED_B1_CONFIG_SHA256"
+            echo "dtb_sha256=$EXPECTED_DTB_SHA256"
+            echo "r1_image_sha256=$(sha256sum work/final-r1/output/Image | awk '{print $1}')"
+            echo "r1_config_sha256=$(sha256sum work/final-r1/output/kernel.config | awk '{print $1}')"
+            echo "r1_modules_sha256=$(sha256sum work/final-r1/output/modules.tar.zst | awk '{print $1}')"
+            echo "kconfig_gate=PASS (revalidated from archived final .config)"
+            echo "built_in_network_core_symbols=PASS (revalidated from archived vmlinux symbol audit)"
+            echo "module_hardware_driver_isolation=PASS (archive re-extracted and re-audited)"
+            echo "dtb_reference_identity=PASS"
+          } | tee work/final-r1/output/R1-VERIFICATION.txt
+          cp work/r1-reused-build-sha256.txt work/final-r1/
+          cp work/r1-modules-audit.txt work/final-r1/
+          cp work/modules-archive-list.txt work/final-r1/
+
+      - name: Upload completed R1 artifact assembled from reused outputs
+        uses: actions/upload-artifact@v6
+        with:
+          name: b2-1-r1-network-core-final
+          path: work/final-r1/
+          if-no-files-found: error
+          retention-days: 30
