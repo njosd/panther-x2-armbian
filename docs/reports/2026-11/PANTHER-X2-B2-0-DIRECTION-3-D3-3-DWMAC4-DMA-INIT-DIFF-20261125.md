@@ -73,6 +73,21 @@ Panther RK356x SoC DTSI 定义 snps,axi-config，blen=<0 0 0 0 16 8 4>、rd_osr_
 
 6.1.174/6.12 的 Rockchip dwmac-rk.c 未给 plat->dwmac4_addrs 赋值；平台数据使用 devm_kzalloc 初始化，新增 pointer 未赋值时为 NULL。既有 dwmac4.h 地址 helper 对 NULL 使用默认 DWMAC4 register offsets。因此 Panther 不会因为新增 register map abstraction 自动切换到自定义寄存器布局。此项与 2026-11-19 stable 报告的结论一致，但本轮将实际 c2f148d 与 6.12.81 端点纳入核对。
 
+## 4.4 Panther 的 PBL / AXI 静态输入值闭环
+
+四版本 stmmac_axi_setup() 函数体逐行一致；stmmac_platform.c 的 DMA config parser 在四版本也保留相同的 PBL、PBLx8、fixed_burst、mixed_burst、aal 解析规则。6.1.174/6.12 的错误清理路径和 flow_ctrl 默认处理有结构变化，但不改变以下 DMA 输入：
+
+- Panther SoC DTSI 未提供 snps,pbl、snps,txpbl、snps,rxpbl，因此 parser 使用 DEFAULT_DMA_PBL=8，txpbl/rxpbl 保持 0。
+- Panther DTSI 未提供 snps,no-pbl-x8，因此 dma_cfg->pblx8=true。
+- Panther DTSI 未提供 snps,fixed-burst、snps,aal，因此 fixed_burst=false、aal=false。
+- Panther DTSI 提供 snps,mixed-burst，因此 mixed_burst=true。
+- snps,axi-config 指向 gmac1_stmmac_axi_setup；其子节点 snps,blen=<0 0 0 0 16 8 4>、snps,rd_osr_lmt=<8>、snps,wr_osr_lmt=<4>。未声明的 axi bool 字段由 devm_kzalloc 零初始化，OSR 缺省值不触发，因为 DTS 已显式提供 8/4。
+- 因 txpbl/rxpbl 为 0，dwmac4_dma_init_tx_chan()/rx_chan() 使用 pbl fallback，即 TX PBL=8、RX PBL=8；PBLx8 bit 被设置。
+- dwmac4_dma_init() 对 DMA_SYS_BUS_MODE 设置 MB，不设置 FB/AAL；EAME 仍由硬件地址宽度能力与 ARM64 DMA 条件决定。
+- dwmac4_dma_axi() 对 AXI 的 OSR 与 BLEN 写入值为 write OSR=4、read OSR=8、BLEN 16/8/4。
+
+上述 DTS 输入在四个固定端点相同；parser 和 register programming 算法没有发现版本差异。MTL queue parser 与 Panther 1 RX + 1 TX / queue0→DMA channel0 的结论已在既有 queue-init 报告和 TX queue audit 中完成，本节只引用其结果，不重复该专题。
+
 ## 5. DMA address width / EAME 条件
 
 四版本 dwmac4_get_hw_feature() 均从 GMAC_HW_FEATURE1 的 GMAC_HW_ADDR64 字段解码 addr64：0→32 bit、1→40 bit、2→48 bit、其他值→32 bit。6.12 额外解码 MAC additional address entries 字段，但 addr64 的解码方式未变。四版本 stmmac_main.c 的 DMA mask/address-width 主体逻辑一致：
@@ -99,7 +114,7 @@ Panther RK356x SoC DTSI 定义 snps,axi-config，blen=<0 0 0 0 16 8 4>、rd_osr_
 - 尚未核对 DMA init 1500ms delay 与 Rockchip glue clock/reset/power 顺序的跨层关系；该项留在后续既定平台专题，不在此扩展。
 - 尚未完成 DWMAC4 DMA feature register addr64/host_dma_width 与 dma_set_mask 的运行时闭环。
 
-**D3-3 状态：进行中。** 已完成 DWMAC4 DMA core 主要初始化函数四版本初审，并发现两个黄金/故障版本分界明显的时序差异（reset 前 1500ms delay 缺失、reset polling interval 缩短）。当前先保留为高优先级候选，不宣布根因；下一步只补齐 DMA feature/address-width 与 PBL/AXI/queue platform data 的静态来源证据。D3-4/D3-5 descriptor 生命周期尚未开始。
+**D3-3 状态：已完成（静态源码范围）。** 四版本 DWMAC4 DMA reset、DMA bus mode、AXI、channel/PBL/base-address 初始化和 DMA address-width 代码均已对照；Panther PBL/AXI 静态输入也已闭环。保留两项重要时序差异为待关联候选：黄金版本 reset 前有 1500ms delay、故障版本缺失；reset polling interval 从 10ms 缩短为 0.5ms。硬件 feature register 实际 addr64 值、运行时 DMA mask 成功状态及 reset 完成时间没有历史运行时证据，不认定根因。按顺序进入 D3-4 TX descriptor 未覆盖分支。
 
 ## 7. 精确源码链接
 
@@ -112,3 +127,14 @@ Panther RK356x SoC DTSI 定义 snps,axi-config，blen=<0 0 0 0 16 8 4>、rd_osr_
 - [6.1.174-rk35xx dwmac4_lib.c](https://github.com/ophub/linux-6.1.y-rockchip/blob/c2f148dece4b67ebd30aefad1bdd1990f41e5633/drivers/net/ethernet/stmicro/stmmac/dwmac4_lib.c)
 - [6.12.81-rk35xx dwmac4_lib.c](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/dwmac4_lib.c)
 - [JL2xx1 delay + MDIO workaround commit 49b5f340](https://github.com/unifreq/linux-6.1.y/commit/49b5f340f346cc9a5b777499fce46150b691b70e)
+
+## 8. D3-3 结项记录（2026-11-25）
+
+- [x] 四版本 DWMAC4 DMA SW reset 和 polling interval。
+- [x] 四版本 stmmac_init_dma_engine() reset delay 与 channel programming 顺序。
+- [x] 四版本 DMA_SYS_BUS_MODE / AXI / TX/RX channel PBL/base address 初始化。
+- [x] 四版本硬件 feature addr64 decode 与 dma_set_mask_and_coherent() 软件判断。
+- [x] Panther PBL/PBLx8/fixed/mixed/AAL/AXI OSR/BLEN 静态输入值核对。
+- [x] 引用并避免重复 queue parser、普通 TX descriptor OWN/barrier/tail-pointer 与 MAC TE/DMA ST 既有审计。
+
+**结论：** D3-3 静态审计结项。高优先级候选为 1500ms pre-reset delay 在故障源码缺失及 reset polling cadence 改变；二者仍需历史运行时证据才能建立因果。硬件 addr64 capability 和 DMA reset 实际完成时间为未验证项，作为证据限制保留，不阻塞本项静态结项。
