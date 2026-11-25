@@ -2000,3 +2000,51 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 **结论：** 本次既有 artifact 不足以闭合 6.1.174 的 BQL/NET_DROP_MONITOR 实际配置值。不得以 RK35xx config-6.1 候选模板 not set/y 替代官方包内最终 config。该子项继续标记“官方最终 config 已知存在且有 SHA256，但本次可读取 artifact 不含完整文件内容”。
 
 本轮没有重新下载/解包官方 135 MB 发布包，没有构建、设备访问或系统修改；没有把该资产缺口转化为新测试。下一步如需补齐，只能从原始官方发布包或其他已归档的完整 config 文件中只读提取对应两行。
+
+
+## 47. 6.12.81 最终 kernel.config 从既有构建审计 artifact 补齐（2026-11-25）
+
+### 47.1 证据来源与完整性
+
+从既有 GitHub Actions artifact 只读取回：
+- Run artifact ID：14143082992；
+- artifact ZIP SHA256：b2fc272881bef576b0e6961bfb2cea5a0cbb13f9c4eb9e614cb41a4c1f0ba3d0；
+- artifact 内文件：extracted/kernel.config；
+- 提取后 kernel.config SHA256：dd9f6b316171eabd4b18f3e9799d2f40dbf6211d3a49540fdb50837b5e07f5c2；
+- 同一 artifact 的 package-check.txt 记录 6.12.81.tar.gz 实际大小 141,437,450 bytes，实际 SHA256 与预期 72c1c331a5da0853f80563aa05e9285749da6187bad0276878b386d4913b9b5b 一致，package integrity verified。
+
+这份 kernel.config 是原始 6.12.81 发布包审计时提取的最终配置，不是候选 config-6.12 模板。因此本节将以下值提升为“最终包配置证据”。
+
+### 47.2 本方向涉及的最终配置值
+
+| 符号 | 6.12.81 最终 kernel.config |
+|---|---:|
+| CONFIG_NET / CONFIG_INET / CONFIG_NETDEVICES / CONFIG_NET_CORE | y / y / y / y |
+| CONFIG_NET_DEVMEM | y |
+| CONFIG_XDP_SOCKETS | y |
+| CONFIG_IP_PNP / CONFIG_IP_PNP_DHCP | y / y |
+| CONFIG_INET_DIAG | m |
+| CONFIG_IPV6 | m |
+| CONFIG_NETFILTER / CONFIG_NETFILTER_INGRESS / CONFIG_NETFILTER_EGRESS | y / y / y |
+| CONFIG_NF_CONNTRACK / CONFIG_NF_DEFRAG_IPV4 | y / y |
+| CONFIG_NF_NAT / CONFIG_NETFILTER_XTABLES / CONFIG_NETFILTER_XT_NAT | y / y / y |
+| CONFIG_IP_NF_IPTABLES / CONFIG_IP_NF_FILTER / CONFIG_IP_NF_NAT | m / m / m |
+| CONFIG_VLAN_8021Q | m |
+| CONFIG_NET_SCHED | y |
+| CONFIG_NET_SCH_INGRESS | m |
+| CONFIG_NET_RX_BUSY_POLL / CONFIG_PAGE_POOL | y / y |
+| CONFIG_BQL | y |
+| CONFIG_NET_DROP_MONITOR | not set |
+
+### 47.3 对 §12、§22、§26 的修订
+
+1. **§12：** 6.12.81 的 IPv6、VLAN_8021Q、INET_DIAG 为 m；NET_DEVMEM、IP_PNP、IP_PNP_DHCP 为 y。此前仅能称为候选模板值，现在由最终 package kernel.config 确认。
+2. **§22：** NET_DEVMEM=y 是 6.12.81 最终包配置事实，unreadable-fragment TX drop 门具备编译配置前提；但仍不能证明历史 DHCP skb 实际使用 net_iov backing memory 或 skb->unreadable=true。配置启用不等于运行时命中。
+3. **§26：** BQL=y、NET_DROP_MONITOR not set 均由 6.12.81 最终配置确认。NET_DROP_MONITOR 是可选告警服务，不参与 TX 数据面。
+4. **模板 SHA 差异：** 先前记录的 config-6.12 候选模板 blob SHA 966f4b6a... 与 6c7714f5... 不一致的问题仍是模板快照身份问题；但它不再妨碍本报告使用最终包内 kernel.config 判断上述符号。不得再用候选模板覆盖最终包值。
+
+### 47.4 剩余状态
+
+6.12.81 最终配置资产缺口已部分闭合：本方向所列网络核心符号均可从该最终 kernel.config 直接核验。6.1.174 的 BQL/NET_DROP_MONITOR 最终配置仍未从官方包原始 config 内容提取；6.1.65 的 NET_DROP_MONITOR 配置行仍未找到。6.12 unreadable-fragment 是否曾在故障窗口实际命中，仍缺历史 skb backing-memory 证据。
+
+本项只读取既有 workflow artifact 与其内部最终配置文本；没有访问设备、构建、修改系统或执行网络测试。
