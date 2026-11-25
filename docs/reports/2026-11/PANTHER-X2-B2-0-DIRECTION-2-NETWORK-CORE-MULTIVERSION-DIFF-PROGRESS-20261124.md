@@ -1596,3 +1596,26 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 3. Panther 实际设备 feature bitmap、运行时 DSCP rule 与 hook 状态不由 generic helper 静态比较推断；驱动私有能力留在后续驱动方向。
 
 **本项结项：** §9 的 6.1.65 候选源码回溯已完成。下一项按原顺序进入 §11 RX dispatch、IPv4 input 与 UDP receive；§10 是覆盖范围摘要，不是新增源码专题。方向二仍进行中。
+
+
+## 34. §11 RX dispatch、IPv4 input 与 UDP receive：补入 6.1.65 候选源码端点（2026-11-25）
+
+### 34.1 四端点函数比较
+
+本次只读比较：
+- `net/core/dev.c`：`__netif_receive_skb_core()`、`__netif_receive_skb_one_core()`、`netif_receive_skb_internal()`；
+- `net/ipv4/ip_input.c`：`ip_rcv()`、`ip_rcv_finish()`、`ip_local_deliver()`、`ip_local_deliver_finish()`；
+- `net/ipv4/udp.c`：`udp_rcv()`、`__udp4_lib_rcv()`。
+
+### 34.2 比较结果
+
+- 6.1.65、6.1.116、6.1.174 的 `__netif_receive_skb_core()`、`__netif_receive_skb_one_core()`、`netif_receive_skb_internal()` 函数体一致；6.12 的 core/internal wrapper 有 RX dispatch 结构调整，one_core 函数保持一致。
+- `ip_rcv()`、`ip_rcv_finish()`、`ip_local_deliver()`、`ip_local_deliver_finish()` 四端点函数体一致。
+- `udp_rcv()` 四端点函数体一致。
+- `__udp4_lib_rcv()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 有后续 UDP receive 路径调整，延续原 §11 对 6.12 的既有分析。
+
+### 34.3 本项结论
+
+6.1.65 黄金 A 与 6.1.116 黄金 B 在网络核心 RX dispatch、IPv4 input 与 UDP receive 的上述主入口没有发现实现差异；6.1.174 也保持相同。6.12 的 RX dispatch/UDP receive 变化属于接收方向，不构成当前出站 DHCP Discover TX 失败的直接解释。
+
+**本项结项：** §11 的 6.1.65 候选源码端点回溯已完成。下一项按原顺序进入 §12 网络核心 Kconfig 模板/符号对照；6.1.65 实际配置映射已在 §27 提供，但仍需核对本节及后续配置项对应的源码 Kconfig 定义和符号语义，不能把模板值当作最终配置。
