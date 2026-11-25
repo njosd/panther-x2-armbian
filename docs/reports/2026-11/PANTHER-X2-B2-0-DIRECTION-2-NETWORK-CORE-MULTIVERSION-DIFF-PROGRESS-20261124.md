@@ -1389,3 +1389,52 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 按 §25.5 原顺序，下一项是第 2 项：继续追溯 6.1.65 原始源码身份，优先复核镜像构建时间、release 字符串、内嵌 IKCONFIG、包元数据及 Armbian/Ophub 对应发行版源码线索；若仍不能取得可验证的精确 commit，继续明确保留“源码端点未锁定”，不得用 6.1.116 代替。该项完成后，才按 §3～§24 顺序补入能够可靠锁定的 6.1.65 函数级比较。
 
 **方向二仍进行中。** 本轮仅读取既有 Dropbox 配置归档、源码报告与 Kconfig/配置证据；未访问设备、未构建、未修改系统/网络配置、未执行网络试验，也未新增审计专题。
+
+
+## 28. 6.1.65 源码身份复核：证据等级不变（2026-11-25）
+
+按 §25.5 第 2 项回读既有 6.1.65 来源证据后，确认：
+- 原始 Kernel banner：`6.1.65-ophub`，编译器 Arm GNU Toolchain 13.2.1，构建时间字符串 2023-12-03 10:14:23 UTC；
+- uInitrd uImage 时间 2023-12-03 10:19:56 UTC，与先生成 Kernel、随后生成 initramfs 的顺序相容；
+- 原始镜像 `/etc/ophub-release` 记录 `KERNEL_REPO=ophub/kernel`、`KERNEL_TAGS=stable`、`PACKAGED_DATE=2023-12-07)，构建流程指向 Armbian + Ophub Rebuild；
+- Panther X2 DTS 已进入 `unifreq/linux-6.1.y` 的历史来源链；候选源码提交 `4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` 的提交标题为 `up to 6.1.65)，时间与 Kernel banner 相容；
+- 既有来源审计已查询构建日期附近的 Ophub Actions 运行记录，但未取得可用原始 run ID、dispatch inputs、实际 checkout SHA 和产物绑定证据。
+
+**结论：** `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` 继续作为高置信度候选源码端点；仍不能称为 6.1.65 原始 Image 已证实的精确构建 commit。没有新证据可把等级提升为“已锁定”。本项不再扩大历史构建溯源；后续源码比较必须持续标注“候选端点”，不能以 6.1.116 代替。
+
+## 29. §3 网络子系统配置入口与初始化：补入 6.1.65 候选源码端点
+
+### 29.1 本次静态读取的四端点
+
+| 版本 | 源码端点 | 本次文件 blob SHA |
+|---|---|---|
+| 6.1.65（高置信度候选） | `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` | `net/Kconfig` `73b06c41cdedb971a927a48fc9d4d7c30b195048`；`drivers/net/Makefile` `6ce076462dbfd26829472daa13096eea4136d266`；`drivers/net/loopback.c` `2e9742952c4e9b367c93db9ce589af1115bdb6e0`；`net/core/dev.c` `0f4a91f0bef343719707bc9e88ee5eb7ced9e9d6`；`net/ipv4/af_inet.c` `5d379df90c82624dcf52ff191c16734fb693768f` |
+| 6.1.116 | `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` | `net/Kconfig` `12699f98453c32be863d6434f20d5b9192aabf3e`；`drivers/net/Makefile` `c2f4d4bbf65aa597c97912916e3f97ceebe235b4`；`drivers/net/loopback.c` `2e9742952c4e9b367c93db9ce589af1115bdb6e0`；`net/core/dev.c` `3c3eacad5e9e539b92135c44074dc9ddec57cf61`；`net/ipv4/af_inet.c` `cc013be9b02c48b6b56b7745d71a8ef6c59d2342` |
+| 6.1.174 | `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633` | `net/Kconfig` `12699f98453c32be863d6434f20d5b9192aabf3e`；`drivers/net/Makefile` `fb5531f35ab8ea2df0f15adc130f70b616d5b670`；`drivers/net/loopback.c` `206a1807a9b80248263eac7f10ce5332597427a2`；`net/core/dev.c` `9ad32aa60c2c8864fff81845adfdb51538a8584f`；`net/ipv4/af_inet.c` `a09b90552cf6e53d3a20ce30b9ea97ec29e0c084` |
+| 6.12.81 | `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` | `net/Kconfig` `fc0ee6d81a74b28d47b8d69af5cfbae8cdb2a7b9`；`drivers/net/Makefile` `13743d0e83b5fde479e9b30ad736be402d880dee`；`drivers/net/loopback.c` `013f00210b88d3d146e19b1823610d841dfc9c0d`；`net/core/dev.c` `6788518e52b8b368248b40ab6f4cac739bfcf73f`；`net/ipv4/af_inet.c` `81400aee0534b202abd72d4d4de9ed581684d484` |
+
+### 29.2 Kconfig / Makefile 入口
+
+- 四端点 `net/Kconfig` 的 `NET`、`INET` 入口结构一致；`drivers/net/Makefile` 均以 `obj-$(CONFIG_NET) += loopback.o` 接入 loopback。
+- 6.1.65 与 6.1.116 的 `net/Kconfig` 唯一逐行差异是 6.1.116 新增隐藏 bool `ETHERNET_PACKET_MANGLE`（无 prompt、无 default；help 说明可由需要改写 Ethernet TX/RX 报文的 PHY driver 选择）。该符号在 6.1.65 候选源码中不存在；6.12.81 中也已移除。
+- 6.1.65 与 6.1.116 的 `drivers/net/Makefile` 差异为 DSA 子目录接入写法：6.1.65 使用 `obj-$(CONFIG_NET_DSA) += dsa/`，6.1.116 改为 `ifdef CONFIG_NET_DSA / obj-y += dsa/ / endif`。四端点 loopback 编译入口没有变化；该差异不是 Panther GMAC 主链配置证据。
+- 6.1.65 实际 config 文本未找到 `CONFIG_ETHERNET_PACKET_MANGLE` 行，且其候选源码 `net/Kconfig` 没有该符号定义；不能把 6.1.116 的可选 hook 反向套用到 6.1.65。
+
+### 29.3 初始化与 loopback 函数级比较
+
+直接按函数体边界提取并比较：
+- `drivers/net/loopback.c:loopback_xmit()`：四端点函数体完全一致。
+- `drivers/net/loopback.c:loopback_net_init()`：四端点函数体完全一致。
+- `net/core/dev.c:net_dev_init()`：6.1.65、6.1.116、6.1.174 三端点函数体完全一致；6.12.81 新增 `net_dev_struct_check()`、每 CPU `net_page_pool_create()`、可选 backlog NAPI 线程注册、housekeeping timestamp 初始化及失败回滚清理，延续 §3.3 已有结论。
+- `net/ipv4/af_inet.c:inet_init()`：6.1.65、6.1.116、6.1.174 三端点函数体完全一致；6.12.81 将 UDP/TCP `net_protocol` 对象放入 `net_hotdata` 后注册，并为 TCP 对象设置 `icmp_strict_tag_validation`，延续 §3.4 已有结论。
+
+### 29.4 四版本结论修订
+
+1. §3 的 loopback 两个关键函数现在有四端点源码证据；没有发现黄金 A 与黄金 B 在 loopback 发送/初始化函数上的差异。
+2. §3 的 `net_dev_init()`、`inet_init()` 现有 6.1.116/6.1.174/6.12.81 差异结论已由 6.1.65 候选端点补齐 6.1 系列黄金 A；6.1.65 与 6.1.116/6.1.174 函数体一致。
+3. 6.1.65→6.1.116 新增的 `ETHERNET_PACKET_MANGLE` 是网络核心 TX 交付前可选 hook 的源码/Kconfig 差异，值得保留在 §22 的四版本 TX 交付矩阵中；其实际编译启用与 Panther PHY 是否注册 callback，不能由本节 Kconfig 定义单独推断。驱动侧 callback 注册关系属于后续既定驱动方向，本节不提前审计。
+4. DSA Makefile 书写方式差异不改变 loopback 接入，也没有证据表明它改变 Panther X2 的普通 IPv4/UDP TX 路径。
+
+**本项结论：** §3 的 6.1.65 源码回溯完成（候选端点等级）。本节没有发现 6.1.65 与 6.1.116/6.1.174 在网络初始化、loopback 或 IPv4 初始化关键函数上的回归。唯一需要在方向二既有 TX 章节继续保留的是 6.1.65 与 6.1.116/6.1.174 的可选 `ETHERNET_PACKET_MANGLE` hook 存在性差异；不把它升级为已启用差异或故障根因。
+
+**后续顺序：** 按 §25.5 第 3 项，继续以 §3～§24 原顺序补入能可靠锁定的 6.1.65 函数级差异；下一项是 §4 的 IPv4 output、`__dev_queue_xmit()`、qdisc 与 TX checksum/helper 路径。6.1.65 仍为高置信度候选源码端点，不改变其证据等级。方向二仍进行中，不进入方向三或 B2-1。
