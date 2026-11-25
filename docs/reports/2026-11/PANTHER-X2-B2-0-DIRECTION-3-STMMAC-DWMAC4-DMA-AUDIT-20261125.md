@@ -45,7 +45,7 @@
 
 | 顺序 | 子项 | 状态 | 交付 |
 |---|---|---|---|
-| D3-1 | STMMAC probe/platform resource parsing | 进行中 | 四版本函数/结构/配置差异 |
+| D3-1 | STMMAC probe/platform resource parsing | 部分完成、进行中 | 四版本函数/结构/配置差异；重点补齐 pclk/MDC CSR clock source 交叉证据 |
 | D3-2 | DT/MDIO/PHY attach 生命周期 | 待开始 | Panther 节点适用性与 6.1.124 定点差分 |
 | D3-3 | DWMAC4 DMA 初始化/寄存器编程 | 待开始 | channel/AXI/PBL/address-width 对照 |
 | D3-4 | TX descriptor 其余分支 | 待开始 | 排除重复后的四版本差异 |
@@ -64,6 +64,13 @@
 - Panther X2 DTS 实际命中的 match/compatible 和属性是否触发相关分支。
 
 先确认精确源码端点与文件路径，再逐函数对照；不得只根据版本号或搜索摘要下结论。遇到未在仓库缓存中的源码，应标明缺失并使用已有可信端点补齐，不访问设备。
+
+### D3-1 首轮结果（2026-11-25）
+- 已直接读取四版本精确源码端点的 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi。
+- 6.1.65/6.1.116 的 stmmac_platform.c 关键 probe/resource 函数逐行一致；6.1.174-rk35xx 与 6.12.81 的变化及 Panther 分支适用性已记录。
+- 已确认 pclk 获取名从旧版本的 pclk 改为 pclk_mac；Panther DTSI 实际名称是 pclk_mac；stmmac_clk_csr_set() 的动态 MDC CSR 选择分支在 Panther 没有 snps,clk-csr 的情况下会执行，且输入 clock source 从 stmmac_clk 改为 pclk。
+- D3-1 仍未结项：尚需完成 pclk clock handle/运行时 enable 交接的只读交叉核对，并明确最终证据上限。详细结果见 PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md。
+- 本轮没有设备访问、构建、安装、驱动/DTB/系统配置修改。
 
 ## 6. 记录格式
 
