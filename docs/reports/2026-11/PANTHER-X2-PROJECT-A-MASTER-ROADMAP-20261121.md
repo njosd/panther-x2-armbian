@@ -546,3 +546,9 @@ B2-0 方向一至五静态审计及第一轮版本/组件决策已形成归档�
 用户指出历史完整安装的 6.18.63/6.18.64 系统仍然网络不通，故仅配置启用、编译成功、驱动 probe、PHY attach 或 carrier 均不得作为网络通过。B2-1 计划已修订：R1–R6 仅标记组件准备通过；R8 最小测试工具提前到 R7 前准备；R7 恢复 Panther GMAC1/MDIO/PHY 后必须执行真实数据面验收，逐层证明 PHY link/速率双工、双向 MAC TX/RX（Panther 与对端计数器/日志相互印证）、ARP、同网段双向 ICMP、hEX 网关双向 ICMP、已知外部 IP 路由及按范围要求的 TCP/UDP 双向 payload。任何组件/补丁/DTB 变更后，使用同一端点和参数完整 A/B 复测；失败即停留当前层，按双端证据定位，再只修改一个组件。MAC/PHY loopback 只作经授权的边界诊断，不替代真实线侧通信。
 
 本次只更新实施计划、报告索引和路线图；没有访问 Panther X2、构建、写卡、修改系统或启动网络实测。
+
+### 2026-11-25 B2-1 TX-first 验收原则修订
+
+用户明确要求网络组件不得一次性全部加入。首项网络实测应在最小必要网络组件集合下，验证 Panther X2 发出的特定 Ethernet 广播帧能否被局域网对端真实接收；未通过不得引入更高层组件。B2-1 已据此修订为 TX-first、one-component-at-a-time：首轮不配置 IPv4，不依赖 DHCP/DNS/ARP/ICMP/路由；通过最小 AF_PACKET/SOCK_RAW 发送程序发送自定义 EtherType（计划采用实验 EtherType 0x88B5）广播帧，携带项目标识、序列号、长度和校验字段，由 iMac/局域网对端抓包逐帧核对。明确核验 CONFIG_PACKET；INET/IPv4 延后到 TX-PASS 后单独引入。TX-PASS 必须以对端实际捕获、帧内容准确、多轮重复、两端计数器与驱动统计相互印证为依据；probe、link up 或 Panther TX counter 增长均不足以通过。TX 通过后再按 RX、ARP、IPv4、ICMP、路由、TCP、UDP、DHCP、DNS 顺序逐层放行，每次只增加一个组件/最小依赖闭包，且 TX 广播测试作为后续回归项。
+
+本次仅修订计划、索引和路线图，没有访问设备、构建、写卡、修改系统或启动网络实测。
