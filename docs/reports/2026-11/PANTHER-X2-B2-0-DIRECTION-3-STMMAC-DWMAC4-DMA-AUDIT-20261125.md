@@ -51,19 +51,19 @@
 | D3-4 | TX descriptor 其余分支 | 已完成（静态源码范围） | 四版本 TSO mapping lifecycle、mapping error/ring shortage、completion/reclaim、TX timer/recovery 条件差异 |
 | D3-5 | RX descriptor/buffer/page-pool | 已完成（静态源码范围） | 四版本 RX refill/page-pool/DMA sync/OWN/status/NAPI 对照 |
 | D3-6 | DMA API/coherency/IOMMU | 已完成（静态源码/Kconfig/DTS 范围） | 四版本 DMA map/sync、ARM64 cache maintenance、DMA_NEED_SYNC/bounce、coherency/IOMMU 交叉矩阵 |
-| D3-7 | IRQ/NAPI/watchdog/recovery | 进行中 | 复用既有 IRQ/NAPI 研究，只补四版本 STMMAC/DWMAC4 差异和实际 c2f148d |
-| D3-8 | 总矩阵与一致性审校 | 待开始 | 方向三总结报告 |
+| D3-7 | IRQ/NAPI/watchdog/recovery | 已完成（静态源码范围） | 四版本 IRQ status/NAPI schedule/timeout/recovery 对照 |
+| D3-8 | 总矩阵与一致性审校 | 进行中 | 汇总 D3-1～D3-7、核对范围/来源/结论一致性 |
 
-## 5. 当前唯一工作项：D3-7
+## 5. 当前唯一工作项：D3-8
 
 D3-1 至 D3-6 已在配套报告中按静态源码范围结项。本轮当前只做 D3-7：核对 STMMAC IRQ registration/mask/unmask、NAPI schedule/complete、DMA abnormal/fatal bus error、watchdog 与 recovery；generic network-core 层的 NET_TX_SOFTIRQ 已在方向二完成，不重做。
-- 先回读既有 STMMAC IRQ/NAPI/WDG 报告，列明已经完成的部分；
-- 四版本比较 stmmac_interrupt()/NAPI schedule/complete、TX/RX IRQ mask/unmask、DMA abnormal/fatal bus error handling；
-- 对照 TX watchdog timer、DMA reset/recovery、queue wake/stop 的驱动侧调用顺序；
-- 特别区分 6.1.174 upstream stable 与实际 c2f148d；
-- 不重复方向二 NET_TX_SOFTIRQ，也不访问设备或启用 tracing。
+- 回读 D3-1～D3-7 报告与方向三总计划；
+- 建立四版本差异总矩阵，区分无条件差异、条件性差异、仅统计/API 变化与未验证运行时事项；
+- 逐项检查 6.1.174 使用实际构建 source_hash c2f148d，不混用 upstream stable 3f06ed3e；
+- 检查普通 DHCP/UDP 单 skb 的适用性结论与方向二结论是否一致；
+- 形成方向三结项评估，不自动启动方向四或 B2.1。
 
-先回读已有 IRQ/NAPI/watchdog/recovery 相关报告与 6.1.116/6.12.81 运行日志；再以四版本精确源码端点检查 STMMAC 层剩余差异，优先核对实际 c2f148d。
+回读 D3-1～D3-7 七份子项报告和方向二 §53/§55，建立总矩阵并做最终一致性审校。
 
 ### D3-1 结项结果（2026-11-25）
 - 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
