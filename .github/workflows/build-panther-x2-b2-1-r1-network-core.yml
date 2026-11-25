@@ -120,7 +120,7 @@ jobs:
           require_off() { if grep -Eq "^$1=[ym]$" work/output/kernel.config; then echo "::error::Forbidden $1 enabled"; grep -E "^$1=" work/output/kernel.config; exit 1; fi; }
           for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do require_y "$key"; done
           for key in CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO CONFIG_MDIO_DEVICE CONFIG_MDIO_BUS CONFIG_MDIO_DEVRES CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_FIXED_PHY CONFIG_NET_DSA CONFIG_NET_DSA_REALTEK CONFIG_NET_DSA_REALTEK_MDIO CONFIG_SHORTCUT_FE CONFIG_NETDEVSIM CONFIG_NET_FAILOVER CONFIG_NETCONSOLE CONFIG_NETPOLL CONFIG_NET_POLL_CONTROLLER CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do require_off "$key"; done
-          for key in $(sed -n 's/^# \\(CONFIG_NET_VENDOR_[A-Z0-9_]*\\) is not set$/\\1/p' "$R1_FRAGMENT"); do require_off "$key"; done
+          for key in $(grep -oE 'CONFIG_NET_VENDOR_[A-Z0-9_]+' "$R1_FRAGMENT" | sort -u); do require_off "$key"; done
           cp "$SEED" work/output/kernel.config.seed
           cp "$B1_FRAGMENT" work/output/b1-network-isolated.fragment
           cp "$R1_FRAGMENT" work/output/r1-network-core.fragment
