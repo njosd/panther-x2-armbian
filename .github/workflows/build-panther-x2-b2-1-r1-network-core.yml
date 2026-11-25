@@ -94,8 +94,10 @@ jobs:
             echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
             echo "kernel_version=${KERNEL_VERSION}"
             echo "b1_patch=$PATCH sha256=$PATCH_SHA"
-            echo "kernel_config_seed=$SEED"
+            echo "kernel_config_seed=$SEED (provenance only; not an R1 merge input)"
             echo "kernel_config_seed_blob_sha=${KERNEL_CONFIG_SEED_BLOB_SHA}"
+            echo "r1_config_base=work/b1-reference/output/kernel.config"
+            sha256sum work/b1-reference/output/kernel.config
             echo "r1_fragment=scripts/panther-x2-b2-1/r1-network-core.fragment"
             echo "b1_reference_run_id=${B1_KERNEL_RUN_ID}"
           } | tee work/source-lock.txt
@@ -105,12 +107,16 @@ jobs:
           set -euo pipefail
           SRC="$GITHUB_WORKSPACE/work/linux"
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          B1_CONFIG="$GITHUB_WORKSPACE/work/b1-reference/output/kernel.config"
           SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
           B1_FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
           R1_FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b2-1/r1-network-core.fragment"
+          test -s "$B1_CONFIG"
+          test "$(sha256sum "$B1_CONFIG" | awk '{print $1}')" = "7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731"
+          grep -qx '# CONFIG_NET is not set' "$B1_CONFIG"
           mkdir -p "$OUT"
           ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$SEED" "$B1_FRAGMENT" "$R1_FRAGMENT" \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$B1_CONFIG" "$R1_FRAGMENT" \
             2>&1 | tee work/logs/r1-config-merge.log
           make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           cp "$OUT/.config" work/output/kernel.config
