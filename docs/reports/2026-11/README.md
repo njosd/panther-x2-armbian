@@ -44,7 +44,7 @@
 - [B2-0 方向三 D3-5：STMMAC RX descriptor / buffer / page-pool lifecycle](./PANTHER-X2-B2-0-DIRECTION-3-D3-5-RX-DESCRIPTOR-PAGEPOOL-DIFF-20261125.md)：当前复核既有 6.1.116/6.12.81 RX 报告，D3-5 已结项；四版本 page-pool create/refill、DMA sync 和 RX OWN/status 主路径未发现普通 DHCP RX 无条件回归。
 - [B2-0 方向三 D3-6：DMA API / coherency / IOMMU 四版本交叉审计](./PANTHER-X2-B2-0-DIRECTION-3-D3-6-DMA-API-COHERENCY-IOMMU-20261125.md)：当前复用 32/32 DMA width 与无 GMAC IOMMU 既有证据，D3-6 已结项；普通 streaming cache sync 四版本一致，GMAC1 无 dma-coherent/iommus，6.12 新增 bounce 条件不命中普通 TX DMA_TO_DEVICE。
 - [B2-0 方向三 D3-7：STMMAC IRQ / NAPI / watchdog / recovery 四版本审计](./PANTHER-X2-B2-0-DIRECTION-3-D3-7-IRQ-NAPI-WATCHDOG-RECOVERY-20261125.md)：当前复核既有 IRQ/NAPI 证据，D3-7 已结项；IRQ status/NAPI schedule、timeout、global reset 与 per-channel recovery 未发现普通 DHCP 的无条件阻断回归。
-- [B2-0 方向三 D3-8：STMMAC/DWMAC4 四版本总矩阵与一致性审校](./PANTHER-X2-B2-0-DIRECTION-3-D3-8-SYNTHESIS-CLOSEOUT-20261125.md)：汇总 D3-1～D3-7，评估方向三是否具备证据边界明确的结项条件。
+- [B2-0 方向三 D3-8：STMMAC/DWMAC4 四版本总矩阵与一致性审校](./PANTHER-X2-B2-0-DIRECTION-3-D3-8-SYNTHESIS-CLOSEOUT-20261125.md)：汇总 D3-1～D3-7，D3-8 已完成；D3-1～D3-7 静态审计全部结项，方向三技术审计具备证据边界明确的结项条件，等待正式归档确认。
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
