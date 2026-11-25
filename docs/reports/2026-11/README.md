@@ -19,6 +19,7 @@
 
 - [原始 Armbian 6.1.65 镜像静态审计报告（2026-11-23）](./PANTHER-X2-6.1.65-ORIGINAL-IMAGE-AUDIT-20261123.md)：原始镜像布局、启动配置、Panther X2 DTB、Kernel built-in 配置及 Dropbox 证据保留清单；Kernel/uInitrd 二进制闭包仍待补齐。
 
+- [B1 用户空间 applet 修复与实机状态（2026-11-25）](./PANTHER-X2-PROJECT-A-B1-USERSPACE-APPLET-FIX-AND-REAL-HARDWARE-STATUS-20261125.md)：归档 Run #73/#77 构建、Run #77 镜像已写入 SU08G 并自动启动的实机证据，定位 `/init: line 18: [: not found` 为 initramfs 漏建 `/bin/[` 链接，并记录定点修复与下一次复验门。
 - [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](./PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 纯 RAM 构建实现、输入锁定、隔离策略与待验证事项。
 
 - [项目 A 干净基线与网络组件隔离决策（2026-11-22）](./PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：B1 先隔离网络变量，再逐项引入的强制决策。
