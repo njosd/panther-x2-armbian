@@ -37,7 +37,8 @@
 - [B2-0 方向1：版本样本与构建来源追溯结项（2026-11-24）](./PANTHER-X2-B2-0-DIRECTION-1-VERSION-AND-SOURCE-PROVENANCE-20261124.md)：整理正常基线与已确认故障样本；明确 6.1.174 是目前最早有明确故障实机证据的版本，但首次回归小版本仍未证明。6.18.63 已确认实机启动及故障，属于 6.18.y，不纳入 6.1.y 首次故障点判断。
 - [B2-0 方向2：Linux 网络核心多版本静态差异评估进度](./PANTHER-X2-B2-0-DIRECTION-2-NETWORK-CORE-MULTIVERSION-DIFF-PROGRESS-20261124.md)：§3～§24、§26 既定 generic network-core 子项已完成四版本源码/配置审计；§53 四版本综合矩阵、§54 一致性审校、§55 结项条件评估及 §56 用户批准后的正式结项记录均已归档。方向二现为“已结项（证据边界明确）”，历史来源/配置/运行时限制按 §55.2 保留，不重复已完成审计。
 - [B2-0 方向三：STMMAC / DWMAC4 / DMA 驱动核心静态审计计划](./PANTHER-X2-B2-0-DIRECTION-3-STMMAC-DWMAC4-DMA-AUDIT-20261125.md)：方向三阶段边界、四版本样本、子项顺序及禁止重复项；当前执行 D3-1。
-- [B2-0 方向三 D3-1：STMMAC platform probe / resource parsing 四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md)：已完成首轮四版本源码对照；发现 pclk/pclk_mac 名称及 MDC CSR clock source 变化，D3-1 仍进行中。
+- [B2-0 方向三 D3-1：STMMAC platform probe / resource parsing 四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md)：已完成首轮四版本源码对照；发现 pclk/pclk_mac 名称及 MDC CSR clock source 变化，D3-1 已结项；确认 6.1.65/6.1.116 与 6.1.174/6.12.81 的 pclk/MDC CSR clock source 差异。
+- [B2-0 方向三 D3-2：STMMAC MDIO / PHY attach 四版本差异](./PANTHER-X2-B2-0-DIRECTION-3-D3-2-MDIO-PHY-ATTACH-DIFF-20261125.md)：确认四版本 MDIO parser 在 Panther DTS 上的最终 bus/PHY 结果等价；发现四次 PHYCR2/BMCR 写入存在于 6.1.65/6.1.116、缺失于实际 6.1.174-rk35xx/6.12.81 源码；并记录 mac_requires_rxc 版本变化。D3-2 静态审计已结项，进入 D3-3。
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
