@@ -95,29 +95,19 @@ G1 未通过时，不允许用 6.1.65 的正常网络结果代替 B1 验收，�
 
 - **R1–R6（硬件节点保持 disabled 的准备阶段）：** 由于 GMAC/MDIO/PHY 不 probe，物理网络不可能连通。这些阶段只能通过依赖闭包、构建产物和启动稳定性检查，结论必须标记为“组件准备通过”，不得标记为“网络通过”。
 - **R7（GMAC1/MDIO/PHY 恢复后）：** 首次进入真实数据面验收。此后任何驱动、配置、DTB 或补丁的修改/替换，都必须回到固定网络测试矩阵完整复测，不得只看 probe 或单向 ping。
-- **R8（最小测试工具）：** 工具必须在 R7 首次启用网卡前准备好；不能等到 R7 失败后才发现缺少 ping/ip/计数器读取能力。R8 的准备工作安排在 R6 之后、R7 之前；R7 完成真实网络验收后，再做 R8 的工具/结果复核。为避免阶段编号造成误解，执行记录要注明“R8-test-harness pre-stage”。
+- **TX 测试夹具（R7 前置）：** R7 前只准备专用 AF_PACKET 原始帧发送程序和对端抓包工具；不提前加入 ping、完整 iproute2、DHCP/DNS 或其他上层工具。原先 R8-test-harness 的综合工具准备表述由 4B TX-first 规则取代。
 
-### 4A.2 固定网络测试矩阵（每次网络相关改动后重复）
+### 4A.2 分层网络验收原则（由 4B TX-first 顺序具体化）
 
-测试参数不在计划中写死，执行前从当时 LAN 实际配置读取并由用户确认。固定同一条网线、同一 hEX LAN 端口、同一局域网测试主机和同一测试窗口；除当前唯一待测变量外不同时改变线缆、端口、地址、MTU、速率或测试端点。
+4A 的通用原则不再要求首轮做双向网络矩阵。第一项真实网络验收严格采用 4B 定义的 TX-only 原始 Ethernet 广播帧；只有 TX-PASS 后才逐项验证 RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS。
 
-| 层级 | 必测内容 | 通过证据 | 失败定位方向 |
-|---|---|---|---|
-| L0 物理/协商 | PHY link、速率、双工、autoneg 状态；确认目标预期为 1000M Full Duplex（若硬件/对端协商条件允许） | PHY/ethtool 或可用状态源、carrier、对端端口状态相互印证 | 供电、reset、PHY、时钟、RGMII、线缆/端口；不能以接口 UP 替代 |
-| L1 MAC/驱动收发 | 接口启用后观察 TX/RX packets/bytes/errors/dropped；从 Panther 发起测试、对端确认收到；对端发回、Panther 确认收到 | 两端计数器均有对应增量；TX 与 RX 分别有正向证据；无持续增长的 errors/dropped | MAC/DMA descriptor、IRQ/NAPI、DMA mapping、RGMII/PHY 数据通道 |
-| L2 同网段二层 | 配置不冲突的临时静态 IPv4；检查 ARP/neigh 双向解析；同网段测试主机双向 ICMP | ARP 请求/应答及邻居项正确；Panther→peer、peer→Panther 双向 ping 成功 | TX-only、RX-only、ARP、MAC 地址、广播/单播接收过滤 |
-| L3 网关 | 同网段基础通过后，单独 ping hEX LAN 网关；检查 hEX 侧是否看到请求与响应 | Panther 与 hEX 双向 ICMP；hEX 侧邻居/MAC 对应正确 | 路由、ARP、网关 ACL/防火墙或 TX/RX 单向异常 |
-| L4 外部 IP 路由 | 仅在 L3 通过后，以已知公网 IP 测试，不依赖 DNS | 外部 IP 可达，路由和回包证据完整 | 默认路由、hEX 转发/WAN 或上游，不把 DNS 混入 |
-| L5 TCP/UDP | 选用局域网可控端点的 TCP 连接和 UDP 请求/应答；分别确认双向 payload，而非只看 socket 建立 | 应用端/对端日志与字节计数证明双向 payload；必要时抓包由对端完成 | MTU/校验和/offload、队列、协议栈或具体传输层 |
-| L6 DHCP/DNS（可选独立功能） | 静态 IP/LAN/IP 路由稳定后再独立测 DHCP；DNS 单独测域名解析 | DHCP lease、DNS query/response 证据 | DHCP/DNS 服务本身，不得反向归因 GMAC 数据面 |
-
-**关键判据：** 仅 Panther 本机 TX counter 增长不是物理发送成功；仅 hEX 收到请求但 Panther 未收到回复不是双向连通；仅 ping 成功一次也不足以宣布稳定。必须结合两端证据、双向计数器、重复测试与错误计数。若工具条件允许，优先在 hEX/iMac 等对端采集观察，不为抓包而提前在 Panther 增加庞大工具链。
+每个阶段的证据必须匹配当前层级：TX 阶段以对端逐帧捕获为决定性证据；后续阶段才逐渐加入对应的接收端观察、协议报文和两端计数器。不能用后续层的工具或协议作为前置依赖，也不能用更高层测试失败倒推最底层 TX 故障。
 
 ### 4A.3 每次修改/替换的 A/B 规则
 
 当实际网络测试失败时：
-1. 冻结失败现场：源码 commit、配置、DTB、补丁、启动日志、link/PHY 状态、两端 counters、ARP/ping/TCP/UDP 结果。
-2. 根据失败所在层级选择唯一候选组件（例如 PHY 初始化、Rockchip clock/glue、RGMII delay、STMMAC DMA/TX/RX、网络核心）；候选优先级必须引用 B2-0 已归档的 A/B 级差异和适用条件。
+1. 冻结失败现场：源码 commit、配置、DTB、补丁、启动日志、link/PHY 状态、TX counters、驱动发送完成/错误统计、对端逐帧抓包及序列号结果；仅在进入相应后续层后才保存 ARP/ping/TCP/UDP 结果。
+2. 根据失败所在层级选择唯一候选组件（TX 阶段例如 packet injection/net_device、STMMAC TX queue/descriptor/DMA、Rockchip clock/glue、RGMII/PHY；后续层才考虑 RX、ARP、IPv4 等）；候选优先级必须引用 B2-0 已归档的 A/B 级差异和适用条件。
 3. 只对一个组件做修改或替换，明确代码 diff、配置 diff、理论作用路径和可证伪预期；禁止同时回移多个历史 workaround。
 4. 使用完全相同的网络测试矩阵、端点和参数复测；同时保留改动前失败证据和改动后结果。
 5. 只有实际双向数据与目标连通性改善且可重复，才能将该修改标记为“有实测收益”；否则回退并记录为未证实/无效，不得继续叠加。
@@ -370,7 +360,7 @@ R0–R6 是最小发送路径的组件依赖逐项准备；R7 是首次启用板
 | 编译失败 | 保留完整日志、失败目标和输入哈希；从失败步骤修复并复用前序产物的策略仅限工作流已具备可验证缓存时 | 无条件全量重构或覆盖最后已知成功产物 |
 | 启动失败/Kernel panic | 停止，恢复最后已知通过的 TF 启动资产；保存 UART 日志 | 继续叠加下一组件 |
 | probe/deferred probe 错误 | 只围绕失败 provider/资源链做静态核对和最小只读取证 | 直接回移 PHY/clock/DMA 多个历史补丁 |
-| MDIO/PHY/link 失败 | 停止 R7 后续层级，保留双端日志、link 状态和 counters；提出单变量下一步方案 | 越过失败层继续 ping/DHCP/TCP/UDP，或同时修改多个组件 |
+| MDIO/PHY/link/TX 帧发送失败 | 停止 R7 后续层级，保留双端日志、link 状态、TX counters、驱动统计及对端抓包；提出单变量下一步方案 | 越过失败层继续加入 RX/ARP/IPv4/ICMP/DHCP/TCP/UDP，或同时修改多个组件 |
 | 意外触及 eMMC/其他存储 | 立即停止并报告目标设备、写入范围和影响 | 未经确认继续操作或自行进行破坏性恢复 |
 
 回退只恢复到最后已知通过的资产，不删除失败报告、不覆盖原始日志、不改写历史证据。若构建工作流失败，应优先从失败步骤恢复并复用已验证 artifact；前提是依赖链、输入哈希和缓存身份可验证。
