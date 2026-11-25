@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态：B1 核心目标已在 Panther X2 实机自动启动通过；当前执行阶段为 B2-0（黄金基线对照与组件恢复顺序），源码依赖审计完成前不放行 B2-1。
+- 当前状态：架构收敛完成；最小系统尚未完成实机启动认证
 
 ## 0. 统一项目定义
 
@@ -156,7 +156,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 - B1 不使用预编译 Image/DTB；必须从锁定源码自建 Kernel，并以独立 allnoconfig + 最小 fragment 生成最终 config。
 - clean-test DTB 从同一源码 commit 的 Panther X2 DTS 派生；自动核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 节点隔离状态。
 - 最终 config 必须证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用；最终二进制与 DTB 需分别提供证据。
-- 首轮源码候选只有在 CI 构建、artifact 审查和目标硬件启动安全门完成后，才可锁定为 B1 Kernel+DTB。
+- 首轮源码候选只有在 CI 构建、artifact 审查和目标硬件启动前检查完成后，才可锁定为 B1 Kernel+DTB；TF 写入须核对目标介质身份并取得相应授权。
 
 ### 5.2 Initramfs 与 BusyBox
 
@@ -190,7 +190,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 - workflow 从锁定源码构建 Kernel、派生 clean-test DTB、构建静态 BusyBox 和 gzip initramfs；旧的预编译包/hybrid workflow 已禁用并仅留作历史记录。
 - 6.18.63 在 CONFIG_NET=n 下的 kobject_uevent stub 需应用一项最小兼容补丁：无网络分支拒绝非空 skb、对空指针直接返回，不引用网络 skb 释放函数；该补丁不启用网络栈或修改 Ethernet 驱动，必须随构建输入和哈希一起审计。
 - 产物仅包括 Kernel、DTB、initramfs/uInitrd、boot.scr、JP proper 参考文件、manifest、文件清单、SHA-256 和构建日志；不生成 raw/hybrid 磁盘镜像，不写 TF/eMMC。
-- eMMC pre-Linux 安全门未通过前，CI artifact 只能标记 PREPARE-ONLY，不得写卡或实机启动。
+- CI artifact 在审查前保持 PREPARE-ONLY；写入专用 TF 前核对介质身份、容量、挂载状态并取得相应授权。全面 eMMC WP/Rescue 研究已由用户明确取消为 B1 前置阻塞项；任何 eMMC 修改仍须另行授权。
 
 ## 6. 启动介质、Vendor 数据与安全边界
 
@@ -221,8 +221,8 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 | 阶段 | 名称 | 目标 | 当前状态 |
 |---|---|---|---|
-| B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和 eMMC 安全边界 | 部分完成；安全门未通过 |
-| B1 | 最小 RAM Linux 干净基线 | 保留正常 RK35xx 基础能力；隔离网络协议栈、板载 Ethernet/GMAC/MDIO/PHY、Wi-Fi/无线和 Bluetooth；RAM initramfs/UART shell | CI 流水线曾成功；旧 Kernel/DTB 因应用已废弃补丁不予验收；修正后 Kernel/DTB 待重建；实机未验证 |
+| B0 | 基线与安全前置审计 | 固定启动入口、Linux 资产候选、介质身份和必要安全边界 | 部分完成；全面 eMMC WP/Rescue 不再作为 B1 阻塞项 |
+| B1 | 最小 RAM Linux 干净基线 | 进入 `/init`，UART shell 可交互；Linux 不启用网络、Ethernet、MMC/block、USB、无线/蓝牙和模块，根文件系统完全在 RAM | 构建流程已提交；CI/实机未验证 |
 | B2 | 板载有线千兆网口分层验证 | 仅对板载 Ethernet 的内核网络基础、MAC、MDIO/PHY 依赖按单项引入；再验证 link、静态地址、ARP、同网段与网关 ICMP | 未开始 |
 | B3 | 板载有线千兆网口 TCP/UDP 验证 | 仅通过板载有线千兆网口进行 TCP 与 UDP 双向端到端验证，分开测试且结果可重复 | 未开始 |
 | B4 | 网络组件按需扩展 | 根据明确需求加入 DHCP/DNS/SSH 等 | 条件触发 |
@@ -246,6 +246,12 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - 首轮 B1 源码候选为 6.18.63 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`；尚待 clean config/build/DTB/artifact 验证。
 - Linux block-layer RO 与 pre-Linux 写保护属于不同保护层。
 
+### B2-0 方向二：Linux 网络核心静态审计状态（2026-11-25）
+- 原始范围内明确列出的 generic network-core 子项 §3～§24、§26 已完成四版本源码/Kconfig/已有配置静态审计；四版本矩阵、普通 DHCP/UDP TX 适用性与证据等级见方向二报告 §53。
+- §54 完成报告内部一致性审校；§55 完成结项条件评估；用户于 2026-11-25 明确批准“证据边界明确的有条件结项”，正式结项记录见方向二报告 §56。
+- **当前状态：方向二已结项（证据边界明确）。** 6.1.65/6.1.116 来源绑定、6.1.174 历史 config 缺口及运行时队列/特殊 skb 证据限制均按 §55.2 保留；不重复已完成 generic network-core 审计。
+- 按 B2-0 原顺序进入方向三 STMMAC/DWMAC4/DMA 驱动核心静态审计。D3-1 platform probe/resource parsing 与 D3-2 MDIO/PHY attach 四版本静态审计均已结项；D3-2 确认黄金版本有、故障版本缺失的四次 PHYCR2/BMCR MDIO 写入差异，保留为待关联候选，不认定根因。D3-1 至 D3-4 已按静态源码范围结项。D3-3 确认黄金版本 DMA reset 前有 1500ms delay、实际故障源码缺失，reset poll interval 从 10ms 缩短至 0.5ms；DWMAC4 DMA/AXI/PBL/channel init 软件逻辑总体相同，硬件 addr64 运行时值保留未知。D3-4 确认 6.1.65 TSO 多 descriptor mapping 记录过早 unmap 风险、后续版本已修复；TX coalescing timer 默认值 1000→5000us，普通 DHCP 单 skb 不命中 TSO 条件分支。D3-5 RX descriptor/buffer/page-pool 四版本静态审计已结项：page-pool create/refill、DMA sync、普通 skb allocation failure 和 DWMAC4 RX OWN/status 未发现可解释普通 DHCP RX 丢失的无条件回归。D3-6 DMA API/coherency/IOMMU 四版本静态审计已结项：普通 streaming cache sync 四版本一致；GMAC1 无 dma-coherent/iommus，按 non-coherent direct DMA path；6.12 coherent prep 的 clean-only 变化不包含实际 6.1.174 故障源码，且有 ARM64 DMA API 设计理由；6.12 unaligned kmalloc bounce 条件不命中普通 DMA_TO_DEVICE。D3-7 STMMAC IRQ/NAPI/watchdog/recovery 四版本静态审计已结项：DMA status RI/TI/TBU/FBE/TPS 处理、NAPI schedule gate、timeout/global reset 与 per-channel recovery 顺序未发现普通 DHCP 的无条件阻断回归。D3-8 四版本总矩阵与一致性审校已完成。**方向三 D3-1～D3-8 静态技术审计已于 2026-11-25 按“证据边界明确的有条件结项”正式归档**，详见 `PANTHER-X2-B2-0-DIRECTION-3-CLOSEOUT-20261125.md`。未验证的源码 provenance、历史 config 与运行时证据边界继续保留，不重复已完成审计。按 B2-0 原顺序推进方向四 Rockchip GMAC glue / CCF / CRU / clock / reset（原组件方向 B2-3）。已完成四版本 GMAC clocks enable 主路径、CRU mux/gate/reset、CCF/PLL、probe/setup/power handoff 与 RGMII callback 首轮核对；识别出 bulk/逐项 enable 与错误检查、5ms/100–200µs 等待、RGMII GRF 写入顺序差异；补齐 HCLK_USB/PCLK_USB 两项 critical flag 的四版本差异，并区分 HCLK_USB 不在 GMAC1 parent chain、PCLK_USB critical 经 CCF parent recursion 保持与 GMAC1 共用的 ACLK_USB 父链；若 ACLK_USB 实际选择 GPLL 且当时 GPLL enable reference 为 0，PCLK_USB critical parent recursion 可能触发后期 GPLL callback；历史 parent/reference/时序未验证；HCLK_USB 不在 GMAC1 父链。regulator/runtime-PM 错误传播弱点为四版本共有项。方向四已完成与方向二 generic network-core、方向三 STMMAC/DWMAC4/DMA 的跨层一致性审校：两组 delay 分属不同调用层；STMMAC pclk/pclk_mac 不等同于 CRU PCLK_GMAC1/ACLK_GMAC1；未发现跨方向结论冲突。**方向四（原组件方向 B2-3）已完成既定静态审计范围，并于 2026-11-25 按“证据边界明确的有条件结项”正式归档**，详见 `PANTHER-X2-B2-0-DIRECTION-4-ROCKCHIP-GMAC-GLUE-CCF-CRU-AUDIT-PROGRESS-20261125.md`。补齐内容包括四版本 RGMII speed callback rate mapping、powerdown/suspend/resume 适用性、最终总矩阵及方向二/三跨层一致性。主要版本差异为 bulk→逐项 clock 获取/enable 与错误检查减弱、5ms→100–200µs settle、RGMII GRF 写入顺序反转、HCLK_USB/PCLK_USB critical flags 与后期 GPLL callback；这些均为源码差异或条件性候选，不是已证实 TX 根因。GMAC1 专属 CRU mux/gate/reset mapping、Panther DTS RGMII 输入配置及 speed-rate mapping 未发现确定性故障回归；regulator/runtime-PM 错误传播是四版本共同弱点。历史 clock enable/clk_set_rate 返回值、ACLK_USB 实际 parent/GPLL reference、GRF/PHY 波形和电源状态仍未验证。**方向五（原组件方向 B2-4）MDIO/PHYLIB/PHYLINK/RTL8211F 已于 2026-11-25 开始只读静态审计，尚未结项**，首轮四版本 Realtek PHY driver、paged MDIO API、PHYLIB 状态机、PHYLINK RGMII mode 与 6.18.63 目标 PHY driver 差异见 `PANTHER-X2-B2-0-DIRECTION-5-MDIO-PHYLIB-PHYLINK-RTL8211F-AUDIT-PROGRESS-20261125.md`。重点保留：历史四版本普通 RTL8211F 初始化主路径基本一致；6.18.63 新增 PHY-mode EEE bit5 清除、默认 config_init 不再无条件 soft reset、speed status 改读 MII_RESV2，以及 suspend/resume 新逻辑。以上均为静态源码差异，不证明运行时 PHY 状态或 TX 根因。方向五已完成 15 份既有 PHY 专题报告交叉审校、PHYCR2 0x1801 完整位域与执行顺序边界澄清、PHYLIB autoneg/status/start/stop 及 PHYLINK connect/disconnect/MLO_AN_PHY/link callback 覆盖，并形成四版本差异矩阵；关键更正是 Realtek config_init 局部主路径相近不代表完整 PHY 初始化序列相同，6.1.65/116 的 STMMAC 前置 workaround 与 6.1.174/6.12 缺失差异必须保留。6.18.63 的 bit5 单 bit EEE 清除不能等同恢复 0x1801。方向五原定静态审计范围已全部覆盖，已形成四版本差异矩阵、PHYCR2 0x1801 完整位域/执行顺序边界、mac_requires_rxc/RXC_ALWAYS_ON 适用性、候选优先级及证据等级评估；建议按“证据边界明确的有条件结项”归档，**用户已批准按“证据边界明确的有条件结项”归档**。运行时 PHYCR2/MDIO 读回、reset retention 与 RXC/CLKOUT 波形仍未验证；不因此授权设备访问。B2.1 未启动。 主要待关联候选为黄金版本的四次 PHY MDIO workaround 写入及 DMA reset 前 1500ms delay（故障源码缺失），以及 MDC CSR clock source 变化；均缺少现场 PHY/clock/reset 证据，不认定根因。方向四已按证据边界明确的有条件结项归档；方向五正在进行只读静态审计，尚未结项；B2.1 仍未启动。
+
 ### 尚未验证
 - B1 clean Kernel/DTB/BusyBox/initramfs workflow 能否成功构建；
 - clean Kernel/DTB/initramfs 组合能否在 Panther X2 启动；
@@ -254,7 +260,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - JP proper 新系统重复启动稳定性；
 - 长期 U-Boot 候选完整板级适配。
 
-**当前唯一优先事项：** 按 2026-11-24 修正后的 workflow 重新构建未修改上游源码的 Kernel/DTB，并继承新产物完成后续阶段；并行只读推进 B0.4 eMMC pre-Linux 写入安全门审计。安全门未通过前，不写 SU08G、不启动实验固件、不进行 Panther X2 实机启动。失败后只恢复失败阶段及必要下游，禁止重复已成功且输入未变化的耗时阶段。
+**当前优先事项：** 复核 B1 PREPARE-ONLY artifact、SU08G 目标身份和 U-Boot 启动地址，按用户已授权的混合启动链完成 B1 RAM Linux 启动验收。全面 eMMC WP/Rescue 研究不再作为前置阻塞项；不擅自写 eMMC，任何 eMMC 修改均须另行明确授权。
 
 ## 9. 关联文档与维护
 
@@ -322,7 +328,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 
 现场初步证据：help dhcp、help mii、help mdio 已核对；mdio list 实际输出 ethernet@fe010000:，证明一个 MDIO bus 已注册，但 PHY、link、DHCP、IP 连通尚未验证。完整过程见 [U-Boot 网络基准实测记录](PANTHER-X2-UBOOT-NETWORK-BASELINE-20261122.md)。
 
-本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来重新启动和写介质仍受 B0.4 安全门约束。
+本修订仅改变验证优先级，不恢复项目 B 的 GMAC/MDIO/PHY 根因专项调查；范围仍仅限板载有线千兆网口。未来 TF 写入须重新核对目标卡身份并取得相应授权；任何 eMMC 写入/修改须另行说明并取得明确授权。全面 eMMC WP/Rescue 研究不再作为 B1/B2 的通用阻塞项。
 
 ## 13. 新增 U0：U-Boot proper 启动完成后的恢复检查点
 
@@ -375,7 +381,7 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 
 ### 15.6 B1 启动脚本与 TF 旧版本隔离（2026-11-22）
 
-静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定，且不能绕过 eMMC pre-Linux 写入安全门和单独授权。
+静态审查发现旧 `boot.cmd` 在加载失败时调用 `reset`，已从仓库版移除；但此前实机检查记录中的 TF `boot.scr` 仍为旧版本，不能因 Git 提交而视为已更新。当前不得执行旧 TF `boot.scr`。新 artifact 必须重新构建、审查、哈希锁定；写入专用 TF 前必须重新核对介质身份并取得单独授权。不得写 eMMC；若确需修改 eMMC，另行说明风险和恢复方式并取得明确授权。
 
 旧 U-Boot 会话记录的 Kernel/FDT/initramfs 地址在 DHCP异常后断电重启，尚未绑定当前会话；旧 TF Kernel/uInitrd 的文件身份哈希也未闭环。因此 PRE-HANDOFF READY 仍未通过。B1 首次启动保持暂停，先完成新 artifact 与当前启动地址/内存布局审计。
 
@@ -504,110 +510,45 @@ U-Boot 网络测试完成后，必须先恢复临时环境变量和测试产生�
 **下一步：** 从用户原始 IMG 本体直接提取 `config-6.1.65-ophub`、modules 清单、`System.map`、rootfs 网络服务/配置文件与 U-Boot 文件 hash；并审计 `f16bd...` 到 `4428...` 之间 stmmac/Rockchip clock/reset/PHY 的实际差异。未完成前不启动 Linux、不刷写介质。
 
 
-## 2026-11-23 B1 基线纠偏（覆盖旧裁剪规则）
+## 19. 2026-11-24 原版 6.1.65 TF 启动有线网络实机基线
 
-本节与 `PANTHER-X2-PROJECT-A-B1-BASELINE-RESET-20261123.md` 一致；较早章节中“B1 关闭 MMC/USB/模块”等旧表述不再作为执行指令。
+2026-11-24 用户在 Panther X2 上实际启动原版 Armbian 6.1.65（TF rootfs，日志显示 /boot 位于 eMMC），完成 eth0 驱动/链路、DHCP IPv4、hEX 网关 ICMP、外部 IPv4 ICMP 和 DNS 解析验证。完整现场数据与证据边界见：
 
-- **配置种子：** `ophub/kernel` 的 `kernel-config/release/rk35xx/config-6.12`，来源 commit `ba00be60d59300bd93633218a8905829d6cabd72`，Git blob `dee127c6c644f38426eeb28000d73536084d34a3`。
-- **配置流程：** 完整 seed → Linux 6.18.63 `olddefconfig` 适配 → 网络隔离 fragment → 再次 `olddefconfig`；禁止从 `allnoconfig` 起步。
-- **保留：** ARM64 4KB 页、VA48、PA48、LPA2 off、RK3566 erratum、BLOCK/MMC/eMMC/TF/SD、USB、文件系统、MODULES，以及 UART、时钟、复位、pinctrl、regulator、PMIC、DMA 和中断基础支持。
-- **隔离：** 网络协议栈、网络设备、板载 Ethernet/GMAC/STMMAC/DWMAC、MDIO/PHY/PCS、Wi-Fi/无线和 Bluetooth。Wi-Fi/无线与 Bluetooth 永久排除；USB/PCIe 外接网卡也不属于项目 A。
-- **DTB：** 保留 eMMC `sdhci`、TF/SD `sdmmc0`、USB host/PHY、UART1（仅移除 Bluetooth 子节点）、UART2、完整 aliases、Ethernet LED、GMAC 时钟节点及共享资源；禁用 GMAC1/MDIO1/PHY 和 Wi-Fi 专用 `sdmmc1`，移除 Wi-Fi/BT 专用节点。
-- **模块：** 构建 Image 与 modules，安装并单独打包；不由 `/init` 自动加载。
-- **RAM init：** 只挂载 procfs/sysfs，不自动挂载持久化文件系统、不主动写入存储。MMC 恢复后 Linux 仍可能枚举 eMMC；eMMC pre-Linux 安全门继续是实机启动的必要前置条件。
-- **uevent：** 旧 kobject_uevent 补丁不再应用，仅保留历史审计；B1 使用未修改的锁定上游源码。
+- `docs/reports/2026-11/PANTHER-X2-6.1.65-ORIGINAL-TF-BOOT-ETHERNET-BASELINE-20261124.md`
 
-当前仅完成仓库分支中的实现和静态文件审查；CI、artifact、eMMC 安全门和 Panther X2 实机结果均未验证。
+**重要边界：** 这是原版 6.1.65 完整 Armbian 系统的实机正向基线，不是 B1 最小 RAM Linux 的测试结果。B1 当时仍处于打包构建阶段；B1 的构建、artifact 审计、目标硬件启动及后续网络验收均须独立完成。不得把本次原版系统测试转记为 B1/B2/B3 通过。
 
 
-## B2 板载有线千兆 Ethernet 分层路线
+## 2026-11-25 B2-0 最终决策阶段：第一轮版本与组件恢复建议
 
-| 子阶段 | 唯一目标 | 验收重点 |
-|---|---|---|
-| B2-1 | 恢复 NET/INET/NETDEVICES 最小网络核心，暂不启用 Panther GMAC | 网络核心初始化、loopback |
-| B2-2 | 加入 STMMAC/Rockchip DWMAC 与必要 SoC 资源，GMAC DTB 仍 disabled | 驱动 probe、netdev 注册，不要求 link |
-| B2-3 | 引入 MDIO/PHYLIB/RTL8211F 最小依赖并激活目标节点 | MDIO 扫描、PHY 发现、驱动绑定和寄存器访问 |
-| B2-4 | 验证 RGMII、时钟方向/频率、TX/RX delay 和 PHY 协商 | 物理链路、1000 Mbps Full Duplex |
-| B2-5 | 验证 MAC DMA 与真实数据收发 | TX/RX、ARP、ICMP、TCP/UDP、持续传输和稳定性 |
+方向一至方向五的静态审计均已按各自证据边界完成归档，用户已批准方向五有条件结项。现进入 B2-0 最后阶段：版本决策与组件恢复顺序整合。第一轮建议与详细证据见 PANTHER-X2-B2-0-VERSION-AND-COMPONENT-RECOVERY-DECISION-PROGRESS-20261125.md。
 
-每轮只引入一个组件或不可再拆分的最小依赖闭包；通过后保存源码 commit、patch、最终 .config、DTS/DTB、Image、initramfs、SHA-256 和原始日志。不得将 GMAC probe 成功等同网络打通。Wi-Fi、Bluetooth 和 USB/PCIe 外接网卡永久排除。B2 属于项目 A 的分层功能验证，不是恢复项目 B 的历史故障根因调查。
+第一轮建议：
+- 目标内核系列继续保持 Linux 6.18.y；当前 B1 精确源码候选 6.18.63（ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f）作为 B1 与首轮后续网络验证的连续基线候选，但不是已知网络正常版本，也不等于网络版本已最终冻结。
+- 6.1.65、6.1.116 继续作为两条黄金行为参照；6.1.174、6.12.81 作为故障对照。不得整套回退到 6.1.116 或将历史源码候选伪装成二进制精确来源。
+- 不直接回移 PHYCR2=0x1801、DMA reset 前 1500ms、clock enable/settle、RGMII GRF 写入顺序或 MDC CSR source 补丁；这些只保留为候选，必须有单变量证据才能讨论改动。
+- B1 通过后，建议按网络核心 → 缺失的共享 SoC provider → PHY 电源 provider → MDIO/PHY → STMMAC/DWMAC4 → Rockchip glue → 单独恢复 GMAC1 DTB 节点 → 最小只读 ip 工具的顺序，逐项审查和引入。
+- 首轮优先 built-in，避免模块装载顺序成为额外变量；具体 Kconfig/Makefile 依赖必须按 6.18.63 精确源码核对。REALTEK_PHY、ETHTOOL_NETLINK 与 RK809 PMIC provider 等不能漏项或假定自动 select。
+- 所有网络组件实机引入均以 B1 完整通过和另行授权为前置条件；不把全面 eMMC WP/Rescue 研究作为阻塞项，任何 eMMC 修改仍须另行明确授权。
 
-
-## 2026-11-24 B1 CI 复核状态
-
-Run #62（45291347822）的 BusyBox 与 PREPARE-ONLY 镜像打包 Job 成功，但 Kernel/DTB 来自 Run #58（45201970736），其构建仍应用了 2026-11-23 B1 基线纠偏明确废弃的 `kobject_uevent` 补丁。因此 Run #62 只能记录为流水线与打包验证成功，不能作为当前 B1 Kernel/DTB 基线验收。Workflow 已在 `e6d94d2d337fe6caaff1d743aca1aef77451159d` 修正为不修改锁定上游源码；新 Kernel/DTB 构建待运行。具体 artifact、digest、Job 结果和证据见 [B1 构建实施记录](PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)。
-
-后续所有多阶段构建必须支持跨 Run 阶段产物复用和从失败阶段恢复。复用前校验来源 commit、配置基线及 SHA-256；基线变化的产物必须重建。不得为修复单一阶段而重复耗时的已成功阶段。
+**阶段状态：** B2-0 决策第一轮建议已归档，尚待逐项审议和最终冻结。B1 当前状态不因本决策而改变；B2.1 未启动。本阶段不访问设备、不构建、不安装、不修改系统/驱动/DTB/Kconfig/网络配置、不读写寄存器、不写 TF/eMMC。
 
 
-## 2026-11-24 B1 构建失败与修正状态
+## 2026-11-25 B2-1 实施计划归档
 
-Run #63（45294164685）Kernel/DTB 在最终链接阶段因 `CONFIG_NET=n` 下 uevent stub 引用 `sk_skb_reason_drop` 失败；BusyBox 和 package 未产生有效结果。已确认锁定源码中的 GPIO hotplug 调用者由 `CONFIG_KEYBOARD_GPIO_BUTTON_HOTPLUG` 控制，而 B1 fragment 明确禁用该选项。
+B2-0 方向一至五静态审计及第一轮版本/组件决策已形成归档。B2-1 实施计划已单独建立：`PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md`。该计划把 6.18.63 连续基线候选与 R0–R8 组件恢复顺序转化为实施卡、精确依赖核对要求、唯一变量、静态/构建/实机验收、停止回退规则和进入原计划 B2.1 的最终放行清单。
 
-当前兼容补丁改为仅在 `CONFIG_NET` 下声明、实现和导出 `broadcast_uevent()`，删除无网络 stub，保留正常网络实现中的 skb 释放逻辑。旧的无网络 stub 补丁不再应用。Workflow 同时修正为：Kernel/DTB 失败时跳过 BusyBox/package；仅在明确提供已成功 Kernel/DTB Run ID 时才复用旧产物。
-
-该修正已提交，但未触发 Actions；补丁应用、Kernel 链接、完整 B1 artifact 均待下一次用户手动运行验证。B1 尚未通过，实机启动仍受 eMMC pre-Linux 安全门约束。
-
-### B1 latest status — 2026-11-24 (Run #64)
-
-Run `45307203767` failed before kernel compilation because the new no-NET `broadcast_uevent` compatibility patch had malformed unified-diff hunk counts. The exact pinned source checkout succeeded; `git apply --check` rejected the patch. Kernel/DTB, BusyBox and package stages did not produce new outputs.
-
-The patch hunk offsets/counts and its README have been corrected in the repository, and hunk-count consistency has been statically checked. This correction is not yet CI-verified. B1 remains unaccepted; the next gate is successful patch application, followed by Kernel/DTB build. No hardware boot or storage write is authorized by this result.
+**状态边界：** B2-1 计划文档已建立，尚待用户审阅冻结；B1 尚未完整通过；R0–R8 未执行；原计划 B2.1 未启动。本次仅更新仓库文档，不访问设备、不运行构建、不写 TF/eMMC、不修改系统、驱动、DTB、Kconfig 或网络配置。任何后续实机动作均须满足计划中的阶段门并取得逐次授权。
 
 
+### 2026-11-25 B2-1 网络验收原则修订
 
-## 2026-11-24 B1 实机通过与 B2-0 黄金基线矩阵
+用户指出历史完整安装的 6.18.63/6.18.64 系统仍然网络不通，故仅配置启用、编译成功、驱动 probe、PHY attach 或 carrier 均不得作为网络通过。B2-1 计划已修订：R1–R6 仅标记组件准备通过；R8 最小测试工具提前到 R7 前准备；R7 恢复 Panther GMAC1/MDIO/PHY 后必须执行真实数据面验收，逐层证明 PHY link/速率双工、双向 MAC TX/RX（Panther 与对端计数器/日志相互印证）、ARP、同网段双向 ICMP、hEX 网关双向 ICMP、已知外部 IP 路由及按范围要求的 TCP/UDP 双向 payload。任何组件/补丁/DTB 变更后，使用同一端点和参数完整 A/B 复测；失败即停留当前层，按双端证据定位，再只修改一个组件。MAC/PHY loopback 只作经授权的边界诊断，不替代真实线侧通信。
 
-B1 核心目标已在 Panther X2 实机自动启动通过：Linux 6.18.63、Panther X2 DTB、RAM initramfs、`/init` 和 BusyBox shell 均已由 Run #45328201244 的 artifact 与 UART 记录确认。B1 网络组件仍按设计隔离，不能视为网络验收。
+本次只更新实施计划、报告索引和路线图；没有访问 Panther X2、构建、写卡、修改系统或启动网络实测。
 
-**B2-0 当前工作：建立黄金基线对照表和组件恢复顺序。** 正常网络行为有两条同机实测黄金基线，不得遗漏或混淆：
+### 2026-11-25 B2-1 TX-first 验收原则修订
 
-1. **第一黄金基线：原版 Armbian 6.1.65。** 2026-11-24 Panther X2 实机 TF rootfs + eMMC /boot 混合环境，已验证 `rk_gmac-dwmac`、RTL8211F、RGMII、1000Mb/s Full、DHCP IPv4、hEX 网关 ICMP、外部 IPv4 ICMP、DNS 查询成功。详见 `PANTHER-X2-6.1.65-ORIGINAL-TF-BOOT-ETHERNET-BASELINE-20261124.md`。这条线同时有原始镜像静态审计与本机网络实测证据。
-2. **第二黄金基线：Linux 6.1.116。** 2026-11-16 同机正常运行记录，已验证最终 1000Mb/s Full、DHCP IPv4、网关/iMac IPv4 连通；详见 `panther-x2-6.1.116-usb-ethernet-baseline-20261116.md` 与网络测试总记录。
-3. **B1 隔离基线：Linux 6.18.63。** 自动启动到 RAM BusyBox 实机通过，但 `CONFIG_NET=n` 且 GMAC/MDIO/PHY 驱动与节点隔离；仅作为新内核启动和硬件基线，不代表网络功能通过。
+用户明确要求网络组件不得一次性全部加入。首项网络实测应在最小必要网络组件集合下，验证 Panther X2 发出的特定 Ethernet 广播帧能否被局域网对端真实接收；未通过不得引入更高层组件。B2-1 已据此修订为 TX-first、one-component-at-a-time：首轮不配置 IPv4，不依赖 DHCP/DNS/ARP/ICMP/路由；通过最小 AF_PACKET/SOCK_RAW 发送程序发送自定义 EtherType（计划采用实验 EtherType 0x88B5）广播帧，携带项目标识、序列号、长度和校验字段，由 iMac/局域网对端抓包逐帧核对。明确核验 CONFIG_PACKET；INET/IPv4 延后到 TX-PASS 后单独引入。TX-PASS 必须以对端实际捕获、帧内容准确、多轮重复、两端计数器与驱动统计相互印证为依据；probe、link up 或 Panther TX counter 增长均不足以通过。TX 通过后再按 RX、ARP、IPv4、ICMP、路由、TCP、UDP、DHCP、DNS 顺序逐层放行，每次只增加一个组件/最小依赖闭包，且 TX 广播测试作为后续回归项。
 
-两条黄金线用于对照网络栈、STMMAC/DWMAC、MDIO/PHY、GMAC DTB 与正常运行行为；6.1.65 的实机测试不证明 TCP/UDP payload、IPv6 或长期压力稳定性，6.1.116 亦保留其原有证据边界。
-
-B2 恢复顺序固定为：
-- B2-0：黄金基线矩阵、6.18.63 精确源码 Kconfig/Makefile 依赖图、DTB/共享资源引用图、逐项试验卡。
-- B2-1：最小网络核心与 loopback，不启用物理 Ethernet。
-- B2-2：netdev/Ethernet 框架及 STMMAC/Rockchip DWMAC，GMAC DT 节点保持 disabled。
-- B2-3：GMAC1、MDIO1、PHYLIB/PHYLINK、RTL8211F 及最小依赖闭包。
-- B2-4：pinctrl、clock、reset、regulator、DMA、IRQ、RGMII 与千兆链路。
-- B2-5：最小用户空间工具、静态 IPv4、ARP、ICMP 和双端报文验证。
-- B3：TCP、UDP 分开验证双向 payload。
-
-**当前状态：** B2-0 的黄金基线矩阵与恢复顺序已建立；源码依赖闭包、B1 DTB 差异和 B2-1 单项试验卡仍待静态审计，完成前不放行 B2-1。详见 [B2-0 专项报告](PANTHER-X2-PROJECT-A-B2-0-GOLDEN-BASELINE-AND-COMPONENT-RESTORE-ORDER-20261124.md)。
-
-非阻断待办：B1 `/init` 的 BusyBox `[` applet/设备树型号显示问题，以及 MMC deferred-probe PMIC 依赖静态审计，安排在下次打包处理，不为此重建已通过的 B1。
-
-
-## 2026-11-24 B2 策略修订：源码适配与版本回归优先
-
-B2 的主要目标不是简单恢复 B1 关闭的网络配置。项目 B 已经分段审查过多项组件配置与实现；项目 A 应继承这些成果，避免重复检查。B2 应优先审查 Linux 6.18.y 组件源码是否存在版本回归、错误处理退化、时序/生命周期问题或不适合 Panther X2/RK3566 的实现，再根据源码审查结果决定保留、修复、单组件回退或暂不修改。配置审查定位为复合与查漏补缺。
-
-重点历史线索包括：
-- 6.1.116 与 6.1.174/6.12.81 的 STMMAC PHY/DMA workaround 差异；
-- Rockchip GMAC clock enable 返回值处理与 5ms 对 100–200µs settle delay 差异；
-- RK3566/RK3568 RGMII delay 写入顺序差异；
-- STMMAC PHY resume 上游修复的适用性边界；
-- DWMAC4 DMA 寄存器/队列路径与 TX 物理出线证据边界；
-- RTL8211F PHY driver 的寄存器 mask 和初始化行为。
-
-以上均是项目 B 已有研究输入，不能直接视为 6.18 根因。必须在 6.18.63 精确源码中逐项核实是否存在、是否命中 Panther 路径以及是否有证据支持修复。JL2xx1 专用 workaround 不得未经 PHY 语义证明直接移植到 RTL8211F。
-
-执行主计划：[B2 源码适配、版本回归与组件恢复审查计划](PANTHER-X2-PROJECT-A-B2-SOURCE-COMPATIBILITY-AND-VERSION-REGRESSION-PLAN-20261124.md)。此前 B2 按 Kconfig/驱动/DTB 线性恢复的初步顺序由该源码优先计划取代。当前仍处于 B2-0，完成源码账本和 6.18 对应差异审计前不放行 B2-1。
-
-
-## 2026-11-24 版本范围校正：6.1.y 是持续异常版本族
-
-用户澄清：此前提到的不是单一 6.1.119，而是 Linux 6.1.y 系列。该系列曾升级过多个小版本，网络故障表现相同。用户目前记不清各次测试的具体小版本号。
-
-因此：
-- 6.1.y 应作为一个**跨多个小版本持续异常的版本族**纳入 B2 对照，而不是虚构/猜测某个小版本号。
-- 6.1.174 仍是项目 B 中有精确源码审计的一个样本，但不能称为整个 6.1.y 系列的第一个故障版本，也不能代表该系列全部实测版本。
-- 后续需从仓库的 Actions 构建记录、镜像文件名、Image/DTB 哈希、uname、测试报告和源码 commit 中恢复每次升级的版本清单。
-- 对比时分别记录“同一故障是否跨 6.1.y 多版本持续”“哪些源码变化在不同小版本之间变化但故障不变”“哪些组件实现是整个异常系列共有而正常基线没有的”。
-- 在精确版本清单恢复前，不对 6.1.y 族作超出用户确认范围的版本身份推断。
-
-当前权威细节见 [B2 源码适配、版本回归与组件恢复审查计划](PANTHER-X2-PROJECT-A-B2-SOURCE-COMPATIBILITY-AND-VERSION-REGRESSION-PLAN-20261124.md)。
+本次仅修订计划、索引和路线图，没有访问设备、构建、写卡、修改系统或启动网络实测。
