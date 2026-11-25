@@ -1570,3 +1570,29 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 4. 6.12 新增 unreadable net_iov fragment 的 generic TX 拒绝门已在 §22 记录；它与普通 UDP 用户数据构造不同，当前没有历史 DHCP skb 使用 net_iov fragment 的证据。
 
 **本项结项：** §8 中 6.1.65 候选源码端点的 checksum、UDP GSO 与 fragment helper 对照已补齐。方向二仍进行中；下一项严格按原报告顺序转到 §9 netdevice feature negotiation、ARP/neighbour output 与 IPv4 route key 的 6.1.65 回溯，不跳过章节。
+
+
+## 33. §9 netdevice feature、ARP/neighbour output 与 IPv4 route key：补入 6.1.65 候选源码端点（2026-11-25）
+
+### 33.1 本次补查函数
+
+四端点只读比较：
+- `net/core/dev.c`：`netif_skb_features()`、`netdev_fix_features()`、`netdev_update_features()`、`validate_xmit_vlan()`、`netdev_features_change()`；
+- `net/core/neighbour.c`：`neigh_resolve_output()`、`neigh_connected_output()`；
+- `net/ipv4/arp.c`：`arp_solicit()`；
+- `net/ipv4/route.c`：`ip_route_output_key_hash()`。
+
+### 33.2 四版本比较结果
+
+- `netif_skb_features()`、`netdev_update_features()`、`validate_xmit_vlan()`、`netdev_features_change()`：四端点函数体一致。
+- `netdev_fix_features()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 新增 `NETIF_F_GSO_UDP_L4` 能力约束，并整理 TLS TX checksum 依赖判断。该变化约束 UDP segmentation offload feature 组合，不是普通 UDP datagram checksum 的通用开关。
+- `neigh_resolve_output()`、`neigh_connected_output()`、`arp_solicit()`：四端点函数体一致；黄金 A 与黄金 B 没有 ARP/neighbour 输出差异。
+- `ip_route_output_key_hash()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 将 TOS 归一化改为 DSCP mask，并配合 DSCP/ECN 分离语义。该差异需要实际 DSCP selector/rule 才会影响路由匹配；普通 DHCP Discover 通常 TOS 为 0，当前无历史 DSCP policy 命中证据。
+
+### 33.3 本项结论
+
+1. 6.1.65 与 6.1.116 在本节列出的 generic netdevice feature negotiation、ARP/neighbour output 与 IPv4 route-key 函数上没有发现实现差异。
+2. 6.12 的 UDP GSO feature 约束与 DSCP route-key 变化已有明确适用条件，未形成普通小型 UDP/DHCP 的已证实回归。
+3. Panther 实际设备 feature bitmap、运行时 DSCP rule 与 hook 状态不由 generic helper 静态比较推断；驱动私有能力留在后续驱动方向。
+
+**本项结项：** §9 的 6.1.65 候选源码回溯已完成。下一项按原顺序进入 §11 RX dispatch、IPv4 input 与 UDP receive；§10 是覆盖范围摘要，不是新增源码专题。方向二仍进行中。
