@@ -245,7 +245,7 @@ B1 当前 6.18.63 构建输入包含 0001-kobject-uevent-config-net-n.patch，�
 本轮先形成了版本定位和组件引入顺序建议；下列项目尚需在 B2-0 决策阶段继续逐项冻结：
 
 1. **版本决策正式冻结：** 用户确认 6.18.63 精确源码作为 B1 与首轮 B2 连续候选；明确更新到更高 6.18.y 的独立触发条件。
-2. **B1 基线状态核实：** 以当前仓库最新构建/实机报告为准，确认 /init、UART shell、DTB、initramfs、eMMC 安全门状态；不能以 Kernel banner 单独宣称 B1 通过。
+2. **B1 基线状态核实：** 以当前仓库最新构建/实机报告为准，确认 /init、UART shell、DTB、initramfs 和隔离条件；不能以 Kernel banner 单独宣称 B1 通过。eMMC 全面 WP/Rescue 不再是 B1 前置阻塞项，任何 eMMC 修改仍须另行明确授权。
 3. **R2/R3 依赖分拆：** 从 6.18.63 Kconfig 与 B1 最终 .config 做差异表，识别哪些 provider 已存在、哪些必须新增、哪些是共享启动依赖。
 4. **R4～R6 构建闭包冻结：** 明确每个 Kconfig 符号、Makefile 对象、built-in/module 选择和 DTB 触发关系。
 5. **候选差异追踪表：** 对 A/B 级候选分别标明未来哪一个阶段可能产生证据；不得提前写补丁。
