@@ -250,7 +250,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 - 原始范围内明确列出的 generic network-core 子项 §3～§24、§26 已完成四版本源码/Kconfig/已有配置静态审计；四版本矩阵、普通 DHCP/UDP TX 适用性与证据等级见方向二报告 §53。
 - §54 完成报告内部一致性审校；§55 完成结项条件评估；用户于 2026-11-25 明确批准“证据边界明确的有条件结项”，正式结项记录见方向二报告 §56。
 - **当前状态：方向二已结项（证据边界明确）。** 6.1.65/6.1.116 来源绑定、6.1.174 历史 config 缺口及运行时队列/特殊 skb 证据限制均按 §55.2 保留；不重复已完成 generic network-core 审计。
-- 按 B2-0 原顺序进入方向三 STMMAC/DWMAC4/DMA 驱动核心静态审计。D3-1 platform probe/resource parsing 与 D3-2 MDIO/PHY attach 四版本静态审计均已结项；D3-2 确认黄金版本有、故障版本缺失的四次 PHYCR2/BMCR MDIO 写入差异，保留为待关联候选，不认定根因。当前进入 D3-3：DWMAC4 DMA core initialization / register programming。**方向三仍进行中，尚未进入后续独立专题或 B2.1。**
+- 按 B2-0 原顺序进入方向三 STMMAC/DWMAC4/DMA 驱动核心静态审计。D3-1 platform probe/resource parsing 与 D3-2 MDIO/PHY attach 四版本静态审计均已结项；D3-2 确认黄金版本有、故障版本缺失的四次 PHYCR2/BMCR MDIO 写入差异，保留为待关联候选，不认定根因。当前执行 D3-3：DWMAC4 DMA core initialization。使用实际 6.1.174-rk35xx 构建源码 c2f148d 复核后，发现黄金版本 DMA reset 前有 1500ms delay、故障版本缺失，且 reset poll interval 从 10ms 缩短至 0.5ms；DWMAC4 DMA/AXI/channel init 算法总体相同。D3-3 仍进行中，DMA address-width 实际硬件能力和 platform PBL/AXI 值尚未闭环。**方向三仍进行中，尚未进入后续独立专题或 B2.1。**
 
 ### 尚未验证
 - B1 clean Kernel/DTB/BusyBox/initramfs workflow 能否成功构建；
