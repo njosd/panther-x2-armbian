@@ -8,19 +8,32 @@
 
 本轮目标是比较正常基线与故障版本的 Linux 网络核心代码差异，判断差异是否命中普通本机小 UDP 报文的发送路径。源码差异只作为待评估事实，不自动等同于故障根因。
 
-## 2. 固定源码比较端点与证据等级
+## 2. 固定版本比较矩阵、源码端点与证据等级
 
-| 版本 | 比较端点 | 来源说明 |
-|---|---|---|
-| 6.1.116 | `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e` | 正常运行基线的源码比较端点；精确安装包构建 source commit 尚未闭环 |
-| 6.1.174-rk35xx | `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633` | 原始 Actions run #296 日志确认的构建 source_hash |
-| 6.12.81-rk35xx | `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c` | 原始 Actions 构建日志锁定的 source commit |
+方向二软件 TX 的核心横向比较对象是四个代表版本，不能缩减为三个源码仓库端点：
 
-6.1.65、6.1.79、6.1.112 已有正常实机证据，但目前没有足以逐一锁定的精确源码 commit；本报告不伪造其源码端点，也不将 6.1.116 的源码差异直接外推为所有 6.1.y 小版本均相同。
+| 版本 | 基线角色 | 实机证据 | 当前可用源码端点/证据边界 |
+|---|---|---|---|
+| **6.1.65** | **黄金基准 A** | 正常实机；原始 Armbian Panther X2 镜像，2026-11-24 TF 启动与有线 IPv4 实测通过 | 原始镜像、内核配置、modules.builtin、DTB、uInitrd 及实机网络证据已归档；精确构建源码 commit / Actions checkout SHA 尚未锁定。必须纳入比较，但不能用 6.1.116 源码代替 |
+| **6.1.116** | **黄金基准 B** | 正常实机；历史稳定运行基线 | `unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`；当前源码比较端点，精确安装包构建 source commit 尚未闭环 |
+| **6.1.174-rk35xx** | **故障对照 A** | 已确认网络故障；目前最早有明确故障实机证据的 6.1.y 样本 | `ophub/linux-6.1.y-rockchip@c2f148dece4b67ebd30aefad1bdd1990f41e5633`；原始 Actions run #296 日志确认的构建 source_hash |
+| **6.12.81-rk35xx** | **故障对照 B** | 已确认网络故障；跨系列故障样本 | `ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；原始 Actions 构建日志锁定的 source commit |
 
-6.18.63 属于 6.18.y，不纳入本轮 6.1.y 最早回归判断，也不为本轮方向二重复追查其历史包身份。
+辅助正常实机样本：6.1.79、6.1.112。它们用于判断正常 6.1.y 实现/配置是否稳定延续；在各自精确源码来源未锁定前，不伪造源码端点，也不将它们冒充四个核心代表版本之一。
+
+### 2.1 必须遵守的比较规则
+
+1. 每个软件 TX 子项都以四版本矩阵组织结论：黄金 A、黄金 B、故障 A、故障 B。不能只写 6.1.116→6.1.174→6.12.81 的三版本差异。
+2. 对 6.1.65，先复用已归档原始镜像和二进制/配置资产；凡必须依赖源码函数逐行比较的项目，先标记“6.1.65 源码端点未锁定”，继续追溯其原始构建源码或可验证的发行版源码包。
+3. 在 6.1.65 源码身份未闭环前，6.1.116 与故障版本之间的源码差异只能标为“三端点源码比较结果”，不得宣称已经完成两条黄金基准对两条故障线的四版本对照。
+4. 6.1.79、6.1.112 是已确认正常的辅助样本；只有取得可核验的源码/配置证据后，才将其加入对应子项比较，不以版本号相近推定实现相同。
+5. 对普通 UDP/DHCP TX 的适用性必须单独判断；仅存在于 TCP GSO、特殊 skb backing memory、PREEMPT_RT 或其他条件编译分支的差异，不得直接归因于普通 DHCP 报文。
+
+6.18.63 属于 6.18.y，不纳入本轮 6.1.y 正常/故障对照矩阵，也不为本轮方向二重复追查其历史包身份。
 
 ## 3. 网络子系统配置入口与初始化
+
+**四版本回溯状态：** 本节原始源码比较仅覆盖 6.1.116、6.1.174、6.12.81。6.1.65 已有原始 config 与 modules.builtin 归档，可补做 NET/INET/NETDEVICES 等实际配置符号核对；但本节所比较的 Kconfig/Makefile 与 C 初始化函数源码尚无 6.1.65 精确源码端点。故本节现有结论只能标为三端点源码结论，6.1.65 配置层待补、源码层未闭环。
 
 ### 3.1 Kconfig / Makefile 入口
 
@@ -63,6 +76,8 @@
 该变化是协议对象存储/初始化结构调整；新增 strict-tag 字段位于 TCP protocol 对象，不是 DHCP 使用的 UDP 发送处理分支。当前没有证据表明它改变普通 UDP 报文发出路径。
 
 ## 4. IPv4 输出与 netdevice 发送上层路径
+
+**四版本回溯状态：** 本节 ip_output、__dev_queue_xmit、qdisc 与 checksum helper 的函数级比较未包含 6.1.65。6.1.65 原始镜像的正常网络实测证明该完整系统能够完成 IPv4 通信，但不能替代对应内核函数源码证据。现有差异均为三端点源码发现，不能据此断言两条黄金基准共同具备或故障版本共同缺失。
 
 ### 4.1 IPv4 输出
 
@@ -153,6 +168,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 ## 8. 本轮追加核验记录：checksum / fragment / UDP GSO
 
+**四版本回溯状态：** 本节涉及的 checksum、fragment 可读性及 UDP GSO 代码比较没有 6.1.65 源码端点；现有 6.1.65 config/实机结果不足以证明这些内部实现与 6.1.116 相同。保留为三端点源码结论，6.1.65 待补。
+
 源码端点仍为第 2 节固定的三个 commit。本轮直接读取并比较：
 - `net/core/dev.c`：`skb_checksum_help()`、`skb_csum_hwoffload_help()`
 - `net/ipv4/udp.c`：`udp4_hwcsum()`、`udp_send_skb()`
@@ -172,6 +189,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 
 ## 9. 本轮追加核验：netdevice feature negotiation、ARP/邻居输出与 IPv4 route key
+
+**四版本回溯状态：** 本节 feature negotiation、ARP/neighbour 输出和 route-key 函数比较未包含 6.1.65。6.1.65 的成功 DHCP/IPv4 实测仅证明端到端行为，不提供上述函数实现的源码等价性证据。现有结论按三端点源码结果保留，不能外推为四版本结论。
 
 本轮继续沿网络核心的 TX 前置路径，比较：
 - `net/core/dev.c`：`netif_skb_features()`、`netdev_fix_features()`、`netdev_update_features()`、`validate_xmit_vlan()`、`netdev_features_change()`
@@ -213,6 +232,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 
 ## 11. 本轮追加核验：Linux 网络核心 RX 分派、IPv4 输入与 UDP 接收
+
+**四版本回溯状态：** 本节 RX 分派、IPv4 输入、UDP socket 查找/GRO/receive queue 比较未包含 6.1.65。其成功 IPv4 实测是黄金基准行为证据，但不补足 RX 函数源码比较。现有结论仅适用于三端点源码范围。
 
 固定源码端点仍为第 2 节所列 commit。本轮读取：
 - `net/core/dev.c`：`__netif_receive_skb_core()`、`__netif_receive_skb_one_core()`、`netif_receive_skb_internal()`、`__netif_receive_skb_list_core()`
@@ -271,6 +292,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 ## 12. 本轮配置差异补充：网络核心 Kconfig 模板
 
+**四版本回溯状态：** 本节所用候选配置模板不能自动代表 6.1.65 原始镜像的实际 .config。6.1.65 已归档的 config-6.1.65-ophub 应作为独立真实配置输入；在逐符号提取并映射前，本节不得将模板差异视为四版本实际配置差异。
+
 ### 12.1 证据等级与模板身份
 
 - 6.1.116 真实运行配置已由既有报告完成全量解析：7,677 个符号与对应 Ophub general `config-6.1` 模板完全一致，符号差异为 0。模板 blob SHA：`c5e4598301c3ef3675be0058b99b9b6044a14bbf`。
@@ -313,6 +336,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 
 
 ## 14. 本轮追加核验：AF_PACKET、VLAN/bridge RX 与 Netfilter ingress
+
+**四版本回溯状态：** 本节 AF_PACKET、VLAN/bridge RX、Netfilter ingress 代码与配置对照未包含 6.1.65 的精确源码/实际配置映射。现有结果仅为三端点源码比较；6.1.65 对应源码和实际 Kconfig 值均待补。
 
 固定源码端点仍为第 2 节所列三个 commit。本轮读取：
 - `net/packet/af_packet.c`：`packet_rcv()`、`packet_rcv_spkt()`、`tpacket_rcv()`、`packet_create()`
@@ -400,6 +425,8 @@ DHCP Discover 是普通小型 UDP 报文，不属于 TCP GSO 分段 skb list；�
 下一项继续审计 IPv4 Netfilter PREROUTING/LOCAL_IN 与 conntrack/NAT hook 的核心注册、调用顺序和 Kconfig 依赖，区分“内核具备功能”与“实际 hook/ruleset 生效”。B2-0 仍然只做多版本源码、Kconfig、配置及设备树静态审计，不涉及 B1 包的实机配置、构建、启动或网络试验。
 
 ## 16. 本轮追加核验：IPv4 PREROUTING/LOCAL_IN、conntrack 与 NAT hook
+
+**四版本回溯状态：** 本节 conntrack、NAT hook 注册/顺序及 tuple lookup 函数比较未包含 6.1.65。6.1.65 实机 IPv4 成功不能证明其 conntrack/NAT 内部实现与其他版本一致。现有结论限定为三端点源码比较。
 
 固定源码端点仍为第 2 节列出的 6.1.116、6.1.174、6.12.81 commit。本轮重点核对：
 - `net/netfilter/nf_conntrack_proto.c`：IPv4 conntrack hook ops、注册/注销；
@@ -507,6 +534,8 @@ Kconfig 结构变化：
 
 ## 18. 本轮追加核验：IPv4 header checksum、分片重组与本机交付
 
+**四版本回溯状态：** 本节 IPv4 checksum、分片重组和本机交付代码未包含 6.1.65 源码端点。6.1.65 的正常 IPv4 实测仅作黄金行为基准，不作为函数级实现证据。现有结论限定为三端点源码比较。
+
 本轮继续使用第 2 节固定的三个源码端点，直接读取并比较：
 - `net/ipv4/ip_input.c`：`ip_rcv_core()`、`ip_rcv()`、`ip_local_deliver()`、`ip_local_deliver_finish()`、`ip_protocol_deliver_rcu()`
 - `net/ipv4/ip_fragment.c`：`ip4_frag_init()`、`ip_frag_queue()`、`ip_frag_reasm()`、`ip_defrag()`、`ipv4_frags_init_net()`
@@ -594,6 +623,8 @@ IPv4 fragment queue 在内存分配失败、超过内存阈值、队列超时、
 
 ## 19. 本轮追加核验：IPv4 route lookup、FIB trie 与 policy routing
 
+**四版本回溯状态：** 本节 FIB trie、policy routing 与 route lookup 代码比较未包含 6.1.65。6.1.65 的 DHCP 默认路由和 IPv4 连通实测可作为行为侧参照，但不能代替源码及实际配置比较。现有结论限定为三端点源码比较。
+
 承接第 18 节，继续核对 IPv4 入站路由、本机/转发分流、FIB trie、策略路由规则和源地址校验。固定源码端点仍为第 2 节列出的 6.1.116、6.1.174、6.12.81 commit。本轮读取并比较：
 - `net/ipv4/route.c`：`ip_route_input_slow()`、`ip_route_input_rcu()`、`ip_route_output_key_hash_rcu()`、`ip_route_output_key_hash()`
 - `net/ipv4/fib_frontend.c`：`fib_validate_source()`
@@ -669,6 +700,8 @@ IPv4 专用 `fib4_rule_match()`：
 本轮仍为固定源码端点、Kconfig、Makefile 和候选配置模板的静态审计；未执行设备操作、构建、补丁或实机网络试验。方向二仍未结项。
 
 ## 20. 本轮追加核验：ARP RX 处理与 neighbour 状态机
+
+**四版本回溯状态：** 本节 ARP RX 与 neighbour NUD 状态机比较未包含 6.1.65 源码端点。黄金 A 的网络成功结果不等于已证明内部 ARP/neighbour 实现与黄金 B 一致。现有结论限定为三端点源码比较。
 
 承接第 9 节已经完成的 ARP/neighbour 输出关键函数，本轮补齐 ARP 输入和邻居项状态维护，避免将“ARP 输出函数一致”误写成整个 ARP/neighbour 子系统已审计。
 
@@ -750,6 +783,8 @@ IPv4 专用 `fib4_rule_match()`：
 
 ## 21. 本轮追加核验：UDP IPv4 sendmsg 与 IP skb 构造/追加路径
 
+**四版本回溯状态：** 本节 UDP sendmsg、checksum/GSO 尾段、IP skb 构造与追加函数比较未包含 6.1.65 源码端点。6.1.65 的 DHCP/IPv4 实测只能证明系统层面可通信，不能填补 sendmsg 内部代码差异。现有结论限定为三端点源码比较。
+
 本轮继续核对普通 DHCP Discover/Request 所使用的 UDP IPv4 用户态发送入口，重点补齐此前只审过 checksum、UDP GSO 与部分 IP output helper、但尚未完整比较的 `udp_sendmsg()` → `ip_make_skb()/ip_append_data()` → `ip_send_skb()` 构造链。
 
 固定源码端点仍为第 2 节的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
@@ -820,6 +855,8 @@ IPv4 专用 `fib4_rule_match()`：
 本轮为源码静态审计；未修改代码/配置，未构建、未启动或操作 Panther X2 实机。方向二仍未结项。
 
 ## 22. 本轮追加核验：TX queue → qdisc → validate → ndo_start_xmit 交付链
+
+**四版本回溯状态：** 本节 TX queue、qdisc、validate_xmit_skb 与 ndo_start_xmit 交付链的函数级比较未包含 6.1.65。6.1.65 原版系统已实机完成 DHCP/IPv4 通信，是关键黄金行为基准；但在其精确源码端点未锁定前，不得把本节三端点源码结果写成两条黄金线共同实现。6.1.65 对应 TX 核心函数待补。
 
 本轮按用户要求将方向二重点转向 TX 发送环节，继续向下追踪普通 UDP skb 从 `__dev_queue_xmit()` 进入 netdevice TX queue、qdisc dequeue、发送前校验，直到 Linux 网络核心调用驱动 `ndo_start_xmit` 的边界。仍使用第 2 节固定的 6.1.116、6.1.174、6.12.81 源码端点。
 
@@ -908,6 +945,8 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 本轮仅进行固定源码端点静态比较；没有构建、修改配置、执行设备操作或实机网络试验。方向二仍未结项；TX DMA descriptor/mapping/doorbell/completion/reclaim 留在后续既定驱动方向，不在本节提前展开。
 
 ## 23. 本轮追加核验：netdev_start_xmit、TX queue flow control、watchdog 与 skb completion/free
+
+**四版本回溯状态：** 本节 netdev_start_xmit、queue stop/wake、BQL、watchdog 和 skb free/completion 比较未包含 6.1.65 源码端点。现有结果仅覆盖 6.1.116、6.1.174、6.12.81；不能据此推断 6.1.65 代码相同。
 
 承接第 22 节的 `ndo_start_xmit` 驱动边界，本轮继续核对其上层调用封装、TX queue stop/wake、BQL（Byte Queue Limits）、watchdog timeout，以及驱动完成发送后 skb 的释放/消费路径。目标是确认网络核心是否可能在“已进入驱动调用”之后，由通用队列管理或 skb 生命周期机制改变发送推进状态。
 
@@ -1005,6 +1044,8 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 
 ## 24. 本轮追加核验：NET_TX_SOFTIRQ、qdisc reschedule、completion_queue 与 TX trace
 
+**四版本回溯状态：** 本节 NET_TX_SOFTIRQ、output_queue/completion_queue、qdisc reschedule 和 tracepoint 比较未包含 6.1.65 源码端点。现有结论只对三个已锁定源码端点成立；6.1.65 黄金 A 的对应实现仍待补，不能形成四版本共同结论。
+
 本轮继续按 TX 方向核对第 23 节之后的软中断调度和 skb 延迟释放路径，重点确认 `NET_TX_SOFTIRQ` 的两条工作队列分别承担什么职责，以及 6.12 的改动是否可能影响普通 UDP 报文继续进入 qdisc/驱动。
 
 固定源码端点仍为第 2 节的 6.1.116、6.1.174、6.12.81 commit。本轮读取：
@@ -1094,3 +1135,57 @@ Panther X2 板载 GMAC 的实际 `real_num_tx_queues`、驱动 `ndo_select_queue
 4. TX tracepoint 可帮助建立软件交付证据链，但 `net_dev_xmit rc=NETDEV_TX_OK` 或 `consume_skb` 均不能单独证明 Ethernet PHY 已完成物理发送。
 
 本轮仅做固定源码端点静态比较；未构建、未修改系统配置、未执行实机操作。方向二仍未结项；尚需按原定顺序完成 TX 统计/drop reason/Kconfig 等剩余网络核心子项，再回读 B2-0 原始计划确认方向三。
+
+
+## 25. 对已完成方向二子项的四版本回溯修订（2026-11-25）
+
+### 25.1 修订原因
+
+复核方向二既有报告后确认：第 3～24 节多数源码对照实际以 6.1.116、6.1.174、6.12.81 三个已锁定源码端点开展。虽然这些分析可保留为候选差异，但此前章节标题和阶段结论容易让读者误以为已完成两条黄金基准对两条故障线的完整横向比较。现按第 2 节标准逐项修订证据等级，并明确补入 6.1.65 黄金基准 A。
+
+### 25.2 6.1.65 可复用的已知证据
+
+以下证据已存在于仓库，不要求用户重复采集：
+
+- 原版 Armbian 6.1.65 原始镜像静态审计：已归档 `config-6.1.65-ophub`、`modules.builtin`、Panther X2 DTB、uInitrd 等资产；精确 Actions run / checkout SHA 不可证。
+- 2026-11-24 原版 TF 实机记录：确认运行 `6.1.65-ophub`，板载 Ethernet 驱动绑定、RTL8211F、1Gbps Full、DHCP IPv4、网关 IPv4、外部 IPv4 与 DNS 查询成功。
+- 四版本资产矩阵已确认 6.1.65 与 6.1.116 均为正常实机黄金基准；两者的 GMAC DTB 语义已完成既有交叉核对。本轮方向二不重复这些已结项工作。
+
+这些证据证明 6.1.65 是真实、有效的黄金基准 A；但它们不能单独给出 6.1.65 的 Linux 网络核心 C 函数实现。
+
+### 25.3 已完成子项逐项回溯结果
+
+| 原报告章节 | 已审计主题 | 原有源码比较范围 | 6.1.65 回溯状态 | 修订后结论等级 |
+|---|---|---|---|---|
+| §3 | Kconfig/Makefile、loopback、net_dev_init、inet_init | 6.1.116 / 6.1.174 / 6.12.81 | config 与 built-in 资产可复用；网络核心符号需从原始 config 补齐；源码函数待精确端点 | 三端点源码结论；6.1.65 配置/源码待补 |
+| §4、§8 | IPv4 output、qdisc、checksum、fragment、UDP GSO | 三端点 | 实机 IPv4 正常是行为证据，不是函数源码证据 | 三端点源码结论 |
+| §9 | netdevice feature、ARP/neighbour output、route key | 三端点 | DHCP/IPv4 成功可作行为参照，内部函数待补 | 三端点源码结论 |
+| §11 | RX dispatch、IPv4 input、UDP socket/GRO/receive queue | 三端点 | 没有 6.1.65 对应源码审计 | 三端点源码结论 |
+| §12 | 网络核心 Kconfig 模板 | 候选模板/三端点证据 | 不得以模板替代 6.1.65 原始 config；需逐符号映射 | 配置对照未完成四版本闭环 |
+| §14 | AF_PACKET、VLAN/bridge RX、Netfilter ingress | 三端点 | 源码和实际配置均待补 | 三端点源码结论 |
+| §16 | conntrack、NAT hook、tuple lookup | 三端点 | 实机 IPv4 成功不能替代内部源码比较 | 三端点源码结论 |
+| §18 | IPv4 checksum、fragment reassembly、本机交付 | 三端点 | 实机 IPv4 成功仅为行为证据 | 三端点源码结论 |
+| §19 | FIB trie、policy routing、route lookup | 三端点 | DHCP 默认路由可复用为行为参照；源码/配置待补 | 三端点源码结论 |
+| §20 | ARP RX、neighbour NUD | 三端点 | 实机通信成功不证明函数实现一致 | 三端点源码结论 |
+| §21 | UDP sendmsg、IP skb 构造/追加 | 三端点 | DHCP/IPv4 成功不等于 sendmsg 函数源码已比较 | 三端点源码结论 |
+| §22 | TX queue、qdisc、validate、ndo_start_xmit | 三端点 | 黄金 A 已通过真实 DHCP/IPv4；对应 TX 核心源码未审 | 三端点源码结论；TX 核心待补 |
+| §23 | netdev_start_xmit、queue flow control、BQL、watchdog、skb free | 三端点 | 没有 6.1.65 函数源码比较 | 三端点源码结论 |
+| §24 | NET_TX_SOFTIRQ、qdisc reschedule、completion_queue、trace | 三端点 | 没有 6.1.65 函数源码比较 | 三端点源码结论 |
+
+### 25.4 对此前结论措辞的统一修订
+
+1. 第 3～24 节原有的函数级差异仍保留，不要求重复下载或重跑三个已审计源码端点。
+2. 所有“正常线与故障线的差异”“两条黄金线共同具备”“故障版本共同缺失”等表述，在 6.1.65 对应证据未补齐前，均只能视为待验证假设；本报告已在各章节开头标明范围。
+3. 第 22～24 节中关于普通单 skb UDP、qdisc、驱动调用封装、queue flow control、NET_TX_SOFTIRQ 的结论，均限定为三个源码端点之间的比较结果，不能宣称为四版本结论。
+4. 6.1.65 的正常实机网络结果是强行为基准，但不反向证明其网络核心内部实现与 6.1.116 相同。
+5. 6.1.79、6.1.112 继续作为辅助正常样本；本轮不因其已知实机正常就推定其源码等同于 6.1.65 或 6.1.116。
+
+### 25.5 后续修订顺序
+
+1. 先对 6.1.65 原始镜像现有 `config-6.1.65-ophub` 做只读提取与网络核心符号映射，覆盖本报告已完成子项涉及的 Kconfig 选项；不得重做已完成的原始镜像、DTB 或实机网络测试。
+2. 继续追溯 6.1.65 的原始源码身份。优先利用镜像构建时间、release 字符串、内嵌 IKCONFIG、包元数据及 Armbian/Ophub 对应发行版源码线索；没有可验证的 commit 时明确保留“源码端点未锁定”。
+3. 对能锁定源码的 6.1.65 子项，按 §3～§24 原顺序补入函数级差异；不能锁定的子项保留证据缺口，不用 6.1.116 代替。
+4. 只有在四版本矩阵的对应子项确实补齐后，才允许给出该子项的四版本横向结论；之后再按原计划推进尚未审计的方向二子项。
+5. 方向二仍未结项；不进入方向三、B2-1 或任何实机试验。
+
+**修订性质：** 本次为既有方向二报告的证据等级与比较矩阵纠偏。没有执行构建、设备操作、配置修改或网络测试。
