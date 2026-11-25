@@ -34,7 +34,7 @@ env:
     BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
     JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
     # Temporary targeted repair: reuse the already accepted Run #73 kernel/DTB.
-    B1_REUSE_KERNEL_RUN_ID: ${{ env.B1_REUSE_KERNEL_RUN_ID || '45309219886' }}
+    B1_REUSE_KERNEL_RUN_ID: ${{ github.event.inputs.reuse_kernel_run_id || '45309219886' }}
     KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
 
 jobs:
