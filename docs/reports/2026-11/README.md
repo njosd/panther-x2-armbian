@@ -35,7 +35,7 @@
 - [GMAC glue、时钟与电源路径补充审计（2026-11-24）](./PANTHER-X2-GMAC-GLUE-CLOCK-POWER-SUPPLEMENTAL-AUDIT-20261124.md)：汇总既有 CRU clock/reset、CSU、RK809 PHY supply 与 runtime-PM 静态证据；仅作后续对应专题的证据复用，不代表 B2-0 当前方向结项。
 - [B2-0：Linux 6.18.63 精确源码 Kconfig / Makefile 依赖审计（2026-11-24）](./PANTHER-X2-B2-0-6.18.63-KCONFIG-MAKEFILE-DEPENDENCY-AUDIT-20261124.md)：闭合 STMMAC、Rockchip glue、PHYLINK/PHYLIB/MDIO、RTL8211F、CCF/CRU、GRF、GPIO、RK809 PHY supply 的构建依赖，并登记 6.1.116 / 6.12.81 差异。
 - [B2-0 方向1：版本样本与构建来源追溯结项（2026-11-24）](./PANTHER-X2-B2-0-DIRECTION-1-VERSION-AND-SOURCE-PROVENANCE-20261124.md)：整理正常基线与已确认故障样本；明确 6.1.174 是目前最早有明确故障实机证据的版本，但首次回归小版本仍未证明。6.18.63 已确认实机启动及故障，属于 6.18.y，不纳入 6.1.y 首次故障点判断。
-- [B2-0 方向2：Linux 网络核心多版本静态差异评估进度](./PANTHER-X2-B2-0-DIRECTION-2-NETWORK-CORE-MULTIVERSION-DIFF-PROGRESS-20261124.md)：已按原顺序补齐 §3～§24 的 6.1.65 高置信度候选源码端点及原始配置映射，复核 §26 TX 统计/drop reason/Kconfig，并从既有 artifact 补齐 6.12.81 最终 kernel.config（BQL=y、NET_DROP_MONITOR 未设置、NET_DEVMEM=y）。仍待 6.1.174 最终 config 两项、6.1.65 NET_DROP_MONITOR 缺失行说明、源码 provenance 等级和 B2-0 原始组件账本范围复核；方向2仍进行中，未进入方向三或 B2.1。
+- [B2-0 方向2：Linux 网络核心多版本静态差异评估进度](./PANTHER-X2-B2-0-DIRECTION-2-NETWORK-CORE-MULTIVERSION-DIFF-PROGRESS-20261124.md)：已按原顺序补齐 §3～§24 的 6.1.65 高置信度候选源码端点及原始配置映射，复核 §26 TX 统计/drop reason/Kconfig，并从既有 artifact 补齐 6.12.81 最终 kernel.config（BQL=y、NET_DROP_MONITOR 未设置、NET_DEVMEM=y）。6.1.174 历史包 config 仍缺；当前同名 release asset SHA 已与历史审计包不一致，不能替代。另待 6.1.65 NET_DROP_MONITOR 缺失行说明、源码 provenance 等级和 B2-0 原始组件账本范围复核；方向2仍进行中，未进入方向三或 B2.1。
 ## 独立专题：历史网卡故障调查（不属于项目 A）
 
 以下文件只保留为独立专题的历史证据、技术结论和审计记录，不构成项目 A 的路线、待办或验收条件。项目 A 不继续追踪其故障根因，不重复其专项测试。
