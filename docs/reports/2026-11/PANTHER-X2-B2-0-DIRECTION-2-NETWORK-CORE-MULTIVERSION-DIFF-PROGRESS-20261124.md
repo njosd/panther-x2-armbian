@@ -1861,3 +1861,43 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 6.1.174 的 noqueue GSO list 返回码变化只命中 GSO skb list；6.12 的 unreadable net_iov fragment 提前 drop 需要特定 skb backing memory；二者均未证明命中普通小型 DHCP UDP 单 skb。当前没有找到解释 6.1.174/6.12.81 普通 UDP 发送失败的通用 Linux 网络核心 TX 回归点。
 
 **本项结项：** §22 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §23 netdev_start_xmit、TX queue flow control、watchdog 与 skb completion/free。
+
+
+## 43. §23 TX queue stop/watchdog：补入 6.1.65 黄金 A 后发现的真实内存序差异（2026-11-25）
+
+### 43.1 6.1.65 与 6.1.116 的函数比较
+
+补查 `include/linux/netdevice.h`、`net/core/dev.c`、`net/sched/sch_generic.c`、`net/core/skbuff.c` 与 `include/linux/skbuff.h` 后：
+- `__netdev_start_xmit()`、`netdev_tx_completed_queue()`、`__netdev_tx_sent_queue()`、`netif_tx_queue_stopped()`、`netif_xmit_stopped()`、`txq_trans_update()`、`netif_tx_wake_queue()`：6.1.65 与 6.1.116 一致。
+- `netdev_tx_sent_queue()`、`netif_tx_stop_queue())、`dev_watchdog()`：6.1.65 与 6.1.116 存在实际函数体差异。
+- `consume_skb()`、`napi_consume_skb()`、`skb_release_all()`、`skb_release_data()`：6.1.65 与 6.1.116 一致；6.12 的 reason/dataref 变化仍按 §23.5 记录。
+
+### 43.2 新增的队列状态与 watchdog 内存序配对
+
+6.1.116 相对 6.1.65 增加：
+- `netdev_tx_sent_queue()`：使用 `WRITE_ONCE(dev_queue->trans_start, jiffies)`，并在设置 STACK_XOFF 前增加 `smp_mb__before_atomic()`；注释明确其与 `dev_watchdog()` 的 READ_ONCE/屏障配对。
+- `netif_tx_stop_queue()`：同样使用 `WRITE_ONCE(trans_start)`，并在置位 DRIVER_XOFF 前增加 `smp_mb__before_atomic()`，以保证 watchdog 可观察到队列停止与时间戳更新的顺序。
+- `dev_watchdog()`：从 6.1.65 的简单 `netif_xmit_stopped()` + 普通 `trans_start` 读取，改为在检查停止状态后执行 `smp_mb()`，再以 `READ_ONCE(trans_start)` 读取时间戳；并计算最老队列起始时间和 timeout 毫秒数，改善多队列 timeout 诊断及竞争处理。
+
+这是一组相互配对的队列停止/发送记账/watchdog 内存序修正，不能拆开只看某一个 helper。6.1.174/6.12 延续 6.1.116 这组修正。
+
+### 43.3 对发送故障的含义
+
+该差异确实涉及 TX queue flow-control 状态与 watchdog 对停止状态/发送时间的观察，属于方向二网络核心中真实的 6.1.65→6.1.116 软件变化；与 §22 的 packet budget 或 GSO-list 变化不同，它触及队列停止与 watchdog 的并发可见性。
+
+但静态源码不能证明 Panther 历史故障命中了该竞争条件：
+- 需要发生 TX queue stop/STACK_XOFF 或 DRIVER_XOFF 状态变化；
+- watchdog 需要在相关时间窗内检查该队列；
+- 必须有对应 queue stop/wake 与时间戳状态证据，才能判断是否存在停队列未唤醒、timeout 误判或并发可见性问题。
+- 当前历史故障证据未提供这些运行时队列状态/时间序列；不能把该差异直接定为 6.1.174/6.12.81 的故障根因。
+
+与 DHCP 普通小包的关系：该变化不改变 `ndo_start_xmit` 的调用签名和驱动返回码，但可能影响队列在并发 stop/submit/watchdog 条件下的状态观察。因此应列为**方向二中保留的真实 TX 软件差异，需与已有运行时证据对照**，不能简单归类为纯日志变化。
+
+### 43.4 本项结论与状态修订
+
+§23 的“queue stop/wake 与 watchdog 三版函数完全一致”结论需修订为：
+- 6.1.65→6.1.116：存在配对的 WRITE_ONCE/READ_ONCE 与 memory barrier 修正；
+- 6.1.116→6.1.174：相关 helper/ watchdog 核心逻辑保持；
+- 6.1→6.12：非 PREEMPT_RT 下 xmit_more 行为保持，PREEMPT_RT 有 task-local 适配；其余已记录的 watchdog/BQL 核心逻辑延续。
+
+**本项结项：** §23 的 6.1.65 函数比较已补齐，并发现一组需要保留的 TX queue/watchdog 内存序差异。下一项按原顺序进入 §24 NET_TX_SOFTIRQ、qdisc reschedule、completion_queue 与 TX trace。方向二仍进行中，不提前进入方向三。
