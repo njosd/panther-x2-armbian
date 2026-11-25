@@ -2048,3 +2048,14 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 6.12.81 最终配置资产缺口已部分闭合：本方向所列网络核心符号均可从该最终 kernel.config 直接核验。6.1.174 的 BQL/NET_DROP_MONITOR 最终配置仍未从官方包原始 config 内容提取；6.1.65 的 NET_DROP_MONITOR 配置行仍未找到。6.12 unreadable-fragment 是否曾在故障窗口实际命中，仍缺历史 skb backing-memory 证据。
 
 本项只读取既有 workflow artifact 与其内部最终配置文本；没有访问设备、构建、修改系统或执行网络测试。
+
+
+## 48. 修订 §45 剩余清单：6.12.81 最终配置缺口已闭合（2026-11-25）
+
+§45.3 第 2 项与 §45.4 第 2 步现作如下修订：
+- **6.12.81 最终配置不再是未取得。** §47 已从 artifact 14143082992 的 extracted/kernel.config 读取最终包配置，并记录 SHA256。BQL=y、NET_DROP_MONITOR not set、NET_DEVMEM=y 及相关网络符号均已闭合。
+- 6.12.81 config 模板 blob SHA 966f4b6a... 与 6c7714f5... 的差异仍保留为“候选模板快照来源差异”，但不再阻塞最终配置结论；以 §47 的最终包内 kernel.config 为准。
+- 6.1.174 官方包配置缺口仍在：现有 audit artifact 仅含少量选定 config 项，不含完整 config 内容，因此 BQL 与 NET_DROP_MONITOR 仍不能从现有 artifact 证实。
+- 6.1.65 的 NET_DROP_MONITOR 行仍未找到，继续保留“未找到配置行”，不推定为 n。
+
+因此，方向二当前剩余的配置闭环任务已缩小为：6.1.174 最终 config 的 BQL/NET_DROP_MONITOR 两项，以及 6.1.65 NET_DROP_MONITOR 的实际配置行缺失说明；6.12.81 不再列为最终配置缺口。
