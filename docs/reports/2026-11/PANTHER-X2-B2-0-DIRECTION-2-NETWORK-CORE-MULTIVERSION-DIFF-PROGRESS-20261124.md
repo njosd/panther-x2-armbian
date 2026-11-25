@@ -1747,3 +1747,35 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 - IPv4 header checksum、长度基本检查、本机 LOCAL_IN 与 UDP protocol dispatch 主入口四版本没有发现会解释普通 DHCP 收发异常的新增逻辑。
 
 **本项结项：** §18 的 6.1.65 候选源码与原始配置映射完成。方向二继续按原顺序进入 §19 IPv4 route lookup、FIB trie 与 policy routing。
+
+
+## 39. §19 IPv4 FIB / policy routing：补入 6.1.65 候选源码与实际配置（2026-11-25）
+
+### 39.1 原始配置映射
+
+6.1.65 原始配置确认：
+- `CONFIG_IP_ADVANCED_ROUTER=y)；
+- `CONFIG_IP_MULTIPLE_TABLES=y)；
+- `CONFIG_FIB_RULES=y)（由对应 Kconfig 选择/配置）；
+- `CONFIG_INET=y)。
+
+这与 6.1.116 已审计模板的关键路由配置一致；只表示策略路由功能可编译，不表示运行时存在自定义 rule、DSCP selector 或多路由表规则。
+
+### 39.2 6.1.65 与 6.1.116 函数比较
+
+本次对原报告列出的函数逐项补查：
+- `ip_route_input_rcu()`、`ip_route_output_key_hash_rcu()`、`ip_route_output_key_hash()`：6.1.65 与 6.1.116 函数体一致。
+- `ip_route_input_slow()`：6.1.116 新增 `in_dev` 空指针检查并在为空时返回 `-EINVAL`；6.1.65 没有该保护分支。这是异常/缺失 in_device 状态下的防御性错误返回，不改变正常有效入站接口的 route lookup。
+- `fib_validate_source()`：两版一致。
+- `fib_table_lookup()`：6.1.116 新增将 alias 的 `fa_dscp` 写入 `fib_result.dscp`；本次比较未发现它改变 trie 前缀查找、alias 匹配或 nexthop 选择条件。后续 6.12 的 DSCP mask 匹配调整仍按 §19.2 解释。
+- `fib4_rule_match()`、`fib4_rule_configure()`、`fib4_rule_fill()` 与通用 `fib_rules_lookup()`：6.1.65 与 6.1.116 函数体一致。
+
+### 39.3 四版本结论更新
+
+6.1.65→6.1.116 在本节发现的差异为：
+1. 入站 route slow path 增加 in_device NULL 防御检查；
+2. FIB lookup 结果结构增加 DSCP metadata 赋值。
+
+未发现正常接口条件下的路由决策、FIB trie 搜索、policy rule 匹配/遍历或源地址校验变化。6.1.174 延续 6.1.116 的上述实现；6.12 的 DSCP selector 语义扩展、BC_FORWARDING READ_ONCE 与 forwarding 统计变化仍按 §19 原文限定。当前没有证据表明 Panther 历史 DHCP 报文命中 DSCP rule 或缺失 in_device 异常状态。
+
+**本项结项：** §19 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §20 ARP RX 处理与 neighbour 状态机。
