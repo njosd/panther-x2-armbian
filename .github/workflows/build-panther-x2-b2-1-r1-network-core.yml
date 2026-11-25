@@ -1,0 +1,189 @@
+name: Panther X2 B2-1 R1 minimum network core
+
+on:
+  workflow_dispatch:
+    inputs:
+      b1_kernel_run_id:
+        description: "Successful R0 run containing the frozen b1-kernel-dtb artifact"
+        required: true
+        type: string
+        default: "45309219886"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-b2-1-r1-network-core
+  cancel-in-progress: false
+
+env:
+  KERNEL_VERSION: "6.18.63"
+  KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+  KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+  KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
+  B1_KERNEL_RUN_ID: ${{ inputs.b1_kernel_run_id }}
+
+jobs:
+  r1-network-core:
+    name: Configure, build and audit R1 network core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install isolated build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential cpio curl device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git gzip libelf-dev \
+            libncurses-dev libssl-dev make perl python3 qemu-user-static \
+            binutils kmod zstd
+
+      - name: Restore frozen R0 kernel and DTB reference artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: b1-kernel-dtb
+          path: work/b1-reference
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.b1_kernel_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify R0 reference artifact and freeze its identity
+        run: |
+          set -euo pipefail
+          test -s work/b1-reference/output/kernel.config
+          test -s work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/b1-reference/output/kernel.config.seed
+          test -s work/b1-reference/output/kernel.config.fragment
+          test "$(sha256sum work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+          test "$(sha256sum work/b1-reference/output/kernel.config | awk '{print $1}')" = "7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731"
+          grep -qx '# CONFIG_NET is not set' work/b1-reference/output/kernel.config
+          {
+            echo "b1_kernel_run_id=${B1_KERNEL_RUN_ID}"
+            sha256sum work/b1-reference/output/kernel.config
+            sha256sum work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb
+          } | tee work/r0-reference-lock.txt
+
+      - name: Fetch pinned Linux source and apply the existing B1 compatibility patch
+        run: |
+          set -euo pipefail
+          mkdir -p work/logs work/output work/kernel-out work/modules-root
+          git init work/linux
+          git -C work/linux remote add origin "${KERNEL_SOURCE_REPO}"
+          git -C work/linux fetch --depth=1 origin "${KERNEL_SOURCE_COMMIT}"
+          git -C work/linux checkout --detach FETCH_HEAD
+          test "$(git -C work/linux rev-parse HEAD)" = "${KERNEL_SOURCE_COMMIT}"
+          test -z "$(git -C work/linux status --porcelain)"
+          PATCH="scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          git -C work/linux apply --check "$PATCH"
+          git -C work/linux apply "$PATCH"
+          PATCH_SHA="$(sha256sum "$PATCH" | awk '{print $1}')"
+          SEED="scripts/panther-x2-b1/kernel.config.seed"
+          test "$(git hash-object "$SEED")" = "${KERNEL_CONFIG_SEED_BLOB_SHA}"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          aarch64-linux-gnu-gcc --version | head -n 1 > work/toolchain-version.txt
+          {
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "b1_patch=$PATCH sha256=$PATCH_SHA"
+            echo "kernel_config_seed=$SEED"
+            echo "kernel_config_seed_blob_sha=${KERNEL_CONFIG_SEED_BLOB_SHA}"
+            echo "r1_fragment=scripts/panther-x2-b2-1/r1-network-core.fragment"
+            echo "b1_reference_run_id=${B1_KERNEL_RUN_ID}"
+          } | tee work/source-lock.txt
+
+      - name: Merge B1 baseline plus the single R1 network-core delta
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          SEED="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.seed"
+          B1_FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b1/kernel.config.fragment"
+          R1_FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-b2-1/r1-network-core.fragment"
+          mkdir -p "$OUT"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$SEED" "$B1_FRAGMENT" "$R1_FRAGMENT" \
+            2>&1 | tee work/logs/r1-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/output/kernel.config
+          diff -u work/b1-reference/output/kernel.config work/output/kernel.config > work/logs/r1-config-diff.txt || test "$?" -eq 1
+
+          require_y() { grep -qx "$1=y" work/output/kernel.config || { echo "::error::Expected $1=y"; exit 1; }; }
+          require_off() { if grep -Eq "^$1=[ym]$" work/output/kernel.config; then echo "::error::Forbidden $1 enabled"; grep -E "^$1=" work/output/kernel.config; exit 1; fi; }
+          for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do require_y "$key"; done
+          for key in CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do require_off "$key"; done
+          cp "$SEED" work/output/kernel.config.seed
+          cp "$B1_FRAGMENT" work/output/b1-network-isolated.fragment
+          cp "$R1_FRAGMENT" work/output/r1-network-core.fragment
+          echo "R1 Kconfig gate checks: PASS" | tee work/logs/r1-config-gates.txt
+
+      - name: Build the R1 kernel and modules
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          MODULES_ROOT="$GITHUB_WORKSPACE/work/modules-root"
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image modules 2>&1 | tee work/logs/r1-kernel-build.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules_install INSTALL_MOD_PATH="$MODULES_ROOT"
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          cp "$OUT/System.map" work/output/System.map
+          file work/output/Image | tee work/output/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+          tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
+
+      - name: Audit built-in symbols, modules and unchanged Panther DTB
+        run: |
+          set -euo pipefail
+          nm -a work/kernel-out/vmlinux > work/logs/r1-vmlinux-symbols.txt
+          grep -q 'packet_create' work/logs/r1-vmlinux-symbols.txt
+          grep -q 'packet_sendmsg' work/logs/r1-vmlinux-symbols.txt
+          grep -q 'eth_type_trans' work/logs/r1-vmlinux-symbols.txt
+          grep -q 'dev_queue_xmit' work/logs/r1-vmlinux-symbols.txt
+          mkdir -p work/modules-check
+          tar --zstd -xf work/output/modules.tar.zst -C work/modules-check
+          MODULE_DIR="$(find work/modules-check/lib/modules -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$MODULE_DIR"
+          if find "$MODULE_DIR" -type f -name '*.ko*' | grep -E '/kernel/drivers/net/(ethernet|phy|usb|wireless)/|/kernel/drivers/bluetooth/' ; then
+            echo "::error::Unexpected network hardware/PHY/Bluetooth module in R1"
+            exit 1
+          fi
+          if grep -E 'kernel/drivers/net/(ethernet|phy|usb|wireless)/|kernel/drivers/bluetooth/' "$MODULE_DIR/modules.builtin"; then
+            echo "::error::Unexpected built-in network hardware/PHY/Bluetooth driver in R1"
+            exit 1
+          fi
+          cp work/b1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          cp work/b1-reference/output/dtb-verification.txt work/output/dtb-verification.txt
+          test "$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+          {
+            echo "model=$(fdtget -t s work/output/dtb/rockchip/rk3566-panther-x2.dtb / model)"
+            echo "gmac1_status=$(fdtget -t s work/output/dtb/rockchip/rk3566-panther-x2.dtb /ethernet@fe010000 status)"
+            echo "mdio_status=$(fdtget -t s work/output/dtb/rockchip/rk3566-panther-x2.dtb /ethernet@fe010000/mdio status)"
+            echo "phy_status=$(fdtget -t s work/output/dtb/rockchip/rk3566-panther-x2.dtb /ethernet@fe010000/mdio/ethernet-phy@0 status)"
+            sha256sum work/output/Image work/output/kernel.config work/output/modules.tar.zst work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          } | tee work/output/R1-VERIFICATION.txt
+          grep -qx 'gmac1_status=disabled' work/output/R1-VERIFICATION.txt
+          grep -qx 'mdio_status=disabled' work/output/R1-VERIFICATION.txt
+          grep -qx 'phy_status=disabled' work/output/R1-VERIFICATION.txt
+
+      - name: Save R1 configuration, kernel and audit evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/toolchain-version.txt
+            work/r0-reference-lock.txt
+          if-no-files-found: warn
+          retention-days: 30
