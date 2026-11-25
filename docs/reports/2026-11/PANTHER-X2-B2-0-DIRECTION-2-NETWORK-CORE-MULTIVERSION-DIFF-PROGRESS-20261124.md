@@ -1779,3 +1779,27 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 未发现正常接口条件下的路由决策、FIB trie 搜索、policy rule 匹配/遍历或源地址校验变化。6.1.174 延续 6.1.116 的上述实现；6.12 的 DSCP selector 语义扩展、BC_FORWARDING READ_ONCE 与 forwarding 统计变化仍按 §19 原文限定。当前没有证据表明 Panther 历史 DHCP 报文命中 DSCP rule 或缺失 in_device 异常状态。
 
 **本项结项：** §19 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §20 ARP RX 处理与 neighbour 状态机。
+
+
+## 40. §20 ARP RX / neighbour NUD 状态机：补入 6.1.65 候选源码与配置（2026-11-25）
+
+### 40.1 6.1.65 原始配置映射
+
+原始 config 已确认 `CONFIG_INET=y`、`CONFIG_NET=y`；`CONFIG_IP_PNP` 明确 not set。IPv4 ARP 核心随 INET IPv4 栈接入，不存在单独 `CONFIG_ARP` 开关。启动阶段 RARP/IP autoconfiguration 选项不等于普通 ARP 协议实现开关。
+
+### 40.2 6.1.65 与 6.1.116 函数比较
+
+本次补查：
+- `arp_rcv()`、`arp_process()`、`arp_ignore()`、`arp_filter()`、`arp_solicit()`；
+- `__neigh_event_send()`、`__neigh_update()`、`neigh_probe()`、`neigh_timer_handler()`、`neigh_periodic_work())；
+- `include/net/route.h:ip_route_output()`。
+
+以上函数在 6.1.65 与 6.1.116 函数体完全一致。结合第 9 节已补齐的 `neigh_resolve_output()` / `neigh_connected_output()` 一致性，6.1 黄金 A/B 在本报告列出的 ARP RX、邻居状态推进、探测重试、ARP filter 与邻居最终输出主路径没有实现差异。
+
+### 40.3 四版本结论
+
+6.1.65 与 6.1.116 一致；6.1.174 也保持本节关键 ARP/NUD 函数一致；6.12 的主要差异仍是 ARP filter 调用 route helper 时显式传入原默认 `RT_SCOPE_UNIVERSE`，不是默认 scope 改变。没有发现 6.1.174 或 6.12 新增普通 ARP request/reply 的默认丢弃条件。
+
+ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，不是 DHCP Discover 广播报文的协议入口。实际 neighbour cache 状态属于运行时证据，本轮不推断。
+
+**本项结项：** §20 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §21 UDP IPv4 sendmsg 与 IP skb 构造/追加路径。
