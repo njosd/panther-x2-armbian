@@ -49,21 +49,21 @@
 | D3-2 | DT/MDIO/PHY attach 生命周期 | 已完成（静态源码范围） | 四版本 MDIO parser、PHY attach、四次 MDIO 写入差异及 Panther 适用性 |
 | D3-3 | DWMAC4 DMA 初始化/寄存器编程 | 已完成（静态源码范围） | 四版本 reset timing、DMA/AXI/PBL/channel/address-width 对照 |
 | D3-4 | TX descriptor 其余分支 | 已完成（静态源码范围） | 四版本 TSO mapping lifecycle、mapping error/ring shortage、completion/reclaim、TX timer/recovery 条件差异 |
-| D3-5 | RX descriptor/buffer/page-pool | 进行中 | 复用 116/612 已有 RX 报告，只补 65 与实际 c2f148d 的差异 |
-| D3-6 | DMA API/coherency/IOMMU | 待开始 | 源码+DTS+config 交叉矩阵 |
+| D3-5 | RX descriptor/buffer/page-pool | 已完成（静态源码范围） | 四版本 RX refill/page-pool/DMA sync/OWN/status/NAPI 对照 |
+| D3-6 | DMA API/coherency/IOMMU | 进行中 | 复用既有 32/32 DMA width 与无 GMAC IOMMU 结论，只补四版本源码及实际 c2f148d 边界 |
 | D3-7 | IRQ/NAPI/watchdog/recovery | 待开始 | 中断与恢复路径矩阵 |
 | D3-8 | 总矩阵与一致性审校 | 待开始 | 方向三总结报告 |
 
-## 5. 当前唯一工作项：D3-5
+## 5. 当前唯一工作项：D3-6
 
-D3-1 至 D3-4 已在配套报告中按静态源码范围结项。本轮当前只做 D3-5：核对 RX descriptor/buffer/page-pool 生命周期；复用既有 6.1.116/6.12.81 RX allocation/page-pool 报告，只补 6.1.65 与实际 6.1.174 c2f148d 的缺口。
-- 复核既有 6.1.116/6.12.81 RX skb allocation/page-pool 报告；
-- 只补四版本差异中尚未覆盖的 RX descriptor refill、buffer DMA mapping/sync、OWN handoff、RX interrupt/NAPI poll 和 error/overflow 分支；
-- 特别比较 6.1.65 与实际 6.1.174 c2f148d，避免将 stable 3f06ed3e 当作故障构建源码；
-- 普通 DHCP IPv4 RX 适用性为判断边界；XDP/AF_XDP、jumbo、multi-queue 等 Panther 未启用分支降级；
-- 不重复 6.1.116/6.12.81 已闭环的 skb allocation/page-pool 核心差异。
+D3-1 至 D3-5 已在配套报告中按静态源码范围结项。本轮当前只做 D3-6：核对 DMA API/coherency/IOMMU 交叉关系；复用既有 32/32 DMA host/device width 与 GMAC DTS 无 IOMMU 结论，不重复设备测试或缓存同步泛化推断。
+- 核对四版本 dma_set_mask_and_coherent()/dma_set_mask()、dma_map_single/page、dma_sync_single_for_cpu/device 与 page_pool DMA mapping 的调用契约；
+- 对照 CONFIG_ARCH_DMA_ADDR_T_64BIT、CONFIG_DMA_NEED_SYNC、IOMMU 相关配置，但不由单个 Kconfig 符号推断实际 cache maintenance；
+- 核对 Panther gmac1 DTS 是否声明 iommus/dma-coherent，以及四版本 DMA ops/平台设备 DMA attributes 的交接；
+- 复用既有 6.1.116/6.12.81 32/32 host/device width 与无 GMAC IOMMU 结论，只补 6.1.65 和实际 c2f148d；
+- 不重复 D3-3 已完成的 EAME software logic，不访问设备或进行 DMA mapping 实测。
 
-先回读 PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md 与 PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md 中 RX/page-pool 相关段落；再比较 6.1.65 与实际 c2f148d 的 RX path，确认是否存在真实功能差异。
+先回读 PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md §14.2/§14.3 与 D3-3 §5；然后逐版本核对 DMA API 调用和 DTS/config 证据，重点避免把 DMA_NEED_SYNC=y 误判为驱动漏同步。
 
 ### D3-1 结项结果（2026-11-25）
 - 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
