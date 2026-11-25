@@ -26,6 +26,11 @@ CONFIG_PACKET=y
 # CONFIG_MAC80211 is not set
 # CONFIG_RFKILL is not set
 
+# Generic Ethernet drivers outside NET_VENDOR_* groups can select PHYLIB directly.
+# CONFIG_DNET is not set
+# CONFIG_ETHOC is not set
+# CONFIG_OA_TC6 is not set
+
 # Explicitly neutralize network-device options inherited from the broad Ophub seed.
 # R1 validates only generic networking/AF_PACKET; no physical NIC, DSA, PHY or offload.
 # CONFIG_NET_DSA is not set
