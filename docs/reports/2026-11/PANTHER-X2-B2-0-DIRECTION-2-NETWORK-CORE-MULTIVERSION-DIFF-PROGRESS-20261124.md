@@ -1498,3 +1498,43 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 **下一项严格按 §25.5 第 3 项原顺序：** 继续 §5 已引用的 NAPI skb allocator、GRO/shared-frag 与相关网络核心函数的 6.1.65 候选端点回溯；复用已有报告，不重做 6.1.116/6.12.81 已完成分析。之后依 §6、§7……原章节顺序推进，不能跳去驱动方向。
 
 方向二仍进行中。本轮仅做四端点源码/Kconfig/既有配置证据只读审计；没有访问设备、构建、修改系统或执行网络试验。
+
+
+## 31. §5 NAPI skb allocator 与 GRO/shared-frag：补入 6.1.65 候选源码端点（2026-11-25）
+
+### 31.1 复用的既有报告与本次补查边界
+
+复用：
+- `PANTHER-X2-NAPI-SKB-ALLOCATOR-DIFF-AND-READONLY-TRACE-CHECK-20261119.md`：已有 6.1.116 / 6.12.81 allocator 比较；
+- `PANTHER-X2-KERNEL-6.1.116-TO-6.1.174-REGRESSION-WINDOW-STMMAC-DIFF-20261119.md`：已有 6.1.116→6.1.174 shared-frag/GRO/SKB segment 变更提交背景。
+
+本次仅补入 6.1.65 候选端点，并将相关函数放入四版本矩阵；不重做既有 NAPI allocator 结论，也不进入 STMMAC 驱动 RX 分支。
+
+### 31.2 NAPI skb allocator
+
+比较 `include/linux/skbuff.h` 与 `net/core/skbuff.c`：
+- 6.1.65、6.1.116、6.1.174 的 `napi_alloc_skb()` inline wrapper 与 `__napi_alloc_skb()` 实现一致；都通过 per-CPU `napi_alloc_cache`，常规使用 `page_frag_alloc_1k()` / `page_frag_alloc()`，边界情形回退 `__alloc_skb()`，分配失败返回 NULL。
+- 6.12.81 将 `napi_alloc_skb()` 改为 out-of-line 函数，并对 per-CPU NAPI allocator cache 增加 `local_lock_nested_bh()` 保护，分配标志增加 `__GFP_NOWARN`；仍使用 NAPI page-frag cache，分配失败仍返回 NULL。
+- 因而 6.1.65 黄金 A 与黄金 B 在 allocator API/实现上没有发现差异；6.1.174 也没有新增 allocator 变化。6.12 的主要差异是 per-CPU cache 并发保护和 API 形态，不是已证实的不同分配策略或必然失败条件。
+
+### 31.3 GRO 与 skb shared-frag 标记
+
+四端点函数比较：
+- `napi_gro_receive()`：四端点函数体一致。
+- `dev_gro_receive()`：6.1.65、6.1.116、6.1.174 的核心实现一致；6.12 对 GRO offload list 的存储迁移至 `net_hotdata`，并增加 frag0 pull 优化入口，延续此前 6.12 结构变化记录。
+- `skb_gro_receive()`：6.1.65 与 6.1.116 在 skb ownership 转移部分有差异；6.1.174 增加将 `SKBFL_SHARED_FRAG` 从聚合输入 skb 传播到 GRO 输出 skb 的标记继承，6.12 延续并重构 GRO size/flush 等条件。
+- `skb_segment()`：6.1.65 与 6.1.116 已有 GSO partial 长度上限计算差异；6.1.174 进一步修复 shared-frag 标记在 segment 生成过程中的传播，6.12 继续演进相关实现。
+
+这些差异属于接收侧 GRO 聚合与 GSO 分段缓冲区共享 fragment 元数据维护。普通 DHCP Discover 是本机发出的普通小型 UDP datagram，不经入站 GRO 聚合；普通非 GSO datagram 也不走 `skb_segment()` 的 GSO 分段路径。因此本节没有发现黄金 A/B 间的 NAPI allocator 差异，也没有发现 6.1.174 shared-frag/GRO 变化可直接解释普通 DHCP 单 skb TX 失败。
+
+### 31.4 四版本状态矩阵
+
+| 函数/子项 | 6.1.65 黄金 A | 6.1.116 黄金 B | 6.1.174 故障 A | 6.12.81 故障 B |
+|---|---|---|---|---|
+| `napi_alloc_skb()` / `__napi_alloc_skb()` | 旧 inline + per-CPU cache | 与 A 一致 | 与 A/B 一致 | out-of-line + local_lock + NOWARN |
+| `napi_gro_receive()` | 与其余三版一致 | 一致 | 一致 | 一致 |
+| `dev_gro_receive()` | 6.1 旧 offload list | 与 A 一致 | 与 A 一致 | net_hotdata / frag0 pull 变化 |
+| `skb_gro_receive()` | ownership 旧实现 | ownership 有整理 | 增加 shared-frag 标记传播 | 后续 GRO 结构演进 |
+| `skb_segment()` | GSO partial 旧实现 | 增加长度上限处理 | shared-frag 传播修正 | 延续并演进 |
+
+**结论：** 本项补齐了 §5 的 6.1.65 候选源码比较。NAPI allocator 在两条 6.1 黄金/故障线之间没有发现变化；GRO/shared-frag 变化有明确接收聚合或 GSO 分段适用条件，当前不命中普通 DHCP 小 UDP TX。仍按 §25.5 顺序继续后续章节，不提前进入方向三。
