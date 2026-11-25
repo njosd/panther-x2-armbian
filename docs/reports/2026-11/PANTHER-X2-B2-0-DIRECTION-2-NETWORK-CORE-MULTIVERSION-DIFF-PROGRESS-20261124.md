@@ -1649,3 +1649,35 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 - 配置 y/m 只表示 built-in/module 编译形态；不证明模块实际加载、程序附着、内核 IP autoconfiguration 启动或 bridge/VLAN/netfilter 规则实际运行。
 
 **本项结项：** §12 表中 6.1.65 黄金 A 配置证据缺口已按原始配置归档补齐。下一项按原报告顺序进入 §14 AF_PACKET、VLAN/bridge RX 与 Netfilter ingress 的 6.1.65 回溯；不得跳到 §16 或其他专题。
+
+
+## 36. §14 AF_PACKET / VLAN / bridge RX / Netfilter ingress：补入 6.1.65 候选源码与实际配置（2026-11-25）
+
+### 36.1 6.1.65 实际 Kconfig 值
+
+依据原始配置归档（§27）：
+- `CONFIG_PACKET=y`、`CONFIG_PACKET_DIAG=y)；
+- `CONFIG_VLAN_8021Q=y)；
+- `CONFIG_BRIDGE=m)、`CONFIG_BRIDGE_VLAN_FILTERING=y)、`CONFIG_BRIDGE_NETFILTER=m)；
+- `CONFIG_NETFILTER=y)、`CONFIG_NETFILTER_INGRESS=y)、`CONFIG_NETFILTER_EGRESS=y)；
+- `CONFIG_NF_CONNTRACK=y)、`CONFIG_NF_TABLES=m)。
+
+这些值与 6.1.116 general config 模板对应项相同。它们只描述编译形态，不证明 packet socket 监听、VLAN 子接口、bridge port、ingress hook 或过滤规则实际启用。
+
+### 36.2 6.1.65 源码函数补齐
+
+四端点比较补齐了 §14 之前缺少的 6.1.65 候选端点：
+- AF_PACKET：`packet_rcv()` 在 6.1.65、6.1.116、6.1.174 一致；6.12 的 snaplen 对 unreadable fragment 限制仍按 §14.1 既有结论。 `packet_rcv_spkt()`、`tpacket_rcv()` 四端点一致；`packet_sendmsg()` 四端点一致。
+- `packet_create()`：6.1.65 与 6.1.116 一致；6.1.174 开始存在后续变化，6.12 延续。该函数负责 packet socket 创建与权限/类型处理，不是普通 IP/UDP 数据面转发函数。
+- VLAN：`vlan_do_receive()` 四端点函数体一致。
+- Bridge：`br_handle_frame()`、`br_handle_frame_finish()`、`br_pass_frame_up()` 在 6.1.65 与 6.1.116 间存在变化。6.1.116 新增 bridge offload input 处理与 promisc 状态传递；6.1.174 将 MST helper 调整为 port-aware 并增加 VLAN group RCU 检查。上述变化仅在设备注册 bridge RX handler、报文确实进入 Linux bridge port 时适用。6.1.65→6.1.116 的变化不是通用 netdevice RX dispatch。
+- Netfilter：`nf_ingress()`、`nf_register_net_hook()` 四端点一致；`nf_hook_slow()` 在 6.1.65、6.1.116、6.1.174 一致，6.12 对 `NF_STOLEN` 非标准 verdict/error 返回处理变化延续 §14.4。
+
+### 36.3 修订后的四版本判断
+
+1. 6.1.65 与 6.1.116 在 AF_PACKET receive、VLAN RX、Netfilter ingress 注册/执行主入口没有发现实现差异。
+2. 两个 6.1 黄金基准在 bridge RX 有一组明确的 bridge offload/promisc bookkeeping 差异，但 6.1.65 原始配置中 `CONFIG_BRIDGE=m`；没有现有证据证明模块实际加载或 Panther 网卡处于 bridge port。不能把它作为普通物理接口 DHCP TX/RX 的故障解释。
+3. 6.1.174 的 MST port-aware 修正属于 bridge 专用路径；6.12 的 AF_PACKET unreadable-fragment snaplen 和 Netfilter verdict 处理分别作用于抓包可见性及特定 hook verdict，不等于普通 IPv4/UDP 默认丢包。
+4. 当前仍无证据显示 Panther 故障路径使用 Linux bridge、VLAN 子设备、AF_PACKET 过滤 socket 或已注册 Netfilter ingress drop hook。
+
+**本项结项：** §14 的 6.1.65 候选源码与原始配置映射完成。下一项按原报告顺序进入 §16 IPv4 PREROUTING/LOCAL_IN、conntrack 与 NAT hook；不提前转向驱动专题。
