@@ -1901,3 +1901,25 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 - 6.1→6.12：非 PREEMPT_RT 下 xmit_more 行为保持，PREEMPT_RT 有 task-local 适配；其余已记录的 watchdog/BQL 核心逻辑延续。
 
 **本项结项：** §23 的 6.1.65 函数比较已补齐，并发现一组需要保留的 TX queue/watchdog 内存序差异。下一项按原顺序进入 §24 NET_TX_SOFTIRQ、qdisc reschedule、completion_queue 与 TX trace。方向二仍进行中，不提前进入方向三。
+
+
+## 44. §24 NET_TX_SOFTIRQ / qdisc reschedule / completion_queue / TX trace：补入 6.1.65 候选源码（2026-11-25）
+
+### 44.1 6.1.65 与 6.1.116 函数比较
+
+本次补查：
+- `net/core/dev.c`：`net_tx_action()`、`__netif_schedule()`、`__netif_reschedule()`、`netif_schedule_queue()`、`netif_tx_wake_queue()`、`__dev_kfree_skb_irq()`；
+- `net/sched/sch_generic.c`：`__qdisc_run()`、`qdisc_restart()`、`dequeue_skb()`、`dev_watchdog()`；
+- `kernel/softirq.c` 及 `include/trace/events/net.h` / `skb.h` 的相关框架与事件定义。
+
+比较结果：
+- `net_tx_action()`、qdisc schedule bit/per-CPU output_queue 入队、`__netif_reschedule()` 的 NET_TX_SOFTIRQ raise、`netif_schedule_queue()`、`netif_tx_wake_queue()`、`__dev_kfree_skb_irq()`：6.1.65 与 6.1.116 函数体一致。
+- `__qdisc_run()`、`qdisc_restart()`、`dequeue_skb()`：6.1.65 与 6.1.116 函数体一致；6.1.174 起 packet budget 的变化已在 §22/§24 记录。
+- `dev_watchdog()`：两黄金基准存在 §43 已确认的配对 WRITE_ONCE/READ_ONCE 与 memory barrier 差异；本节不重复计算为新的 softirq/qdisc 差异。
+- tracepoint 定义中 TX start/xmit/timeout 事件的核心字段在两黄金端点保持一致；skb free/consume trace 在 6.12 的 caller/reason 字段扩展仍按 §24.6 记录。
+
+### 44.2 四版本判断
+
+6.1.65 与 6.1.116 在 NET_TX_SOFTIRQ 的 completion_queue/output_queue 处理顺序、qdisc schedule/reschedule、IRQ-context skb 延迟释放入队及 qdisc 重新运行路径上没有发现差异。6.1.174 与 6.12.81 的已有变化分别为 qdisc packet budget、softirq 回调 API 和 skb drop-reason/free helper 演进，均未发现改变 generic output_queue 调度职责或将 completion_queue 变成硬件 DMA completion 的证据。
+
+**本项结项：** §24 的 6.1.65 候选源码回溯完成。至此 §3～§24 已有 6.1.65 候选源码覆盖补齐；但这不代表方向二已完成：仍须复核 §25.5 之外可能存在的原始方向二剩余任务，特别是 §26 TX 统计/drop reason/Kconfig 的 6.1.65 真实配置缺口与四版本符号映射，并检查是否存在尚未列入 §3～§24 的网络核心子项。
