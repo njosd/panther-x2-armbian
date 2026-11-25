@@ -439,3 +439,27 @@ DTB 是否变化：
 本次归档不授权：访问 Panther X2、运行 U-Boot 命令、写入 TF/eMMC、启动实验固件、构建/安装内核、修改 Kconfig/DTB/驱动/网络配置、读写寄存器、启用 GMAC/MDIO/PHY、运行网络连通性测试。
 
 **后续默认起点：** 先审阅并冻结本计划；随后回到 B1 完整验收剩余事项。只有 B1 通过后，才按本计划从 R0 开始，逐项放行。不得跳到 R1，更不得直接启动 R7 或原计划 B2.1。
+
+
+## 4C. R2–R7 分段运行验收及数据流追踪修订（2026-11-25）
+
+本轮将 R2–R7 从“静态配置/构建为主、R7 才首次集中验证”修订为逐层运行证据和独立放行门。原 R0–R8 顺序、R2–R6 GMAC/MDIO/PHY DT disabled 边界、R7 TX-first、R8 后续协议递进均保留。
+
+**本次新增三份正式配套交付物：**
+
+1. [R2–R7 详细实施计划与分段验收修订](PANTHER-X2-B2-1-R2-R7-DETAILED-IMPLEMENTATION-AND-GATED-ACCEPTANCE-PLAN-20261125.md)：逐阶段实施目标、直接/间接验证、最早验证时点、通过条件、失败停止规则。
+2. [R2–R7 分段验收矩阵](PANTHER-X2-B2-1-R2-R7-GATED-ACCEPTANCE-MATRIX-20261125.md)：将每个组件、资源和数据交接映射到最早验证阶段及证据等级。
+3. [TX ABCD 端到端数据流追踪协议](PANTHER-X2-B2-1-TX-ABCD-END-TO-END-DATA-PATH-TRACE-PROTOCOL-20261125.md)：以唯一测试 payload、run ID、sequence 和 hash 追踪 skb、DMA mapping、descriptor、DMA completion、MAC/PHY 及对端捕获。
+
+### 新增的核心验收规则
+
+- 每层组件即使配置、参数和编译正确，也必须考虑内部功能故障。
+- 能在当前阶段安全验证的组件，必须尽早进行实际运行验证；暂时不能验证的组件标记 BLOCKED，并注明最早可验证阶段。
+- 统一区分 PASS-STATIC、PASS-BUILD、PASS-REGISTER、PASS-PROBE、PASS-FUNCTIONAL、PASS-INTEGRATED、PASS-LINE。
+- 原 R7 拆为 R7-A Platform Probe、R7-B MDIO/PHY、R7-C MAC/DMA open、R7-D 对端真实捕获 TX。
+- TX 数据流采用“内容身份 + 地址引用 + 所有权交接”追踪。不是要求每层寄存器都存放 ABCD 原文：skb/buffer 中核对字节，DMA mapping/descriptor 中核对 DMA 地址、长度和 OWN 状态，DMA completion 中核对完成状态，最终由对端逐帧核对原始 payload。
+- DMA completion、驱动 TX counter、PHY link 均不能替代对端真实捕获。
+- 任一门失败或缺乏可靠观测方法，停止当前阶段；不叠加后续组件，不把观测不足误判为功能故障。
+- 本轮没有修改 R1 产物、没有构建、没有操作 Panther、没有写入任何存储介质，也没有授权后续硬件操作。
+
+**前置门不变：** B1 完整验收仍未正式通过。该修订只完善后续计划和验收方法，不提前启动 R0–R7。
