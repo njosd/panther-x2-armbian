@@ -77,7 +77,7 @@
 
 这是对既有报告中仅突出 `PCLK_USB` 的补充修正：实际后期源码两个公共 USB clock 都增加了 critical 标记，不能只记录 PCLK。该差异仍属于 provider 注册/unused-clock 管理语义，尚无证据证明它改变 Panther GMAC1 正常运行时 gate 或 TX clock。
 
-该 flag 的作用边界仍按既有报告限定：它影响 clock provider 注册阶段的 critical/unused clock 管理语义；不能据此声称 GMAC1 正常运行时 gate 或 TX clock 被改变。GMAC1 是 PCLK_USB 的 consumer 时，是否发生实际运行时差异仍不能仅凭该 flag 推断。
+两条 critical 分支必须分别解释：HCLK_USB 的 parent list 是 GPLL 派生时钟/XIN24M，与 GMAC1 已确认的 ACLK/PCLK parent chain 无直接关系；PCLK_USB 的 parent 是 aclk_usb，而 ACLK_GMAC1 也以 aclk_usb 为 parent、PCLK_GMAC1 以 pclk_usb 为 parent。因此 PCLK_USB critical 会在 provider 注册阶段保持该父链的引用/启用状态，属于 GMAC1 共用上游时钟树的真实初始化差异；但 GMAC1 probe 正常 enable ACLK_GMAC1/PCLK_GMAC1 时也会递归启用对应父链，故不能仅凭 critical flag 推断 MAC 已运行后出现 TX 时钟差异。它可能改变 GMAC probe 前的 early/unused-clock 状态和时钟引用基线，历史 parent/gate readback 缺失，仍需保留为未验证候选。HCLK_USB critical 则不在已确认的 GMAC1 parent chain 内，不应与 PCLK_USB 等同处理。
 
 ### 4.3 Panther DTS 的 GMAC1 关键输入
 
@@ -267,7 +267,7 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 ### 6.6.1 本轮审校后的优先级与边界
 
 - **已确认且与故障版本分组一致的 glue 差异：** bulk→逐项 clock enable、错误检查减弱、5ms→100–200µs settle、RGMII CON0/CON1 写入顺序反转。它们是静态源码回归候选，不等于已经证明硬件因果。
-- **已确认但当前不能证明影响 GMAC 工作态：** HCLK_USB/PCLK_USB critical flags、GPLL provider callback 变化。
+- **已确认但影响边界不同：** HCLK_USB critical 与 GMAC1 parent chain 无直接关系；PCLK_USB critical 保持与 GMAC1 共用的 ACLK_USB 父链，probe 前状态可能变化，但 active TX 影响未验证；GPLL provider callback 是否命中实际 parent chain 未验证。
 - **已确认但不是 6.1.116→6.1.174 新增：** regulator helper 错误吞并、runtime-PM get 返回值未检查；STMMAC 10µs reset delay 在 6.1.116 已存在。
 - **已排除为当前源码差异解释：** GMAC1 专属 CRU mux/divider/gate、reset ID/provider 映射、Panther DTS RGMII 输入配置。
 - **保留未验证：** 历史实际 clock enable 返回值、clock rate/gate readback、GRF 写事务与寄存器值、PHY 电源轨、runtime-PM 状态、PLL parent/mode、RGMII 波形。
