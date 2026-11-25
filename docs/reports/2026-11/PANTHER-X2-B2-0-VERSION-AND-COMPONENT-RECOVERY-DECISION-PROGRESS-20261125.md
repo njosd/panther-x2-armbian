@@ -148,7 +148,7 @@ B1 未通过时，停留在 B1，不开始网络组件恢复。
 |---|---|---|---|---|
 | R0 | 冻结 B1 资产与当前已启用 provider 清单 | 不改 .config | GMAC/MDIO 保持隔离 | 仅静态核对与基线归档 |
 | R1 | Linux 网络基础：NET、INET、NETDEVICES 及实际必要 generic core | 以 6.18.63 精确 Kconfig 为准 | GMAC 仍 disabled，不启用网卡 probe | 配置、依赖、构建闭包检查；不做收发 |
-| R2 | Panther 所需共享 SoC provider 缺项补齐：syscon/GRF、pinctrl/GPIO、CRU/common clock/reset | MFD_SYSCON、ROCKCHIP_GRF、PINCTRL_ROCKCHIP、GPIO_ROCKCHIP、COMMON_CLK_ROCKCHIP、CLK_RK3568、RESET_CONTROLLER 等；先核对 B1 是否已有 | GMAC 仍 disabled | 每个缺项按最小依赖闭包分别引入；检查 provider probe，不以此声称 GMAC 可用 |
+| R2 | 只补齐 B1 最终配置中确实缺失的共享 SoC provider | B1 fragment 已明确包含 COMMON_CLK、COMMON_CLK_ROCKCHIP、CLK_RK3568、PINCTRL、PINCTRL_ROCKCHIP、GPIOLIB、RESET_CONTROLLER、ROCKCHIP_GRF；GPIO_ROCKCHIP 与 MFD_SYSCON 的最终值仍须从实际最终 .config 核验 | GMAC 仍 disabled | 不重复引入已在 B1 启用的 provider；只对最终配置中缺失且 Panther GMAC 路径确实需要的符号建立最小依赖闭包 |
 | R3 | PHY 电源 provider 闭包 | Panther phy-supply 指向 RK809 SWITCH_REG1；核对 I2C_RK3X、I2C、MFD_RK8XX_I2C、MFD_RK8XX、REGULATOR、REGULATOR_RK808 | GMAC 仍 disabled | 分别检查 I2C/PMIC/regulator provider；不得把 DWMAC Kconfig select 当作供电闭包已自动满足 |
 | R4 | MDIO/PHY 通用基础设施与 RTL8211F 驱动 | MDIO_BUS、OF_MDIO、PHYLIB、PHYLINK、REALTEK_PHY；其中 REALTEK_PHY 必须显式核对，不能假定自动 select | GMAC 仍 disabled；暂不触发外接 PHY probe | Kconfig/Makefile/对象闭包与最终 built-in/module 状态检查 |
 | R5 | STMMAC/DWMAC4 MAC/DMA core | STMMAC_ETH、DWMAC4 相关对象及其完整 Kconfig select 闭包；6.18.63 必须满足 ETHTOOL_NETLINK、PTP_1588_CLOCK_OPTIONAL、HAS_IOMEM、HAS_DMA 等门槛 | GMAC 仍 disabled | 构建对象与符号依赖检查；不执行网卡收发 |
@@ -219,3 +219,38 @@ B1 未通过时，停留在 B1，不开始网络组件恢复。
 本轮仅回读仓库内路线图、实施计划、方向一至方向五报告及 6.18.63 Kconfig/Makefile 审计，形成决策建议。没有访问 Panther X2，没有构建、安装、触发 Actions，没有修改系统/驱动/DTB/Kconfig/网络配置，没有读取或写入设备寄存器，没有写入 TF/eMMC，没有启动 B2.1。
 
 下一步严格继续本决策阶段的剩余项，不提前进入 B2.1。
+
+
+### 5.4 B1 已有共享 provider 的复用核对（2026-11-25）
+
+本轮直接回读当前仓库的 scripts/panther-x2-b1/kernel.config.fragment 与 scripts/panther-x2-b1/verify-b1-config.sh，发现 B1 并非把所有 SoC provider 都关闭。为保障 UART/SoC 启动，B1 已明确启用以下共享基础设施：
+
+| 配置符号 | B1 fragment 状态 | 对后续 GMAC 依赖的意义 |
+|---|---|---|
+| CONFIG_COMMON_CLK | y | 通用 CCF 基础 |
+| CONFIG_COMMON_CLK_ROCKCHIP | y | Rockchip clock provider |
+| CONFIG_CLK_RK3568 | y | RK3568/RK3566 CRU clock provider |
+| CONFIG_PINCTRL | y | 通用 pinctrl 框架 |
+| CONFIG_PINCTRL_ROCKCHIP | y | Rockchip pinctrl provider |
+| CONFIG_GPIOLIB | y | GPIO descriptor 基础设施 |
+| CONFIG_RESET_CONTROLLER | y | CRU reset framework |
+| CONFIG_ROCKCHIP_GRF | y | Rockchip GRF provider |
+| CONFIG_GPIO_ROCKCHIP | fragment 未显式设置 | 最终 .config 值待核验；不能仅凭 Kconfig default 推定 |
+| CONFIG_MFD_SYSCON | fragment 未显式设置 | 最终 .config 值待核验；6.18.63 STMMAC/平台驱动依赖闭包需核对 |
+
+因此，R2 不应被执行成“重新加入全部 clock/pinctrl/GPIO/reset/GRF”。正确动作是先读取 B1 构建 artifact 的最终 .config 和 built-in 对象清单，以已存在的 provider 为基线，只补实际缺项。特别是 GPIO_ROCKCHIP 与 MFD_SYSCON，不能只看 fragment，也不能把 Kconfig default/select 直接当作最终配置事实。
+
+这也意味着：
+- R1 网络核心启用时不应顺带修改上述已在 B1 存在的 provider；
+- 后续 R2 若需要增加 GPIO_ROCKCHIP 或 MFD_SYSCON，必须作为单独配置闭包并说明实际 consumer；
+- B1 中 GMAC/MDIO 节点仍 disabled，provider 已编入并不等于 GMAC 已 probe，也不构成网络功能已验证；
+- B1 clean-test DTB 继续禁用 GMAC/MDIO，不能为了“提前验证 provider”而同时恢复网卡节点。
+
+### 5.5 B1 no-NET 兼容补丁的过渡处理
+
+B1 当前 6.18.63 构建输入包含 0001-kobject-uevent-config-net-n.patch，其目的仅是解决 CONFIG_NET=n 时 uevent stub 的编译依赖。进入未来 R1（启用 NET）时：
+- 先核对补丁修改的条件编译分支在 CONFIG_NET=y 时是否完全不参与编译；
+- 不要在同一次 R1 变更中顺手删除补丁、升级源码或调整其他组件；
+- 若补丁在 CONFIG_NET=y 下为无效条件分支，可暂时保持相同源码输入，以减少变量；若源码审计证明必须移除，则把移除补丁作为独立、可审计的源代码输入变化，不与 NET 配置启用捆绑。
+
+当前未执行上述配置转换或补丁修改。
