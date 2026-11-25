@@ -1803,3 +1803,31 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，不是 DHCP Discover 广播报文的协议入口。实际 neighbour cache 状态属于运行时证据，本轮不推断。
 
 **本项结项：** §20 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §21 UDP IPv4 sendmsg 与 IP skb 构造/追加路径。
+
+
+## 41. §21 UDP IPv4 sendmsg / IP skb 构造：补入 6.1.65 候选源码（2026-11-25）
+
+### 41.1 6.1.65 与 6.1.116 函数比较
+
+本次按 §21 原范围比较：
+- `net/ipv4/udp.c`：`udp_sendmsg()`、`udp_send_skb()`、`udp4_hwcsum())；
+- `net/ipv4/ip_output.c`：`ip_make_skb()`、`ip_append_data()`、`ip_push_pending_frames()`、`ip_setup_cork()`；
+- `net/ipv4/route.c`：`ip_route_output_flow()`；
+- 并复核 §30 已补的 `__ip_append_data()`。
+
+比较结果：
+- `udp_send_skb()`、`udp4_hwcsum()`、`ip_make_skb()`、`ip_append_data()`、`ip_push_pending_frames()`、`ip_route_output_flow()` 函数体一致。
+- `ip_setup_cork()` 的函数体语义与行内容一致；本次提取结果仅存在非语义文本/格式差异，未发现可改变普通 UDP datagram 构造的条件差异。
+- `udp_sendmsg()` 存在 6.1.65→6.1.116 的并发访问与 cork/pending 状态读取/写入调整：6.1.65 直接读取 `up->corkflag` / `up->pending` 并直接写 pending；6.1.116 改用 `udp_test_bit(CORK, sk)`、`READ_ONCE(up->pending)` 与 `WRITE_ONCE(up->pending, ...)`，并在错误回退分支显式清理 connected 状态。这属于 UDP socket cork/pending 状态访问和并发可见性整理。
+
+### 41.2 对普通 DHCP/UDP sendmsg 的适用性
+
+- 普通单次 UDP sendmsg、无 `MSG_MORE`、socket 未设置 UDP_CORK 时，`corkreq` 在两版都由 false 的 cork 状态与 MSG_MORE 共同决定；本轮未发现普通 datagram 进入不同的 payload 构造或 IP 提交路径。
+- `udp_sendmsg()` 的 READ_ONCE/WRITE_ONCE 变化可能影响并发 cork/pending 状态访问，但没有证据表明 Panther 历史 DHCP 客户端设置 UDP_CORK、并发共享同一 UDP socket 或通过 MSG_MORE 构造 DHCP Discover。
+- `udp_send_skb()`、IPv4 UDP checksum、IP make/append/push 与 route output helper 均一致；结合 §30 的 `__ip_append_data()` 比较，6.1.65→6.1.116 未发现普通 IPv4 UDP skb 构造/校验主路径的功能性差异。
+
+### 41.3 四版本结论更新
+
+6.1.65 与 6.1.116 的 UDP socket sendmsg 状态访问存在明确小差异，但普通非 cork DHCP datagram 的 skb 构造、checksum 和 IP output helper 保持一致。6.1.174 的 UDP GSO 专用差异及 6.12 的 MSG_SPLICE_PAGES/后续 UDP 变化仍按 §32 既有适用条件记录；不能混同于普通 DHCP 单 skb 路径。
+
+**本项结项：** §21 的 6.1.65 候选源码函数级回溯完成。下一项严格进入 §22 TX queue → qdisc → validate → ndo_start_xmit 交付链，重点将既有 §30 的函数比较结果纳入该节四版本矩阵。
