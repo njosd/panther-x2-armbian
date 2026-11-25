@@ -161,4 +161,8 @@ Job `139149992105` 的源码准备步骤已全部通过：
 - 功能分支工作流修正 commit：`928cb011bbe75a81ed4f27297b508f46d3030b93`。
 - 默认分支 main 的 workflow_dispatch 注册副本同步 commit：`cf00e4f313d0f43f44e660462e17ec0c4eaa7b38`。
 
+
+- 对 Linux 6.18.63 `drivers/net/ethernet/Kconfig` 的补充审计发现，通用 Ethernet 子树中还有不属于 `NET_VENDOR_*` 组、却会直接 `select PHYLIB` 的 `DNET`、`ETHOC`、`OA_TC6`。已在 R1 fragment 显式关闭这三项，并加入最终配置禁止检查，避免仅关闭 72 个厂商组仍遗漏通用驱动。
+- 补充 fragment commit：`77c8fda3420775dcc55c216f7c1a894a7323ba8a`；补充 workflow gate commit：`87da2bfb1b48135bfc09ec30a4c4e65035b92a8d`。两份文件均已同步到 main（fragment commit `b081b723d5945be39ca6b490dc5c9bb79c1739b1`；workflow commit `dac40520a15650f7e97e9378d72df8cca59c3126`）。
+
 这项修正尚未由新的 Actions 运行验证。下一次必须新建 workflow_dispatch，选择功能分支 `project-a/b2-1-r1-network-core-build`，输入仍为冻结的 R0 Run ID `45309219886`。不得对旧 Run 45598258364 使用 Re-run。新运行首先只审阅 merge/olddefconfig 日志、最终配置差异及全部禁止项；只有配置门通过后才允许进入 Kernel build。当前 R1 仍未 PASS，不得进入 R2。
