@@ -65,11 +65,24 @@ D3-1 与 D3-2 已在配套报告中结项。本轮当前只做 D3-3：核对四�
 
 先回读 PANTHER-X2-STABLE-116-174-MAC-DMA-MTL-TX-ENABLE-DIFF-20261119.md、PANTHER-X2-STMMAC-TX-DMA-MAPPING-DESCRIPTOR-OWNERSHIP-116-VS-174-20261119.md 和 PANTHER-X2-B2-0-FOUR-VERSION-KERNEL-ASSET-CLOSURE-20261124.md；补齐 c2f148d 实际故障端点与四版本 DMA init 差异。不得重复已关闭的普通 TX mapping/OWN/barrier/tail pointer 主路径。
 
-### D3-1 首轮结果（2026-11-25）
-- 已直接读取四版本精确源码端点的 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi。
-- 6.1.65/6.1.116 的 stmmac_platform.c 关键 probe/resource 函数逐行一致；6.1.174-rk35xx 与 6.12.81 的变化及 Panther 分支适用性已记录。
-- 已确认 pclk 获取名从旧版本的 pclk 改为 pclk_mac；Panther DTSI 实际名称是 pclk_mac；stmmac_clk_csr_set() 的动态 MDC CSR 选择分支在 Panther 没有 snps,clk-csr 的情况下会执行，且输入 clock source 从 stmmac_clk 改为 pclk。
-- D3-1 仍未结项：尚需完成 pclk clock handle/运行时 enable 交接的只读交叉核对，并明确最终证据上限。详细结果见 PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md。
+### D3-1 结项结果（2026-11-25）
+- 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
+- 6.1.65/6.1.116 的关键 probe/resource 函数逐行一致；6.1.174-rk35xx 与 6.12.81 的变化及 Panther 分支适用性已记录。
+- pclk/pclk_mac 名称与 MDC CSR clock source 变化已确认；运行时频率、寄存器值和 enable/refcount 未验证，明确保留为运行时证据限制。
+- D3-1 已按静态源码范围结项，详见 PANTHER-X2-B2-0-DIRECTION-3-D3-1-STMMAC-PLATFORM-PROBE-DIFF-20261125.md。
+
+### D3-2 结项结果（2026-11-25）
+- 四版本 MDIO parser 在 Panther DTS 输入下得到相同的 MDIO bus、PHY node、bus_data 和 bus_id 结果。
+- 黄金版本 6.1.65/6.1.116 存在四次 PHYCR2/BMCR MDIO 写入，实际故障源码 6.1.174 c2f148d/6.12.81 缺失；P1 已有寄存器语义报告，本阶段只补齐精确四版本端点。
+- 6.1.174/6.12 的 mac_requires_rxc 及 PHY resume/attach 语义变化已记录；没有运行时 RXC/PHY 状态证据，不认定根因。
+- D3-2 已按静态源码范围结项，详见 PANTHER-X2-B2-0-DIRECTION-3-D3-2-MDIO-PHY-ATTACH-DIFF-20261125.md。
+
+### D3-3 当前结果（2026-11-25）
+- 6.1.65/6.1.116 在 stmmac_init_dma_engine() 的 DMA SW reset 前有 1500ms delay；实际 6.1.174 c2f148d/6.12.81 缺失。
+- dwmac4_dma_reset() 的 polling interval 从黄金版本 10ms 变为故障版本 0.5ms，timeout 均为 1s。
+- DWMAC4 DMA/AXI/channel init 算法总体相同；address map abstraction 对 Panther 使用 NULL default offsets。
+- DMA feature/address-width 软件逻辑已对照；硬件 feature register 实际值、DMA mask 成功状态及 platform PBL/AXI/queue 最终值未闭环。
+- D3-3 继续进行中；详细结果见 PANTHER-X2-B2-0-DIRECTION-3-D3-3-DWMAC4-DMA-INIT-DIFF-20261125.md。
 - 本轮没有设备访问、构建、安装、驱动/DTB/系统配置修改。
 
 ## 6. 记录格式
