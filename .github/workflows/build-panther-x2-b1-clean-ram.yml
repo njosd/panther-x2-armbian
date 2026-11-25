@@ -33,13 +33,11 @@ env:
     BUSYBOX_VERSION: "1.37.0"
     BUSYBOX_SHA256: "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4"
     JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
-    # Temporary targeted repair: reuse the already accepted Run #73 kernel/DTB.
-    B1_REUSE_KERNEL_RUN_ID: ${{ github.event.inputs.reuse_kernel_run_id || '45309219886' }}
     KERNEL_CONFIG_SEED_BLOB_SHA: "dee127c6c644f38426eeb28000d73536084d34a3"
 
 jobs:
   build-kernel-dtb:
-    if: ${{ env.B1_REUSE_KERNEL_RUN_ID == '' }}
+    if: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') == '' }}
     name: Build and validate kernel plus DTB
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -260,7 +258,7 @@ jobs:
           retention-days: 14
 
   build-busybox:
-    if: ${{ !cancelled() && (env.B1_REUSE_KERNEL_RUN_ID != '' || needs.build-kernel-dtb.result == 'success') }}
+    if: ${{ !cancelled() && ((github.event.inputs.reuse_kernel_run_id || '45309219886') != '' || needs.build-kernel-dtb.result == 'success') }}
     name: Build and validate static BusyBox
     needs: build-kernel-dtb
     runs-on: ubuntu-24.04
@@ -276,20 +274,20 @@ jobs:
           sudo apt-get install -y bc bison build-essential flex gcc-aarch64-linux-gnu make perl python3 qemu-user-static
 
       - name: Restore kernel and DTB from this run
-        if: ${{ env.B1_REUSE_KERNEL_RUN_ID == '' }}
+        if: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') == '' }}
         uses: actions/download-artifact@v6
         with:
           name: b1-kernel-dtb
           path: work
 
       - name: Reuse kernel and DTB from a previous successful run
-        if: ${{ env.B1_REUSE_KERNEL_RUN_ID != '' }}
+        if: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') != '' }}
         uses: actions/download-artifact@v6
         with:
           name: b1-kernel-dtb
           path: work
           repository: ${{ github.repository }}
-          run-id: ${{ env.B1_REUSE_KERNEL_RUN_ID }}
+          run-id: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') }}
           github-token: ${{ github.token }}
 
       - name: Restore installed kernel modules for validation
@@ -407,20 +405,20 @@ jobs:
           path: work
 
       - name: Restore kernel and DTB from this run
-        if: ${{ env.B1_REUSE_KERNEL_RUN_ID == '' }}
+        if: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') == '' }}
         uses: actions/download-artifact@v6
         with:
           name: b1-kernel-dtb
           path: work
 
       - name: Reuse kernel and DTB from the selected successful run
-        if: ${{ env.B1_REUSE_KERNEL_RUN_ID != '' }}
+        if: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') != '' }}
         uses: actions/download-artifact@v6
         with:
           name: b1-kernel-dtb
           path: work
           repository: ${{ github.repository }}
-          run-id: ${{ env.B1_REUSE_KERNEL_RUN_ID }}
+          run-id: ${{ (github.event.inputs.reuse_kernel_run_id || '45309219886') }}
           github-token: ${{ github.token }}
 
       - name: Verify restored stage inputs before packaging
