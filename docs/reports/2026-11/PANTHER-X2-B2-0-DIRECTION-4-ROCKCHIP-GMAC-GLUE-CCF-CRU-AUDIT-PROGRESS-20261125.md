@@ -2,7 +2,7 @@
 
 ## 1. 当前状态与边界
 
-**方向四进行中。本报告记录历史成果清点及第一轮四版本源码复核，不代表方向四结项。**
+**方向四已完成既定静态审计范围，按证据边界明确的有条件结项归档。** 结项不代表已找到硬件根因或完成实机验证。
 
 严格沿用 B2-0 固定四版本矩阵：
 - 6.1.65：黄金基准 A；源码端点 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc` 为高置信度候选，不是已闭环的历史构建 source commit。
@@ -244,7 +244,7 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 2. RGMII GRF 两寄存器写入顺序（§6.4）；
 3. 相关 CRU/CCF provider 变化及其尚未证实的调用条件（§6.2）。
 
-下一步只做方向四最终矩阵一致性审校：统一所有差异的首次出现版本、适用分支、证据等级和“已验证/未验证”措辞；检查本报告与既有专题报告之间的版本端点和结论边界。方向四仍不结项。
+当时尚待完成总矩阵一致性审校；后续完成情况见 §6.6、§6.7、§6.8 和 §8，本报告最终结项决定见 §10。
 
 
 ## 6.6 方向四四版本总矩阵（第一轮审校版）
@@ -263,6 +263,8 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 | GMAC1 reset ID/provider | ID 236；30 regs；HIWORD | 相同 | 相同 | 相同 | 未发现 reset ID/provider 回归 |
 | STMMAC reset 后 10µs delay | 无 | 有 | 有 | 有 | 6.1.116 已存在，不能解释 6.1.116→6.1.174 首发故障 |
 | GPLL provider callback | wait lock 后返回；disable PWRDOWN | 同左 | wait lock 后切 NORMAL；disable 前切 SLOW | 后期实现 | 本矩阵最早观察到于 c2f148d；是否命中 GMAC1 实际 parent chain 未验证 |
+| RGMII speed callback | 10/100/1000→2.5/25/125MHz | 同左 | 同左 | 同左；回调签名增加未使用 mode 参数 | rate mapping 不变；handle 获取/存储方式随 glue 重构变化；运行时 clk_set_rate 未验证 |
+| powerdown/suspend/resume | 外接 PHY 顺序 runtime-PM put→regulator off→clock off | 同左 | 同左；移除仅供 integrated-PHY 的 powerdown 调用 | 同 c2f148d | Panther 未声明 integrated PHY，变化不命中当前路径；外接 PHY 顺序相同 |
 | Panther GMAC1 DTS | RGMII/input/125MHz/0x30/0x10 | 同 6.1.65 | 同关键语义 | 同 c2f148d | DTS 关键配置保持一致 |
 
 ### 6.6.1 本轮审校后的优先级与边界
@@ -296,6 +298,40 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 - **条件性关联：** 若历史 ACLK_USB parent 为 GPLL，后期 PCLK_USB critical 的注册期 enable 可能使后期 GPLL callback 提前执行；实际 parent、callback 调用时序均未知。
 - **未验证：** 历史启动时 ACLK_USB 的实际 parent、PCLK_USB/ACLK_USB 的 enable_count 与 gate readback、CRU provider 注册和 GMAC probe 的先后时序、GPLL callback 实际调用次数/时刻，以及该初始化差异是否影响故障发生窗口。
 - **不得推断：** 不把 PCLK_USB critical 标记直接认定为 TX 故障根因；不把 HCLK_USB critical 与 GMAC1 时钟链建立因果联系。
+
+
+## 6.8 RGMII speed callback 与 suspend/resume 四版本补充闭环
+
+本轮补齐此前历史专题只做两版本比较、方向四矩阵未单列的 glue speed callback 与 powerdown/resume 分支。
+
+### 6.8.1 RGMII link-speed callback
+
+四版本实际 Panther 条件均为 RK3568 ops + plain RGMII：
+- `rk_fix_speed()` 对 RGMII/RGMII_ID/RGMII_RXID/RGMII_TXID 调用 `ops->set_rgmii_speed`；6.1.65、6.1.116、c2f148d 的函数签名相同，6.12.81 增加 `mode` 参数但函数体不使用该参数。
+- 四版本 `rk3568_ops.set_rgmii_speed` 均绑定 `rk3568_set_gmac_speed`。
+- 四版本 speed→rate 映射相同：10Mbps→2.5MHz、100Mbps→25MHz、1000Mbps→125MHz；未知 speed 记录错误并返回。
+- 四版本均调用 `clk_set_rate()`，失败时记录错误，不向调用者传播返回值。
+- 黄金版本通过 `bsp_priv->clks[RK_CLK_MAC_SPEED].clk` 取得 clock handle；后期源码改为独立的 `bsp_priv->clk_mac_speed` 字段。后期 clk init 对该 handle 获取失败只记录错误，speed callback 本身仍直接调用 `clk_set_rate`。这与 §4.1 的逐项 clock 获取/错误传播弱化属于同一后期 glue 重构背景；本轮未发现 speed→rate 数值映射变化。
+- Panther DTS 的 `clock_in_out = "input"` 与外部 125MHz fixed-clock 配置保持一致；该配置不能被解释为 speed callback 不执行，也不能据静态源码推断历史 `clk_set_rate` 实际返回值或最终 mux/rate readback。
+
+**结论等级：**
+- **已验证：** 四版本 RGMII speed callback 绑定关系与 10/100/1000Mbps rate mapping 一致；6.12 仅增加未使用的 mode 参数。
+- **已验证：** `clk_set_rate` 错误均只记录、不向上返回，是四版本共有行为。
+- **已验证：** clock handle 的存储/获取方式随后期 glue 重构改变，属于既有 clock acquisition/error-handling 差异的延伸，不构成独立的 rate mapping 回归。
+- **未验证：** 历史 link speed callback 是否执行、`clk_set_rate` 返回值、CCF 实际 rate/mux 与硬件输出频率。
+- **适用性：** 只讨论 Panther RGMII 分支；RMII/S/ QSGMII 其他 interface 分支不据此外推。
+
+### 6.8.2 powerdown / suspend / resume
+
+四版本 `rk_gmac_suspend()` 的主顺序一致：先调用 `stmmac_suspend()`；若设备不允许 wakeup，则执行 `rk_gmac_powerdown()` 并设置 `suspended=true`。四版本 `rk_gmac_resume()` 均在 `suspended` 为 true 时执行 `rk_gmac_powerup()`、清除标记，最后调用 `stmmac_resume()`。
+
+6.1.65/6.1.116 的 `rk_gmac_powerdown()` 在 runtime-PM put 前有 integrated-PHY 专属 powerdown 条件；c2f148d/6.12.81 的该 helper 不再保留该调用。Panther DTS 未声明 integrated PHY，故该差异不命中 Panther 外接 PHY 路径。四版本对 Panther 外接 PHY 的 powerdown 顺序均为 runtime-PM put → regulator disable helper → GMAC clock disable。
+
+**结论等级：**
+- **已验证：** Panther 外接 PHY 的 suspend/resume 与 powerdown 主路径没有发现 6.1.116→c2f148d 新增的调用顺序回归。
+- **已验证：** integrated-PHY 专属 powerdown 调用变化不适用于 Panther 当前外接 PHY。
+- **未验证：** 历史是否进入 suspend/resume、wakeup policy、runtime-PM 实际状态及 suspend/resume 期间的 clock/regulator 返回值。
+- **定级：** 不作为当前普通启动 TX 回归候选；保留为非命中 Panther 当前配置的差异说明。
 
 
 ## 8. 与方向二、方向三的交叉一致性审校（2026-11-25）
@@ -358,13 +394,71 @@ Panther 的 tx_delay=0x30、rx_delay=0x10 均为正值，四版本最终选择�
 - **未发现方向三与方向四的 reset / clock 概念可直接合并的依据；两组 delay 必须分别记录。**
 - **未发现四版本源码端点和来源证据等级冲突。**
 - **跨方向未决事项继续按原报告归属，不因引用而转移结项状态。**
-- 本节只完成一致性检查，不代表方向四已经完成所有原计划审计或正式结项。
+- 本节完成跨方向一致性检查；其后补充的 speed callback 与 suspend/resume 核对见 §6.8。
 
 
-## 7. 安全与范围声明
+## 9. 安全与范围声明
 
 - 不访问 Panther X2，不执行设备命令，不读写寄存器，不进行网络测试。
 - 不修改任何系统、内核、驱动、DTS、Kconfig 或网络服务。
 - 不构建、不安装、不触发 Actions。
 - 不启动 B2.1，不进入方向五 MDIO/PHYLIB/PHYLINK/RTL8211F 专题。
 - 不把静态源码差异等同于故障根因；所有历史源码身份、最终配置和运行时证据边界继续保留。
+
+
+## 10. 方向四结项评估与决定（2026-11-25）
+
+### 10.1 原定静态审计范围完成情况
+
+| 原定审计子项 | 结果 | 证据边界 |
+|---|---|---|
+| 历史报告回读、重复项排除、四版本源码身份固定 | 完成 | §2、§3；保留 6.1.65/6.1.116 历史构建绑定限制 |
+| Rockchip GMAC glue clocks 获取、enable/disable、错误传播与 settle | 完成 | §4.1、§6.6；实际返回值/时钟 readback 未知 |
+| Panther 实际 DTS 与 RGMII/plain external PHY/input 分支确认 | 完成 | §4.3、§6.3 |
+| RK3568 GMAC1 CRU parent/mux/divider/gate | 完成 | §4.2；静态定义一致，不代表运行时 readback |
+| CRU reset consumer、ID、provider、寄存器映射 | 完成 | §6.1；ID 236 与 provider 映射一致 |
+| CCF critical reference 与 PLL provider/callback | 完成 | §6.2、§6.7、§8.4.1；实际 parent/reference/callback 时序未知 |
+| probe/setup、regulator、CSU/genpd、runtime-PM handoff | 完成 | §6.3 与既有方向 glue/power 归档；硬件电源状态未测量 |
+| RGMII GRF interface/delay callback 写入顺序 | 完成 | §6.4；寄存器事务/波形未知 |
+| RGMII link-speed callback | 完成 | §6.8.1；历史 clk_set_rate 结果未知 |
+| powerdown/suspend/resume | 完成 | §6.8.2；历史是否进入相关路径未知 |
+| 与方向二、方向三跨层一致性核对 | 完成 | §8；未发现结论冲突，边界已明确 |
+| 四版本总矩阵、优先级与证据等级 | 完成 | §6.6、§6.6.1 |
+
+### 10.2 结项结论
+
+**方向四按“证据边界明确的有条件结项”归档。**
+
+本轮四版本静态源码比较确认，黄金组（6.1.65/6.1.116）与故障组（c2f148d/6.12.81）之间存在以下真实分组差异：
+1. GMAC clock 获取/enable 从 bulk 路径变为逐项获取/enable，错误检查与传播减弱；
+2. clocks enable 后 settle 从 5ms 缩短为 100–200µs；
+3. RGMII GRF CON0/CON1 写入顺序反转；
+4. HCLK_USB 与 PCLK_USB 新增 CLK_IS_CRITICAL；其中 HCLK_USB 不在已确认 GMAC1 parent chain，PCLK_USB 与 GMAC1 共用 ACLK_USB 上游；
+5. GPLL enable/disable callback 改为 wait-lock 后切 NORMAL、disable 前切 SLOW；只有在 ACLK_USB 实际选择 GPLL 且 GPLL enable reference 当时为 0 等条件满足时，才可能与 PCLK_USB critical 注册期 parent recursion 联动。
+
+同时确认：
+- GMAC1 专属 CRU mux/divider/gate、reset ID 236/provider mapping 与 Panther DTS RGMII 关键输入配置没有发现可解释版本故障的确定性回归；
+- RGMII 10/100/1000 speed-rate mapping 四版本一致；
+- regulator helper 与 runtime-PM 错误传播弱点是四版本共同项；
+- Panther 外接 PHY 的 powerdown/suspend/resume 路径没有发现故障组新增的适用性回归；
+- CSU 对 Panther 当前 DTS 无 phandle、调用为 no-op；无独立 GMAC power-domain 绑定。
+
+这些结论均为源码/DTS/既有配置的静态结论。没有证据证明 clock enable 实际失败、100–200µs 必然不足、GRF 写入顺序造成电气异常、PCLK_USB/GPLL 条件链在历史故障启动中实际命中，或任一差异已经构成 TX 根因。
+
+### 10.3 结项后保留的未验证事项
+
+- 6.1.65 与 6.1.116 历史 Image 的精确 source commit 绑定限制；
+- 历史 clock enable / clk_set_rate 返回值、实际 clock rate、mux/gate readback；
+- ACLK_USB 实际 parent、GPLL mode/reference count 与 callback 时序；
+- GRF 写入事务顺序在硬件总线上的实际完成情况、RGMII/PHY 波形；
+- PHY regulator 实际输出、电源质量、runtime-PM 状态；
+- reset 硬件脉冲宽度及历史运行时 reset 状态。
+
+这些缺口来自历史现场运行时证据缺失或源码 provenance 限制；不要求为完成静态审计而重复既有工作，也不构成访问设备或开展 B2.1 的授权。
+
+### 10.4 范围与后续阶段门
+
+方向四结项仅关闭 B2-0 原组件方向 B2-3 的静态源码审计。方向五（MDIO/PHYLIB/PHYLINK/RTL8211F PHY driver，对应原组件方向 B2-4）仍未开始；版本决策与组件恢复顺序整合也未开始。
+
+本结项不启动 B2.1，不访问 Panther X2，不构建、不安装软件、不修改系统/驱动/DTB/网络配置，不读写设备寄存器。进入方向五须遵循 B2-0 原始顺序，等待用户明确指示。
+
