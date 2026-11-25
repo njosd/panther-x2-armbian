@@ -86,7 +86,7 @@ jobs:
             echo "::error::A NET_VENDOR option is enabled in R1"
             exit 1
           fi
-          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 "$R1/output/Image" | tr -d ' \\n')"
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 "$R1/output/Image" | tr -d '[:space:]')"
           test "$IMAGE_MAGIC" = "41524d64"
           grep -q 'packet_create' "$R1/logs/r1-vmlinux-symbols.txt"
           grep -q 'packet_sendmsg' "$R1/logs/r1-vmlinux-symbols.txt"
