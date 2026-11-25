@@ -69,7 +69,7 @@
 - 6.1.65 的源码端点仍是高置信度候选，不能提升为历史 Image 精确构建源码。
 - 本项没有审查 DWMAC4 DMA channel、AXI/PBL、DMA address width、descriptor ring 等内容。
 
-**D3-1 状态：部分完成，继续进行中。** 已完成 platform probe/resource parser 四版本源码差异初审；唯一保留的 Panther 相关跨层点是 pclk 名称/CSR clock source。下一步只补齐这一点的静态交叉证据，或明确证据上限后关闭 D3-1；之后再进入 D3-2。不得提前进入 D3-3 及之后子项。
+**D3-1 状态：已完成（静态源码范围）。** 四版本 platform probe/resource parser 的源码差异、Panther DTS 分支适用性及 MDC CSR clock source 变化均已确认。pclk_mac 的运行时频率、寄存器值及 clock enable/refcount 属于运行时/后续平台交接证据，不是本项静态 parser 验收条件，明确保留为未验证，不据此认定根因。按既定顺序进入 D3-2；不得提前进入 D3-3 及之后子项。
 
 ## 6. 精确源码链接
 
@@ -83,3 +83,13 @@
 - [6.1.116 stmmac_main.c](https://github.com/unifreq/linux-6.1.y/blob/5eb841b59d6ead6e264163785a634e78f0253c8e/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)
 - [6.1.174-rk35xx stmmac_main.c](https://github.com/ophub/linux-6.1.y-rockchip/blob/c2f148dece4b67ebd30aefad1bdd1990f41e5633/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)
 - [6.12.81-rk35xx stmmac_main.c](https://github.com/ophub/linux-6.12.y-rockchip/blob/661b2d8bf1284556f8876d5ed5fb80c64b22f94c/drivers/net/ethernet/stmicro/stmmac/stmmac_main.c)
+
+## 7. D3-1 结项记录（2026-11-25）
+
+- [x] 四版本 stmmac_probe_config_dt() 对照。
+- [x] 四版本 stmmac_get_platform_resources() 对照。
+- [x] Panther alias、IRQ names、clock-names、RGMII/PHY DTS 输入适用性核对。
+- [x] pclk/pclk_mac 获取名称与 stmmac_clk_csr_set() 动态 MDC divider source 的源码调用链核对。
+- [x] 区分源码已验证与运行时频率/寄存器状态未验证，不外推为故障根因。
+
+**结论：** D3-1 静态审计结项。最重要的新差异是 6.1.65/6.1.116 使用 stmmac_clk 作为 MDC CSR divider 动态选择输入，而 6.1.174/6.12.81 使用 pclk；Panther DTS 的 pclk_mac 命名使后两者能够获取该时钟。该变化影响 MDIO 时钟配置，不是普通 Ethernet 数据 TX 描述符路径的直接差异。运行时频率、时钟状态和最终 CSR divider 未验证。
