@@ -103,15 +103,18 @@
 
 | 审计领域 | 状态 | 说明 |
 |---|---|---|
-| 历史报告/禁止重复项清点 | 已完成第一轮 | 已回读八份相关报告；仍需与 B2-0 原始任务顺序核对 |
-| 四版本 `dwmac-rk.c` clocks enable / powerup 主路径 | 已完成第一轮 | clocks enable 差异已确认；probe/setup/power handoff 的实际 RGMII 路径已补核，见 §6.3 |
-| 四版本 GMAC1 CRU mux/divider/gate | 已完成第一轮 | 专属定义一致；HCLK_USB/PCLK_USB critical flags 为两黄金/两故障分组差异 |
-| Panther 四版本 GMAC1 DTS 关键时钟输入 | 已完成第一轮 | 形成两组相同 blob，RGMII input 主配置语义一致 |
-| 四版本 CRU reset ID / reset controller 精确核对 | 已完成（源码静态范围） | 四版本 ID 236、provider 注册参数与映射一致；另发现 STMMAC core 10µs delay 的版本差异，见 §6.1 |
-| RK3568 CCF/PLL provider 与父链回调 | 已完成第一轮 | 6.1.65/6.1.116 PLL provider blob 相同；c2f148d/6.12.81 使用后期 mux 切换实现，见 §6.2 |
-| 最终四版本差异矩阵与一致性审校 | 待完成 | 已补齐 glue 实际路径与 RGMII callback 四版本核对；仍需整合证据等级、排除项与报告一致性 |
+| 历史报告/禁止重复项清点 | 已完成 | 回读并复用既有专题报告，明确禁止重复范围 |
+| 四版本 `dwmac-rk.c` clocks enable / powerup / powerdown | 已完成 | bulk→逐项获取/enable、错误检查、5ms→100–200µs 差异；Panther 实际 RGMII 路径已闭环 |
+| 四版本 GMAC1 CRU mux/divider/gate | 已完成 | 专属定义一致；HCLK_USB/PCLK_USB critical flags 为两黄金/两故障分组差异 |
+| Panther 四版本 GMAC1 DTS 关键时钟输入 | 已完成 | 形成两组相同 blob，RGMII input 主配置语义一致 |
+| 四版本 CRU reset ID / reset controller 精确核对 | 已完成（源码静态范围） | 四版本 ID 236、provider 注册参数与映射一致；STMMAC core 10µs delay 差异见 §6.1 |
+| RK3568 CCF/PLL provider 与父链回调 | 已完成 | 四版本 PLL callback、CCF critical 语义及 GPLL 条件链已核对 |
+| RGMII GRF callback / link-speed callback | 已完成 | CON0/CON1 写入顺序变化；10/100/1000 rate mapping 一致 |
+| regulator / CSU / genpd / runtime-PM handoff | 已完成 | Panther 实际外接 PHY 路径适用性已核对；共同错误传播弱点与 no-op 分支已区分 |
+| suspend/resume 与 powerdown | 已完成 | Panther 外接 PHY 主路径一致；integrated-PHY 差异不命中 |
+| 四版本总矩阵、证据等级与跨方向一致性 | 已完成 | 见 §6.6–§6.8、§8、§10；方向四有条件结项 |
 
-本轮完成 reset ID/provider 的四版本闭环，并补齐 6.1.65 的 CCF/PLL 对照。下一步进入方向四总矩阵的一致性审校；不再重复 CRU reset ID 计算或 PLL provider 函数审计。
+方向四原定静态审计子项现已完成；总矩阵、证据等级及跨方向一致性审校见 §6.6–§6.8、§8，正式有条件结项决定见 §10。
 
 
 ## 6.1 四版本 CRU reset ID / provider 闭环（2026-11-25）
