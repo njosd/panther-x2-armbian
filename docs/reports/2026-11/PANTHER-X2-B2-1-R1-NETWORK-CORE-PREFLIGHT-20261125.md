@@ -3,7 +3,7 @@
 - 阶段：R1
 - 基线：R0 PASS；6.18.63 B1 实际 artifact 已冻结
 - 本轮目标：只引入 Linux 通用网络核心、Ethernet framing/core 和 AF_PACKET 原始帧 socket 支持，为后续最小 MAC TX 路径准备用户态帧注入接口
-- 当前状态：**R1 配置门、Kernel Image/modules 编译及 AF_PACKET 符号审计已通过；最终 DTB/完整 artifact 验收待恢复审计工作流完成；未启用板载 GMAC/MDIO/PHY**
+- 当前状态：**Run 45611898629 全部步骤成功；R1 配置、Kernel Image/modules、AF_PACKET 符号、模块隔离、DTB 与 artifact 上传均通过。R1 构建验收 PASS，尚待用户审阅放行 R2；未启用板载 GMAC/MDIO/PHY**
 - 操作边界：不访问 Panther X2，不写 TF/eMMC，不修改运行系统，不恢复 GMAC DTB 节点
 
 ## 1. R0 已放行的基线身份
@@ -85,7 +85,7 @@ TX-PASS 的决定性证据仍然是局域网另一终端逐帧捕获 Panther 发
 - [x] R1 Actions 配置收敛与禁止项门（Run 45606030640）
 - [x] R1 Kernel Image/modules 编译（Run 45606030640）
 - [x] R1 built-in AF_PACKET/network-core 符号及模块隔离初审（Run 45606030640）
-- [ ] R1 最终 artifact 哈希、DTB 原样复用与完整归档验收（恢复审计工作流待运行）
+- [x] R1 最终 artifact 哈希、DTB 原样复用与完整归档验收（Run 45611898629）
 - [ ] 用户审阅 R1 构建结果后放行 R2
 
 当前不得进入 R2，更不得恢复 GMAC/MDIO/PHY 节点。R1 构建通过后，仍需单独审阅结果和授权，再进入 R2。
@@ -203,3 +203,37 @@ Run 45606030640 已经成功生成 Kernel Image、modules、最终 .config、Sys
 - 恢复工作流只对历史 artifact 做验收与补齐；若历史 artifact 缺少预期文件或 provenance 不匹配，会明确失败，不会回退到重编译。
 
 工作流已同时提交到功能分支和 main。请从 Actions 选择 `resume-panther-x2-b2-1-r1-network-core.yml`，运行时选择功能分支 `project-a/b2-1-r1-network-core-build`，保持默认两个 Run ID。**当前只是流程已提交，尚未执行；R1 最终 PASS 仍以该恢复工作流成功及 artifact 审阅为准。** 不得提前进入 R2。
+
+
+## 14. 第四次 R1 Actions 运行：完整构建验收通过（Run 45611898629）
+
+用户提供 Job：`139197305317`。Run head commit：`5f0ee9b04f2ce7987cdd85170c8235ee29c8116f`。运行结论：`completed / success`；全部 11 个 job steps 均成功。
+
+**重要流程说明：本次执行的是原始完整 R1 build workflow，不是第 13 节新增的 artifact-only resume workflow。** 完整日志确认本次重新 fetch pinned Linux source、重新 merge_config/olddefconfig，并重新编译 Kernel Image 与 modules。它是一次新的完整构建；不能把它记作“复用了 Run 45606030640 的 R1 编译产物”。但 R0/B1 冻结参考 artifact 被成功下载复用，DTB 也从该参考 artifact 原样复制。
+
+通过证据：
+- R0/B1 reference artifact 下载成功；下载 ZIP digest：`dd67ac049775898f3793fc6524d70437630eeb46d64bca8bc79b8b6ae038cee9`。
+- 冻结 B1 最终 config SHA256：`7d6c37a10c0622ad31973b05fe20528e1aff9db984ace93b85bde0d1da599731`；冻结 Panther DTB SHA256：`7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d`。
+- 固定源码 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，Linux 6.18.63；已有 B1 compatibility patch 检查与应用成功。
+- R1 最终 Kconfig gate 明确输出 `R1 Kconfig gate checks: PASS`；NET、NETDEVICES、NET_CORE、ETHERNET、PACKET 均要求为 y；workflow 对 INET/IPv6/NETFILTER、STMMAC/DWMAC、MDIO/PHY、DSA、DNET/ETHOC/OA_TC6、Wi-Fi/BT 和 R1 fragment 中全部 NET_VENDOR 组选项执行关闭检查。
+- Kernel Image 文件识别为 ARM64 Linux kernel Image，little-endian、4K pages；构建步骤成功。
+- `modules.tar.zst` 成功生成并解包；Ethernet/PHY/USB-network/Wireless/Bluetooth 驱动模块与对应 built-in 路径隔离检查成功。
+- AF_PACKET/network-core 符号检查成功：`packet_create`、`packet_sendmsg`、`eth_type_trans`、`dev_queue_xmit`。
+- DTB 成功复制，fdtget 读出 `model=Panther X2`、`gmac1_status=disabled`、`mdio_status=disabled`、`phy_status=disabled`；DTB SHA256 与冻结值一致。
+- Image SHA256：`63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1`。
+- R1 kernel.config SHA256：`480645537537abdadc9e2e07f404b85c1bc9411232df04ecb284c5270d2af23a`。
+- modules.tar.zst SHA256：`4f403cac59809616cf4de36a8e89520ecffc13965597be4b8d88845fb3ce3787`。
+- DTB SHA256：`7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d`。
+- 完整 artifact：`b2-1-r1-network-core`，ID `15023630465`，大小 210,059,326 bytes，ZIP SHA256 `80bd2d33d0e85d8fd4c10fdd33a60c159393db3a45ae5f6e95dd0bf490cc656c`；保留至 2026-12-25。
+
+### R1 结论
+
+**R1 构建与 CI 级静态验收：PASS。** 本阶段目标是形成启用通用网络核心、Ethernet framing/core 和 AF_PACKET 的 6.18.63 内核，同时不引入板载 MAC/PHY、其他网卡、无线或蓝牙驱动；本次所有对应工作流门均成功。
+
+边界仍然明确：
+- 未恢复 Panther X2 GMAC1/MDIO/PHY 节点，未构建板载 MAC 驱动。
+- 未在实机启动本次 R1 Image；未验证真实 Ethernet interface、PHY link 或线侧 TX。
+- 不代表 TX 已经打通，不代表可以进入硬件 TX 阶段。
+- 不访问设备、不写 TF/eMMC。
+
+第 13 节 artifact-only resume workflow 是单独新增的断点验收入口，本次没有调用它。该流程的可运行性尚未由 Actions 实测；不影响本次完整构建 workflow 已经成功的结论。当前先由用户审阅 R1 结果，未授权前不自动启动 R2。
