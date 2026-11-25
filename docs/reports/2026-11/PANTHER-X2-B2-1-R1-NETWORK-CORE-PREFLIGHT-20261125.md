@@ -89,3 +89,16 @@ TX-PASS 的决定性证据仍然是局域网另一终端逐帧捕获 Panther 发
 - [ ] 用户审阅 R1 构建结果后放行 R2
 
 当前不得进入 R2，更不得恢复 GMAC/MDIO/PHY 节点。R1 构建通过后，仍需单独审阅结果和授权，再进入 R2。
+
+## 7. R1 构建入口与复用策略
+
+- 专用工作流：`.github/workflows/build-panther-x2-b2-1-r1-network-core.yml`
+- 工作分支：`project-a/b2-1-r1-network-core-build`
+- Actions 入口：`https://github.com/njosd/panther-x2-armbian/actions/workflows/build-panther-x2-b2-1-r1-network-core.yml`
+- 默认输入 B1 Kernel/DTB Run ID：`45309219886`，只下载已冻结的 B1 artifact 作 .config/DTB 对照。
+- 因 R1 的最终 .config 改变，必须重新编译 Kernel Image 和 modules；不得错误复用 B1 Image。
+- Panther DTB 不变，直接从 R0 artifact 复用并强制校验原始 SHA256。
+- 工作流只上传 R1 Kernel/配置/模块和审计证据；不制作 TF 镜像，不写卡，不访问设备。
+- 工作流为 workflow_dispatch；当前环境没有可调用的 GitHub workflow dispatch 写操作，因此需要用户在 Actions 页面选择该分支并运行。此为启动工作流的 UI 步骤，不代表已经运行或通过。
+
+R1 构建完成后先审阅 config diff、对象符号、模块清单、Image 哈希和 DTB 哈希；不得自动放行 R2。
