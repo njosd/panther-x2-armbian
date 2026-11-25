@@ -48,22 +48,22 @@
 | D3-1 | STMMAC probe/platform resource parsing | 已完成（静态源码范围） | 四版本函数/结构/配置差异；pclk/MDC CSR clock source 变化已归档 |
 | D3-2 | DT/MDIO/PHY attach 生命周期 | 已完成（静态源码范围） | 四版本 MDIO parser、PHY attach、四次 MDIO 写入差异及 Panther 适用性 |
 | D3-3 | DWMAC4 DMA 初始化/寄存器编程 | 已完成（静态源码范围） | 四版本 reset timing、DMA/AXI/PBL/channel/address-width 对照 |
-| D3-4 | TX descriptor 其余分支 | 进行中 | 先复核既有 checksum/TSO/context/fragment/mapping-error 报告，只补缺失的四版本差异 |
-| D3-5 | RX descriptor/buffer/page-pool | 待开始 | 四版本 RX lifecycle 对照 |
+| D3-4 | TX descriptor 其余分支 | 已完成（静态源码范围） | 四版本 TSO mapping lifecycle、mapping error/ring shortage、completion/reclaim、TX timer/recovery 条件差异 |
+| D3-5 | RX descriptor/buffer/page-pool | 进行中 | 复用 116/612 已有 RX 报告，只补 65 与实际 c2f148d 的差异 |
 | D3-6 | DMA API/coherency/IOMMU | 待开始 | 源码+DTS+config 交叉矩阵 |
 | D3-7 | IRQ/NAPI/watchdog/recovery | 待开始 | 中断与恢复路径矩阵 |
 | D3-8 | 总矩阵与一致性审校 | 待开始 | 方向三总结报告 |
 
-## 5. 当前唯一工作项：D3-4
+## 5. 当前唯一工作项：D3-5
 
-D3-1、D3-2、D3-3 已在配套报告中按静态源码范围结项。本轮当前只做 D3-4：核对普通 TX descriptor 主路径之外的 TX descriptor 分支；先盘点既有报告，禁止重做已闭环的 mapping/OWN/barrier/tail pointer 和普通小帧 checksum 路径。
-- 只审此前未完整覆盖的 TSO/context descriptor、multi-descriptor/fragment、mapping failure、descriptor shortage、completion/reclaim 的条件分支；
-- 先回读 2026-11-17 物理边界报告 §14/§40、2026-11-19 TX mapping/ownership 报告和 stable TX core report，建立已完成项清单；
-- 对照四版本，特别将 6.1.174 实际 c2f148d 与 stable 3f06ed3e 区分；
-- 普通 IPv4 DHCP 单 skb 适用性作为每项结论的判断标准；XGMAC/TSO/jumbo/chain-mode 等 Panther 不使用的条件路径降级；
-- 不重复普通 skb DMA map/unmap、OWN 发布、dma_wmb/wmb、tail pointer kick、普通 checksum 主路径。
+D3-1 至 D3-4 已在配套报告中按静态源码范围结项。本轮当前只做 D3-5：核对 RX descriptor/buffer/page-pool 生命周期；复用既有 6.1.116/6.12.81 RX allocation/page-pool 报告，只补 6.1.65 与实际 6.1.174 c2f148d 的缺口。
+- 复核既有 6.1.116/6.12.81 RX skb allocation/page-pool 报告；
+- 只补四版本差异中尚未覆盖的 RX descriptor refill、buffer DMA mapping/sync、OWN handoff、RX interrupt/NAPI poll 和 error/overflow 分支；
+- 特别比较 6.1.65 与实际 6.1.174 c2f148d，避免将 stable 3f06ed3e 当作故障构建源码；
+- 普通 DHCP IPv4 RX 适用性为判断边界；XDP/AF_XDP、jumbo、multi-queue 等 Panther 未启用分支降级；
+- 不重复 6.1.116/6.12.81 已闭环的 skb allocation/page-pool 核心差异。
 
-先复核 PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md §14、§40，PANTHER-X2-STMMAC-TX-DMA-MAPPING-DESCRIPTOR-OWNERSHIP-116-VS-174-20261119.md，PANTHER-X2-STABLE-116-174-STMMAC-TX-CORE-DIFF-20261119.md；建立覆盖矩阵后，只审确实未闭环的四版本条件分支。
+先回读 PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md 与 PANTHER-X2-ETHERNET-TX-PHYSICAL-BOUNDARY-AND-SOURCE-AUDIT-2026-11-17.md 中 RX/page-pool 相关段落；再比较 6.1.65 与实际 c2f148d 的 RX path，确认是否存在真实功能差异。
 
 ### D3-1 结项结果（2026-11-25）
 - 四版本 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi 已完成静态对照。
