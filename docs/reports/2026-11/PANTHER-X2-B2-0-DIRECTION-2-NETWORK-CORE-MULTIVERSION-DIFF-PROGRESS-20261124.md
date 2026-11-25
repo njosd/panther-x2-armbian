@@ -1713,3 +1713,37 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 6.1.65 与 6.1.116 在 conntrack hook 注册/注销、普通 conntrack packet entry、tuple lookup、NAT hook 主函数及 iptables NAT/filter table init 的核心函数上保持一致。6.1.174 的 `init_conntrack()` 变化需按 §16.3 的实际错误传播语义分析，但没有证据证明它在普通无压力 DHCP 流量上会触发。6.12 的变化已在 §16 原文限定为 confirm wrapper、debug/state read、分配 API 与 Kconfig/module 结构整理；目前没有发现普通 IPv4/UDP 默认新增 drop 条件。
 
 **本项结项：** §16 的 6.1.65 候选源码与真实配置映射完成。下一项严格按原顺序进入 §18 IPv4 header checksum、fragment reassembly 与本机交付路径。
+
+
+## 38. §18 IPv4 checksum / fragment reassembly / local delivery：补入 6.1.65 候选源码与配置（2026-11-25）
+
+### 38.1 6.1.65 实际配置
+
+原始配置确认：
+- `CONFIG_INET=y`；
+- `CONFIG_NF_DEFRAG_IPV4=y`；
+- `CONFIG_NETFILTER=y`；
+- `CONFIG_IP_MULTIPLE_TABLES=y)。
+
+其中 `NF_DEFRAG_IPV4=y` 表示 Netfilter conntrack defrag hook 支持编入内核，不表示每个 IPv4 skb 都执行 defrag；`ip_defrag()` 的核心实现属于 INET IPv4 栈。
+
+### 38.2 6.1.65 源码函数比较
+
+补入候选端点后：
+- `ip_rcv_core()`：6.1.65、6.1.116、6.1.174 一致；6.12 才将总长度读取切换为 `iph_totlen()`。
+- `ip_local_deliver()`、`ip_local_deliver_finish()`、`ip_protocol_deliver_rcu()`：四端点一致。
+- `ip_frag_reasm()`：四端点一致。
+- `ip4_frag_init()`：6.1.65 与 6.1.116 一致；6.1.174 起采用 RCU/refcount 安全获取 peer 的实现，6.12 延续。
+- `ip_frag_queue()`、`ip_defrag()`、`inet_frag_queue_insert()`、`inet_frag_reasm_finish()`：6.1.65 与 6.1.116 存在差异；这些差异均位于分片队列插入、排队、重组完成/时间戳等分片专用路径。6.1.174/6.12 在这些基础上继续沿用或扩展既有变化。
+- `inet_frag_find()`：四端点一致。
+- `ipv4_conntrack_defrag()`：6.1.65、6.1.116、6.1.174 一致；6.12 对 hook 生命周期/状态读取作后续调整。
+
+### 38.3 适用性结论
+
+与此前 §18.2、§18.3 的路径条件结合：
+- 普通未分片 DHCP/UDP 不进入 `ip_defrag()`、`ip_frag_queue()` 或 fragment queue insert/reassembly 路径；
+- conntrack defrag hook 即使已注册，也先检查 IPv4 fragment 条件；未分片报文不会被送入分片收集分支；
+- 因此 6.1.65→6.1.116 在 fragment queue 内部的实现差异是真实版本差异，但不命中普通未分片 DHCP Discover；
+- IPv4 header checksum、长度基本检查、本机 LOCAL_IN 与 UDP protocol dispatch 主入口四版本没有发现会解释普通 DHCP 收发异常的新增逻辑。
+
+**本项结项：** §18 的 6.1.65 候选源码与原始配置映射完成。方向二继续按原顺序进入 §19 IPv4 route lookup、FIB trie 与 policy routing。
