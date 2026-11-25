@@ -330,3 +330,95 @@ Panther 地址 0 在合法范围内，STMMAC MDIO bus 提供 read/write callback
 
 **适用性判断：** 6.1.174 新增 mac_requires_rxc / resume 前恢复 PHY，与 RXC 时钟恢复语义有关，必须作为版本差异保留；但该 helper 的调用仅位于 resume 流程，不能解释首次冷启动阶段的 DHCP Discover 无法发出。6.12 将该能力扩展为 attach flag / PCS pre-init 传递，当前 Panther RTL8211F driver 不消费该 flag。该项与 6.1.116 workaround 清除 PHYCR2 bit1 RXC 的历史矛盾存在概念关联，但二者不是同一操作，也不能用一个源码 flag 推断历史 PHYCR2 实际值或 RXC 引脚波形。
 
+
+
+## 10. 方向五最终差异定级与证据边界评估（2026-11-25）
+
+### 10.1 四版本主要差异的首次观察端点与适用性
+
+“首次观察”仅指本项目固定四个源码端点中，最早出现差异的版本分组；不代表上游真实引入 commit，也不代表实际二进制必然包含该实现。
+
+| 差异 | 四版本分组/首次观察 | Panther 实际路径适用性 | 普通 cold boot / DHCP TX 相关性 | 证据等级 |
+|---|---|---|---|---|
+| STMMAC JL2xx1 四次 MDIO 写入，含 PHYCR2=0x1801 + BMCR reset | 6.1.65、6.1.116 有；6.1.174 c2f148d、6.12.81 无 | Panther MDIO address 0，外接 RTL8211F-CG；路径命中 | 高相关初始化差异，但方向不确定：0x1801 清 RXC bit1/EEE bit5，存在与 6.1.116 正常基线矛盾；无实际寄存器回读/波形 | 源码调用顺序已确认；硬件最终状态未验证 |
+| PHYCR2 0x1801 的 bitfield | 已有 datasheet 专项报告完成 | 对 RTL8211F-CG page 0xa43/reg 0x19 适用 | 说明整字写入并非单纯 CLKOUT 配置；reserved 编码与 RXC/EEE 位副作用必须保留 | datasheet 位域可解码；具体 silicon 行为/复位保持未知 |
+| Realtek 普通 CG config_init mask | 四版本共同：PHYCR2 软件 mask 只改 bit0 | Panther 实际命中 | 不会由后续软件 RMW 恢复 0x1801 清掉的 bit1/bit5；硬件 soft reset retention 仍未知 | 源码已确认；PHY 硬件状态未验证 |
+| LED DT/framework 变化 | 6.1.116 增加 realtek,led-data；6.1.174 调整写入位置；6.12 LED framework | Panther 无 LED property/child node | 不命中 | 源码与 DTS 适用性已确认 |
+| PHY paged API 锁/restore | 6.1.65→6.1.116 有 helper 代码演进；6.1.116/174 phy-core blob 相同；6.12 继续演进 | Panther PHY paged register path 使用这些 helper | 未发现 Panther 正常路径 page-lock/restore 回归 | 源码函数级已确认 |
+| PHYLIB state machine error handling | 6.1.65/116/174 的 phy.c blob 相同；6.12 拆分 lock/post-work 并引入 PHY_ERROR | Panther polling PHY 路径适用 | 只在 MDIO/PHY 操作错误、HALTED/ERROR/suspend 路径改变；不能解释 6.1.174 首次故障分组 | 源码已确认；历史错误日志未证明命中 |
+| PHYLINK PHY mode resolve | 6.1 三版本 MLO_AN_PHY 分支相同；6.12 改 act_link_an_mode/link_failed 结构 | Panther MLO_AN_PHY，仍以 phy_state 为状态来源 | 未发现切换到 PCS/in-band 或无条件阻断 | 源码与 DTS 适用性已确认 |
+| mac_requires_rxc / PHY_F_RXC_ALWAYS_ON | 6.1.174 起 STMMAC 配置 mac_requires_rxc；6.12 attach 时传 PHY_F_RXC_ALWAYS_ON | 6.1.174 只在 resume 前对 suspended PHY 调 phy_resume；6.12 flag 被传入 dev_flags，但 RTL8211F driver 不消费 | 不属于首次 cold boot 的普通 TX 主路径；与 RXC 管理概念相关，保留为 PM/RXC 背景 | 源码已确认；历史 resume 命中未知 |
+| PHY interrupt / polling | 四版本 Panther 使用 IRQ=POLL；Realtek interrupt 支持代码不构成当前主路径 | Panther 实际 IRQ=POLL | 不命中 PHY IRQ handler 主路径 | 历史运行记录 + 源码适用性已确认 |
+| suspend/resume / WOL / optional PHY clock | 6.12 开始专用 RTL821x PM/optional clock 路径；6.18 继续演进 | Panther DT 未声明 PHY clock / wakeup-source | PM/WOL 条件路径，不解释普通冷启动 TX | 源码/DTS 已确认；现场 PM 状态未知 |
+| 6.18.63 EEE bit5 单 bit 清除 | 目标内核新增配置，与历史四版本分开 | Panther 普通 RTL8211F-CG config_init 会执行 | 影响 PHY-mode EEE/LPI 管理；不等于 0x1801，不清 RXC bit1 | 目标源码已确认；实际寄存器/链路效果未验证 |
+| 6.18.63 speed status 改读 MII_RESV2 | 目标内核新增 | Link up 后 speed/duplex 状态读取 | 属于 link status decode，不是 TX descriptor 路径；寄存器等价性未实测 | 目标源码已确认；硬件寄存器对应状态未知 |
+
+### 10.2 候选优先级（仅作为后续跨方向引用，不作根因判定）
+
+**A. 高优先级待关联：黄金版本存在、故障版本缺失的 PHYCR2/BMCR workaround**
+
+理由：
+- 版本分组与已知正常/故障样本方向一致；
+- Panther 的真实 PHY ID、MDIO 地址、DTS 外接 PHY 分支均已确定；
+- 写入发生在 PHY probe 之后、config_init 之前，执行顺序已闭环；
+- 0x1801 不是无害的单一 CLKOUT 配置，按完整位域会清除 RXC bit1 和 PHY-mode EEE bit5，并写入 bits[13:12]=01 编码。
+
+限制：
+- 6.1.65 源码端点是高置信度候选，不是原始 Image 精确 source commit 绑定；6.1.116 源码端点固定，但原始 build run 与 Image 的精确绑定仍有限；
+- 没有证明四次 write 成功；
+- 没有历史 workaround 后、BMCR reset 后的 PHYCR2 全寄存器读回；
+- 没有 RXC/CLKOUT 引脚波形与 RK3566 实际接收时钟证据；
+- 6.1.116 正常网络基线与“0x1801 清 bit1 RXC”存在需要解释的矛盾。
+
+因此它是**版本分组最强、但效果方向仍不确定的候选**。不建议直接恢复 workaround，不制作写寄存器补丁。
+
+**B. 中低优先级：6.1.174 新增 mac_requires_rxc / resume 前 phy_resume**
+
+该路径明确面向 MAC 需要 RXC 时的设备 resume；首次冷启动没有调用 phylink_prepare_resume 的依据。可作为 suspend/resume 与 RXC 管理专题保留，但不能解释 cold boot DHCP Discover 不出现在交换机侧的现有证据。
+
+**C. 低优先级/条件路径：6.12 PHY_ERROR、EEE/LPI、link_failed、PM/WOL、LED 与 optional PHY clock**
+
+这些变化要么首次出现在 6.12（无法解释 6.1.174 已存在的故障），要么需要 PHY MDIO 错误、EEE/LPI、link failure、LED/clock/wakeup DT 属性或 suspend/resume 条件。Panther 普通配置没有相应 LED/PHY clock/wakeup 输入，现有历史记录也没有证明错误路径命中。
+
+**D. 未发现回归：正常 PHY polling/autoneg 与 MLO_AN_PHY 连接主链**
+
+四版本 genphy config/read status 与核心 connect/disconnect 主体一致；6.1 三版本 phy.c blob 完全相同；6.12 重构没有把 Panther 的 PHY mode 状态来源切换到 PCS/in-band。当前没有证据支持普通成功路径存在新增无条件阻断。
+
+### 10.3 证据等级汇总
+
+| 证据类别 | 已完成/已验证 | 未完成/不能推断 |
+|---|---|---|
+| 固定源码端点 | 四版本 commit/ref 固定，函数与文件 blob 记录 | 6.1.65/6.1.116 原始 Image 与精确构建 commit 的密码学级绑定 |
+| Panther PHY 身份 | 完整 PHY ID 0x001cc916、地址 0、普通 CG 编码 | 当前设备以外的 silicon revision/批次差异 |
+| DTS 路径 | RGMII、MDIO bus、phy-handle、无 LED/PHY clock/wakeup 属性 | 实际 pin waveform / PHY strap 电气状态 |
+| driver probe/config_init | 代码执行顺序、mask、reset 调用点 | 每笔 MDIO transaction 成功与否、最终 PHYCR2 值 |
+| PHYLIB/PHYLINK | polling/autoneg/link callback、PHY mode resolver 主要函数覆盖 | 历史启动时的完整 PHY 状态机事件与错误码 |
+| MDIO API 安全 | 内核 paged helper 锁保护、用户态接口限制、外部模块生命周期风险 | 运行时 PHYCR2 读回的安全实施方式；remove/unbind 排他同步仍未证明 |
+| 物理时钟 | 软件 DTS/CCF 配置与既有历史状态可引用 | RXC/CLKOUT 频率、相位、振幅及 reset 后稳定时间 |
+| 目标 6.18.63 | EEE bit5、soft reset、speed status、PM 代码已审 | Panther 上运行时寄存器与波形效果 |
+
+### 10.4 方向五原定静态审计范围验收
+
+| 原定范围 | 状态 | 归档位置 |
+|---|---|---|
+| 四版本 RTL8211F 型号匹配、probe/config_init、RGMII delay、PHYCR1/PHYCR2 | 完成 | §3、§4、§9.1、§9.2 |
+| MDIO paged API 锁、page restore、错误传播 | 完成 | §5 |
+| PHYLIB autoneg、read status、polling state machine、start/stop | 完成 | §6、§9.7 |
+| PHYLINK attach/connect、MLO_AN_PHY resolve、link callback | 完成 | §6、§9.7 |
+| IRQ/POLL、LED、clock、suspend/resume/WOL 适用性 | 完成 | §4、§9.4、§9.5、§9.8 |
+| 6.18.63 目标 PHY driver 差异 | 完成静态核对 | §7、§9.3 |
+| 既有 PHY 专项报告复核与跨方向一致性 | 完成 | §2、§9.4、§9.8 |
+| 四版本总矩阵、候选等级、证据边界 | 完成 | §9.5、§10.1～§10.3 |
+
+**方向五静态源码审计的既定范围已全部覆盖。** 剩余未决事项均为运行时寄存器值、MDIO 事务成功、PHY reset retention、RXC/CLKOUT 波形、历史启动状态或源码/二进制 provenance；它们不能通过继续重复当前静态函数检索而解决。按项目约束，本轮不访问设备、不启用 trace、不构建/加载模块、不读写 PHY/MDIO、不重启接口。
+
+### 10.5 有条件结项建议（等待用户确认）
+
+建议方向五按“证据边界明确的有条件结项”归档，理由：
+1. 原定四版本 PHYLIB/PHYLINK/Realtek PHY driver 静态审计范围已经逐项覆盖；
+2. 方向三 D3-2 的 workaround 差异已被正确关联，不重复或越界；
+3. 15 份既有专题报告及 PHYCR2 位域修正已复核，关键矛盾保留；
+4. 6.18.63 目标内核新增行为已独立列出，没有混入历史四版本故障分组；
+5. 所有剩余问题都需要新硬件/运行时证据或新的原始构建资产，当前静态审计已到边界。
+
+**当前正式状态：方向五审计范围完成，结项建议已形成；尚未由用户确认正式结项。** 不自行进入 B2-0 后续版本决策/组件恢复顺序整合阶段，不启动 B2.1，不访问设备，不修改系统。待用户确认后，再按原始实施计划进入下一阶段。
