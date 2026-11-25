@@ -1681,3 +1681,35 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 4. 当前仍无证据显示 Panther 故障路径使用 Linux bridge、VLAN 子设备、AF_PACKET 过滤 socket 或已注册 Netfilter ingress drop hook。
 
 **本项结项：** §14 的 6.1.65 候选源码与原始配置映射完成。下一项按原报告顺序进入 §16 IPv4 PREROUTING/LOCAL_IN、conntrack 与 NAT hook；不提前转向驱动专题。
+
+
+## 37. §16 IPv4 conntrack / NAT hook：补入 6.1.65 候选源码与原始配置（2026-11-25）
+
+### 37.1 6.1.65 实际配置映射
+
+原始 `config-6.1.65-ophub` 的实际值：
+- `CONFIG_NF_CONNTRACK=y`；
+- `CONFIG_NF_DEFRAG_IPV4=y)；
+- `CONFIG_NF_NAT=m`；
+- `CONFIG_NETFILTER_XTABLES=m`、`CONFIG_NETFILTER_XT_NAT=m`；
+- `CONFIG_IP_NF_IPTABLES=m`、`CONFIG_IP_NF_FILTER=m)、`CONFIG_IP_NF_NAT=m)；
+- `CONFIG_NF_TABLES=m)。
+
+6.1.65 没有 `IP_NF_IPTABLES_LEGACY` 独立符号；这是后续 6.12 Kconfig 拆分后出现的符号。以上实际配置形态与 6.1.116 模板对应项一致。
+
+### 37.2 源码函数四端点补齐
+
+本次补入 6.1.65 候选源码后，比较结果：
+- `nf_ct_netns_do_get()` / `nf_ct_netns_put()`：四端点一致；IPv4 conntrack hook 注册/注销机制与引用计数无 6.1 黄金基准差异。
+- `nf_conntrack_in()`、`resolve_normal_ct()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 存在既有报告记录的 debug/state read 整理。
+- `init_conntrack()`：6.1.65 与 6.1.116 一致；6.1.174 起有函数体变化，需沿用 §16.3 已记录的分配错误传播/连接跟踪初始化差异判断，不将其误记为 6.12 才出现的行为。
+- `nf_nat_inet_fn()`：四端点一致。
+- `nf_nat_register_fn()`：6.1.65、6.1.116、6.1.174 一致；6.12 对数组分配 API 做整理。
+- `iptable_nat_table_init()`：四端点一致。
+- `iptable_filter_table_init()`：6.1.65、6.1.116、6.1.174 一致；6.12 存在既有报告记录的注册/初始化 API 调整。
+
+### 37.3 修订后的判断
+
+6.1.65 与 6.1.116 在 conntrack hook 注册/注销、普通 conntrack packet entry、tuple lookup、NAT hook 主函数及 iptables NAT/filter table init 的核心函数上保持一致。6.1.174 的 `init_conntrack()` 变化需按 §16.3 的实际错误传播语义分析，但没有证据证明它在普通无压力 DHCP 流量上会触发。6.12 的变化已在 §16 原文限定为 confirm wrapper、debug/state read、分配 API 与 Kconfig/module 结构整理；目前没有发现普通 IPv4/UDP 默认新增 drop 条件。
+
+**本项结项：** §16 的 6.1.65 候选源码与真实配置映射完成。下一项严格按原顺序进入 §18 IPv4 header checksum、fragment reassembly 与本机交付路径。
