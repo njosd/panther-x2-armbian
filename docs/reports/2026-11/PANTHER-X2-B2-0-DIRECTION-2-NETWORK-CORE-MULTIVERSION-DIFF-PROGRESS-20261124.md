@@ -1438,3 +1438,63 @@ BQL 的功能仍是 TX queue byte accounting / queue limit 控制，相关发送
 **本项结论：** §3 的 6.1.65 源码回溯完成（候选端点等级）。本节没有发现 6.1.65 与 6.1.116/6.1.174 在网络初始化、loopback 或 IPv4 初始化关键函数上的回归。唯一需要在方向二既有 TX 章节继续保留的是 6.1.65 与 6.1.116/6.1.174 的可选 `ETHERNET_PACKET_MANGLE` hook 存在性差异；不把它升级为已启用差异或故障根因。
 
 **后续顺序：** 按 §25.5 第 3 项，继续以 §3～§24 原顺序补入能可靠锁定的 6.1.65 函数级差异；下一项是 §4 的 IPv4 output、`__dev_queue_xmit()`、qdisc 与 TX checksum/helper 路径。6.1.65 仍为高置信度候选源码端点，不改变其证据等级。方向二仍进行中，不进入方向三或 B2-1。
+
+
+## 30. §4 IPv4 output、IP append 与 generic TX 前置路径：补入 6.1.65 候选源码端点（2026-11-25）
+
+### 30.1 比较文件与函数
+
+按 §25.5 第 3 项、§3～§24 原顺序，先补 §4 的 6.1.65 端点。只读读取四版本：
+- `net/ipv4/ip_output.c`：`ip_local_out()`、`ip_output()`、`ip_finish_output()`、`__ip_append_data()`；
+- `net/core/dev.c`：`__dev_queue_xmit()`、`validate_xmit_skb()`、`skb_checksum_help()`、`skb_csum_hwoffload_help()`；
+- `net/sched/sch_generic.c`：`sch_direct_xmit()`、`qdisc_restart()`、`dequeue_skb()`；
+- `net/core/skbuff.c`：`skb_segment()`。
+
+6.1.65 使用第 29 节的高置信度候选源码端点；其余三个端点仍使用第 2 节固定来源。以下结论为候选源码函数比较，不提升 6.1.65 构建身份等级。
+
+### 30.2 IPv4 output 与 IP 数据追加
+
+- `ip_local_out()`：四端点函数体一致。
+- `ip_finish_output()`：四端点函数体一致。
+- `ip_output()`：6.1.65 与 6.1.116 函数体一致；6.1.174 增加 RCU read-side lock，并通过 `skb_dst_dev_rcu()` 获取目标设备；6.12 延续该 RCU 保护并将 OUT 统计更新移至后续路径（与 §4.1 既有结论一致）。6.1.65 黄金 A 与黄金 B 在该函数上没有差异。
+- `__ip_append_data()`：6.1.65 与 6.1.116 的普通数据拷贝、fragment 计算、skb/page-frag 分配及队列追加主流程一致。两者可见差异集中在软件时间戳条件/读取：6.1.65 使用 `SKBTX_ANY_SW_TSTAMP` 与普通 `sk_tsflags` 读取；6.1.116 改为 `SKBTX_ANY_TSTAMP` 并使用 `READ_ONCE(sk->sk_tsflags)`。6.1.174 进一步整理 timestamp key 的持有/错误回滚（既有 §21 已记录）；6.12 新增 `MSG_SPLICE_PAGES` 条件分支，普通 UDP sendmsg 不设置该标志。未发现 6.1.65→6.1.116 改变普通小 UDP datagram 的 payload 拷贝或 IP fragment 计算语义。
+
+### 30.3 Generic TX queue / checksum 入口
+
+- `__dev_queue_xmit()`：6.1.65 与 6.1.116 函数体一致；6.1.174 新增 noqueue GSO skb-list 部分发送返回码处理，6.12 延续并将 ingress metadata 初始化迁移为 `tcx_set_ingress(skb, false)`。6.1.65 与黄金 B 在该函数没有差异。
+- `validate_xmit_skb()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 新增 `!skb_frags_readable(skb)` 入口检查并直接释放 unreadable skb（§22.3 已说明触发条件及其为 generic TX 提前 drop 门）。
+- `skb_checksum_help()`：6.1.65、6.1.116、6.1.174 函数体一致；6.12 新增 unreadable-fragment 检查，属于软件 checksum fallback 条件路径。
+- `skb_csum_hwoffload_help()`：6.1.65 与 6.1.116/6.1.174 存在函数体差异，6.1.116→6.1.174 既有报告已定位为 IPv6 extension/jumbo-header offload 判定调整；该条件不适用于 IPv4 DHCP。6.12 延续相关演进。此项不得误写为 6.1.65 与 6.1.116 完全相同。
+- `sch_direct_xmit()`：四端点函数体一致。
+- `qdisc_restart()` / `dequeue_skb()`：6.1.65 与 6.1.116 函数体一致；6.1.174 起增加 packet budget 传递，6.12 延续。影响批量 dequeue / 调度预算，不改变单 skb direct-xmit 处理。
+- `skb_segment()`：6.1.65 与 6.1.116 已存在实现差异；6.1.174 另有 shared-frag/GRO 元数据传播修正（此前 §5 已归档专项报告），6.12 延续并演进。该函数处理 GSO 分段，不可将其差异直接外推到普通非 GSO DHCP datagram。
+
+### 30.4 本节对普通 UDP/DHCP TX 的判断
+
+1. 黄金 A 与黄金 B 的 `ip_local_out()`、`ip_output()`、`__dev_queue_xmit()`、`validate_xmit_skb()`、`skb_checksum_help()`、`sch_direct_xmit()`、qdisc budget 前版本函数体一致。
+2. 6.1.65→6.1.116 在 `__ip_append_data()` 的 timestamp flag/read accessor 与 `skb_csum_hwoffload_help()`、`skb_segment()` 存在差异；当前未发现这些差异改变普通小型 IPv4 UDP datagram 的 payload 构造、普通 checksum fallback 或单 skb generic TX 交付。
+3. 6.1.174 的 GSO skb-list 返回码修正只命中分段列表；6.12 的 unreadable-fragment drop 门是实际新增条件性 generic TX 丢弃路径，但须 skb 含 unreadable net_iov fragment 才命中。当前无历史 DHCP skb 具备该 backing-memory 形态的证据。
+4. 本节没有发现一个已证实、能解释普通 DHCP 单 skb 在 6.1.174 或 6.12.81 故障的 Linux 网络核心回归点。
+
+### 30.5 对 §22 的补充：可选 ETHERNET_PACKET_MANGLE hook 的四版本差异
+
+对 `net/core/dev.c:xmit_one()` 的四端点函数体再次提取比较：
+- 6.1.65：没有 `CONFIG_ETHERNET_PACKET_MANGLE` 条件分支；
+- 6.1.116、6.1.174：在 `dev_queue_xmit_nit()` 之后、`netdev_start_xmit()` 之前，若 `dev->eth_mangle_tx` callback 存在则调用它；callback 返回 NULL 时直接返回 `NETDEV_TX_OK`；
+- 6.12.81：该分支被移除。
+
+与 Kconfig 对照：
+- 6.1.65 候选源码 `net/Kconfig` 不存在 `ETHERNET_PACKET_MANGLE` 符号；
+- 6.1.116/6.1.174 的 `net/Kconfig` 存在隐藏 bool 定义，无 prompt/default，允许 PHY driver select；
+- 6.12.81 的定义与调用均不存在；
+- 6.1.65 原始实际配置中未找到该符号行，且候选源码不存在定义；不能推定 6.1.65 存在此 hook。
+
+**证据边界：** 本项已确认网络核心通用 hook 的版本存在性差异，但 callback 是否被 Panther X2 的 PHY/网卡驱动注册、对应 config 是否最终置 y，必须依赖驱动侧证据。该问题按原计划留待方向三对应驱动专题，不在本轮提前读取 STMMAC/PHY 驱动代码或扩展专题。不得把 hook 的存在直接当作已启用，更不能认定其导致普通 DHCP TX 故障。
+
+### 30.6 本项状态与后续顺序
+
+**本项结项：** §4 的 6.1.65 候选源码函数回溯已完成；四版本矩阵已能区分黄金 A、黄金 B 与两条故障线的源码差异。结论仍保留候选源码身份限制。
+
+**下一项严格按 §25.5 第 3 项原顺序：** 继续 §5 已引用的 NAPI skb allocator、GRO/shared-frag 与相关网络核心函数的 6.1.65 候选端点回溯；复用已有报告，不重做 6.1.116/6.12.81 已完成分析。之后依 §6、§7……原章节顺序推进，不能跳去驱动方向。
+
+方向二仍进行中。本轮仅做四端点源码/Kconfig/既有配置证据只读审计；没有访问设备、构建、修改系统或执行网络试验。
