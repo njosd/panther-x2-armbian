@@ -1831,3 +1831,33 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 6.1.65 与 6.1.116 的 UDP socket sendmsg 状态访问存在明确小差异，但普通非 cork DHCP datagram 的 skb 构造、checksum 和 IP output helper 保持一致。6.1.174 的 UDP GSO 专用差异及 6.12 的 MSG_SPLICE_PAGES/后续 UDP 变化仍按 §32 既有适用条件记录；不能混同于普通 DHCP 单 skb 路径。
 
 **本项结项：** §21 的 6.1.65 候选源码函数级回溯完成。下一项严格进入 §22 TX queue → qdisc → validate → ndo_start_xmit 交付链，重点将既有 §30 的函数比较结果纳入该节四版本矩阵。
+
+
+## 42. §22 TX queue → qdisc → validate → ndo_start_xmit：补入 6.1.65 候选源码与真实配置（2026-11-25）
+
+### 42.1 6.1.65 实际配置
+
+原始 `config-6.1.65-ophub`：
+- `CONFIG_NET=y)、`CONFIG_NETDEVICES=y)、`CONFIG_NET_CORE=y)；
+- `CONFIG_NET_SCHED=y)、`CONFIG_NET_SCH_INGRESS=y)、`CONFIG_BQL=y)；
+- `CONFIG_NETFILTER_INGRESS=y)、`CONFIG_NETFILTER_EGRESS=y)；
+- `CONFIG_ETHERNET_PACKET_MANGLE`：6.1.65 候选源码中不存在该 Kconfig 符号；
+- `CONFIG_NET_DEVMEM`：6.1.65 源码时代不存在该符号；
+- `CONFIG_NET_DROP_MONITOR`：本次原始配置文本未找到对应行，不能据此直接写成 n。
+
+### 42.2 6.1.65 与 6.1.116 TX 函数比较
+
+补入黄金 A 后：
+- `netdev_core_pick_tx()`、`netdev_pick_tx()`、`validate_xmit_skb_list()`、`dev_hard_start_xmit()`：6.1.65 与 6.1.116 函数体一致。
+- `dequeue_skb()`、`qdisc_restart()`、`sch_direct_xmit())、`__qdisc_run()`：6.1.65 与 6.1.116 函数体一致；6.1.174 起的 packet budget 差异仍如 §22.2。
+- `__dev_queue_xmit()`、`validate_xmit_skb()`、`sch_direct_xmit()`：6.1.65 与 6.1.116 一致（§30 已逐项记录）。
+- `xmit_one()`：6.1.65 没有 `ETHERNET_PACKET_MANGLE` 条件 hook；6.1.116/6.1.174 有可选 `dev->eth_mangle_tx` callback，6.12 删除该 hook。6.1.65 原始源码不存在对应 Kconfig 定义，因此不是“6.1.65 配置没打开”而是该源码端点没有此扩展。
+- `netdev_start_xmit` 是宏/inline 调用边界而非本次函数提取器可独立识别的函数；四版本仍以 `xmit_one()` → `netdev_start_xmit()` → `ndo_start_xmit` 作为驱动交付边界。
+
+### 42.3 对普通 DHCP TX 的判断
+
+6.1.65 与 6.1.116 在 TX queue 选择、qdisc 出队/调度、发送前校验、单 skb direct-xmit、驱动调用/返回处理上没有发现通用路径差异。唯一与通用发送交付点直接相邻的黄金 A/B 差异是 6.1.116 增加可选 `ETHERNET_PACKET_MANGLE` hook；是否启用及是否注册 callback 必须看驱动端配置/代码，不能由 Kconfig 符号存在推断。该驱动侧确认留待方向三，不在方向二提前审计。
+
+6.1.174 的 noqueue GSO list 返回码变化只命中 GSO skb list；6.12 的 unreadable net_iov fragment 提前 drop 需要特定 skb backing memory；二者均未证明命中普通小型 DHCP UDP 单 skb。当前没有找到解释 6.1.174/6.12.81 普通 UDP 发送失败的通用 Linux 网络核心 TX 回归点。
+
+**本项结项：** §22 的 6.1.65 候选源码与原始配置映射完成。下一项按原顺序进入 §23 netdev_start_xmit、TX queue flow control、watchdog 与 skb completion/free。
