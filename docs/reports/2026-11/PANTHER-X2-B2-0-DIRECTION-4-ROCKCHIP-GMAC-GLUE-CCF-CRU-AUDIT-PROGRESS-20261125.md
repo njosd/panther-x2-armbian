@@ -105,11 +105,72 @@
 | 四版本 `dwmac-rk.c` clocks enable / powerup 主路径 | 已完成第一轮 | 6.1.65 与 6.1.116 文件 blob 相同；两故障源码分组差异已确认 |
 | 四版本 GMAC1 CRU mux/divider/gate | 已完成第一轮 | 专属定义一致；PCLK_USB critical flag 为两黄金/两故障分组差异 |
 | Panther 四版本 GMAC1 DTS 关键时钟输入 | 已完成第一轮 | 形成两组相同 blob，RGMII input 主配置语义一致 |
-| 四版本 CRU reset ID / reset controller 精确核对 | 待完成 | 旧报告仅有 6.1.116 与非精确 c2f148d 之前端点；需按实际 c2f148d 补核 |
-| RK3568 CCF/PLL provider 与父链回调 | 待完成 | 继承既有三端点报告，补 6.1.65 并核实 c2f148d 精确调用链 |
+| 四版本 CRU reset ID / reset controller 精确核对 | 已完成（源码静态范围） | 四版本 ID 236、provider 注册参数与映射一致；另发现 STMMAC core 10µs delay 的版本差异，见 §6.1 |
+| RK3568 CCF/PLL provider 与父链回调 | 已完成第一轮 | 6.1.65/6.1.116 PLL provider blob 相同；c2f148d/6.12.81 使用后期 mux 切换实现，见 §6.2 |
 | 最终四版本差异矩阵与一致性审校 | 待完成 | 以上完成后再汇总，不提前结项 |
 
-下一步只推进表中第一项未闭环的 reset ID / reset controller 精确核对；随后按原有报告顺序补齐 CCF/PLL 的 6.1.65 对照。若某项既有证据已足够，则只做来源和端点确认，不重复源码专题。
+本轮完成 reset ID/provider 的四版本闭环，并补齐 6.1.65 的 CCF/PLL 对照。下一步进入方向四总矩阵的一致性审校；不再重复 CRU reset ID 计算或 PLL provider 函数审计。
+
+
+## 6.1 四版本 CRU reset ID / provider 闭环（2026-11-25）
+
+### 6.1.1 DTS consumer 与 reset binding
+
+四版本 `rk356x.dtsi` 的 GMAC1 节点均声明 `resets = <&cru SRST_A_GMAC1>`、`reset-names = "stmmaceth"`。四版本 binding 的 `SRST_A_GMAC1` 均为 ID 236；相邻 `SRST_GMAC1_TIMESTAMP` 为 237。binding 文件整体 blob 虽然不同，GMAC1 reset ID 数值一致。Panther board DTS 没有覆盖该 reset specifier，因此继承 SoC DTS 的 ID 236。
+
+### 6.1.2 CRU reset controller 注册与寄存器映射
+
+四版本 `clk-rk3568.c` 均调用 `rockchip_register_softrst(np, 30, reg_base + RK3568_SOFTRST_CON(0), ROCKCHIP_SOFTRST_HIWORD_MASK)`。四版本均为 30 registers、HIWORD_MASK；常规映射每寄存器 16 个 reset IDs。ID 236 对应 bank 14、bit offset 12、register `RK3568_SOFTRST_CON(0) + 14 * 4`。映射和 hiword-mask assert/deassert 写入规则一致。此处是源码映射推导，不是实际 MMIO readback。
+
+### 6.1.3 softrst.c 文件变化的实际影响边界
+
+6.1.65 / 6.1.116 的 `softrst.c` blob 相同；c2f148d / 6.12.81 blob 相同。后期版本增加 lookup-table reset provider API，并在 assert/deassert 中支持 `softrst->lut`。但 RK3568 CRU 初始化在四版本仍调用普通 `rockchip_register_softrst()`，不是 `rockchip_register_softrst_lut()`；该 LUT 能力没有用于 Panther RK3568 GMAC1 reset 路径，不能据此推断 ID 236 映射发生变化。
+
+### 6.1.4 STMMAC core reset sequence 的时间差异
+
+四版本 `stmmac_main.c` 在 GMAC reset assert/deassert、optional AHB reset deassert 的主要顺序一致；但进入 `stmmac_hw_init()` 前的显式等待不同：
+- 6.1.65：没有该处显式 `udelay(10)`；
+- 6.1.116：存在 `udelay(10)`；
+- c2f148d：存在 `udelay(10)`；
+- 6.12.81：存在 `udelay(10)`。
+
+因此该 10µs delay 是 6.1.65 与后续三个源码端点的差异，不是 6.1.174 首次故障版本相对 6.1.116 的新增差异，不能解释 6.1.116 正常→6.1.174 故障的首发回归。不得笼统写成四版本 reset 流程逐字节一致。
+
+### 6.1.5 reset 子项结论
+
+- **已验证：** 四版本 GMAC1 reset consumer、ID 236、CRU provider 注册参数、HIWORD_MASK 规则和寄存器 bank/bit 映射一致。
+- **已验证：** 后期 `softrst.c` LUT API 没有被 RK3568 CRU 初始化调用，不改变本路径映射。
+- **已验证：** STMMAC reset 到 MAC hardware init 的显式 10µs 等待仅在 6.1.65 缺失，6.1.116/6.1.174/6.12.81 均存在。
+- **未验证：** reset 寄存器运行时值、assert/deassert 实际总线完成时间、硬件复位脉冲宽度及 PHY/MAC 电气状态。
+- **定级：** 没有发现 6.1.174 相对 6.1.116 的 GMAC1 reset ID/provider regression；10µs delay 差异属于 6.1.65→6.1.116 已出现的变化。
+
+## 6.2 CCF / PLL provider 四版本补核（2026-11-25）
+
+### 6.2.1 文件指纹与 callback
+
+`clk-pll.c` blob：
+- 6.1.65 / 6.1.116：`6e5e502be44a63afdcf1044766a1f75d6ab953b3`（相同）
+- c2f148d：`f6d9d199acd81860fbf25b3b330ca33da1705af0`
+- 6.12.81：`a6b1d8a1ce459369d4c9eeca3349a3b01212e86b`
+
+四版本 `clk-rk3568.c` 均将 RK3568 GPLL 注册为 `PLL(pll_rk3328, PLL_GPLL, "gpll", ...)`，使用 RK3328/RK3036 PLL ops family。
+- 6.1.65 / 6.1.116：enable 清除 PWRDOWN → wait lock → 返回；disable 直接设置 PWRDOWN。
+- c2f148d / 6.12.81：enable 在 wait lock 后调用 mux `set_parent(PLL_MODE_NORM)`；disable 前调用 `set_parent(PLL_MODE_SLOW)`。
+- 四版本 `clk-mux.c` blob 完全相同；common CCF 的 0→1/1→0 enable 引用计数及 parent recursion 语义相同。
+
+### 6.2.2 Panther GMAC1 关系与证据边界
+
+GMAC1 ACLK/PCLK 的 parent 分别为 `aclk_usb` / `pclk_usb`；后者以 `aclk_usb` 为 parent。ACLK_USB 可从 GPLL 派生时钟中选 parent，但 Panther DTS 没有为 ACLK_USB 静态指定 parent。既有 GPLL/ACLK_USB closeout 已核实 PCLK_USB critical parent-chain 初始化发生在 CRU clock registration 阶段；若该 parent chain 选中 GPLL，callback 属于 CRU 初始化阶段，而不是 GMAC probe 首次启用时。没有 Panther 6.1.174 启动周期的 ACLK_USB parent / PLL mode readback。
+
+c2f148d / 6.12.81 还将 NPLL 标记为 `CLK_IS_CRITICAL`，而 6.1.65 / 6.1.116 未标记；NPLL 不在 GMAC1 已知 ACLK_USB parent 备选列表内，不应关联到 GMAC1。
+
+### 6.2.3 CCF 子项结论
+
+- **已验证：** 6.1.65 与 6.1.116 PLL provider 实现相同；后期两个故障源码采用 enable 后切 NORMAL、disable 前切 SLOW。
+- **已验证：** CCF mux/common 引用计数机制没有与上述差异同源的新增回归。
+- **未验证：** 故障启动时 ACLK_USB 实际 parent、PLL wrapper mode、PLL callback 实际调用次数与时间。
+- **定级：** PLL provider 差异是后期 BSP 分组变化，不能单凭静态代码证明影响 Panther GMAC TX；不安排设备读取或实机验证。
+
 
 ## 7. 安全与范围声明
 
