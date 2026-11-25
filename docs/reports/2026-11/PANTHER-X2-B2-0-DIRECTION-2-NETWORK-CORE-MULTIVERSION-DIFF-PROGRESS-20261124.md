@@ -1987,3 +1987,16 @@ ARP/neighbour 仍主要影响 DHCP 完成后的下一跳解析和单播流量，
 4. 最后更新方向二总矩阵：分别标注源码候选/精确来源、实际配置/候选模板、函数级差异、是否命中普通 DHCP/UDP TX。满足证据条件后再讨论方向二是否可以结项；在此之前方向二状态保持“进行中”。
 
 **当前状态：方向二未结项。** 本轮已完成 §3～§24 的 6.1.65 候选端点回溯和 §26 已定义源码差异筛查；剩余工作是最终配置资产闭环、来源等级核验，以及查明原始 B2-0 组件差异账本是否另有未列入 §3～§24 的明确网络核心子项。方向三、B2.1/B2.2/B3 均未启动。
+
+
+## 46. 6.1.174 最终配置资产只读可用性复核（2026-11-25）
+
+按 §45.4 第 1 项，回读既有 6.1.174 官方内核包审计 workflow artifact（artifact ID 14625845189，ZIP SHA256 4d0da74e574037eeea37bbd2a5cd868b02bf7ea1c48532b08f9ede97e3f8fce2）。只读检查其文件目录和 config 摘要：
+- artifact 内含 reports/kernel-config-and-module-findings.txt；
+- 摘要只摘录 CONFIG_LOCALVERSION、ARM64、MODULES、MODVERSIONS、STMMAC/DWMAC/PHY/MDIO 等少量关键项；
+- artifact 未包含完整 config-6.1.174-rk35xx-ophub 文件，也未摘录 CONFIG_BQL 或 CONFIG_NET_DROP_MONITOR；
+- artifact 中确有官方包 config 文件 SHA256 记录：8bbb46648ed7e28e0a49d16fe895802657a53f8ad788a9023ed730033473cf83，但仅有哈希不能反推出具体 Kconfig 值。
+
+**结论：** 本次既有 artifact 不足以闭合 6.1.174 的 BQL/NET_DROP_MONITOR 实际配置值。不得以 RK35xx config-6.1 候选模板 not set/y 替代官方包内最终 config。该子项继续标记“官方最终 config 已知存在且有 SHA256，但本次可读取 artifact 不含完整文件内容”。
+
+本轮没有重新下载/解包官方 135 MB 发布包，没有构建、设备访问或系统修改；没有把该资产缺口转化为新测试。下一步如需补齐，只能从原始官方发布包或其他已归档的完整 config 文件中只读提取对应两行。
