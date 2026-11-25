@@ -45,8 +45,8 @@
 
 | 顺序 | 子项 | 状态 | 交付 |
 |---|---|---|---|
-| D3-1 | STMMAC probe/platform resource parsing | 部分完成、进行中 | 四版本函数/结构/配置差异；重点补齐 pclk/MDC CSR clock source 交叉证据 |
-| D3-2 | DT/MDIO/PHY attach 生命周期 | 待开始 | Panther 节点适用性与 6.1.124 定点差分 |
+| D3-1 | STMMAC probe/platform resource parsing | 已完成（静态源码范围） | 四版本函数/结构/配置差异；pclk/MDC CSR clock source 变化已归档 |
+| D3-2 | DT/MDIO/PHY attach 生命周期 | 进行中 | 对照既有 6.1.124 报告，补齐实际 c2f148d 与四版本适用性 |
 | D3-3 | DWMAC4 DMA 初始化/寄存器编程 | 待开始 | channel/AXI/PBL/address-width 对照 |
 | D3-4 | TX descriptor 其余分支 | 待开始 | 排除重复后的四版本差异 |
 | D3-5 | RX descriptor/buffer/page-pool | 待开始 | 四版本 RX lifecycle 对照 |
@@ -54,16 +54,16 @@
 | D3-7 | IRQ/NAPI/watchdog/recovery | 待开始 | 中断与恢复路径矩阵 |
 | D3-8 | 总矩阵与一致性审校 | 待开始 | 方向三总结报告 |
 
-## 5. 当前唯一工作项：D3-1
+## 5. 当前唯一工作项：D3-2
 
-本轮先只做 D3-1：核对四个版本 drivers/net/ethernet/stmicro/stmmac/stmmac_platform.c、stmmac_main.c 中 probe/resource parsing 相关函数及头文件结构，至少覆盖：
-- platform/OF match data 与 plat_stmmacenet_data 初始化；
-- MAC/DMA feature/capability 选择和覆盖；
-- IRQ/resource 获取、clock/reset/PHY handoff 的调用边界（不审 Rockchip glue 内部）；
-- DMA channel/queue 数量与 AXI/PBL 等 platform data 传递；
-- Panther X2 DTS 实际命中的 match/compatible 和属性是否触发相关分支。
+D3-1 已在配套报告中结项。本轮当前只做 D3-2：核对四个版本的 MDIO/PHY attach 生命周期，重点复用既有 6.1.124 解析重构审计，不重复已证明的 6.1.116/6.1.174 stable 行为等价结论。
+- 6.1.65/6.1.116 旧 stmmac_dt_phy() 与 6.1.174 c2f148d / 6.12.81 stmmac_of_get_mdio()/stmmac_mdio_setup() 的实际分支；
+- Panther ethernet0 alias、phy-handle、mdio1 子节点、phy-mode=rgmii、PHY addr 0 的四版本解析结果；
+- mdio_bus_data->needs_reset、bus id、port_node/phylink_node 和 node reference cleanup；
+- MDIO bus 注册、PHY node enumeration、PHY attach/init 的先后关系；
+- 区分 STMMAC common 层与 Rockchip glue/PHY driver 内部动作，不提前扩展后续专题。
 
-先确认精确源码端点与文件路径，再逐函数对照；不得只根据版本号或搜索摘要下结论。遇到未在仓库缓存中的源码，应标明缺失并使用已有可信端点补齐，不访问设备。
+先回读 PANTHER-X2-STMMAC-6.1.124-MDIO-REFACTOR-PANTHER-DT-BEHAVIOR-EQUIVALENCE-20261119.md 与 PANTHER-X2-P3-INIT-CALLCHAIN-MDIO-PHY-ORDER-20261119.md；再对 c2f148d 实际故障源码端点和 6.12.81 做定点补证。不得重做旧版 stable 比较中已闭环的函数。
 
 ### D3-1 首轮结果（2026-11-25）
 - 已直接读取四版本精确源码端点的 stmmac_platform.c 与相关 stmmac_main.c、rk356x.dtsi。
