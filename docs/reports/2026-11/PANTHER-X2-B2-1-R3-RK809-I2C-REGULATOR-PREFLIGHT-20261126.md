@@ -1040,3 +1040,56 @@ SWITCH_REG1 descriptor 有 disable 操作，而 Panther DTS 没有 always-on。�
 4. **放开到 PHY/GMAC：** 先证明 SWITCH_REG1 consumer 成功绑定且不会被 late cleanup 关闭，再验证 PHY reset/clock/interface/delay，最后才进入 DMA/TX descriptor 和真实线缆 TX 验证。
 
 **本节为 6.18.63 固定源码只读调用链审计；未访问实机、未加载驱动、未写 PMIC、未改变 DTB/kernel/config/bootargs 或存储介质。**
+## 26. 6.1.65 黄金基线 regulator late-cleanup 与 Rockchip PHY consumer 对照（2026-11-26）
+
+### 26.1 regulator late cleanup：不是 6.18 新增行为
+
+分别检查固定源码端点：
+- 6.1.65 候选：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`；
+- 6.18.63：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+两版 `drivers/regulator/core.c` 均：
+- 对 populated DT 默认设定 `has_full_constraints = true`；
+- 在 `late_initcall_sync(regulator_init_complete)` 中排队延迟工作；
+- 延迟时间均为 `msecs_to_jiffies(30000)`；
+- 先尝试 resolve pending regulator input supplies，再遍历 regulator 执行 `regulator_late_cleanup()`；
+- 对无 `always_on`、`use_count==0`、硬件状态读取为 enabled 且具有 `REGULATOR_CHANGE_STATUS` 操作的 rail 执行 disable。
+
+所以约 30 秒 unused-regulator cleanup 是 6.1.65 黄金候选和 6.18.63 共有的行为，不是 6.18 regression。6.18 新增 `regulator_ignore_unused` 内核参数，可阻止 late cleanup；6.1.65 该固定源码端点未发现此参数。该参数只适合作为独立诊断变量，不能作为正式修复或默认放行条件，因为它会阻止所有 unused regulator cleanup，可能掩盖 supply consumer 绑定错误并留下未使用 rail 常开。
+
+### 26.2 Rockchip GMAC PHY-supply consumer：两版都由 DWMAC glue 管理
+
+两版 `drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c` 的 `rk_gmac_setup()` 均执行 `devm_regulator_get(dev, "phy")`，对应 GMAC 设备节点的 `phy-supply` 属性。Panther DTS 的 GMAC1 `phy-supply` phandle 指向 RK809 SWITCH_REG1（`vcc_3v3`）。因此 regulator consumer 是 Rockchip GMAC platform glue，不是 RTL8211F PHY driver 自己直接获取 PMIC rail。
+
+### 26.3 发现一个重要的 6.1.65 → 6.18 错误处理差异
+
+6.1.65 `rk_gmac_phy_power_on()` 调用 `regulator_enable()`/`regulator_disable()` 后，虽然记录错误日志，但函数末尾无条件 `return 0`。其调用者 `rk_gmac_powerup()` 检查返回值，因此无法获知 regulator 操作失败；错误可能被吞掉，随后仍继续 `pm_runtime_get_sync()` 和 MAC/PHY 后续初始化。
+
+6.18.63 对应函数改为 `rk_phy_powerup()` 返回 `regulator_enable()` 的真实错误码；`rk_gmac_powerup()` 检查失败并跳转 `clk_disable`，避免把供电失败当作成功继续执行。powerdown 仍为 void helper 并记录 disable 错误。
+
+这是本轮最重要的版本差异：6.18 的错误传播比黄金 6.1.65 更严格，属于正向修复，不应回退。也说明 6.1.65 黄金基线网络曾工作，不能单独证明当时 regulator_enable() 一定成功；SWITCH_REG1 可能在此前已处于 enabled 状态，或者 enable 调用成功但日志未暴露。必须依靠真实运行日志、regulator state/use_count 和后续 PHY 状态来判断。
+
+### 26.4 两版供电调用时序差异
+
+- 6.1.65：`rk_gmac_probe()` 直接调用 `rk_gmac_powerup()`，在调用 `stmmac_dvr_probe()` 之前完成 Rockchip glue 的 clock setup、接口 GRF 配置及 `phy-supply` enable。
+- 6.18.63：设置 `plat_dat->init = rk_gmac_init`，由 stmmac platform init callback 调用 `rk_gmac_powerup()`；`stmmac_pltfr_init()` 将 callback 返回值向上传播。Rockchip probe 先建立平台数据/clock，再进入 `devm_stmmac_pltfr_probe()`/STMMAC probe 生命周期。
+
+因此两版的供电动作都发生在 STMMAC 正常网络设备注册完成之前，但调用入口和生命周期管理方式不同。不能只比较 helper 名称或 regulator API，后续需要以实际运行日志核实 6.18 callback 是否执行及错误是否传播。
+
+### 26.5 对 SWITCH_REG1 与 late cleanup 的准确结论
+
+SWITCH_REG1 在 DTS 没有 `always_on`/`boot_on`；正常成功的 GMAC glue `devm_regulator_get("phy")` 取得 consumer handle 后，powerup 成功调用 `regulator_enable()`，会建立 regulator use count，late cleanup 应跳过该 rail。若 GMAC glue 未 probe、consumer get 失败，或 enable 未成功/use_count 仍为 0，而 rail 硬件状态又读为 enabled，则约 30 秒清理可能关闭它。
+
+这一风险在 6.1.65 和 6.18.63 都存在。6.18 更正确地传播 enable 错误，使失败更容易显性化；不能将错误传播视为供电故障本身。
+
+### 26.6 R3 收敛结论与下一阶段边界
+
+**R3 静态审计结论：COMPLETE（STATIC / CONDITIONAL）。R3 实机 provider/consumer 激活：NOT AUTHORIZED / DEFERRED。**
+
+已完成且有证据的内容：RK809 I2C adapter/identity/status RO runtime reads；RK809 pre-init 与 SWITCH_REG1 descriptor 跨版本对照；DCDC_REG3 apply bit 来源与当前 DTS 触发条件；MFD probe 副作用；regulator provider 注册范围；6.1.65/6.18 regulator late cleanup 对照；Rockchip GMAC PHY-supply consumer 获取/使能路径及关键错误处理差异。
+
+尚未完成但不再阻塞 R3 静态审计结项的内容：原始 6.1.65 DTB 二进制与候选 DTS 的最终逐项对照。当前所有 DTS 结论仍按候选源码证据标记，不能称为 golden DTB binary PASS；该核验应在 R7-A 恢复 GMAC/PHY 前作为硬件准入条件完成，不再无限扩大 R3 源码专题。
+
+本次不启用 MFD/regulator、不读写新的 PMIC 寄存器、不执行 regulator enable/disable。R3 不提供运行时 rail/PHY 正常的结论。后续 R4 只进行 MDIO/PHY 框架与 RTL8211F 的静态/Kconfig/对象审计，保持 GMAC/MDIO/PHY 节点 disabled；不得提前 probe。进入 R7-A 前，必须完成黄金 DTB 对照、R3 构建配置决策、测试镜像回滚方案和单独实机授权。
+
+**本节为两版固定源码只读对照；未访问设备、未改变配置、未进行 PMIC/regulator 操作。**
