@@ -4,7 +4,7 @@
 
 R2 的目标是：只补充 GMAC 路径实际需要、且 R0/B1 最终配置中确实缺失的共享 SoC provider。候选重点为 `MFD_SYSCON`、`GPIO_ROCKCHIP`；已经在 B1 启用的时钟、CRU、pinctrl、GPIOLIB、reset、GRF 不得重复加入。
 
-**当前结论：R2 静态/构建核验通过（零增量复用）；R2 整体未结项，不放行 R3。** 黄金基线配置差异审计与现有 R1 镜像上的 provider 运行时注册/功能验证尚待完成。
+**当前结论：R2 静态/构建核验通过（零增量复用）；R2 整体未结项，不放行 R3。** 6.1.65 黄金基线的相关最终配置对照已补齐，所比较符号与 6.18.63 均为 y、未发现配置值差异；但运行时注册/功能验证尚待完成，6.1.65 精确源码来源也仍未达到二进制级绑定。
 
 对 B1 和 R1 两份真实构建 artifact 的最终 `.config`、built-in 清单和 System.map 进行核验后，确认：
 - `MFD_SYSCON=y`、`GPIO_ROCKCHIP=y` 已存在于 B1 最终配置；
@@ -137,21 +137,47 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 
 ## 8. 2026-11-26 黄金基线对照补充与未决项
 
-### 8.1 第一黄金基线 6.1.65 已知证据
+### 8.1 第一黄金基线 6.1.65：最终配置与 built-in 对象对照
 
-仓库原始镜像审计报告已直接从 6.1.65 Kernel 二进制提取并解压内嵌 IKCONFIG，确认 CONFIG_IKCONFIG=y、CONFIG_IKCONFIG_PROC=y，并确认 STMMAC、Rockchip DWMAC、PHYLINK、PHYLIB、MDIO 等构建配置。原始镜像审计报告同时记录 modules.builtin 中的 STMMAC/Rockchip DWMAC/PHY/MDIO 对象。6.1.65 原版系统另有 Panther X2 实机正向网络验证记录。
+已从 Dropbox 归档文件 `/kernel-config-evidence.zip` 读取 `config-6.1.65-ophub` 与 `modules.builtin`。这是用户此前上传并归档的原始 6.1.65 配置证据，不需要重新提取整个 IMG。以下逐项与本报告 §3 中已从 6.18.63 B1/R1 artifact 的实际最终 `output/kernel.config` 读取的值对照：
 
-**证据缺口：** 当前已回读的 6.1.65 镜像审计摘要没有列出 MFD_SYSCON、GPIO_ROCKCHIP 及其关键依赖的最终配置值/对象逐项结果。因此本报告不能声称这些符号在 6.1.65 中为 y/n，也不能以整机网络正常替代 provider 独立配置差异对照。需要从已归档原始 Image 内嵌 IKCONFIG / modules.builtin 的可用原始资产或用户已有提取件中补齐；优先复用已有文件，不重复完整镜像提取。
+| 配置/依赖 | 6.1.65 原始 config | 6.18.63 B1/R1 final config | 对照结果 |
+|---|---:|---:|---|
+| `MFD_SYSCON` | y | y | 相同 |
+| `GPIO_ROCKCHIP` | y | y | 相同 |
+| `REGMAP_MMIO` | y | y | 相同 |
+| `GENERIC_IRQ_CHIP` | y | y | 相同 |
+| `GPIOLIB_IRQCHIP` | y | y | 相同 |
+| `OF_GPIO` | y | y | 相同 |
+| `PINMUX` | y | y | 相同 |
+| `GENERIC_PINCONF` | y | y | 相同 |
+| `COMMON_CLK` | y | y | 相同 |
+| `COMMON_CLK_ROCKCHIP` | y | y | 相同 |
+| `CLK_RK3568` | y | y | 相同 |
+| `PINCTRL` | y | y | 相同 |
+| `PINCTRL_ROCKCHIP` | y | y | 相同 |
+| `GPIOLIB` | y | y | 相同 |
+| `RESET_CONTROLLER` | y | y | 相同 |
+| `ROCKCHIP_GRF` | y | y | 相同 |
+| `ARCH_ROCKCHIP` / `OF` | y / y | y / y | 相同 |
+
+6.1.65 `modules.builtin` 还列出 `kernel/drivers/pinctrl/pinctrl-rockchip.ko`、`kernel/drivers/gpio/gpio-rockchip.ko` 与 `kernel/drivers/gpio/gpio-syscon.ko`，证明这些对象编译进黄金基线内核。`MFD_SYSCON` 在 config 中为 y；本轮不把 `modules.builtin` 中未列出独立 syscon 对象解释为功能缺失。
+
+**本轮静态配置结论：** 对 R2 涉及的 provider 与关键依赖，6.1.65 与 6.18.63 的配置值完全一致；没有需要回移的配置差异。按用户原则保留 6.18 默认配置，不增加 Kconfig、不修改源码、不重建。
+
+**实现来源限制：** 6.1.65 原始 Kernel 的精确上游构建 commit 尚未实现二进制级绑定；当前候选源码只能作为参考样本，不能冒充 6.1.65 Image 的确定构建源码。因此不能仅凭候选源码宣称两个版本实现完全相同。6.1.65 的整机有线网络成功是实际功能正向证据，但不等于 GPIO/SYSCON 每个 provider 的独立单项测试。
 
 ### 8.2 当前 6.18 默认配置结论
 
-6.18.63 的 MFD_SYSCON、GPIO_ROCKCHIP 与依赖闭包已在 B1/R1 最终 .config 和实际构建产物中确认存在；当前没有证据要求回移 6.1.65 配置，也没有理由制造配置增量。保留 6.18 默认实现。
+6.18.63 的 MFD_SYSCON、GPIO_ROCKCHIP 与依赖闭包已在 B1/R1 最终 `.config` 和实际构建产物中确认存在；与 6.1.65 对照未发现配置值差异。当前没有证据要求回移配置，也没有理由制造配置增量。保留 6.18 默认实现。
 
 ### 8.3 R2 实机只读验证范围
 
-下一轮仅使用现有已启动 R1 镜像进行只读检查：`rockchip-pinctrl` platform driver 是否绑定；GPIO bank 子设备是否由 `gpio-rockchip` 绑定并注册 gpiochip；以及对应 probe/错误日志。源码已确认 Panther X2 pinctrl 节点带有 `rockchip,grf` / `rockchip,pmu` phandle，6.18.63 `pinctrl-rockchip` probe 调用 `syscon_node_to_regmap()` 获取对应 regmap，并通过 `of_platform_populate()` 创建 GPIO bank 子设备。因此 pinctrl 成功 probe 可作为 MFD_SYSCON 的实际 consumer 证据，GPIO bank bind/gpiochip 可作为 GPIO provider 注册证据。不得写 GPIO、读取未文档化 MMIO、触发 reset/power、启用 GMAC/MDIO/PHY 或更改设备状态。
+下一轮仅使用现有已启动 R1 镜像进行只读检查：`rockchip-pinctrl` platform driver 是否绑定；GPIO bank 子设备是否由 `gpio-rockchip` 绑定并注册 gpiochip；以及对应 probe/错误日志。源码已确认 Panther X2 pinctrl 节点带有 `rockchip,grf` / `rockchip,pmu` phandle，6.18.63 `pinctrl-rockchip` probe 调用 `syscon_node_to_regmap()` 获取对应 regmap，并通过 `of_platform_populate()` 创建 GPIO bank 子设备。因此 pinctrl 成功 probe 可作为 MFD_SYSCON 的实际 consumer 证据，GPIO bank bind/gpiochip 可作为 GPIO provider 注册证据。
 
-R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 rockchip,grf / reset GPIO 的真实 phandle 获取和调用无法在 R2 直接验证；若没有安全现存 consumer，此子项必须保留 BLOCKED，并明确由 R7-A/R7-C 首次使用时验证，不能据此声称 provider consumer 功能通过。
+不得写 GPIO、读取未文档化 MMIO、触发 reset/power、启用 GMAC/MDIO/PHY 或更改设备状态。
+
+R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset GPIO 的独立 phandle 获取和调用无法在 R2 直接验证；这部分留到 R7-A/R7-C。它不妨碍 R2 通过 pinctrl 这一现存 consumer 验证 SYSCON 的基本功能。
 
 ### 8.4 已确认的 6.18 运行时 consumer 路径
 
