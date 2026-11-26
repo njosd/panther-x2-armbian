@@ -422,6 +422,28 @@ A successful ID read does not authorize loading RK8xx MFD/regulator drivers or a
 ### 15.4 当前 R3 安全放行判断
 
 - **PASS-RUNTIME：** R3.1 I2C0 controller/adapter；R3.2 RK809 ID `0x8094` 只读身份验证。
-- **PASS-STATIC-CANDIDATE：** R3.7 `PMIC_SYS_STS(0xF0)` 与 `PMIC_OFF_SOURCE(0xF6)` 全位 RO 的语义已由 Rev 2.4 数据手册核实；硬件读取尚待单独授权。
+- **PASS-BUILD / PASS-INITRAMFS：** R3.7 固定范围只读探测程序及手动执行的 RAM-only initramfs 已通过独立构建、静态 ELF、QEMU self-test 和 initramfs round-trip 验证；实际硬件读取仍待执行。
 - **BLOCKED：** R3.3 MFD/regmap parent、R3.4 regulator provider、R3.5 现有 regulator consumer、R3.6 PHY supply consumer。当前 6.18.63 MFD probe 和 regulator registration 并非只读，且 R3.6 依赖 R7-A GMAC probe，不能在 R3 提前执行。
 - **阶段决定：** 不为取得 MFD/regulator 注册证据而启用当前驱动，不重建/刷写内核镜像，不恢复 GMAC/MDIO/PHY。R3 整体继续 HOLD/BLOCKED，不放行 R4。
+
+
+### 15.5 R3.7 专用探测程序与 RAM-only initramfs 构建验证（2026-11-26）
+
+用户已明确授权的硬件访问范围为 I2C0、RK809 地址 `0x20`，仅读取 `0xF0` 和 `0xF6` 各一次。为保持最小范围，新增独立探测程序，不复用可读取其他寄存器的 R3.2 命令行接口。
+
+- 源码：`scripts/panther-x2-b2-1/rk809-status-ro-probe.c`。
+- init 脚本：`scripts/panther-x2-r1/init-rk809-status-probe`。
+- workflow：`.github/workflows/build-panther-x2-r1-rk809-status-probe-initramfs.yml`。
+- 源码/脚本/workflow 提交分别记录于 GitHub 历史；本节以成功 Actions run 与产物哈希作为构建证据。
+- 成功 Actions run：[`45800613904`](https://github.com/njosd/panther-x2-armbian/actions/runs/45800613904)，job `139842557060)，所有步骤成功。
+- 复用冻结输入：R1 run `45611898629` 的 Image/config/DTB；B1 run `45328201244` 的 BusyBox。工作流逐项验证 Image、config、DTB 与 BusyBox SHA256，没有重新编译内核。
+- Artifact：`panther-x2-r1-rk809-r3-7-status-probe-initramfs-only`，ID `15106894148`。
+- `uInitrd`：775261 bytes；SHA256 `39443dc6626ad40042a4144089afd7a6b2e9c543645deff48a854dbc55b1e663`。
+- initramfs cpio.gz：775197 bytes；SHA256 `c4486cc96809447cdbe4982cdcb9cf6c5772e3d63e6a5518d07d23c5450cdb18`。
+- 静态 AArch64 ELF：635072 bytes；SHA256 `bb9a52938bed32a4a812f0943e386071d205a0411c92971ea2d6c84dfa03822a`；无 `PT_INTERP`。
+- QEMU 非硬件 self-test：`scope=RK809_STATUS_REGISTERS_0xF0_0xF6_ONLY`、`self_test=PASS`。
+- 独立下载 artifact ZIP 后检查文件清单、ELF 类型、验证摘要与哈希；构建报告为 `result=PASS`。
+- initramfs 仅含 RAM rootfs 所需目录、冻结 B1 BusyBox、探测程序与手动 shell；round-trip 解包比较通过。探测程序不在 init 中自动调用；无持久存储挂载；Image/config/DTB/U-Boot bootargs 未改变；未添加 RK8xx MFD/regulator 驱动。
+- 本次构建没有访问 Panther 设备或任何物理存储。尚未替换 SU08G 的当前 R3.2 `uInitrd`，尚未进行 `0xF0/0xF6` 硬件读取。
+
+**结论：R3.7 PASS-STATIC + PASS-BUILD + PASS-INITRAMFS；硬件读取仍 PENDING。** 只有完成 SU08G 专用 initramfs 启动并由用户手动执行 `/bin/rk809-status-ro-probe-aarch64` 后，才能给出 PASS-RUNTIME。R3.3–R3.5 仍 BLOCKED，R3.6 仍延后至 R7-A；R3 整体 HOLD/BLOCKED，不放行 R4。
