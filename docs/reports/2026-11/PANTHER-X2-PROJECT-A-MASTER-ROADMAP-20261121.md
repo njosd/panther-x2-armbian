@@ -580,3 +580,24 @@ GitHub Actions run `45739520034`, job `139640803045` (`package-r1`), completed s
 Artifact `panther-x2-r1-hybrid-PREPARE-ONLY`, ID `15079994261`, ZIP SHA256 `9b0f4d4310dad56b866934b0b46832079ae6e6a02073d376351ae8fab3d7852b`; raw image SHA256 `e6744be80273f1cb0a6a40b4d6ed46e82361751a359305d538d7578b1892ec44`.
 
 **Status:** applet correction and CI package validation are verified. The second Panther X2 runtime boot is still pending; full `/init` completion is not yet verified. No Ethernet test is implied because GMAC1/MDIO/PHY remain disabled in R1. See detailed report `PANTHER-X2-B2-1-R1-INITRAMFS-DEFECT-CORRECTION-20261126.md`.
+
+
+## 2026-11-26 R1 corrected runtime and network-core acceptance — PASS
+
+The corrected R1 image has now completed the second Panther X2 target-hardware boot after the BusyBox printf packaging fix. The UART evidence and runtime checks are consolidated in [R1 initramfs correction and runtime acceptance report](PANTHER-X2-B2-1-R1-INITRAMFS-DEFECT-CORRECTION-20261126.md).
+
+**Verified in the running R1 system:**
+- Linux 6.18.63+ boots and reaches the interactive R1 BusyBox ash shell; the earlier printf: not found defect is absent.
+- RAM-backed rootfs is active; procfs and sysfs are mounted; no persistent filesystem mount is shown.
+- /proc/net/dev is readable and lists only lo.
+- /sys/class/net contains only the lo virtual interface.
+- /proc/net/packet is readable; the PF_PACKET table is empty because no packet socket was opened during this check.
+- dmesg reports NET: Registered PF_PACKET protocol family.
+
+**R1 status: PASS — network-core runtime preparation only.** The generic network core and PF_PACKET family registration are present at runtime, and the hardware isolation boundary is consistent with the image: GMAC1/MDIO/PHY remain disabled and no physical Ethernet interface appears. This does **not** verify AF_PACKET socket creation/send or physical Ethernet TX/RX.
+
+The initial inspection's echo: not found messages were caused by the optional BusyBox echo applet link not being present; the follow-up invoked /bin/busybox echo directly and completed all remaining checks. No R1 rebuild is required for this optional diagnostic applet.
+
+**Stage boundary:** R1 is closed. Continue with R2 strictly in the existing R0–R8 order, after reviewing the R2 detailed implementation/acceptance materials. Do not jump to R3 or R7, do not restore GMAC/MDIO/PHY in R1, and do not repeat R1 writing/boot checks. R7 remains the first physical TX-first stage after R2–R6 are independently passed.
+
+The test used the authorized SU08G TF. SN64G and eMMC were not written. No persistent mount is evidenced. No additional storage write or eMMC modification is authorized by this record.
