@@ -242,3 +242,56 @@ Rockchip RK809 Datasheet Rev 2.4（2024-01）寄存器章节明确：
 - 精确复核冻结源码的 RK809 variant 匹配路径不读取 silicon ID；核实 Panther DTS 提供 GPIO0 PA3 IRQ 与 `system-power-controller`；补充 MFD 生命周期写操作及 regulator core 对 boot-on/always-on/初始电压/模式约束的潜在写入风险。
 - 复核 Rockchip RK809 Datasheet Rev 2.4：0xED/0xEE 均为 RO 芯片身份寄存器；确认 RK3x adapter 支持 I2C combined transfer，i2c-dev 对未绑定 driver 的 DT client 可进行 I2C_RDWR。形成最小只读 ID 核验方案，尚未实机执行。
 
+
+
+## 13. R3.5 I2C-dev runtime enumeration and isolated probe preparation (2026-11-26)
+
+### 13.1 Runtime evidence from R1 AF_PACKET initramfs
+
+The following were read from the running R1 environment without PMIC register transactions:
+
+- `/sys/bus/i2c/devices/i2c-0/name` returns `rk3x-i2c`.
+- `/sys/bus/i2c/devices/i2c-0/uevent` identifies `/i2c@fdd40000`, compatible with `rockchip,rk3568-i2c` and `rockchip,rk3399-i2c`, alias `i2c0`.
+- `/proc/devices` lists character major `89 i2c`.
+- `/sys/class/i2c-dev/i2c-0/dev` returns `89:0`; its uevent reports `MAJOR=89`, `MINOR=0`, `DEVNAME=i2c-0`.
+- `/sys/dev/char/89:0/uevent` independently reports the same device identity.
+- `/sys/bus/i2c/devices/0-0020` exists with OF compatible `rockchip,rk809`, but this is an OF-created client object and is not proof of silicon ACK or ID.
+- `/dev/i2c-*` does not match any node. `/proc/mounts` lists rootfs, proc and sysfs only; devtmpfs is not mounted.
+- The shell lacks `mknod`; the attempted command returned `mknod: not found` and created no device node.
+
+**Conclusion:** the I2C adapter and i2c-dev character-device registration are present in kernel/sysfs. The missing `/dev/i2c-0` is a userspace device-node provisioning limitation in this minimal initramfs, not evidence that the kernel lacks i2c-dev. No mount, device-node creation, I2C ioctl, or PMIC transaction has yet been performed.
+
+### 13.2 Dedicated read-only probe source and build workflow
+
+Added an independent source file:
+
+- `scripts/panther-x2-b2-1/rk809-id-ro-probe.c`
+
+Added a build-only GitHub Actions workflow:
+
+- `.github/workflows/build-panther-x2-b2-1-r3-rk809-id-probe.yml`
+
+The program is hard-coded to adapter character device `89:0`, 7-bit address `0x20`, and only registers `0xED` and `0xEE`. If the node is absent, it attempts to create `/dev/i2c-0` as a temporary character device with mode 0600 in the current rootfs. It verifies an existing node's type and major/minor before opening it. It then checks `I2C_FUNC_I2C` and issues two `I2C_RDWR` combined transfers, each consisting of one register-index message and one one-byte read message.
+
+The program does not scan the bus, does not bind or load RK8xx drivers, does not call regulator APIs, and does not send PMIC register data writes. The register-index byte is the address phase of each read transfer. It prints ioctl return values, errno, and returned bytes. A failed read is reported as a failure rather than being treated as a device absence conclusion.
+
+The workflow builds a static AArch64 ELF with a dedicated cross-toolchain, checks the ELF architecture and absence of a dynamic interpreter, runs the program's non-hardware `--self-test` under QEMU, and publishes the binary, source, SHA256 and build metadata as a 30-day artifact. It does not package or alter the R1 image.
+
+Relevant commits:
+- Probe source initial commit: `2b10201c1883dbe7e7d3cf71f476a8c0332e278a`
+- Include correction: `21e7739f1ef1688edc4f47827f2387b31570381c`
+- Workflow initial commit: `be75edb047752e8eeba5c25f9bd1ea441da80cd7`
+- Workflow push trigger: `4eca623af657c01e27151c5c71d60aeeeb840815`
+
+**Build status:** not yet independently confirmed from a completed Actions run or retrieved artifact in this audit. Source committed does not equal successful cross-compilation. Hardware execution and RK809 ID values remain NOT VERIFIED.
+
+### 13.3 Updated R3.5 status
+
+- **PASS-RUNTIME:** I2C0 adapter registered and bound to `rk3x-i2c`.
+- **PASS-RUNTIME:** i2c-dev character-device major/minor registered and exposed in sysfs as `89:0`.
+- **PASS-RUNTIME (bus communication corroboration):** FAN53555@0x1c was previously identified by its driver; this does not prove RK809@0x20 responds.
+- **NOT VERIFIED:** static AArch64 probe build artifact and self-test.
+- **NOT VERIFIED:** RK809@0x20 ACK and values at `0xED`/`0xEE`.
+- **BLOCKED:** RK809 MFD/regmap and regulator-provider functional validation; no driver enablement is authorized.
+
+R3 remains HOLD/BLOCKED. Do not proceed to R4 on the basis of adapter registration, source submission, or a successful userspace self-test alone.
