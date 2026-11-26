@@ -199,6 +199,32 @@ RK809 与 RK817 共用 `rk817_pre_init_reg`。`rk8xx_probe()` 在 regmap IRQ chi
 
 **安全结论：** 当前能不触及 PMIC 的源码/DTB/Kconfig/构建产物审计已完成。RK809 ID 读取与 MFD/regulator 实机验证不属于现有镜像可直接完成的无副作用测试；不通过启用驱动或访问 PMIC 来强行结项。
 
+
+## 12. RK809 芯片 ID 只读寄存器与最小诊断路径（2026-11-26）
+
+### 12.1 Datasheet 证据
+
+Rockchip RK809 Datasheet Rev 2.4（2024-01）寄存器章节明确：
+
+- `PMIC_CHIP_NAME`，地址 `0xED`，属性 `RO`，默认值 `0x80`；
+- `PMIC_CHIP_VER`，地址 `0xEE`，属性 `RO`，默认值 `0x92`，其中芯片名低四位为 `0x9`，版本 nibble 为 `0x2`。
+
+这与 Linux 6.18.63 `include/linux/mfd/rk808.h` 中 `RK817_ID_MSB=0xed`、`RK817_ID_LSB=0xee` 一致；Linux 定义 `RK809_ID=0x8090`，按 ID mask 忽略低版本 nibble。因此两个寄存器可作为独立硬件身份只读核验点。Datasheet 证据：`https://rockchip.fr/RK809%20datasheet%20V2.4.pdf`，第 117 页（寄存器地址及 RO 属性）。
+
+### 12.2 最小安全访问方案
+
+- 仅对 7-bit I2C address `0x20` 读取寄存器 `0xED`、`0xEE`；不扫描总线，不读状态/中断寄存器，不写任何 PMIC 数据寄存器。
+- 使用单字节寄存器索引 + repeated-start 单字节读（或两条独立 SMBus BYTE_DATA read）；寄存器索引字节只是选择读地址，不是写入 PMIC 寄存器数据。
+- 预期：`0xED = 0x80`；`0xEE` 高 nibble 为 `0x9`（Rev 2.4 默认完整值 `0x92`）；Linux masked ID 应归类为 `0x8090`。
+- 6.18.63 RK3x I2C adapter 源码明确声明 `I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL | I2C_FUNC_PROTOCOL_MANGLING`，支持该只读 combined transfer。
+- 6.18.63 `i2c-dev.c` 的 `I2C_RDWR` 路径允许对未绑定 driver 的 DT client 传输；其地址检查注释明确说明“已注册但未绑定 driver”的地址不视为 busy。当前 RK809 client 节点无 driver 绑定，故该机制在源码层面可行。
+
+### 12.3 当前轮可执行边界
+
+该安全只读路径已经由 Datasheet RO 属性、Linux register definitions、RK3x adapter functionality 和 i2c-dev transfer 逻辑共同支持。**尚未在 Panther 实机执行 ID read**：现有极简 shell 没有 `i2cget`/`i2ctransfer`，当前也没有已经构建、验证并送入 RAM 的专用 ioctl 测试程序；不得用 `echo`/`cat` 伪造 ioctl，也不得用 `i2cdetect` 扫描代替精确读取。
+
+下一步优先检查现有 JP-TvBox U-Boot 是否包含 `i2c` 只读命令，或另行构建一个仅读 `0xED`/`0xEE` 的静态 ARM64 小程序。若采用内核态 `i2c-dev`，只执行上述两个 RO 字节读取；不得加载 RK8xx MFD/regulator 驱动。ID 读取通过后，仍只证明芯片身份/总线响应，不代表 MFD/regulator provider 通过。
+
 ## 9. 复用与新增证据
 
 ### 复用既有证据
@@ -214,4 +240,5 @@ RK809 与 RK817 共用 `rk817_pre_init_reg`。`rk8xx_probe()` 在 regmap IRQ chi
 - 对照 6.1.65 Golden 的 RK809 相关 config 与 built-in 对象。
 - 发现 6.18.63 RK809 MFD probe 会执行 `regmap_update_bits()`，确认它不能按只读步骤直接启用。
 - 精确复核冻结源码的 RK809 variant 匹配路径不读取 silicon ID；核实 Panther DTS 提供 GPIO0 PA3 IRQ 与 `system-power-controller`；补充 MFD 生命周期写操作及 regulator core 对 boot-on/always-on/初始电压/模式约束的潜在写入风险。
+- 复核 Rockchip RK809 Datasheet Rev 2.4：0xED/0xEE 均为 RO 芯片身份寄存器；确认 RK3x adapter 支持 I2C combined transfer，i2c-dev 对未绑定 driver 的 DT client 可进行 I2C_RDWR。形成最小只读 ID 核验方案，尚未实机执行。
 
