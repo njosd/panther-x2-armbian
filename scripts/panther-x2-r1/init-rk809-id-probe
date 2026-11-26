@@ -1,0 +1,29 @@
+#!/bin/sh
+# Panther X2 R1 RAM-only shell carrying the RK809 identity-only probe.
+# No automatic probe execution; no persistent storage or network setup.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-r1-rk809-id-probe) # '
+export PATH HOME PS1
+
+printf '\n=== Panther X2 R1 RK809 identity-only probe environment ===\n'
+printf 'Probe is present at /bin/rk809-id-ro-probe-aarch64.\n'
+printf 'It is NOT executed automatically.\n'
+printf 'Scope: I2C0 address 0x20; identity registers 0xED and 0xEE only.\n'
+printf 'No RK8xx MFD/regulator driver is enabled; no persistent storage is mounted.\n'
+
+mkdir -p /proc /sys
+if ! mount -t proc proc /proc; then
+    printf 'WARNING: could not mount procfs\n'
+fi
+if ! mount -t sysfs sysfs /sys; then
+    printf 'WARNING: could not mount sysfs\n'
+fi
+
+printf '\n--- Kernel ---\n'
+uname -a
+printf '\n--- Probe execution is manual ---\n'
+printf 'First run: /bin/rk809-id-ro-probe-aarch64 --self-test\n'
+printf 'Actual I2C identity read requires a separate explicit go-ahead.\n'
+printf '\nRAM-only probe shell ready.\n'
+exec /bin/sh -i
