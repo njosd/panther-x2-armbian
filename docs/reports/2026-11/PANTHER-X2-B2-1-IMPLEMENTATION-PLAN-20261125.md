@@ -530,3 +530,11 @@ R3 静态与实机只读证据报告：`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-P
 - 精确源码确认 6.18.63 `rk8xx_i2c_probe()` 根据 OF compatible 选择 RK809 variant 并初始化 regmap，不读取 silicon ID；随后进入 `rk8xx_probe()`。Panther DTS 含 GPIO0 PA3 IRQ 与 `system-power-controller`。MFD probe 的 regmap IRQ 初始化及 pre-init 存在 PMIC 写操作；shutdown/suspend/resume 与 power-off/restart handler 也会写 PMIC。Regulator 注册应用 DTS constraints，可能写寄存器并启用电源轨。因此 MFD/regulator probe 不是只读验证。
 - R3.7 静态审计确认 `PMIC_SYS_STS(0xF0)` 与 `PMIC_OFF_SOURCE(0xF6)` 全位 RO，排除含 RW 的 `0xF5` 与 W1C 的 `0xF8`。用户已明确授权仅读取 `0xF0/0xF6`；独立固定范围探测程序与 RAM-only initramfs 已通过构建和产物验证（Actions run `45800613904`，artifact `15106894148`），尚未部署到 SU08G，实机读取待执行。
 - **当前状态：R3.1 I2C0 controller/adapter PASS-RUNTIME；R3.2 RK809 ID 只读读取 PASS-RUNTIME；R3.7 状态寄存器 PASS-STATIC-CANDIDATE、runtime pending；R3.3 MFD/regmap、R3.4 regulator provider、R3.5 consumer BLOCKED；R3.6 PHY supply consumer 最早在 R7-A 验证。** 不启用 RK8xx driver、不切换 regulator 或电源状态。R3 整体 HOLD/BLOCKED，不放行 R4。
+
+### 4E.6 R3.7 实机状态寄存器只读验证完成（2026-11-26）
+
+R3 专项报告第 16 节已归档实机证据。SU08G 目标 UUID 与挂载点核验通过；新 R3.7 uInitrd SHA256 为 `39443dc6626ad40042a4144089afd7a6b2e9c543645deff48a854dbc55b1e663`，旧 R3.2 uInitrd 已另存备份且哈希核验通过。仅替换 SU08G 的 uInitrd，SN64G/eMMC 未涉及。
+
+R3.7 专用探针在目标机 self-test PASS；随后对 RK809@0x20 的 `PMIC_SYS_STS(0xF0)`、`PMIC_OFF_SOURCE(0xF6)` 各执行一次 I2C_RDWR repeated-start 只读事务，ioctl 均返回 2、errno=0，原始值分别为 `0xC2`、`0x00`。未扫描总线、未写 PMIC 数据寄存器、未绑定驱动、未调用 regulator API。
+
+**更新状态：R3.7 PASS-RUNTIME。R3.1/R3.2/R3.7 的安全只读项目均 PASS-RUNTIME；R3.3–R3.5 仍 BLOCKED，R3.6 仍留待 R7-A。R3 整体继续 HOLD/BLOCKED，不放行 R4。** 状态寄存器不提供 regulator 输出电压遥测，不能证明 SWITCH_REG1 或 PHY 供电能力。
