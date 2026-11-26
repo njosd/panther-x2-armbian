@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
@@ -18,7 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -41,7 +41,8 @@ static int self_test(void)
 int main(int argc, char **argv)
 {
     const char *ifname = "lo";
-    struct ifreq ifr;
+    char ifindex_path[128];
+    char ifindex_text[32];
     struct sockaddr_ll sll;
     unsigned char raw_frame[ETH_HLEN + 8];
     unsigned char dgram_payload[8] = {
@@ -91,21 +92,31 @@ int main(int argc, char **argv)
     if (rawfd < 0 || rxfd < 0 || dgramfd < 0)
         goto out;
 
-    int ctl = socket(AF_INET, SOCK_DGRAM, 0);
-    if (ctl < 0) {
+    snprintf(ifindex_path, sizeof(ifindex_path),
+             "/sys/class/net/%s/ifindex", ifname);
+    int ifindex_fd = open(ifindex_path, O_RDONLY | O_CLOEXEC);
+    if (ifindex_fd < 0) {
         saved_errno = errno;
-        result("socket_ioctl", -1, saved_errno);
+        result("ifindex_open", -1, saved_errno);
         goto out;
     }
-    rc = ioctl(ctl, SIOCGIFINDEX, &ifr);
-    saved_errno = rc < 0 ? errno : 0;
-    result("ifindex", rc, saved_errno);
-    if (rc == 0)
-        ifindex = ifr.ifr_ifindex;
-    close(ctl);
-    printf("ifindex=%d\n", ifindex);
-    if (ifindex <= 0)
+    ssize_t ifindex_len = read(ifindex_fd, ifindex_text,
+                               sizeof(ifindex_text) - 1);
+    saved_errno = ifindex_len < 0 ? errno : 0;
+    result("ifindex_read", ifindex_len, saved_errno);
+    close(ifindex_fd);
+    if (ifindex_len <= 0)
         goto out;
+    ifindex_text[ifindex_len] = '\0';
+    char *endptr = NULL;
+    long parsed_ifindex = strtol(ifindex_text, &endptr, 10);
+    if (endptr == ifindex_text || parsed_ifindex <= 0) {
+        puts("ifindex_parse_rc=-1");
+        puts("ifindex_parse_errno=EINVAL");
+        goto out;
+    }
+    ifindex = (int)parsed_ifindex;
+    printf("ifindex=%d\n", ifindex);
 
     memset(&sll, 0, sizeof(sll));
     sll.sll_family = AF_PACKET;
