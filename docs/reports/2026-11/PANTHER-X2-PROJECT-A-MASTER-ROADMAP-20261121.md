@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS；R3.1 I2C0 controller/adapter 与 R3.2 RK809 身份读取 PASS-RUNTIME（`0xED=0x80`、`0xEE=0x94`、ID `0x8094`，符合 Linux masked ID）；R3.7 `0xF0`/`0xF6` 已静态核实为全位 RO，用户已授权读取，专用探测程序与 RAM-only initramfs 构建 PASS，实读待执行；R3.3–R3.5 MFD/regmap/regulator provider/consumer BLOCKED，R3.6 留待 R7-A；R3 整体 HOLD，不放行 R4。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS；R3 静态审计 COMPLETE（CONDITIONAL）：RK809 I2C0/身份读取 PASS-RUNTIME（`0xED=0x80`、`0xEE=0x94`、ID `0x8094`），只读状态寄存器 `0xF0=0xC2`、`0xF6=0x00` PASS-RUNTIME；6.1.65/6.18.63 pre-init、SWITCH_REG1 descriptor、regulator late-cleanup、Rockchip PHY-supply consumer 调用路径已完成静态对照。R3 MFD/regulator 实机激活仍 NOT AUTHORIZED / DEFERRED，不代表 rail/PHY 已验证。下一步按 R0–R8 顺序进入 R4 MDIO/PHY 框架与 RTL8211F 静态/Kconfig/对象审计，GMAC/MDIO/PHY DT 节点继续 disabled。原始 6.1.65 DTB 二进制核对作为 R7-A 硬件准入条件，不再阻塞 R3 静态结项。
 
 ## 0. 统一项目定义
 
