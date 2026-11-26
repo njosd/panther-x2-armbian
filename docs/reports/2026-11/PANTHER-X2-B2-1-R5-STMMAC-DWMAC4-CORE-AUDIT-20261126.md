@@ -126,3 +126,56 @@ R3、R4 静态审计已条件结项。按实施计划进入 R5。本报告第一
 **R5-2 open/stop 与 DMA 初始化静态对照：PASS（DIFFERENCES IDENTIFIED；STATIC ONLY）。** 重点差异：6.18 open 增加 PM/PHY/SerDes 生命周期；DMA reset 失败从 6.1.65 的 fatal 改为 6.18 warning-and-continue；DMA pre-reset 配置及 queue tail pointer API 改变；hw_setup 增加 PCS/RX-clock LPI 保护。
 
 尚未审计 TX descriptor 提交、DMA ownership、doorbell、IRQ/NAPI completion 与 reclaim；这些仍留在 R5-3/R5-4。未运行硬件 probe、未执行 TX/RX、未更改源码或配置。
+
+## 8. DWMAC4 descriptor / ring-chain / DMA 一致性对照（R5-3，2026-11-26）
+
+### 8.1 DWMAC4 descriptor 格式与 OWN 交接
+
+两版普通 DWMAC4 TX descriptor 均由四个 32-bit word（des0–des3）构成；TX buffer address 位于 des2，长度及 packet metadata 在 des2/des3，OWN 位于 des3。两版均以 little-endian 读写 descriptor，并在 `dwmac4_rd_prepare_tx_desc()` / TSO 对应函数中保留相同的关键交接顺序：
+
+1. 先填写 buffer address、长度、FS/LS、checksum 等字段；
+2. 如需在首 descriptor 同时交 OWN，先执行 `dma_wmb()`；
+3. 最后写回包含 OWN 的 des3。
+
+两版均在主 TX 提交路径中先准备整帧 descriptors，再设置首 descriptor OWN；随后执行队列 tail pointer 更新前的 write barrier。6.18 使用 `wmb()` 后调用 queue-aware `stmmac_set_queue_tx_tail_ptr()`；6.1.65 使用 `wmb()` 后按队列计算 tail pointer 并调用旧 helper。此处 barrier/OWN 基本语义保持，暂未发现 6.18 删除 DMA ownership ordering 的证据。
+
+### 8.2 Descriptor ring 内存与 packet buffer DMA 映射
+
+两版都使用 `dma_alloc_coherent()` 分配 TX/RX descriptor ring；descriptor ring 属于 coherent DMA memory，不应再对整个 ring 做 streaming `dma_map_single()` 或手工 cache flush。两版对 skb payload 使用 streaming DMA API：
+- linear skb head：`dma_map_single(..., DMA_TO_DEVICE)`；
+- skb fragments：`skb_frag_dma_map(..., DMA_TO_DEVICE)`；
+- completion/cleanup 时根据记录的 map 类型与长度执行 `dma_unmap_single()` 或 `dma_unmap_page()`。
+
+因此，数据 buffer 的 cache/coherency 维护由 DMA mapping API 和平台 DMA ops 负责；descriptor OWN 的 CPU→DMA 可见性由 coherent allocation + `dma_wmb()` / 提交前 write barrier 配合。不能将两者混为同一个“cache flush”步骤。
+
+### 8.3 32-bit descriptor address 与 host DMA mask
+
+6.18 ring_mode/chain_mode 将 DMA 地址写入 32-bit descriptor word 时显式使用 `lower_32_bits(dma_addr)`；6.1.65 对应位置直接赋值到 32-bit word（隐式截断）。6.18 这项改动使 descriptor 的 32-bit 地址编码意图更清楚，但并不意味着允许任意 64-bit DMA 地址被截断后使用。
+
+两版 STMMAC main 都根据硬件 addr64 与 platform host_dma_width 设置 `dma_set_mask_and_coherent()`，失败后回退 DMA_BIT_MASK(32)，若 32-bit mask 也失败则停止硬件初始化。若 host DMA width 大于 32，还需结合硬件 enhanced addressing mode/EAME 能力与设备寄存器高地址路径。对 Panther X2，必须从 R6 Rockchip glue、GMAC DMA capability 及实际 DMA mask 日志确认设备地址宽度；不能仅凭 RK3566 是 32-bit CPU 就推断 DMA mask。
+
+### 8.4 Ring 与 chain 模式差异
+
+两版都保留 ring_mode_ops 与 chain_mode_ops，模式的选择由 STMMAC descriptor mode/platform configuration 决定，不是由 RTL8211F 或 PHY interface 决定。R1 当前隔离状态没有启用 STMMAC，因此没有 Panther 实际选择值。
+
+发现一项具体的 6.18 修正：`chain_mode.c` 计算首 buffer 长度时：
+- 6.1.65 直接将 `bmax` 作为首段映射长度，即使 `skb_headlen(skb) < bmax`；
+- 6.18.63 使用 `buf_len = min_t(unsigned int, nopaged_len, bmax)`，然后 `len = nopaged_len - buf_len`。
+
+6.18 避免对短 skb head 以超过实际 headlen 的长度执行 DMA map，是更稳妥的边界处理。其余多段拆分仍按 bmax 分片，首 descriptor 暂不置 OWN，后续 descriptor 填好后再由主路径交接首 descriptor OWN。
+
+Ring mode jumbo 路径也在 6.18 显式写入 lower_32_bits DMA 地址，并使用 `STMMAC_NEXT_ENTRY`；6.1.65 使用直接赋值和 `STMMAC_GET_ENTRY`。环形索引 helper 名称变化，需结合宏定义确认 wrap 语义；两版当前均按 TX ring size 回绕，未发现这里改变 descriptor ownership 规则。
+
+### 8.5 本子项结论
+
+**R5-3 DWMAC4 descriptor/ring-chain/DMA coherency 静态对照：PASS（STATIC；差异已标注）。**
+
+确认：
+- DWMAC4 descriptor OWN 位和 FS/LS/长度字段的核心语义一致；
+- 两版都保留 dma_wmb()，首 descriptor OWN 最后交接；
+- coherent descriptor ring 与 streaming skb DMA mapping 分工一致；
+- 6.18 明确 lower_32_bits 编码，且继续通过 dma_set_mask_and_coherent() 管理 DMA 地址能力；
+- 6.18 chain mode 修正首 buffer 长度不应超过 skb headlen；
+- Panther 实际 ring/chain 选择、DMA width、EAME、cache 属性仍未实机确认，留待 R6/R7。
+
+未运行设备测试、未启用驱动、未修改内核配置或源码。
