@@ -50,7 +50,7 @@
 
 **通过条件：** 先完成 6.1.65（必要时 6.1.116）对应 provider 配置/实现差异对照，再确认 6.18 默认配置和构建对象；运行时至少达到 PASS-REGISTER，并对安全、现存 consumer 取得功能证据。不得翻转未知 GPIO，尤其不得操作 reset、电源或存储控制脚。GMAC DT 节点仍关闭。
 
-若由于 GMAC/MDIO 节点关闭而不存在安全 consumer，provider consumer 功能项必须标记 BLOCKED，并明确在 R7-A 首次使用时验证；在该必需功能尚未得到验证前，R2 不得整体 PASS 或放行 R3。若仅能证明注册而不能证明 provider 功能，亦不得将注册证据升级为 PASS-FUNCTIONAL。
+R2 不依赖 GMAC consumer 来验证共享 provider：6.18.63 Panther DTS 中，rockchip-pinctrl 节点通过 `rockchip,grf` / `rockchip,pmu` phandle 使用 `syscon_node_to_regmap()`；其 probe 成功可作为 MFD_SYSCON 的现存安全 consumer 路径证据。pinctrl probe 后通过 `of_platform_populate()` 创建 GPIO bank 子设备，`gpio-rockchip` 驱动绑定并注册 gpiochip 可作为 GPIO provider 的运行时注册证据。应只读检查 pinctrl driver bind、GPIO bank driver bind/gpiochip，以及对应日志；不触碰 GPIO 值或改变状态。GMAC 对 GRF 和 reset GPIO 的独立 consumer 调用仍保留到 R7-A/R7-C 验证，不属于 R2 必须提前证明的内容。若 R1 实际 DTB 未包含/启用上述 pinctrl/GPIO 节点，或无法取得对应运行时证据，则如实标记 BLOCKED，不得整体 PASS。
 
 ### R3 — I2C0 / RK809 / MFD / Regulator
 
