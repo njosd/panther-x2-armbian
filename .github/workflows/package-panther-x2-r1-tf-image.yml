@@ -172,6 +172,10 @@ jobs:
           sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img > work/output/tf-image-sha256.txt
           zstd -T0 -10 work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img -o work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.zst
           sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.zst >> work/output/tf-image-sha256.txt
+          gzip -n -1 -c work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img > work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.gz
+          gzip -t work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.gz
+          test "$(gzip -dc work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.gz | sha256sum | awk '{print $1}')" = "$(awk '{print $1}' work/output/tf-image-sha256.txt | head -n 1)"
+          sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.gz >> work/output/tf-image-sha256.txt
           {
             echo "result=PASS"
             echo "mode=PREPARE-ONLY; no physical device access or storage writes"
@@ -186,6 +190,7 @@ jobs:
             echo "gmac1/mdio/phy=disabled"
             echo "tf_layout=2GiB GPT; PANTHER_BOOT partition1; start LBA 32768; end LBA 4192255"
             echo "final_image_sha256=$(sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img | awk '{print $1}')"
+            echo "etcher_image=panther-x2-r1-hybrid-PREPARE-ONLY.img.gz (gzip; decompressed SHA256 verified against raw image)"
           } | tee work/output/R1-TF-IMAGE-VERIFICATION.txt
           rm -f work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img
 
