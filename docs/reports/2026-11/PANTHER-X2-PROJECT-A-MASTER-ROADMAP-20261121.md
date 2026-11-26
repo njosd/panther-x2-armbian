@@ -761,3 +761,10 @@ G0.3 静态拓扑和写入路径已归档：`PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-A
 G0.4 静态 clock/reset/PHY 依赖审计已归档：`PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md`。CRU clock IDs/mux/gate、SRST_A_GMAC1 ID236、GPIO3_PA1 active-low、RGMII delay/mode 均复用 R6 证据确认。125MHz DTS fixed-clock 仅为 CCF 逻辑模型；RTL8211F CLKOUT pin35 是候选物理来源，实际 PCB 连线与波形仍 UNKNOWN。未执行任何设备或外部测量操作。
 
 下一项唯一任务为 G0.5：审查 ABCD 发送器与同帧 trace/对端抓包夹具，不恢复 GMAC、不发送目标帧。
+
+
+### G0.5 阶段进度更新（2026-11-26）
+
+G0.5 ABCD-TX sender 与观测夹具审查已归档：`PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md`。现有 R1 AF_PACKET probe 的 loopback outgoing tap 仅证明软件 API，不是 Ethernet TX；后续必须使用独立 sender，固定 EtherType 0x88B5、ABCD/run_id/sequence/digest，采用单帧、单队列、无 GSO/VLAN/fragments，按 skbaddr、DMA mapping、descriptor address 关联 A/B/C/D；对端 pcap 是 E6 决定性证据。观测配置已有静态构建证据，运行时 tracefs/kprobe 可用性仍待后续授权验证。
+
+G0.1–G0.5 子项报告已齐备；下一步不是启动设备，而是进行 G0 总体准入复核，重点解决 G0.2 stock PMIC path NO-GO 与 G0.3/G0.4 物理状态未知的依赖阻塞。
