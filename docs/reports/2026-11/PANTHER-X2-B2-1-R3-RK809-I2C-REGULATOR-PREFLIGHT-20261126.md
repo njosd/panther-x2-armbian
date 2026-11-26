@@ -2,7 +2,7 @@
 
 ## 1. 状态与范围
 
-**状态：R3 静态审计完成；运行时验收 HOLD/BLOCKED；R3 整体未通过，不放行 R4。**
+**状态：R3 静态审计完成；R3.1 I2C0 controller PASS-RUNTIME；R3.2 RK809 ID 只读身份读取 PASS-RUNTIME；R3.3–R3.7 MFD/regulator/provider 与 consumer 验证仍 HOLD/BLOCKED；R3 整体不放行 R4。**
 
 本轮只读核验：
 - 复用既有 6.18.63 Kconfig/Makefile 与 GMAC PHY supply 静态审计；
@@ -107,7 +107,7 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 | R3 R1 最终配置/对象 | PASS-STATIC | 真实 R1 artifact 已解包 |
 | R3 6.1.65 Golden 配置/对象对照 | PASS-STATIC | Dropbox 原始 config 与 modules.builtin |
 | R3.1 I2C0 controller bind | PASS-RUNTIME | 实机 sysfs 显示 DRIVER=rk3x-i2c；启动日志识别 0-001c 的 FAN53555，证明 I2C0 至少一个从设备完成通信；adapter class 枚举本轮未能确认 |
-| R3.2 RK809 稳定通信/ID read | NOT VERIFIED | 精确 6.18.63 Linux driver 根据 DT compatible 选择 RK809 variant，不读取芯片 ID；独立 ID 读取需另做诊断工具，尚未执行 |
+| R3.2 RK809 稳定通信/ID read | PASS-RUNTIME | 专用静态 AArch64 程序经 I2C_RDWR 对 0x20 仅读取 0xED/0xEE；两次 ioctl 均返回 2、errno=0；实测 0x80/0x94，符合 Linux RK809 masked ID 规则 |
 | R3.3 MFD/regmap parent/child | BLOCKED | 当前 R1 未构建 driver；probe 先注册 regmap IRQ，再执行 RK817 pre-init 写入；生命周期还有 shutdown/suspend/resume 写入 |
 | R3.4 regulator 注册 | BLOCKED | DTS 有多路 always-on/boot-on、initial voltage/mode 约束；regulator core 注册时可能写电压/模式/使能寄存器 |
 | R3.5 现有安全 regulator consumer | NOT TESTED | 需先有安全的 provider 注册证据 |
@@ -325,8 +325,67 @@ Evidence from job log:
 
 **Interpretation:** static AArch64 build and QEMU non-hardware self-test are PASS. This does not test actual I2C hardware, device-node creation permissions, RK809 ACK, or PMIC register values.
 
-### 13.6 Hardware execution remains pending
+### 13.6 Hardware execution (superseded by Section 14)
 
-The verified binary has not yet been run on Panther X2. The next operation must first stage the binary into the live R1 RAM environment without touching TF/eMMC. Then execute it once as root. The program will create only `/dev/i2c-0` (89:0) if absent and read only RK809 address `0x20`, registers `0xED` and `0xEE`. Preserve the complete stdout/stderr and exit status.
+At the time this subsection was written, hardware execution was pending. The dedicated binary was subsequently packaged into a separate RAM-only initramfs and run on Panther X2; see Section 14 for the actual runtime evidence. The previous pending status is no longer current.
 
-R3 remains HOLD until the hardware read returns valid values and the RK809 identity is confirmed. Even a successful ID read does not authorize loading RK8xx MFD/regulator drivers or advancing to power-provider functional testing.
+A successful ID read does not authorize loading RK8xx MFD/regulator drivers or advancing to power-provider functional testing.
+
+
+## 14. R3.2 RK809 实机身份寄存器只读验证（2026-11-26）
+
+### 14.1 专用 initramfs 构建与部署
+
+- 使用独立 GitHub Actions workflow 构建专用 initramfs；复用已冻结的 R1 Image/config/DTB、B1 BusyBox 与已验证的 RK809 probe artifact，没有重新编译内核。
+- 成功构建 run：`45793983845`；job：`139819812243`；artifact ID：`15103942731`。
+- Artifact：`panther-x2-r1-rk809-id-probe-initramfs-only`。
+- uInitrd 大小：775382 bytes；SHA256：`29114171087f60dd281245f41c49de24fede51b2e3216603caaf0f5908d70a30`。
+- 在 iMac 下载后、9.2 临时传输文件、SU08G 写入前后均核对相同 SHA256。
+- SU08G 原始 uInitrd 备份：`uInitrd.original-20261126`，778739 bytes，SHA256：`fea239c50598ede90dfd6e18e7a916de454525b1e7c357baff9d85107ae50aeb`。
+- 仅替换 SU08G 的 `uInitrd`；`Image`、`boot.scr`、`boot.cmd` 与 DTB 未修改。SN64G 与 eMMC 未触碰。
+- 新 initramfs 实机启动成功；`/proc/mounts` 仅有 rootfs、proc、sysfs，无持久化存储挂载。探测程序位于 `/bin/rk809-id-ro-probe-aarch64`，不是 `/usr/bin`。其 `--self-test` 输出 `architecture=aarch64`、`self_test=PASS`；该自检不访问 I2C。
+
+### 14.2 实际 I2C 只读事务结果
+
+用户明确授权后，以 root 执行一次：
+
+```sh
+/bin/rk809-id-ro-probe-aarch64
+```
+
+程序输出的关键证据：
+
+| 字段 | 实测值 |
+|---|---|
+| adapter | `/dev/i2c-0` |
+| adapter_dev | `89:0` |
+| node_action | `CREATED_TEMPORARY_CHAR_DEVICE_89_0` |
+| adapter_open | `PASS` |
+| i2c_funcs | `0xeff000d` |
+| i2c_func_i2c | `SUPPORTED` |
+| target_address | `0x20` |
+| target_registers | `0xED,0xEE` |
+| read_reg_0xED_ioctl_rc / errno / value | `2 / 0 / 0x80` |
+| read_reg_0xEE_ioctl_rc / errno / value | `2 / 0 / 0x94` |
+| rk809_name_read / version_read | `PASS / PASS` |
+| rk809_id_raw | `0x8094` |
+| datasheet_default_exact_match | `NO` |
+| identity_matches_linux_rk809_id | `YES` |
+
+### 14.3 解释与证据边界
+
+1. 两个 `I2C_RDWR` combined transfer 均完整返回 2 条消息，errno 均为 0；说明 I2C0 对目标地址及两个指定寄存器的读取事务成功。
+2. `0xED=0x80`，`0xEE=0x94`。原始值 `0x8094` 满足 Linux RK809 masked ID 判定：MSB 为 `0x80` 且版本寄存器高 nibble 为 `0x9`。
+3. 数据手册 Rev 2.4 列出的版本寄存器默认完整值为 `0x92`；实测 `0x94`，所以 exact-default-match 为 NO。不能把实测值改写为默认值，也不能将这个 NO 误判为身份失败；当前证据支持 RK809 身份匹配，低 nibble 记录为实测版本字段 `4`，不在缺少更具体 silicon revision 文档时推断其市场版本/批次含义。
+4. 该程序只执行对 `0xED`、`0xEE` 的两次寄存器索引+repeated-start 单字节读取；未扫描 I2C 总线、未写 PMIC 数据寄存器、未绑定/加载 RK8xx MFD、未调用 regulator API、未改变电源状态。
+5. `/dev/i2c-0` 在不存在时创建为临时字符设备 89:0，位于 RAM rootfs；新 initramfs 未挂载 TF/eMMC，节点随 RAM 环境结束而消失。
+6. 该结果证明 I2C0 与地址 `0x20` 的设备能完成指定身份寄存器读取，并支持 RK809 silicon identity；**不证明** RK8xx MFD probe 安全、regmap IRQ 正常、regulator provider 注册、各 rail 电压/时序正常、consumer 功能正常或 GMAC PHY supply 可用。
+
+### 14.4 更新后的 R3 状态
+
+- **PASS-STATIC：** Kconfig/Makefile、R1 config/objects、DTB topology/phandle、6.1.65 Golden 对照与精确源码副作用审计。
+- **PASS-RUNTIME：** I2C0 controller bind、i2c-dev adapter 注册、RK809@0x20 的 `0xED/0xEE` 只读读取，以及符合 Linux masked ID 规则的 `0x8094`。
+- **HOLD/BLOCKED：** RK8xx MFD/regmap parent、regulator provider、regulator consumers、GMAC PHY supply consumer 与其他 PMIC 状态观察。
+- **安全决定不变：** 不启用 `MFD_RK8XX_I2C` / `REGULATOR_RK808`，不进入 R4；后续若要研究 provider 必须先单独评估并明确授权 probe、shutdown、restart、suspend/resume 和 regulator constraint 的写寄存器副作用。
+
+**最终结论：R3.2 RK809 硬件身份只读验证 PASS；R3 整体仍 HOLD/BLOCKED，不放行 R4。**
