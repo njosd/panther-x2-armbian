@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS（6.1.65 Golden 配置对照及现有 R1 镜像 pinctrl/SYSCON/GPIO 只读运行时验证完成）；R3 静态审计完成，但 RK809 MFD probe 含 PMIC 寄存器写操作，运行时验证暂 HOLD/BLOCKED，不放行 R4。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS（6.1.65 Golden 配置对照及现有 R1 镜像 pinctrl/SYSCON/GPIO 只读运行时验证完成）；R3.1 I2C0 controller bind 已 PASS-RUNTIME（rk3x-i2c 绑定，FAN53555@0x1c 识别），但 RK809 实际响应及 MFD/regulator provider 仍未验证或 BLOCKED；R3 整体 HOLD，不放行 R4。
 
 ## 0. 统一项目定义
 
@@ -710,5 +710,5 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 
 - R1 AF_PACKET 软件 API 与 loopback outgoing 观察已实机通过；不证明物理 Ethernet TX/RX。
 - **R2 已 PASS。** 复用现有 R1 最终镜像，只读确认 `rockchip-pinctrl` 绑定、GRF/PMU SYSCON consumer probe 成功、GPIO0–GPIO4 五个 bank 绑定且五个 32-line gpiochip 注册；6.1.65 Golden 与 6.18.63 provider/关键依赖配置对照均为 y。没有写 GPIO、操作 reset/电源或重建刷写。
-- **R3 静态审计已完成，运行时 HOLD/BLOCKED。** R1 最终 DTB 的 I2C0/RK809/SWITCH_REG1/GMAC1 `phy-supply` phandle 已解析；R1 最终配置仅有 I2C controller/regmap/regulator 通用基础，缺少 `MFD_RK8XX_I2C`、`MFD_RK8XX` core 与 `REGULATOR_RK808`。6.1.65 Golden 含旧版 `MFD_RK808`、`REGULATOR_RK808` 及相应 built-in 对象。6.18 RK809 MFD probe 会执行 `regmap_update_bits()`，不是只读操作；未经单独批准不得引入该驱动或访问 PMIC。R3 不整体 PASS，不放行 R4。
+- **R3 静态审计完成；R3.1 controller bind PASS-RUNTIME；R3 整体仍 HOLD/BLOCKED。** 实机 sysfs 确认 I2C0 platform controller 绑定 `rk3x-i2c`，启动日志识别 FAN53555@0x1c，证明总线上至少一个从设备完成实际通信；RK809@0x20 仅有 DT client 节点证据，尚无芯片响应/ID 读取证据。R1 最终配置缺少 RK8xx MFD/regulator provider；6.18 RK809 MFD probe 会执行 `regmap_update_bits()`，未经单独批准不得引入该驱动或访问 PMIC。R3 不整体 PASS，不放行 R4。
 - GMAC1/MDIO1/RTL8211F 在 R3 期间继续 disabled；不执行 PMIC 写入、regulator 开关/电压切换、电源循环、网络发送或镜像重建。
