@@ -571,3 +571,12 @@ R1 hybrid PREPARE-ONLY image was written by the user to the dedicated 8GB SU08G 
 **Not verified:** complete `/init` diagnostics; any Ethernet TX/RX or network connectivity. GMAC1/MDIO/PHY remain disabled in R1 by design. Deferred USB/MMC/PMIC/power-domain probe messages remain recorded observations, not declared fatal without further evidence.
 
 **Safety:** only the authorized SU08G TF was used. SN64G and eMMC were not written. No further storage write or eMMC change is authorized by this record. Detailed evidence: `PANTHER-X2-B2-1-R1-INITRAMFS-DEFECT-CORRECTION-20261126.md`.
+
+
+## 2026-11-26 R1 printf correction — CI package verification passed
+
+GitHub Actions run `45739520034`, job `139640803045` (`package-r1`), completed successfully; all 11 substantive steps passed. The log directly confirms that BusyBox lists `printf`, the initramfs packaging creates its applet link, and the extracted `bin/printf -> busybox` check succeeds. Final image payload/hash checks and gzip integrity/decompression checks also passed.
+
+Artifact `panther-x2-r1-hybrid-PREPARE-ONLY`, ID `15079994261`, ZIP SHA256 `9b0f4d4310dad56b866934b0b46832079ae6e6a02073d376351ae8fab3d7852b`; raw image SHA256 `e6744be80273f1cb0a6a40b4d6ed46e82361751a359305d538d7578b1892ec44`.
+
+**Status:** applet correction and CI package validation are verified. The second Panther X2 runtime boot is still pending; full `/init` completion is not yet verified. No Ethernet test is implied because GMAC1/MDIO/PHY remain disabled in R1. See detailed report `PANTHER-X2-B2-1-R1-INITRAMFS-DEFECT-CORRECTION-20261126.md`.
