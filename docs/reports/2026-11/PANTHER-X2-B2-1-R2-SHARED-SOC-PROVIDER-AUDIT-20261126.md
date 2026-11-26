@@ -114,6 +114,7 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 | B1 最终配置中的 MFD_SYSCON | PASS | 实际 .config：y |
 | B1 最终配置中的 GPIO_ROCKCHIP | PASS | 实际 .config：y |
 | R1 最终配置保留两项 provider | PASS | 实际 .config 与 R1 config diff |
+| 6.1.65 黄金基线 provider/关键依赖配置对照 | PASS | 归档 config-6.1.65-ophub 与 modules.builtin；所比符号均为 y |
 | provider 关键 Kconfig 依赖闭合 | PASS | 精确 6.18.63 Kconfig + 最终 .config |
 | GPIO Rockchip built-in 对象 | PASS | modules.builtin |
 | syscon 与 GPIO 实现符号 | PASS | 同构建 System.map |
@@ -122,17 +123,17 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 | provider 在 Panther 实机 probe / controller 注册 | PENDING | 需使用现有 R1 镜像进行只读运行时检查；此前未执行 |
 | 物理 Ethernet TX/RX | NOT TESTED | 仅 R7 进行真实线侧测试 |
 
-**阶段判定：R2 INCOMPLETE / HOLD。** 已完成子项：6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验，确认无须重复增加配置或重建。未完成子项：6.1.65 黄金基线对应 provider 配置/对象逐项对照；R1 镜像上的 GPIO controller 注册/驱动绑定与可安全观察的 SYSCON/Regmap provider 运行时证据。不得将上述静态/构建证据升级为实机功能 PASS。
+**阶段判定：R2 INCOMPLETE / HOLD。** 已完成子项：6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验，确认无须重复增加配置或重建。未完成子项：R1 镜像上的 GPIO controller 注册/驱动绑定与 SYSCON/Regmap 现存 consumer 运行时证据。6.1.65 对应 provider/依赖配置逐项对照已完成，所比符号均为 y；6.1.65 精确源码构建来源仍未达到二进制级绑定，不将候选源码当作确定来源。不得将上述静态/构建证据升级为实机功能 PASS。
 
 ## 7. 安全边界与下一阶段
 
-- 本轮只读取 GitHub 仓库、既有 Actions artifact 和固定版本源码；没有访问 Panther X2。
+- 本轮只读取 GitHub 仓库、既有 Actions artifact、固定版本源码，以及 Dropbox 归档的 `kernel-config-evidence.zip`；没有访问 Panther X2。
 - 没有构建新内核、修改系统、安装软件、改写驱动或设备树。
 - 没有写入 SU08G、SN64G 或 eMMC；没有重启或运行设备测试。
 - 不启用 GMAC1、MDIO1、RTL8211F；不做网络发送测试。
 - 不触碰 Wi-Fi、蓝牙或 USB；此前约定的 USB2.0 旁线验证仍等待后续自然打包节点，不属于 R2。
 
-**下一步仍在 R2 内：** 先完成黄金基线差异核对，再使用现有 R1 镜像进行只读运行时检查。GMAC1/MDIO1/PHY 继续关闭；不重建、不刷写、不改变 GPIO/电源/reset 状态。只有 R2 所有必需验收项完成并归档后，才重新评估是否放行 R3。
+**下一步仍在 R2 内：** 黄金基线配置差异核对已完成；使用现有 R1 镜像进行只读运行时检查。GMAC1/MDIO1/PHY 继续关闭；不重建、不刷写、不改变 GPIO/电源/reset 状态。只有 R2 所有必需验收项完成并归档后，才重新评估是否放行 R3。
 
 
 ## 8. 2026-11-26 黄金基线对照补充与未决项
