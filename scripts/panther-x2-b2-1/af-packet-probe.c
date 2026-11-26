@@ -1,8 +1,9 @@
 /*
  * Panther X2 B2-1 R1 AF_PACKET runtime probe.
  *
- * This program does not configure an IP address or modify network settings.
- * It exercises AF_PACKET socket creation, binding to an existing interface,
+ * This program does not configure IP addresses, routes, or network services.
+ * It may temporarily raise the selected test interface, then restores its
+ * original flags. It exercises AF_PACKET socket creation and binding,
  * raw/datagram send attempts, and optional packet-socket receive observation.
  *
  * Run as root (or with CAP_NET_RAW). A successful send syscall is NOT proof
@@ -51,6 +52,7 @@ int main(int argc, char **argv)
     };
     int rawfd = -1, rxfd = -1, dgramfd = -1;
     int control_fd = -1, link_flags_saved = 0, link_flags_changed = 0;
+    int link_up_confirmed = 0;
     short original_ifflags = 0;
     struct ifreq ifr;
     int ifindex = 0;
@@ -122,35 +124,12 @@ int main(int argc, char **argv)
     sll.sll_protocol = htons(ETH_P_ALL);
     sll.sll_ifindex = ifindex;
 
-    if (rawfd >= 0) {
-        bind_raw_rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
-        saved_errno = bind_raw_rc < 0 ? errno : 0;
-        result("bind_raw", bind_raw_rc, saved_errno);
-    } else {
-        puts("bind_raw_rc=SKIPPED_SOCKET_CREATE_FAILED");
-    }
-
-    if (rxfd >= 0) {
-        bind_rx_rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
-        saved_errno = bind_rx_rc < 0 ? errno : 0;
-        result("bind_rx", bind_rx_rc, saved_errno);
-    } else {
-        puts("bind_rx_rc=SKIPPED_SOCKET_CREATE_FAILED");
-    }
-
-    if (dgramfd >= 0) {
-        bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
-        saved_errno = bind_dgram_rc < 0 ? errno : 0;
-        result("bind_dgram", bind_dgram_rc, saved_errno);
-    } else {
-        puts("bind_dgram_rc=SKIPPED_SOCKET_CREATE_FAILED");
-    }
-
     /*
-     * Bring only the selected test interface up for this process's bounded
-     * loopback test. Use an AF_PACKET socket for generic interface-flag
-     * ioctls; do not require AF_INET or an IP control socket. Restore the
-     * original UP state before exit.
+     * Bring only the selected test interface up before binding packet
+     * sockets. Linux packet_do_bind() records ENETDOWN when the device is
+     * down; a later NETDEV_UP notification re-registers the packet hook but
+     * does not clear that socket error. Use an AF_PACKET socket for the flag
+     * ioctls and restore the original flags before exit.
      */
     control_fd = rawfd >= 0 ? rawfd : (dgramfd >= 0 ? dgramfd : rxfd);
     if (control_fd >= 0) {
@@ -178,11 +157,48 @@ int main(int argc, char **argv)
             rc = ioctl(control_fd, SIOCGIFFLAGS, &ifr);
             saved_errno = rc < 0 ? errno : 0;
             result("get_ifflags_after_up", rc, saved_errno);
-            if (rc == 0)
+            if (rc == 0) {
                 printf("ifflags_after_up=0x%04x\n", (unsigned short)ifr.ifr_flags);
+                link_up_confirmed = !!(ifr.ifr_flags & IFF_UP);
+            }
         }
     } else {
         puts("get_ifflags_rc=SKIPPED_NO_PACKET_SOCKET");
+    }
+
+    /*
+     * Bind only after the selected interface is confirmed IFF_UP. Binding
+     * while it is down leaves ENETDOWN in the packet socket even if the
+     * interface is brought up afterwards.
+     */
+    if (link_up_confirmed) {
+        if (rawfd >= 0) {
+            bind_raw_rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
+            saved_errno = bind_raw_rc < 0 ? errno : 0;
+            result("bind_raw", bind_raw_rc, saved_errno);
+        } else {
+            puts("bind_raw_rc=SKIPPED_SOCKET_CREATE_FAILED");
+        }
+
+        if (rxfd >= 0) {
+            bind_rx_rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
+            saved_errno = bind_rx_rc < 0 ? errno : 0;
+            result("bind_rx", bind_rx_rc, saved_errno);
+        } else {
+            puts("bind_rx_rc=SKIPPED_SOCKET_CREATE_FAILED");
+        }
+
+        if (dgramfd >= 0) {
+            bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
+            saved_errno = dgramfd < 0 ? errno : 0;
+            result("bind_dgram", bind_dgram_rc, saved_errno);
+        } else {
+            puts("bind_dgram_rc=SKIPPED_SOCKET_CREATE_FAILED");
+        }
+    } else {
+        puts("bind_raw_rc=SKIPPED_INTERFACE_NOT_CONFIRMED_UP");
+        puts("bind_rx_rc=SKIPPED_INTERFACE_NOT_CONFIRMED_UP");
+        puts("bind_dgram_rc=SKIPPED_INTERFACE_NOT_CONFIRMED_UP");
     }
 
     /* A deterministic test frame. Loopback is not an Ethernet device. */
