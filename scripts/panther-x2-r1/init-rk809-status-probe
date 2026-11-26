@@ -1,0 +1,29 @@
+#!/bin/sh
+# Panther X2 R1 RAM-only shell carrying the fixed-scope RK809 R3.7 status probe.
+# No automatic probe execution; no persistent storage or network setup.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-r1-rk809-status-probe) # '
+export PATH HOME PS1
+
+printf '\n=== Panther X2 R1 RK809 R3.7 read-only status probe environment ===\n'
+printf 'Probe: /bin/rk809-status-ro-probe-aarch64\n'
+printf 'Fixed access scope: I2C0, address 0x20, registers 0xF0 and 0xF6 only.\n'
+printf 'The probe is NOT executed automatically.\n'
+printf 'No persistent storage is mounted; no RK8xx MFD/regulator driver is enabled.\n'
+
+mkdir -p /proc /sys
+if ! mount -t proc proc /proc; then
+    printf 'WARNING: could not mount procfs\n'
+fi
+if ! mount -t sysfs sysfs /sys; then
+    printf 'WARNING: could not mount sysfs\n'
+fi
+
+printf '\n--- Kernel ---\n'
+uname -a
+printf '\n--- Non-hardware self-test ---\n'
+printf 'Run: /bin/rk809-status-ro-probe-aarch64 --self-test\n'
+printf 'Authorized hardware read command: /bin/rk809-status-ro-probe-aarch64\n'
+printf '\nRAM-only probe shell ready.\n'
+exec /bin/sh -i
