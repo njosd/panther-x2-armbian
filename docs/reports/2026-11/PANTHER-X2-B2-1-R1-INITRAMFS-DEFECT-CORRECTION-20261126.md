@@ -74,7 +74,7 @@ The corrected image was subsequently written by the user to the dedicated 8GB SU
 
 The R1 packaging workflow was amended to include `printf` in the BusyBox applet link allowlist and to assert that the extracted initramfs contains `bin/printf -> busybox`. No change was made to the R1 `/init` script, kernel Image, kernel configuration, DTB, U-Boot proper, bootargs, load addresses, GPT geometry or storage layout.
 
-The workflow change is committed as `4efd7c7e56abfbc43a8309b4d797cd4cc5c40891`. This fixes the identified packaging omission at source level. A new CI package run and a subsequent runtime boot are still required before the correction itself can be marked verified.
+The workflow change is committed as `4efd7c7e56abfbc43a8309b4d797cd4cc5c40891`. This fixes the identified packaging omission at source level. The subsequent CI package run and second target-hardware boot are recorded below; the corrected /init path is now runtime-verified.
 
 ### Safety boundary
 
@@ -101,6 +101,55 @@ Published artifact:
 - Raw image SHA256: `e6744be80273f1cb0a6a40b4d6ed46e82361751a359305d538d7578b1892ec44`
 - Artifact expiry: 2026-12-26
 
-This closes the source-level applet correction and CI packaging verification. **It does not prove runtime execution of `/init` after the fix.** A second target-hardware boot is still pending. R1 remains PREPARE-ONLY; GMAC1/MDIO/PHY are disabled, so Ethernet TX/RX remains outside this test.
+This closes the source-level applet correction and CI packaging verification. **This CI record alone does not prove runtime execution of `/init` after the fix.** The second target-hardware boot and runtime network-core checks are recorded in the final section below. R1 remains PREPARE-ONLY; GMAC1/MDIO/PHY are disabled, so Ethernet TX/RX remains outside this test.
 
 Source: GitHub Actions run 45739520034, job 139640803045 and its uploaded artifact metadata.
+
+
+## Corrected R1 second boot and network-core runtime acceptance — 2026-11-26
+
+**Overall result: PASS for R1 boot/initramfs and the runtime checks within the R1 network-core scope.** This is not a physical Ethernet TX/RX result.
+
+### Corrected runtime boot
+
+The user booted the corrected image from the authorized SU08G 8GB TF card. The UART record confirms:
+- Linux 6.18.63+ #1 SMP Wed Nov 25 12:42:00 UTC 2026, AArch64, reached the interactive R1 shell.
+- /init completed sufficiently to present the (panther-x2-r1-network-core) # prompt; the previous printf: not found defect did not recur.
+- Root is RAM-backed rootfs; proc and sysfs are mounted. No persistent filesystem mount is shown.
+- /proc/net/dev exists and lists only lo.
+- /sys/class/net contains only the lo virtual interface symlink.
+- /proc/net/packet exists and exposes the PF_PACKET socket table; it contains only the header, consistent with no packet socket currently open.
+- Kernel log explicitly states NET: Registered PF_PACKET protocol family.
+
+### R1 runtime acceptance matrix
+
+| Item | Result | Evidence / boundary |
+|---|---|---|
+| Linux 6.18.63 runtime | PASS | UART uname -a |
+| Panther R1 interactive shell | PASS | R1 ash prompt; corrected printf available through the initramfs applet link |
+| RAM-only root and proc/sysfs | PASS | mount output |
+| Network device statistics interface | PASS | /proc/net/dev |
+| Network sysfs inventory | PASS | /sys/class/net contains only lo |
+| PF_PACKET protocol family registration | PASS | NET: Registered PF_PACKET protocol family in dmesg |
+| PF_PACKET socket table | PASS | /proc/net/packet readable; no socket open during this observation |
+| Physical Ethernet interface | Correctly absent | GMAC1/MDIO/PHY are intentionally disabled in R1 |
+| AF_PACKET socket create/send | NOT TESTED | No socket test program was run |
+| Physical Ethernet TX/RX | NOT TESTED / OUT OF SCOPE | R1 has no GMAC/MDIO/PHY path enabled |
+
+### Diagnostic command note
+
+The first grouped inspection attempted to use echo, which was not linked as a BusyBox applet and produced /bin/sh: echo: not found. This did not affect kernel or network-core operation. The follow-up used /bin/busybox echo and completed the sysfs, packet-table and network-device checks. No initramfs change is warranted solely to add the optional echo applet.
+
+### Remaining observations
+
+The boot log contains deferred-probe messages for USB, MMC/PMIC regulators and Rockchip power domains, as well as unrelated subsystem initialization messages. They did not prevent the R1 shell or the network-core checks and are not treated as R1 acceptance failures. No new investigation is authorized or required by this result.
+
+### Safety and storage boundary
+
+The runtime test used the user-authorized SU08G TF card. SN64G and eMMC were not written. The observed Linux mount table shows RAM root, procfs and sysfs only; no persistent filesystem mount is evidenced. This report does not authorize any further storage write or eMMC modification.
+
+### R1 closeout and next stage
+
+R1 is accepted as **network-core component/runtime preparation passed**, not as a physical network test. Preserve the existing R1 image and evidence; do not rebuild or rewrite the card for this acceptance.
+
+Proceed only to the next planned R2 item after its own plan/source/config review and the required explicit operation authorization. Do not skip R2–R6, do not restore GMAC/MDIO/PHY early, and do not perform the R7 TX-first test until all preceding stage gates are independently passed.
