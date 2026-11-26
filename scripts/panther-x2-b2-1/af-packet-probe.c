@@ -51,7 +51,7 @@ int main(int argc, char **argv)
     int rawfd = -1, rxfd = -1, dgramfd = -1;
     int ifindex = 0;
     int rc, saved_errno;
-    int bind_raw_rc, bind_rx_rc, bind_dgram_rc;
+    int bind_raw_rc = -2, bind_rx_rc = -2, bind_dgram_rc = -2;
     struct pollfd pfd;
     unsigned char rxbuf[256];
 
@@ -87,9 +87,6 @@ int main(int argc, char **argv)
     saved_errno = dgramfd < 0 ? errno : 0;
     result("socket_dgram", dgramfd, saved_errno);
 
-    if (rawfd < 0 || rxfd < 0 || dgramfd < 0)
-        goto out;
-
     snprintf(ifindex_path, sizeof(ifindex_path),
              "/sys/class/net/%s/ifindex", ifname);
     int ifindex_fd = open(ifindex_path, O_RDONLY | O_CLOEXEC);
@@ -121,17 +118,29 @@ int main(int argc, char **argv)
     sll.sll_protocol = htons(ETH_P_ALL);
     sll.sll_ifindex = ifindex;
 
-    bind_raw_rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = bind_raw_rc < 0 ? errno : 0;
-    result("bind_raw", bind_raw_rc, saved_errno);
+    if (rawfd >= 0) {
+        bind_raw_rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
+        saved_errno = bind_raw_rc < 0 ? errno : 0;
+        result("bind_raw", bind_raw_rc, saved_errno);
+    } else {
+        puts("bind_raw_rc=SKIPPED_SOCKET_CREATE_FAILED");
+    }
 
-    bind_rx_rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = bind_rx_rc < 0 ? errno : 0;
-    result("bind_rx", bind_rx_rc, saved_errno);
+    if (rxfd >= 0) {
+        bind_rx_rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
+        saved_errno = bind_rx_rc < 0 ? errno : 0;
+        result("bind_rx", bind_rx_rc, saved_errno);
+    } else {
+        puts("bind_rx_rc=SKIPPED_SOCKET_CREATE_FAILED");
+    }
 
-    bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = bind_dgram_rc < 0 ? errno : 0;
-    result("bind_dgram", bind_dgram_rc, saved_errno);
+    if (dgramfd >= 0) {
+        bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
+        saved_errno = bind_dgram_rc < 0 ? errno : 0;
+        result("bind_dgram", bind_dgram_rc, saved_errno);
+    } else {
+        puts("bind_dgram_rc=SKIPPED_SOCKET_CREATE_FAILED");
+    }
 
     /* A deterministic test frame. Loopback is not an Ethernet device. */
     memset(raw_frame, 0, sizeof(raw_frame));
