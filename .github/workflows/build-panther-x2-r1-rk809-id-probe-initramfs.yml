@@ -92,7 +92,7 @@ jobs:
           test "$(sha256sum work/probe/rk809-id-ro-probe-aarch64 | awk '{print $1}')" = "$PROBE_SHA"
           test "$(sha256sum work/probe/rk809-id-ro-probe.c | awk '{print $1}')" = "$PROBE_SOURCE_SHA"
           test -s work/probe/SHA256SUMS
-          (cd work/probe && sha256sum -c SHA256SUMS)
+          sed 's#work/output/##g' work/probe/SHA256SUMS | (cd work/probe && sha256sum -c -)
           cmp scripts/panther-x2-b2-1/rk809-id-ro-probe.c work/probe/rk809-id-ro-probe.c
           cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
           file work/probe/rk809-id-ro-probe-aarch64 | tee work/probe/elf-file.txt
