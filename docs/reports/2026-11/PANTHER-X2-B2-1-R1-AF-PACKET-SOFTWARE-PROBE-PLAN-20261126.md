@@ -70,3 +70,14 @@ After the build artifact is available, choose and separately authorize a deliver
 | Physical Ethernet TX | Not available in R1; earliest R7 | Blocked by design |
 
 No target hardware or storage medium was accessed for this supplement.
+
+
+## 2026-11-26 source audit follow-up
+
+A read-only review of the committed C source found two issues before target use:
+- The sysfs-based ifindex conversion had retained an obsolete `ifreq` initialization/name-copy block. This was removed; the current source has no `struct ifreq`, `SIOCGIFINDEX`, or `AF_INET` control socket.
+- The first draft stopped all later checks if any one of the three packet-socket creations failed. The probe now keeps the stages independent: it records each socket result, continues interface lookup, and attempts bind/send/receive only for sockets whose preceding stage succeeded. A failed socket no longer suppresses useful evidence from the other socket types.
+
+Source corrections are committed in `337be3b142b79861a17ef78033c214b522047b59` and `668e5241d5f61eea81ea021c5f2d704753b815f1`.
+
+**CI status:** no completed Actions run or build artifact has yet been confirmed from the available repository status/run queries. Therefore static compilation, ELF checks and QEMU self-test remain pending; source review is not represented as a successful build. No target device or storage was accessed.
