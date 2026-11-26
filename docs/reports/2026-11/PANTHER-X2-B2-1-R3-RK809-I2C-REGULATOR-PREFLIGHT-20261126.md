@@ -749,3 +749,70 @@ R3.1 实机启动日志归档已记录 MMC、SARADC、IO-domain 等设备等待 
 4. 在完成上述核查前，不读取 0xF8–0xFD 实机寄存器，不做总线扫描，不进行任何 PMIC 写入；现有 R3.7 对 0xF0/0xF6 的授权不包含 IRQ register 访问。
 
 **G1 释放条件新增：必须解释并解决 RK809 Rev 2.4 与 Linux 24 IRQ bit map 的差异，且明确保留位处理策略。**
+
+## 21. G0-A 黄金基线回溯：6.1.65 RK809 IRQ / MFD / regulator 对照（2026-11-26）
+
+### 21.1 6.1.65 源码身份与证据等级
+
+复用方向二已归档的 6.1.65 源码候选端点：
+`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`。
+
+该 commit 与原版 6.1.65 Kernel build 时间及提交版本线索吻合，是高置信度源码候选，但尚未与 6.1.65 原始 Image 建立二进制级构建来源绑定。因此以下函数级比较标记为 **GOLDEN-CANDIDATE SOURCE**，不能冒充已锁定的原始构建源码。6.1.65 的实际 `.config`、`modules.builtin` 和 2026-11-24 Panther X2 正常有线网络运行结果则是已归档的直接证据。
+
+### 21.2 IRQ 映射：6.1.65 与 6.18.63 并无新引入差异
+
+在 6.1.65 候选源码 `drivers/mfd/rk808.c` 中：
+- RK809 compatible 与 RK817 compatible 均进入 ID 读取路径，读取 `0xED`、`0xEE`，将 ID mask 后识别 variant。
+- RK809 variant 与 RK817 variant 共用 `rk817_irq_chip`、`rk817_irqs[]`、`rk817_regmap_config`、`rk817_pre_init_reg[]` 与 `rk817s` MFD cells。
+- IRQ 定义为 24 路，按三组 8-bit line 映射到 status/ack `0xF8/0xFA/0xFC` 和 mask `0xF9/0xFB/0xFD`。
+- IRQ chip 同样设置 `num_regs=3`、`irq_reg_stride=2`、`status_base=0xF8`、`mask_base=0xF9`、`ack_base=0xF8`、`init_ack_masked=true`。
+
+6.18.63 `rk8xx-core.c` 继续对 RK809 使用相同的 `rk817_irq_chip` 与 24 路 IRQ 表。**因此，RK809 24-bit IRQ layout 不是 6.18 新引入的变化；在可用的 6.1.65 高置信度候选源码中已经存在。**
+
+这项对照改变了问题定性：与 RK809 Rev 2.4 对保留位的描述不一致，属于至少跨越 6.1.65 候选与 6.18.63 的历史兼容性疑点，而不是当前已证实的 6.18 regression。6.1.65 在同一 Panther X2 实机上成功运行千兆链路和 IPv4 网络，是该整机组合的正向集成行为证据；但不能单独证明 IRQ reserved bits 从未被置位、写入 ACK 无副作用，或 24 路 IRQ 全部被触发验证。
+
+### 21.3 MFD probe 身份识别方式的版本差异
+
+| 行为 | 6.1.65 候选源码 | 6.18.63 固定源码 |
+|---|---|---|
+| PMIC variant 来源 | probe 读取 ID 0xED/0xEE 并 mask 识别 | I2C OF match data 提供 variant |
+| RK809 / RK817 IRQ | 共用 rk817 24-bit IRQ 表 | 共用 rk817 24-bit IRQ 表 |
+| pre-init | 共用 rk817_pre_init_reg | 共用 rk817_pre_init_reg |
+| MFD 子设备 | rk817s | rk817s |
+| shutdown / restart | RK809 使用 RK817 SYS_CFG(3) 对应位 | 同一功能寄存器及位定义 |
+| regulator provider | rk808-regulator.c | rk808-regulator.c，随 RK8xx core 拆分 |
+
+用户在 6.18 RAM-only R1 上读到 `0xED=0x80`、`0xEE=0x94`，原始 ID `0x8094`。按 6.1.65 候选源码的 ID mask/variant 逻辑，该原始 ID 会归入 RK809 variant（mask 后为 RK809 ID）。这使旧版驱动身份识别路径与本次只读身份结果相互吻合，但没有在 6.1.65 原版系统中取得 PMIC probe 日志来证明当时实际打印的 chip ID。
+
+### 21.4 pre-init 与 regulator descriptor 对照
+
+6.1.65 候选源码与 6.18.63 固定源码的 RK809 pre-init 均使用 `rk817_pre_init_reg[]`。两者包含 RTC_STOP 和大量 CODEC 寄存器初始化；这些是 probe 副作用，不因驱动文件拆分而消失。
+
+对网络相关的 `SWITCH_REG1`，两版 `rk808-regulator.c` 的 RK809 descriptor 对照一致：
+- regulator name：`SWITCH_REG1`；
+- supply name：`vcc9`；
+- enable register：`RK817_POWER_EN_REG(3)`；
+- enable mask/value：`ENABLE_MASK(2)`；
+- disable value：`DISABLE_VAL(2)`；
+- 属于 switch regulator，不提供可调 voltage selector。
+
+RK809 regulator probe 的代码组织略有变化：6.1.65 从 parent drvdata 取得 regmap/client 并按 variant 选择 descriptor；6.18 通过 parent device 取得 regmap，并把 OF node 关联给 regulator child device 后注册 descriptor。两版最终仍通过 `devm_regulator_register()` 注册对应 regulator 集合。
+
+这证明 RK809 SWITCH_REG1 的 Linux descriptor 在两个源码端点间没有发现差异，但**不能证明 Panther X2 两版 DTB 对 SWITCH_REG1 的 constraints 完全相同，也不能证明 regulator registration 没有读改写副作用或实测电压相同**。还需完成 Golden DTB regulator 子节点属性的逐项提取。
+
+### 21.5 G0-A 修订结论
+
+1. **PASS-COMPARISON（带源码身份限制）：** 6.1.65 候选源码与 6.18.63 的 RK809 24-bit IRQ layout、pre-init 表及 SWITCH_REG1 descriptor 一致。
+2. **历史兼容性疑点仍存在：** 两版源码都复用 RK817 IRQ layout，而 RK809 Rev 2.4 对部分位标为 reserved。由于 6.1.65 实机网络成功，该疑点不能单独解释为 6.18 网络回归；仍需确认数据手册/芯片修订及实际 IRQ 状态。
+3. **版本差异已确认：** 6.1.65 通过读取 0xED/0xEE 识别 silicon variant；6.18 依赖 OF compatible match data，不在 MFD probe 中重新读取 ID。当前实测 0x8094 与 RK809 compatible 相符，但 6.18 对 DT/芯片不匹配的运行时检测较少。
+4. **G1 仍不放行：** 黄金基线的正常网络行为不等于对 PMIC IRQ ACK 写入的风险豁免。必须完成 RK809 datasheet revision/芯片 revision 适用性核实、Golden DTB regulator constraints 对照、pre-init 寄存器属性核对与 MFD IRQ 初始状态影响评估。
+5. **网络目标关联：** 两版 SWITCH_REG1 descriptor 一致，为后续验证 `phy-supply` provider/consumer 关系提供了较强参照；但实际 PHY rail 电压和 PHY 工作电源链仍未验证。
+
+### 21.6 下一步最小任务
+
+- 从已归档 6.1.65 原始 DTB 中提取 RK809 regulator 子节点与 SWITCH_REG1 的完整属性，和 R1 最终 DTB 做逐字段比较；不访问、不写入 SN64G。
+- 追溯 RK809 Rev 2.4 与芯片版本字段 0xEE=0x94 的关系，区分 datasheet default byte、silicon revision 与 reserved-bit 说明适用范围。
+- 复核 6.1.65 启动日志是否留有 RK809 probe / regulator registration / IO-domain probe 记录；只复用归档资料，不重复启动黄金介质。
+- 然后完成 RK809 pre-init 表逐项寄存器访问属性表。未完成前继续不读取 0xF8–0xFD 实机寄存器、不启用 MFD、不进行 PMIC 写操作。
+
+**本节未访问实机、未读取 IRQ 状态寄存器、未执行任何硬件写入。**
