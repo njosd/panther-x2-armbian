@@ -31,7 +31,7 @@ D 之后继续记录 TX descriptor（buffer DMA address、length、FS/LS、OWN�
 G0 完成前不激活 RK809 MFD/regulator，不恢复 GMAC/MDIO/PHY，不做硬件发送。
 
 - **G0.1 依赖矩阵**：将 R2–R6 证据映射为 provider→consumer→实际动作→证据等级→阻塞项；分别记录 6.1.65、6.1.116、6.18.63 默认配置/对象和已知实机行为。
-- **G0.2 PMIC 副作用**：复核 RK809 variant/match、MFD pre-init、IRQ、shutdown/restart/suspend/resume 和 regulator 注册约束可能触发的写入；形成寄存器访问/副作用白名单与风险说明。没有明确决策前不启用驱动。
+- **G0.2 PMIC 副作用：已完成静态审计，stock MFD/regulator NO-GO。** MFD probe 会执行 IRQ mask/条件 ACK、整组 RK817 pre-init 并创建全部子设备；regulator probe 注册全部 rail，约束处理及约 30 秒 late cleanup 可能写 PMIC/关闭未使用 rail。当前允许写入白名单为空；不得启用 stock driver。详见 G0.2 报告。
 - **G0.3 IO-domain**：核实 supplier、consumer、deferred-probe、各 bank/rail 映射和 GRF 写入行为。R1 已知因 regulator provider 缺失而 defer；不得把 defer 当成功，也不得为解除 defer 越权写 GRF。
 - **G0.4 clock/reset/PHY**：复核 GRF/CRU/reset/pinctrl、PHY reset 极性/时序、125MHz 外部时钟的真实来源候选及安全测量点；fixed-clock 只代表 CCF 模型，不代表板上波形。
 - **G0.5 ABCD 夹具**：审查 AF_PACKET 发送器、6.18 tracepoint/ftrace/kprobe 可观测性、同帧 sequence/hash 关联和外部抓包方案；只准备，不向目标网口发送。
@@ -43,8 +43,8 @@ G0 放行条件：依赖矩阵和关键副作用已说明；必需 provider 缺�
 | 阶段 | 唯一目标与激活边界 | ABCD 检查点 |
 |---|---|---|
 | G1 I2C/RK809 只读边界 | 复用已完成 I2C0 bind、RK809 ID 0x8094、0xF0/0xF6 只读证据；除非出现明确缺口，不重复读取；不启用 MFD | 不具备 MAC/netdev，记 NOT EXECUTABLE |
-| G2 RK809 MFD/regmap | 先审查 MFD pre-init/IRQ/生命周期写入；用户单独接受副作用并授权前保持 BLOCKED | 再检查发送器/观测方案，不发帧 |
-| G3 regulator provider | 与 MFD 分开核验 regulator descriptors、约束、注册时自动写入/rail 影响；不等于实际 rail 电压通过 | NOT EXECUTABLE；检查目标网口仍隔离 |
+| G2 RK809 MFD/regmap | stock MFD 当前 NO-GO；只有替代最小 provider 方案完成静态设计、回退审查并另行授权后才可评估 | 不发帧；目标 MAC 未激活 |
+| G3 regulator provider | stock 全量 regulator provider 暂不放行；必须先解决 G2 provider 安全路径，逐 rail 约束/自动写入与物理测量条件另审 | NOT EXECUTABLE；检查目标网口仍隔离 |
 | G4 IO-domain 与共享硬件资源 | 在 provider 安全放行后，核验 IO-domain supplier/deferred-probe/GRF 写入；再逐项确认 GMAC 所需 clock/reset/pinctrl/GPIO/PHY supply，物理电压/波形另证 | 复核一次 netdev/open/DMA 的前置条件 |
 | G5-A Rockchip glue/STMMAC probe | 单独恢复目标 MAC 节点和最小依赖；核验资源、probe、bind、netdev 注册；不把 probe 当作 open/link | netdev 未 open 时不执行真实 A–D |
 | G5-B MDIO/RTL8211F | 单独核验 MDIO bus、地址0 PHY ID、driver bind、link；不写 PHY 寄存器 | 若接口与 DMA 前置条件确已满足，另行批准后单帧 A→D；否则 BLOCKED |
@@ -71,9 +71,9 @@ G0 放行条件：依赖矩阵和关键副作用已说明；必需 provider 缺�
 ## 7. 当前进度
 
 - [x] G0–G10 总体门序、启动依赖和 ABCD-TX 同帧定义已建立。
-- [ ] G0.1 provider/consumer 依赖矩阵归档。
-- [ ] G0.2 RK809 MFD/regulator 副作用白名单。
-- [ ] G0.3 IO-domain/deferred-probe 证据闭环。
+- [x] G0.1 provider/consumer 依赖矩阵第一轮归档；交叉复核仍待 G0 总审。
+- [x] G0.2 stock RK809 MFD/regulator 副作用审计；当前决策为 NO-GO，允许写入白名单为空。
+- [ ] G0.3 IO-domain/deferred-probe 证据闭环（当前唯一下一项）。
 - [ ] G0.4 PHY 125MHz 物理时钟与硬件资源测量方案。
 - [ ] G0.5 ABCD 发送器与观测夹具审查。
 - [ ] G0 总体准入评审。
