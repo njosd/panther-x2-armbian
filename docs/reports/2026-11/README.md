@@ -54,7 +54,7 @@
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
 - [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：R2 已 PASS；复用 B1/R1 构建与配置、6.1.65 Golden 对照，现有 R1 镜像只读验证 pinctrl/SYSCON consumer、五个 GPIO bank 和五个 gpiochip 注册成功；零增量复用，无需重建。
-- [B2-1 / R3：RK809 / I2C / Regulator 前置审计（2026-11-26）](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计完成；R1 最终 DTB 的 I2C0/RK809@0x20/SWITCH_REG1 phandle 已核验，R1 最终配置缺少 RK8xx MFD/regulator driver，6.1.65 Golden 包含对应旧版驱动链；发现 6.18 RK809 MFD probe 会执行 PMIC 寄存器写入，故运行时绑定暂 HOLD/BLOCKED，不放行 R4。
+- [B2-1 / R3：RK809 / I2C / Regulator 前置审计（2026-11-26）](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3.1 实机只读验收补充：I2C0 platform controller 已绑定 `rk3x-i2c`，FAN53555@0x1c 被识别，证明总线上至少一个从设备可通信；RK809@0x20 仅确认 DT client 节点存在，未证明芯片响应。RK809 MFD/regulator provider 仍缺失，且 MFD probe 有 PMIC 寄存器写入副作用；R3 整体 HOLD/BLOCKED，不放行 R4。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
 
