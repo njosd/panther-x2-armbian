@@ -21,7 +21,7 @@ on:
         description: Successful static AF_PACKET probe build run
         required: true
         type: string
-        default: "45747785913"
+        default: "45750286867"
 
 permissions:
   contents: read
