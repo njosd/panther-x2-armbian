@@ -1,0 +1,55 @@
+name: Panther X2 B2-1 R3 RK809 identity probe (build only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panther-x2-b2-1-r3-rk809-id-probe
+  cancel-in-progress: false
+
+jobs:
+  build-rk809-id-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install isolated AArch64 static toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            binutils-aarch64-linux-gnu qemu-user-static file
+
+      - name: Build static AArch64 RK809 identity probe
+        run: |
+          set -euo pipefail
+          mkdir -p work/output
+          SRC=scripts/panther-x2-b2-1/rk809-id-ro-probe.c
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror \
+            -D_FORTIFY_SOURCE=2 "$SRC" -o work/output/rk809-id-ro-probe-aarch64
+          file work/output/rk809-id-ro-probe-aarch64 | tee work/output/file.txt
+          aarch64-linux-gnu-readelf -h work/output/rk809-id-ro-probe-aarch64 > work/output/elf-header.txt
+          aarch64-linux-gnu-readelf -l work/output/rk809-id-ro-probe-aarch64 > work/output/elf-program-headers.txt
+          grep -q 'AArch64' work/output/elf-header.txt
+          if grep -q 'INTERP' work/output/elf-program-headers.txt; then
+            echo "::error::Probe must be statically linked without PT_INTERP"
+            exit 1
+          fi
+          qemu-aarch64-static work/output/rk809-id-ro-probe-aarch64 --self-test | tee work/output/self-test.txt
+          grep -qx 'self_test=PASS' work/output/self-test.txt
+          cp "$SRC" work/output/
+          sha256sum work/output/rk809-id-ro-probe-aarch64 work/output/rk809-id-ro-probe.c > work/output/SHA256SUMS
+          stat -c 'probe_size_bytes=%s' work/output/rk809-id-ro-probe-aarch64 | tee work/output/size.txt
+
+      - name: Publish probe and build evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r3-rk809-id-ro-probe-static-aarch64
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
