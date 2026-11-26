@@ -192,3 +192,87 @@ SoC DTS 的 GMAC1 节点使用 `resets = <&cru SRST_A_GMAC1>`，name `stmmaceth`
 - 真实硬件 CRU/GRF 当前寄存器状态。
 
 R6-3 转向原始 DTB 二进制属性对照。需要取得并校验原始 6.1.65 黄金 DTB、R1 6.18.63 隔离 DTB 和目标 6.18.63 完整 Panther DTB 的确切文件及 SHA256。若原始黄金 DTB 不在仓库可访问文件中，先定位既有审计附件/归档，不重新构建、不触碰 SN64G/eMMC，也不让用户重复已完成的导出工作。
+
+
+## 6. R6-3：DTB 实物提取、属性对照与证据边界（2026-11-26）
+
+### 6.1 已取得 6.18.63 DTB 实物并独立复核
+
+从既有 GitHub Actions run `43543451274` 下载原始 artifact `ophub-kernel-6.18.63-driver-inspection`（artifact ID `14093500129`，ZIP SHA-256 `69028bca5e9193e9610e768b5fcbc836d48a2ce592784c855c73be171bb306ee`），从中直接提取：
+- `extracted/rk3566-panther-x2.dtb`，117,859 bytes；
+- `extracted/rk3566-panther-x2.from-dtb.dts`，137,260 bytes；
+- dtc warning 文件为空。
+
+本轮重新计算 DTB SHA-256，结果为 `5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`，与既有 6.18.63 DTB 审计记录以及 6.1.116 Panther X2 磁盘 DTB 的 SHA-256 完全相同。这证明两个已归档文件是字节级完全相同的 DTB，不只是属性语义相似。注意这不等于它与 6.1.65 原始 DTB 相同。
+
+### 6.2 6.18.63 实际 DTB 中 GMAC1 属性（非 DTS 推测）
+
+反编译的 DTB 实际节点 `/ethernet@fe010000`：
+- compatible：`rockchip,rk3568-gmac`、`snps,dwmac-4.20a`；
+- reg：`0xfe010000 / 0x10000`；
+- IRQ：SPI 32 macirq、SPI 29 eth_wake_irq；
+- reset：`SRST_A_GMAC1`（clock binding ID 236）；
+- clocks：8 项，与 SoC DTS 定义顺序一致；
+- assigned clocks：ID 393、391、390，即 SCLK_GMAC1_RX_TX、SCLK_GMAC1_RGMII_SPEED、SCLK_GMAC1；
+- assigned parents：391、390、fixed-clock phandle；
+- `clock_in_out = "input"`；
+- `phy-supply` 指向 vcc_3v3 phandle；
+- `phy-mode = "rgmii"`；
+- pinctrl：6 组 gmac1m0；
+- reset GPIO：GPIO3 line 1，active-low；
+- reset delays：`<0 20000 100000>`；
+- TX/RX delay：`0x30 / 0x10`；
+- PHY handle 指向 MDIO1 地址 0；
+- GMAC1 status = okay，MDIO 子节点在完整 DTB 中存在。
+
+external-gmac1-clock 节点在实际 DTB 中为 fixed-clock，频率 cell `0x07735940`，即 125,000,000 Hz，clock-output-name `gmac1_clkin`。
+
+### 6.3 与 6.1.65 原始黄金 DTB 的可证实比较
+
+6.1.65 原始 IMG DTB 身份已在原始镜像审计中直接记录：
+- 文件 `dtb/rockchip/rk3566-panther-x2.dtb`；
+- 111,351 bytes；
+- SHA-256 `d03ec12df0d69bfa0f0ab5ac462a8fffd8ae5d1c512032ff9468df89248d289f`。
+
+已归档的 2026-11-20 原始 DTB 解析结果明确确认 6.1.65：
+- GMAC 节点 ethernet@fe010000；
+- compatible 为 rockchip,rk3568-gmac + snps,dwmac-4.20a；
+- status okay；
+- reg 0xfe010000 / 0x10000；
+- phy-mode rgmii；
+- clock_in_out input；
+- TX/RX delay 0x30 / 0x10；
+- MDIO PHY address 0；
+- 六组 GMAC1 M0 pinctrl 及其引脚/mux/pull/drive 解析；
+- assigned clocks IDs 0x189、0x187、0x186；parent IDs 0x187、0x186 和 fixed-clock phandle；
+- fixed-clock 为 125MHz gmac1_clkin；
+- reset GPIO 指向 GPIO3 line 1、原始 flags cell=1；
+- phy-supply 指向 vcc_3v3。
+
+因此现有原始 DTB 解析证据支持：**6.1.65 黄金 DTB 与 6.18.63 实际 DTB 的 GMAC1 主要硬件连接、RGMII、clock parent、delay、PHY address、pinmux 设计高度一致。** 这与此前 6.1.65/6.1.116 黄金交叉报告相互印证。
+
+6.1.65 旧解析记录没有保留 reset-delays-us 的实际原始 cell，故不能把 6.18 DTB 的 `<0 20000 100000>` 声称为已完成两份原始二进制的逐项确认。6.1.65 DTB 原始文件大小/hash 与 6.18 DTB 不同是全 DTB 层面的事实，不可仅凭 hash 不同推断 GMAC 配置不同。
+
+### 6.4 仍缺失的原始文件字节
+
+6.1.65 的 `04-device-tree.tar.gz` 仍在 Dropbox 原始证据库，file ID `id:9qHOnx-HLYoAAAAAAAAADA`，大小 2,256,475 bytes；原始镜像和阶段包按既定约束继续保留，不移动、不覆盖。
+
+当前可通过既有报告和哈希确认原始 DTB 身份，并复用已保存的完整 GMAC 解析结果；但本轮工具只能从 Dropbox 阶段包读取文本提取结果，未能把压缩包中的二进制成员直接放入本次本地分析环境。因此本节**不声称已对 6.1.65 与 6.18 DTB 执行本轮重新反编译或全属性自动 diff**。如后续必须补齐 reset delay、完整 phandle/clock cells 或全 DTB diff，只需取得现有 2.2 MiB 阶段包/DTB 文件，不需要重新从 851 MiB 原始镜像提取，也不需要重新运行历史提取流程。
+
+### 6.5 DTB 相关结论
+
+- 6.18.63 包内 DTB 的原始二进制已提取并重新核验 hash。
+- 该 DTB 与 6.1.116 磁盘 Panther X2 DTB 完全相同（SHA-256 相同）。
+- 6.1.65 原始 DTB 与 6.18/6.1.116 DTB 文件不同，但已有原始解析证据显示 GMAC1 的核心硬件属性一致。
+- 尚缺 6.1.65 原始 DTB 二进制在本轮的重新反编译与自动全属性 diff；既有报告中 reset delay cell 也未留存。
+- 不把非 GMAC 节点差异或 MMC aliases 变化混入当前 TX 根因推断；存储别名属于独立板级属性，若后续涉及启动介质映射，再回到存储专题核验。
+
+**R6-3 GMAC1 DTB 核心属性语义对照：PASS（基于 6.1.65 已归档原始 DTB 解析 + 6.18 DTB 实物复核）；全 DTB 二进制自动 diff：BLOCKED（缺 6.1.65 DTB 原始字节在本轮环境）。**
+
+### 6.6 R6 当前状态与下一步
+
+R6-1 Rockchip glue/board+SoC DTS 源码对照：PASS（STATIC）。  
+R6-2 GRF/CRU clock/reset 静态核验：PASS（STATIC；bit7 硬件语义仍待 TRM/可信 BSP 证据）。  
+R6-3 GMAC1 DTB 核心属性语义对照：PASS（已有黄金原始解析证据 + 6.18 DTB 实物）；完整二进制 diff BLOCKED。
+
+下一步不重复导出已知证据。先补齐 RK3568 GRF CON1 bit7 的可信寄存器定义来源（TRM/官方 BSP）；同时审查 6.1.65 原始解析中已保存的完整 M0 pinctrl 和 clock cells 是否足够覆盖 R7-A。只有存在具体未决字段时才请求现有 04-device-tree 阶段包或单个 DTB，不要求重做原始镜像提取。
