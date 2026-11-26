@@ -976,3 +976,67 @@ vcc_ddr: DCDC_REG3 {
 5. 原始 6.1.65 DTB 二进制对照仍未完成；当前 DTS 结论仍是候选源码比较，不得标记为 golden binary PASS。
 
 **本节为公开上游补丁、数据手册与冻结 DTS 的只读审计；未访问设备、未进行 PMIC 事务、未写入介质。**
+## 25. 6.18 RK8xx MFD → regulator provider 调用链与放行边界（2026-11-26）
+
+### 25.1 I2C probe 到 MFD core 的顺序
+
+固定源码 `ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`：
+
+1. `rk8xx_i2c_probe()` 根据 `rockchip,rk809` match data 选择 RK809 variant 与 RK817 regmap config；
+2. `devm_regmap_init_i2c()` 建立 regmap；
+3. 立即调用 `rk8xx_probe()`；
+4. `rk8xx_probe()` 先选择 `rk817_irq_chip` 和完整 `rk817_pre_init_reg[]`；
+5. 若无 IRQ，直接 `-EINVAL` 退出；
+6. `devm_regmap_add_irq_chip()` 注册 regmap IRQ chip；
+7. 逐项执行完整 `rk817_pre_init_reg[]` 的 `regmap_update_bits()`；
+8. 最后才 `devm_mfd_add_devices()` 创建所有 RK817/RK809 MFD 子设备。
+
+这意味着：**上游 6.18 的 RK809 MFD probe 没有“先只注册 regulator、以后再做其他初始化”的现成阶段边界。** IRQ 初始化和全部 pre-init 写入发生在 regulator 子设备创建之前；codec 写入不能通过不加载 codec 子驱动来避免。
+
+### 25.2 MFD 子设备不是只有 regulator
+
+`rk817s[]` 会一次性注册：
+- `rk808-clkout`
+- `rk808-regulator`
+- `rk805-pwrkey`
+- `rk808-rtc`
+- `rk817-codec`
+- `rk817-charger`
+
+因此即使 Kconfig 不构建或不加载 codec 子驱动，MFD core 仍然会执行 codec pre-init 表；而 MFD core 仍会要求 IRQ 并建立 regmap IRQ chip。仅通过关闭 codec 子驱动不能达到“仅验证 SWITCH_REG1”的隔离目标。
+
+### 25.3 regulator provider probe 的动作边界
+
+`rk808_regulator_probe()` 会根据 variant 选择完整 `rk809_reg[]`，然后循环调用 `devm_regulator_register()` 注册所有 regulator，而不是只注册 SWITCH_REG1。
+
+对 SWITCH_REG1：
+- descriptor 使用 `rk817_switch_ops`；
+- 支持 `enable`、`disable`、`is_enabled`；
+- `is_enabled` 需要读取 enable 状态寄存器；
+- enable/disable 会更新 `RK817_POWER_EN_REG(3)` 中 SWITCH_REG1 对应 bit；
+- descriptor 本身没有 voltage selector 或 set_voltage 操作。
+
+本板 DTS 对 SWITCH_REG1 没有 `regulator-always-on`、`regulator-boot-on` 或 voltage constraints。因而单纯 `devm_regulator_register()` 不等于已使能 SWITCH_REG1，也不证明 3.3V 输出存在。
+
+### 25.4 延迟清理是不可忽略的电源副作用
+
+6.18 `drivers/regulator/core.c` 在 DT 系统中默认启用 full constraints，并在约 30 秒后执行 regulator late cleanup。对未标记 always-on、没有 use_count、硬件当前又报告 enabled 且具有 STATUS control 的 regulator，core 会调用 disable。
+
+SWITCH_REG1 descriptor 有 disable 操作，而 Panther DTS 没有 always-on。因此在 PHY consumer 未及时成功获取并 enable 该 supply、或 consumer probe 失败/延迟的情况下，SWITCH_REG1 可能被 late cleanup 关闭。这是**潜在的真实板级供电风险**，不是已经观测到的行为；必须通过正常启动下 regulator summary、consumer probe 日志和时序来验证。不能为了测试而直接添加 `regulator-always-on`，那会改变板级约束并掩盖真实消费者链。
+
+### 25.5 6.1.65 黄金基线对照状态
+
+已完成的黄金对照仍包括：RK809 pre-init 数组逐字节相同、SWITCH_REG1 descriptor 控制定义相同、候选 Panther DTS regulator 子树一致。但本节新梳理的完整 MFD probe 顺序、regulator core late cleanup 时序，尚未用原始 6.1.65 内核源码/镜像运行证据完成逐项绑定。因此本节的调用顺序与 late cleanup 结论标记为 **6.18.63 SOURCE VERIFIED / 6.1.65 GOLDEN COMPARISON PENDING**，不得把它表述为已证明两版完全相同。
+
+### 25.6 对“何时安全放开边界”的结论
+
+当前不能安全启用上游完整 RK809 MFD + regulator stack 来验证 TX。原因不是 RK809 I2C 通信未知（已实机只读通过），而是 stock probe 会组合执行 IRQ 初始化、整组 pre-init 写入、创建全部 MFD 子设备、注册全部 regulator，并可能在延迟清理阶段关闭未被消费者使用的 rail。
+
+可考虑的后续验证路径，按风险从低到高：
+
+1. **只读启动前置证据（不放开 MFD）：** 完成原始 6.1.65 DTB 二进制核对；静态核对 RK809 IRQ GPIO/极性/父中断链；审计 stmmac/PHY consumer 对 `phy-supply` 的实际获取和 enable 顺序；不执行 PMIC 写入。
+2. **隔离式 provider 设计评审（不在本轮实现）：** 若上游 MFD 不可安全裁剪，评估独立的、仅暴露 SWITCH_REG1 的临时测试 provider。必须明确其 regmap、IRQ 依赖、enable bit、已有启动状态、失败回滚和 rail-off 风险；不能在未设计回滚前执行 enable/disable。
+3. **受控实机 provider/consumer 验证：** 只有在测试内核可回滚、串口/网络之外的恢复通道明确、所有写寄存器清单经过审查、黄金基线对照完成、用户另行授权后，才可进行。首轮仅观察既有状态；后续若必须 enable，单独授权一次明确的 SWITCH_REG1 bit 操作。
+4. **放开到 PHY/GMAC：** 先证明 SWITCH_REG1 consumer 成功绑定且不会被 late cleanup 关闭，再验证 PHY reset/clock/interface/delay，最后才进入 DMA/TX descriptor 和真实线缆 TX 验证。
+
+**本节为 6.18.63 固定源码只读调用链审计；未访问实机、未加载驱动、未写 PMIC、未改变 DTB/kernel/config/bootargs 或存储介质。**
