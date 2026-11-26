@@ -89,3 +89,102 @@ config REALTEK_PHY
 下一轮继续 R4 的第二子项：对照两版 `drivers/net/phy/realtek.c`（6.18 若已拆分则连同对应子目录文件）中 RTL8211F PHY ID、match table、probe、config_init、soft reset、RGMII delay 配置和错误传播。只审查与 Panther X2 当前 DT interface/phy-mode 相关的路径，不重新做历史 JL2xx1 workaround 专题，也不进行实机寄存器访问。
 
 **本报告只记录固定源码的只读审计；没有构建、加载驱动、访问硬件或修改设备。**
+
+## 7. RTL8211F 驱动实现对照（R4 第二子项，2026-11-26）
+
+固定源码：
+- 黄金候选 6.1.65：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`，`drivers/net/phy/realtek.c`；
+- 目标 6.18.63：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`，`drivers/net/phy/realtek/realtek_main.c`（Realtek driver 已拆分目录）。
+
+### 7.1 PHY ID 匹配：核心 RTL8211F ID 未变化
+
+两版均以 `PHY_ID_MATCH_EXACT(0x001cc916)` 匹配 RTL8211F，均保留 RTL8211F-VD 的 `0x001cc878` 独立条目。6.1.65 的 RTL8211F probe 指向 `rtl821x_probe`；6.18.63 的普通 RTL8211F 条目改为专用 `rtl8211f_probe`。因此 PHY ID 匹配本身不是 6.18 回归，但 probe 副作用发生变化。
+
+### 7.2 Probe 阶段从读取配置变成明确写寄存器
+
+6.1.65 的 `rtl821x_probe()`：
+- 读取 page `0xa43` / PHYCR1 `0x18`；
+- 读取 page `0xa43` / PHYCR2 `0x19`（VD 变体除外）；
+- 将 ALDPS 相关位和 CLKOUT_EN 位缓存到私有数据；
+- DT 属性存在时才调整缓存目标值；
+- probe 阶段没有对上述寄存器执行写操作。
+
+6.18.63 的通用 `rtl821x_probe()`：
+- 分配私有数据；
+- `devm_clk_get_optional_enabled()` 获取并可能使能 PHY clock；
+- 读取 `realtek,aldps-enable` 和 `realtek,clkout-disable` 属性；
+- 不再读取/缓存 PHYCR1、PHYCR2。
+
+随后 6.18.63 专用 `rtl8211f_probe()` 会无条件执行：
+`phy_write_paged(RTL8211F_WOL_PAGE=0xd8a, RTL8211F_WOL_SETTINGS_EVENTS=16, 0)`，
+即清除 PHY 的 PME/WoL event 配置。该动作是明确的 MDIO 写操作，即使设备树没有 `wakeup-source` 也会执行。
+
+**结论：6.18 RTL8211F 的 PHY driver probe 不是只读操作。** PHY/MDIO 节点仍必须保持 disabled；不得把“只加载驱动观察 probe”当作无副作用的验证。6.1.65 probe 也会做两次 paged MDIO 读取，且可能 enable optional clock，但没有上述 WOL register write。
+
+### 7.3 ALDPS 配置策略变化
+
+6.1.65：
+- probe 先读出现有 PHYCR1；
+- 缺少 `realtek,aldps-enable` 时保留硬件当前 ALDPS 三个位；
+- 属性存在时将三个位设为 1；
+- config_init 通过 `phy_modify_paged_changed()` 将缓存值写回掩码位。
+
+6.18.63：
+- probe 不读 PHYCR1；
+- 缺少 `realtek,aldps-enable` 时 config helper 直接返回，不改寄存器；
+- 属性存在时才将三个 ALDPS 位设为 1。
+
+对“属性缺失时保留现状”而言，两版目标一致，但实现方式不同；6.18 去掉了 probe read + config_init write-back 的往返。
+
+### 7.4 RGMII TX/RX delay：寄存器位置与接口映射一致
+
+两版都按 `phydev->interface` 选择 2ns delay：
+- RGMII：TX=0、RX=0；
+- RGMII_RXID：TX=0、RX=1；
+- RGMII_TXID：TX=1、RX=0；
+- RGMII_ID：TX=1、RX=1；
+- 其他 interface：不调整 delay。
+
+寄存器/位定义也一致：
+- page `0xd08`，TXCR `0x11)，TX delay bit 8；
+- page `0xd08`，RXCR `0x15)，RX delay bit 3。
+
+6.18 将页号/寄存器抽成常量并将逻辑移入 `rtl8211f_config_rgmii_delay()`，行为基本保持。两版都使用 paged modify helper 并传播负错误码。6.18 还在 resume 路径重新应用 RGMII delay；6.1.65 的 RTL8211F resume 仅走通用 resume 延时流程，没有该专用重应用步骤。
+
+**当前不判定 Panther 应使用 RGMII / RGMII-ID / RXID / TXID。** 必须以 Panther X2 原始 DTS 与 6.1.65 黄金 DTB 的 `phy-mode`、MAC delay 属性、PHY 节点配置做联合核验后才能决定；不能由芯片型号猜测。
+
+### 7.5 CLKOUT 与 soft reset 行为变化
+
+6.1.65 在 RGMII delay 配置后，若变体支持 PHYCR2，会将缓存的 CLKOUT_EN 位写回；最后执行 `genphy_soft_reset()`。对非 RGMII interface，函数在 delay switch default 分支提前返回，因此后续 PHYCR2 写回和 soft reset 不执行。
+
+6.18.63：
+- `realtek,clkout-disable` 缺省时保留 CLKOUT，不访问 CLKOUT 控制寄存器；
+- 属性存在时才清除 CLKOUT；对普通 RTL8211F 使用 PHYCR2，对 RTL8211F-VD 使用独立 undocumented page/register；
+- 只有执行 CLKOUT disable 修改成功后才调用 `genphy_soft_reset()`；
+- 正常默认配置下 config_init 不再无条件 soft reset。
+
+因此 6.18 默认启动路径比 6.1.65 少一次 PHY soft reset；这是实质性生命周期差异，需在后续 PHY bring-up 时纳入观察，但不能据此推断哪版更适合 Panther。
+
+### 7.6 新增 EEE 配置写入
+
+6.18.63 的 `rtl8211f_config_init()` 最后无条件调用 `rtl8211f_config_phy_eee()`，通过 page `0xa43` / PHYCR2 `0x19` 清除 `RTL8211F_PHYCR2_PHY_EEE_ENABLE`（bit 5），注释说明目的是关闭 PHY-mode EEE，让 LPI 由 MAC 处理。
+
+6.1.65 对应 RTL8211F config_init 没有该 EEE bit 修改。
+
+这是一项 6.18 新增的 PHY 寄存器写行为。后续 TX 测试必须记录它，避免把 EEE/LPI 行为与基本 TX descriptor/DMA 问题混为一谈。首轮基础 TX 验证应先明确 EEE 配置状态，但不能未经测试直接改成启用或禁用的另一种策略。
+
+### 7.7 Interrupt 配置差异
+
+两版均在 page `0xa42` / INER `0x12` 配置 link-status interrupt，并通过 page `0xa43` / INSR `0x1d` ack 状态。6.18 将当前 INER 值缓存到私有数据，供 suspend/resume 时恢复；6.1.65 没有此缓存字段。两版对 MDIO 错误均传播负错误码。
+
+### 7.8 R4-2 结论
+
+- PHY ID match：PASS（核心 ID/VD ID 一致）；
+- RGMII delay bit/寄存器与 interface 映射：PASS（行为一致）；
+- ALDPS 默认保持现状：PASS（实现方式不同）；
+- probe 副作用：有重要差异，6.18 新增 WOL event register 写，且可能 enable optional PHY clock；
+- PHY config_init：有重要差异，6.18 新增 PHY EEE bit 清除；默认路径不再无条件 soft reset；
+- resume：6.18 新增 RGMII delay 重应用；
+- 实际 Panther interface/delay 选择：BLOCKED，等待原始 DTS/黄金 DTB 对照。
+
+因此 **R4 第二子项源码对照 PASS（STATIC / DIFFERENCES DOCUMENTED）**。R4 整体仍 IN PROGRESS，后续还需完成 MDIO/PHY 核心对象依赖闭包与 R1 当前 config/最终 built-in object 对照。当前仍不放行任何 PHY probe。
