@@ -188,3 +188,33 @@ config REALTEK_PHY
 - 实际 Panther interface/delay 选择：BLOCKED，等待原始 DTS/黄金 DTB 对照。
 
 因此 **R4 第二子项源码对照 PASS（STATIC / DIFFERENCES DOCUMENTED）**。R4 整体仍 IN PROGRESS，后续还需完成 MDIO/PHY 核心对象依赖闭包与 R1 当前 config/最终 built-in object 对照。当前仍不放行任何 PHY probe。
+
+## 8. MDIO/PHY 核心对象及链接边界（R4 第三子项，2026-11-26）
+
+### 8.1 6.1.65 黄金基线
+
+固定 Makefile：drivers/net/phy/Makefile、drivers/net/mdio/Makefile。
+
+6.1.65 的 libphy 聚合对象包含 phy.o、phy-c45.o、phy-core.o、phy_device.o、linkmode.o；mdio-bus-y 包含 mdio_bus.o、mdio_device.o。当 CONFIG_PHYLIB 存在时，Makefile 将 mdio-bus-y 追加进 libphy-y，因此 MDIO bus/device 核心与 PHYLIB 合并链接；没有 PHYLIB 时，才由 CONFIG_MDIO_DEVICE 单独构建 mdio-bus.o。mdio_devres.o 由 CONFIG_MDIO_DEVRES 控制。OF_MDIO/FWNODE_MDIO/ACPI_MDIO helper 分别在 drivers/net/mdio/ 下独立构建。REALTEK_PHY 显式生成 realtek.o。
+
+### 8.2 6.18.63 对象拆分
+
+6.18 的 libphy 聚合对象新增 phy_link_topology.o、phy_caps.o、mdio_bus_provider.o；mdio_bus.o 和 mdio_device.o 组成独立 mdio-bus.o，由 CONFIG_MDIO_BUS 控制，不再并入 libphy。mdio_devres.o 改由 CONFIG_PHYLIB 控制。CONFIG_PHYLIB 时还加入 stubs.o。OF_MDIO/FWNODE_MDIO/ACPI_MDIO helper 仍由各自配置在 drivers/net/mdio/ 构建。REALTEK_PHY 改为生成 realtek/ 子目录对象。
+
+这是重要的对象模型变化：6.18 必须分别核验 CONFIG_PHYLIB、CONFIG_MDIO_BUS、CONFIG_OF_MDIO 和 CONFIG_REALTEK_PHY，不能照搬 6.1.65 的 libphy 聚合假设。
+
+### 8.3 功能调用链
+
+源码链路为 Rockchip GMAC glue → MDIO bus 注册/使用 → OF MDIO helper 解析 PHY 子节点并创建 PHY device → MDIO bus 层访问 → PHY ID 匹配 → Realtek PHY driver probe/config_init → PHY 状态机/phylink 与 STMMAC MAC 协作。
+
+OF PHY 发现会触发实际 MDIO 事务；RTL8211F probe/config_init 也存在前节记录的寄存器写副作用。因此这条链路只用于静态依赖审计，当前 GMAC/MDIO/PHY DT 节点仍必须 disabled。
+
+### 8.4 R1 配置与对象证据边界
+
+本轮取得了两个固定源码版本的 Makefile，但未取得 R1 config SHA256 480645537537abdadc9e2e07f404b85c1bc9411232df04ecb284c5270d2af23a 对应的完整 .config 和最终 built-in.a/vmlinux 对象清单。因此不能推断当前 CONFIG_PHYLIB、CONFIG_MDIO_BUS、CONFIG_OF_MDIO 或 CONFIG_REALTEK_PHY 的实际值，也不能把 Makefile 存在对象规则当作 R1 已包含对象的证据。
+
+R4-4 将从 R1 已归档构建产物提取原始 config 与对象清单，核验 CONFIG_PHYLIB 对应 libphy 及新增对象、CONFIG_MDIO_BUS 对应 mdio-bus.o（6.18）、CONFIG_OF_MDIO 对应 drivers/net/mdio/of_mdio.o、CONFIG_REALTEK_PHY 对应 drivers/net/phy/realtek/。STMMAC/DWMAC 对象留待 R5/R6。
+
+### 8.5 R4-3 结论
+
+R4-3 源码对象归属与依赖架构：PASS（STATIC）。R1 当前配置/最终对象实证：PENDING，转入 R4-4。未构建、未加载驱动、未执行 MDIO 事务、未访问硬件。
