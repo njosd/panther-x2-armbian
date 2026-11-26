@@ -46,3 +46,38 @@ Corrected packaging run: [45736650568](https://github.com/njosd/panther-x2-armbi
 The previous artifact from run `45735410519` (ID `15078283453`) is superseded and must not be used. The corrected artifact is **packaging-verified and eligible for the next separately authorized TF-card stage**, but has not been boot-tested on Panther X2. This is not proof of runtime success. The hybrid boot dependency remains: existing eMMC SPL is required; the TF image does not contain an independent SPL/IDB.
 
 No physical TF card or eMMC was accessed or written. This report does not authorize writing SU08G, SN64G, or eMMC.
+
+
+## Post-packaging Panther X2 runtime result — 2026-11-26
+
+The corrected image was subsequently written by the user to the dedicated 8GB SU08G TF card using balenaEtcher and booted on Panther X2. The 64GB SN64G comparison card and eMMC were not written or intentionally modified.
+
+### Observed runtime evidence
+
+- Existing eMMC SPL successfully handed off to JP-TvBox U-Boot proper on the TF card.
+- U-Boot loaded the R1 Kernel, uInitrd and Panther X2 DTB from the TF boot partition and passed control to Linux.
+- Linux identified the machine as Panther X2, initialized four CPUs and recognized approximately 4GiB RAM.
+- Linux executed `/init`; the RAM initramfs root was active and an interactive BusyBox v1.37.0 ash prompt `(panther-x2-r1-network-core) #` appeared.
+- The boot log contains repeated `/init: printf: not found` errors (including script lines 33, 35 and 38). The R1 `/init` source calls `printf`, but the package workflow's BusyBox applet/link allowlist omitted `printf`. This is a packaging omission, not evidence of a kernel boot failure.
+- Deferred-probe messages for USB, MMC/PMIC regulators and Rockchip power domains were also logged. They are retained as observations and are not promoted to fatal failures by this report.
+- No evidence in this log indicates that persistent storage was mounted or written by Linux.
+
+### Runtime status and limits
+
+**Verified:** kernel handoff and execution; Panther X2 DTB recognition; four-CPU/4GiB memory enumeration; initramfs root execution; BusyBox ash interactive shell availability.
+
+**Defect confirmed:** the R1 initramfs does not provide the `printf` command required by the current `/init`. The diagnostic/status output is therefore incomplete. The root cause is the package workflow's applet/link allowlist, not a missing kernel feature.
+
+**Not verified:** completion of every `/init` diagnostic; physical Ethernet TX/RX or any network connectivity. R1 intentionally keeps GMAC1/MDIO/PHY disabled and is not an Ethernet test image.
+
+### Minimal correction
+
+The R1 packaging workflow was amended to include `printf` in the BusyBox applet link allowlist and to assert that the extracted initramfs contains `bin/printf -> busybox`. No change was made to the R1 `/init` script, kernel Image, kernel configuration, DTB, U-Boot proper, bootargs, load addresses, GPT geometry or storage layout.
+
+The workflow change is committed as `4efd7c7e56abfbc43a8309b4d797cd4cc5c40891`. This fixes the identified packaging omission at source level. A new CI package run and a subsequent runtime boot are still required before the correction itself can be marked verified.
+
+### Safety boundary
+
+The observed boot used the user-authorized SU08G TF card. SN64G and eMMC remain outside the write scope. The boot log does not establish that Linux accessed persistent storage; no storage write is reported. This record does not authorize further storage writes or eMMC changes.
+
+Source: user-provided UART boot log, full 1,567-line record reviewed in this conversation.
