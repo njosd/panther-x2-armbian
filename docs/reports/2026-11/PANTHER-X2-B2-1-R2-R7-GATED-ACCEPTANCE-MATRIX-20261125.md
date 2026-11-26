@@ -20,8 +20,8 @@
 
 | 阶段 | 对象/交接 | 最早直接验证点 | 观察方法 | 成功证据 | 不能证明 |
 |---|---|---|---|---|---|
-| R2 | GPIO provider | R2 | gpiochip 注册、绑定、安全现有消费者 | controller + consumer 证据 | 每个引脚电气质量 |
-| R2 | Syscon/Regmap | R2 | regmap 实例、实际 consumer 访问 | 实例及消费者成功 | 所有寄存器均正常 |
+| R2 | GPIO provider | R2 | `gpio-rockchip` bank bind、gpiochip 注册 | controller bind + gpiochip 证据 | 每个引脚电气质量、GMAC reset consumer（R7-A/C） |
+| R2 | Syscon/Regmap | R2 | `rockchip-pinctrl` bind；probe 使用 `syscon_node_to_regmap()` 获取 GRF/PMU regmap | pinctrl probe/bind 成功及无 regmap lookup 错误 | GMAC consumer 的独立 phandle 调用（R7-A）及所有寄存器均正常 |
 | R3 | RK3x I2C | R3 | controller 绑定、adapter 注册 | I2C0 adapter | PMIC 事务成功 |
 | R3 | RK809 | R3 | 安全 ID/status 只读、重复读取 | 稳定 PMIC 响应 | 全部 PMIC rail |
 | R3 | MFD/Regmap | R3 | parent、子设备、regmap 关联 | 子设备和 regmap | 物理电压 |
@@ -88,3 +88,5 @@
 **黄金基线证据边界：** 6.1.65 已有原版系统在 Panther X2 上完成 Ethernet/RTL8211F、千兆链路、DHCP、网关/外网 IPv4 和 DNS 的正向实机验证；其内嵌 IKCONFIG 与 `modules.builtin` 是构建配置证据，不代表其中每个 provider 的独立功能都已单独测试。不能把整机网络成功无条件泛化为所有 provider 的独立 PASS。
 
 **默认配置接受原则：** 6.18 的组件版本、配置值、依赖结构和实现方式可以不同于 6.1.65。只要当前阶段功能通过且差异有解释，就接受 6.18 默认实现；不要求配置逐项相同。
+
+R2 运行时 consumer 说明：6.18.63 Panther X2 pinctrl 节点带有 GRF/PMU syscon phandle；pinctrl probe 实际调用 syscon API 并通过 of_platform_populate 创建 GPIO bank 子设备。故 R2 可以在不启用 GMAC/MDIO/PHY 的前提下，使用 pinctrl bind 与 gpio-rockchip/gpiochip 作为共享 provider 的安全运行时验证路径。
