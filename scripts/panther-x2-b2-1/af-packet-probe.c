@@ -50,6 +50,7 @@ int main(int argc, char **argv)
     int rawfd = -1, rxfd = -1, dgramfd = -1;
     int ifindex = 0;
     int rc, saved_errno;
+    int bind_raw_rc, bind_rx_rc, bind_dgram_rc;
     struct pollfd pfd;
     unsigned char rxbuf[256];
 
@@ -111,17 +112,17 @@ int main(int argc, char **argv)
     sll.sll_protocol = htons(ETH_P_ALL);
     sll.sll_ifindex = ifindex;
 
-    rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = rc < 0 ? errno : 0;
-    result("bind_raw", rc, saved_errno);
+    bind_raw_rc = bind(rawfd, (struct sockaddr *)&sll, sizeof(sll));
+    saved_errno = bind_raw_rc < 0 ? errno : 0;
+    result("bind_raw", bind_raw_rc, saved_errno);
 
-    rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = rc < 0 ? errno : 0;
-    result("bind_rx", rc, saved_errno);
+    bind_rx_rc = bind(rxfd, (struct sockaddr *)&sll, sizeof(sll));
+    saved_errno = bind_rx_rc < 0 ? errno : 0;
+    result("bind_rx", bind_rx_rc, saved_errno);
 
-    rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
-    saved_errno = rc < 0 ? errno : 0;
-    result("bind_dgram", rc, saved_errno);
+    bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
+    saved_errno = bind_dgram_rc < 0 ? errno : 0;
+    result("bind_dgram", bind_dgram_rc, saved_errno);
 
     /* A deterministic test frame. Loopback is not an Ethernet device. */
     memset(raw_frame, 0, sizeof(raw_frame));
@@ -132,7 +133,7 @@ int main(int argc, char **argv)
     raw_frame[13] = 0xb5;
     memcpy(raw_frame + ETH_HLEN, "PX2R1TX!", 8);
 
-    if (rc == 0) {
+    if (bind_raw_rc == 0) {
         sll.sll_protocol = htons(0x88b5);
         rc = sendto(rawfd, raw_frame, sizeof(raw_frame), 0,
                     (struct sockaddr *)&sll, sizeof(sll));
@@ -142,12 +143,14 @@ int main(int argc, char **argv)
         puts("send_raw_rc=SKIPPED_BIND_FAILED");
     }
 
-    sll.sll_protocol = htons(0x88b5);
-    if (dgramfd >= 0) {
+    if (bind_dgram_rc == 0) {
+        sll.sll_protocol = htons(0x88b5);
         rc = sendto(dgramfd, dgram_payload, sizeof(dgram_payload), 0,
                     (struct sockaddr *)&sll, sizeof(sll));
         saved_errno = rc < 0 ? errno : 0;
         result("send_dgram", rc, saved_errno);
+    } else {
+        puts("send_dgram_rc=SKIPPED_BIND_FAILED");
     }
 
     pfd.fd = rxfd;
