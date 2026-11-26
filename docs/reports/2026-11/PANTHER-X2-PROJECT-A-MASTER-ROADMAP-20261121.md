@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 静态/构建核验及 6.1.65 黄金基线配置对照已完成（所比符号均为 y、无配置值差异）；现有 R1 镜像上的 provider 运行时注册/功能验证待完成，R2 暂不结项、不放行 R3。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS（6.1.65 Golden 配置对照及现有 R1 镜像 pinctrl/SYSCON/GPIO 只读运行时验证完成）；R3 静态审计完成，但 RK809 MFD probe 含 PMIC 寄存器写操作，运行时验证暂 HOLD/BLOCKED，不放行 R4。
 
 ## 0. 统一项目定义
 
@@ -709,5 +709,6 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 ### 当前执行状态（2026-11-26）
 
 - R1 AF_PACKET 软件 API 与 loopback outgoing 观察已实机通过；不证明物理 Ethernet TX/RX。
-- R2 的静态依赖与构建证据已完成；此前报告将其写成完整 PASS 属于过早结项，现更正为：**6.1.65 黄金基线 provider/关键依赖配置对照已完成（所比符号均为 y、无配置值差异）；现有 R1 镜像上的 provider 运行时注册/功能验证待完成；R2 未结项，不放行 R3。**
-- R2 期间继续保持 GMAC1/MDIO1/RTL8211F DT 节点关闭；不启用硬件路径、不发送网络帧、不重打包。先完成只读运行时检查；黄金基线配置证据已补齐。
+- **R2 已 PASS。** 复用现有 R1 最终镜像，只读确认 `rockchip-pinctrl` 绑定、GRF/PMU SYSCON consumer probe 成功、GPIO0–GPIO4 五个 bank 绑定且五个 32-line gpiochip 注册；6.1.65 Golden 与 6.18.63 provider/关键依赖配置对照均为 y。没有写 GPIO、操作 reset/电源或重建刷写。
+- **R3 静态审计已完成，运行时 HOLD/BLOCKED。** R1 最终 DTB 的 I2C0/RK809/SWITCH_REG1/GMAC1 `phy-supply` phandle 已解析；R1 最终配置仅有 I2C controller/regmap/regulator 通用基础，缺少 `MFD_RK8XX_I2C`、`MFD_RK8XX` core 与 `REGULATOR_RK808`。6.1.65 Golden 含旧版 `MFD_RK808`、`REGULATOR_RK808` 及相应 built-in 对象。6.18 RK809 MFD probe 会执行 `regmap_update_bits()`，不是只读操作；未经单独批准不得引入该驱动或访问 PMIC。R3 不整体 PASS，不放行 R4。
+- GMAC1/MDIO1/RTL8211F 在 R3 期间继续 disabled；不执行 PMIC 写入、regulator 开关/电压切换、电源循环、网络发送或镜像重建。
