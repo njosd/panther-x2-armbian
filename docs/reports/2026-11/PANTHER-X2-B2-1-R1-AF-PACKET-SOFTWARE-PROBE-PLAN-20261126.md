@@ -181,3 +181,74 @@ Artifact: [download PREPARE-ONLY Etcher-ready image](https://github.com/njosd/pa
 ### Authorization and safety boundary
 
 This is a **PREPARE-ONLY artifact**, not a target-hardware result. No Panther X2 access occurred during packaging, and no SU08G, SN64G or eMMC write was performed. The artifact is prepared for the dedicated SU08G stage, but flashing it and booting Panther X2 require separate explicit authorization. SN64G and eMMC remain excluded. The original R1 image remains the rollback baseline.
+
+## 2026-11-26 target-runtime result and corrected loopback retest package
+
+### First Panther X2 runtime result
+
+The user booted the dedicated probe image on the authorized SU08G TF and supplied the UART output.
+
+Verified:
+- AF_PACKET SOCK_RAW, second receive SOCK_RAW, and SOCK_DGRAM socket creation all succeeded (rc values 3, 4, and 5).
+- All three packet sockets bound successfully to lo (bind_*_rc=0).
+- Interface index lookup succeeded (ifindex=1).
+- Both raw and datagram sendto() returned -1, errno=100 (ENETDOWN).
+- No packet was received during the 500ms observation.
+- The probe process exited 0, meaning its diagnostic routine completed; it is not an all-subtests-pass indicator.
+- Physical Ethernet TX was explicitly not tested; GMAC1/MDIO/PHY remain disabled.
+
+After the probe, the user read /sys/class/net/lo/flags; result was 0x8. This contains IFF_LOOPBACK but not IFF_UP (0x1). The loopback interface was therefore administratively down during the first send attempt. This directly explains the ENETDOWN result; it does not indicate an AF_PACKET send implementation defect.
+
+### Source correction
+
+Commit 0e6c590cdc27ddd43d819c4d11e4163fad262133 updates scripts/panther-x2-b2-1/af-packet-probe.c:
+- After successful packet socket creation/bind, query lo flags through the existing AF_PACKET socket using SIOCGIFFLAGS.
+- If IFF_UP is absent, temporarily set only IFF_UP.
+- Record original and post-change flags.
+- Run RAW/DGRAM send and packet receive observation.
+- Report poll() revents explicitly, so readiness/error/hangup can be distinguished.
+- Restore the original interface flags before normal process exit.
+- No IPv4 socket, IP address, route, GMAC, MDIO, PHY, or persistent configuration is added.
+
+The init script now explains that lo may be temporarily raised and its original flags are restored.
+
+### Rebuild and image packaging
+
+Static build workflow: [45747785913](https://github.com/njosd/panther-x2-armbian/actions/runs/45747785913), job 139667947294, source commit 0e6c590cdc27ddd43d819c4d11e4163fad262133. Build, AArch64 ELF/static-link checks and QEMU non-network self-test passed.
+- Static probe artifact ID: 15084530876
+- Artifact ZIP SHA256: 2691bd4c55b781a786ea23971de232b1c826022bc59151be7be02a771150eeed
+- Binary size: 636,120 bytes
+- Binary SHA256: d74ad0a1012e1f345cab5ee3901872c800f872d4b57b023fe84ac91f6b617b3e
+- Source SHA256: 9333a6f0d0d6a2196917443c8ab33479d953a8192a5338644954bc14da2f1ffd
+
+The dedicated PREPARE-ONLY package workflow [45748363770](https://github.com/njosd/panther-x2-armbian/actions/runs/45748363770), job 139670126730, completed successfully. It verifies the probe artifact checksum manifest and exact source equality against the repository, pins the frozen R1 kernel/DTB and B1 U-Boot inputs, validates the initramfs round trip, preserves the existing bootargs/load addresses and GPT layout, then checks the Etcher gzip and decompressed raw image hashes.
+
+New artifact:
+- Name: panther-x2-r1-af-packet-probe-TF-IMAGE-ETCHER-READY-PREPARE-ONLY
+- Artifact ID: 15084507127
+- Artifact ZIP size: 15,502,100 bytes
+- Artifact ZIP SHA256: b77a6ed8df90f72218c3fabc8b22419af91d937cadf8197da1cab95f0bc98a7b
+- Etcher file: panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz
+- Compressed image SHA256: f7a3c6f21d9150af062b3dc7229a42bc4d7ba2cf83267fc984836a18036da821
+- Decompressed 2GiB raw image SHA256: beac3df7e770dbcb39d4e22995bafbaebfd38317222e387e5a3ee497a7f40d22
+- Dedicated uInitrd SHA256: f18503eee87bdb9d65e6b2b64604490a43465e94fac17f243cf3a55f793f4cbd
+- Embedded probe SHA256: d74ad0a1012e1f345cab5ee3901872c800f872d4b57b023fe84ac91f6b617b3e
+
+Artifact: [download corrected PREPARE-ONLY image](https://github.com/njosd/panther-x2-armbian/actions/runs/45748363770/artifacts/15084507127). Retention expiry: 2026-12-26.
+
+### Current acceptance state
+
+| Item | Result | Evidence |
+|---|---|---|
+| AF_PACKET RAW/DGRAM socket creation | PASS | Panther X2 UART output |
+| Bind RAW/RX/DGRAM to lo | PASS | Panther X2 UART output |
+| First RAW/DGRAM send | BLOCKED BY lo DOWN | ENETDOWN; lo/flags=0x8 |
+| First receive observation | No packet | 500ms probe output; no POLLIN detail in original probe |
+| Corrected probe source/build | PASS | Commit 0e6c590; CI 45747785913 |
+| Corrected dedicated initramfs/image package | PASS — PREPARE-ONLY | CI 45748363770 |
+| Corrected probe on Panther X2 | NOT YET RUN | Requires separate SU08G write/boot authorization |
+| Physical Ethernet TX/RX | NOT TESTED IN R1 | Earliest physical TX stage remains R7 |
+
+### Authorization boundary
+
+The corrected image is only prepared. It has not been written to any physical medium and has not been booted. The earlier authorization to write/boot the previous probe image does not automatically authorize replacing it with this new image. Any new write is restricted to the dedicated SU08G TF and requires explicit confirmation. SN64G and eMMC remain excluded. No persistent system configuration has been changed.
