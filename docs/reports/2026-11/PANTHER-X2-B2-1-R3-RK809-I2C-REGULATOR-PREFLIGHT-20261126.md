@@ -106,7 +106,7 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 | R3 Kconfig/Makefile 依赖 | PASS-STATIC | 6.18.63 精确源码已核对 |
 | R3 R1 最终配置/对象 | PASS-STATIC | 真实 R1 artifact 已解包 |
 | R3 6.1.65 Golden 配置/对象对照 | PASS-STATIC | Dropbox 原始 config 与 modules.builtin |
-| R3.1 I2C0 controller bind / adapter 注册 | NOT TESTED | 可先用现有 R1 镜像只读 sysfs 核验，不触碰 PMIC |
+| R3.1 I2C0 controller bind | PASS-RUNTIME | 实机 sysfs 显示 DRIVER=rk3x-i2c；启动日志识别 0-001c 的 FAN53555，证明 I2C0 至少一个从设备完成通信；adapter class 枚举本轮未能确认 |
 | R3.2 RK809 稳定通信/ID read | BLOCKED | driver probe 有 PMIC 写操作；独立只读事务方案尚未获准 |
 | R3.3 MFD/regmap parent/child | BLOCKED | 当前 R1 未构建 driver；启动 built-in driver 会触发上述写操作 |
 | R3.4 regulator 注册 | BLOCKED | 当前 R1 未构建 driver；不操作 regulator |
@@ -114,7 +114,30 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 | R3.6 GMAC PHY supply consumer | BLOCKED / R7-A | GMAC1 仍 disabled，按原计划留到 R7-A |
 | R3.7 PMIC 状态寄存器只读观察 | BLOCKED | 先确认寄存器语义及无副作用的安全访问方法 |
 
-**阶段结论：** R3 已完成静态配置、Golden 对照、实际 DTB 和 probe 副作用审计；运行时功能未通过，R3 整体保持 HOLD/BLOCKED，不放行 R4。下一项安全动作仅为在现有 R1 镜像上只读检查 I2C0 adapter 与 DT 创建的 RK809 client 节点；该动作不等于 PMIC 通信成功，也不会启用 RK809 driver。
+**阶段结论（更新至 2026-11-26 实机只读取证）：** R3 静态审计完成；R3.1 的 I2C0 platform controller 已绑定 rk3x-i2c，并有 FAN53555@0x1c 成功识别的启动日志，证明 I2C0 总线上至少一个非 RK809 从设备完成了实际通信。RK809@0x20 仅确认 DT 创建的 client 节点存在，尚无 RK809 ID/寄存器响应证据。R3.1 controller bind 可记 PASS-RUNTIME；adapter class 目录枚举未得到有效结果（终端缺少 echo 等命令），不单独判定 adapter class 注册状态。RK809 provider/regulator 链仍未验证，R3 整体 HOLD/BLOCKED，不放行 R4。
+
+
+## 10. R3.1 实机只读取证补充（2026-11-26）
+
+### 10.1 证据来源与结果
+
+在现有 R1 AF_PACKET probe initramfs 中执行只读 sysfs 检查，并查看启动内核日志；没有修改配置、加载模块、发起额外 I2C/PMIC 事务或改变电源状态。
+
+1. `/sys/bus/platform/devices/fdd40000.i2c/uevent` 输出 `OF_FULLNAME=/i2c@fdd40000`、`OF_ALIAS_0=i2c0`，并从其 driver 链接读取到 `DRIVER=rk3x-i2c`。**这直接证明 I2C0 platform controller 已绑定 `rk3x-i2c` 驱动。**
+2. `/sys/bus/i2c/devices/0-0020` 存在，uevent 标识 `OF_FULLNAME=/i2c@fdd40000/pmic@20`、`OF_COMPATIBLE_0=rockchip,rk809`，`/name` 为 `rk809`。这证明 DT 创建了 RK809 client 设备节点，不证明芯片应答或 ID 读取成功。
+3. 启动日志出现 `fan53555-regulator 0-001c: FAN53555 Option[12] Rev[15] Detected!`。这证明 I2C bus 0 上地址 `0x1c` 的 FAN53555 完成驱动识别和实际通信；它不是 RK809，不能替代 RK809@0x20 的响应证据。
+4. 启动日志出现 MMC、SARADC、IO-domain 等多个设备等待 `/i2c@fdd40000/pmic@20/regulators/...` supplier 的 deferred-probe 记录，与 R1 未构建 RK8xx MFD/regulator provider 的静态审计一致。
+5. `/sys/class/i2c-adapter/*` 的枚举命令依赖 `echo`，但当前极简 shell 报 `echo: not found`；因此本轮没有取得有效的 adapter class 目录枚举结果。不能把此前通配符未显示内容误判为 adapter class 为空。
+6. 当前 shell 也缺少 `command`、`dmesg`、`ls`、`grep`、`readlink` 等工具。通过 `/proc/kmsg` 可读取启动日志；`Ctrl+C` 未能退出目标端读取，最终通过 iMac UART 程序的 `Ctrl+]` 正常关闭本地串口会话。该操作没有重启设备或修改设备配置。
+
+### 10.2 更新后的 R3.1 结论
+
+- **PASS-RUNTIME：** I2C0 platform controller 与 `rk3x-i2c` 驱动成功绑定。
+- **PASS-RUNTIME（总线通信旁证）：** FAN53555@0x1c 被识别，证明 I2C0 上至少一个从设备可通信。
+- **NOT VERIFIED：** I2C adapter class 目录枚举；RK809@0x20 的芯片应答、ID/寄存器读取。
+- **BLOCKED：** RK809 MFD/regmap、regulator provider 和 consumer 功能；不得为了推进这些项目直接启用有 probe 写寄存器副作用的 RK809 MFD。
+
+本轮不执行 `i2cget`、`i2cdetect`、`/dev/i2c-*` 访问、regulator 操作、PMIC 寄存器读写或驱动启用。R3 整体仍为 HOLD/BLOCKED，不放行 R4。
 
 ## 9. 复用与新增证据
 
@@ -126,6 +149,7 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 
 ### 本轮新增
 - 直接解包 R1 artifact 15023630465，提取最终 .config、modules.builtin 和 DTB。
+- R3.1 实机只读取证：I2C0 platform controller 绑定 `rk3x-i2c`；FAN53555@0x1c 识别成功；RK809 client 节点存在但未证明芯片响应；记录极简 shell 工具缺失造成的 adapter class 枚举限制。
 - 对 R1 最终 DTB 二进制解析 I2C0/RK809/SWITCH_REG1/GMAC1 phandle。
 - 对照 6.1.65 Golden 的 RK809 相关 config 与 built-in 对象。
 - 发现 6.18.63 RK809 MFD probe 会执行 `regmap_update_bits()`，确认它不能按只读步骤直接启用。
