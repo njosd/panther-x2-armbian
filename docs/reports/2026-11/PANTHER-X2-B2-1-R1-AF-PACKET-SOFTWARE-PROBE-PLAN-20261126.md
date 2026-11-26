@@ -15,7 +15,7 @@ The probe is a small statically linked AArch64 C program. It attempts, and recor
 1. AF_PACKET/SOCK_RAW socket creation;
 2. a second raw packet socket for receive observation;
 3. AF_PACKET/SOCK_DGRAM socket creation;
-4. interface-index lookup for the requested existing interface (default: `lo`);
+4. interface-index lookup by reading `/sys/class/net/<interface>/ifindex` (default: `lo`), deliberately avoiding an `AF_INET` control socket because R1 keeps `CONFIG_INET` disabled;
 5. binding each packet socket to that interface;
 6. raw and datagram `sendto()` attempts using a fixed local test marker;
 7. a bounded receive observation on the raw receive socket.
