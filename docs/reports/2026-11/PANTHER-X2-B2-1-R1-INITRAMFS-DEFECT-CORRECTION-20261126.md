@@ -30,12 +30,19 @@ This is a B1 userspace/initramfs defect. It does not invalidate the R1 kernel Im
 - GMAC1/MDIO/PHY remain disabled in R1. This image is not an Ethernet TX test image.
 - SN64G, SU08G and eMMC have not been accessed or modified.
 
-## CI acceptance status
+## CI acceptance status — PASS
 
-The source changes are committed, but the corrected packaging workflow has not yet been run. Therefore the corrected uInitrd and regenerated full TF image are **not yet validated**. The previous artifact `panther-x2-r1-hybrid-PREPARE-ONLY` remains superseded and must not be used for runtime testing.
+Corrected packaging run: [45736650568](https://github.com/njosd/panther-x2-armbian/actions/runs/45736650568), job `139631401388`. All 11 substantive steps completed successfully, including ARM64 BusyBox validation, fresh initramfs generation, image assembly, read-only partition verification, and artifact upload.
 
-Run `.github/workflows/package-panther-x2-r1-tf-image.yml` from `main` with:
-- `r1_run_id=45611898629`
-- `b1_run_id=45328201244`
+- Artifact: `panther-x2-r1-hybrid-PREPARE-ONLY`, ID `15079555836` (expires 2026-12-26).
+- Artifact ZIP SHA256: `44b0d27da386e53177db3a6967bb2861296f4d932da875a25c2efa8b3fd6676a`.
+- New R1 `uInitrd` SHA256: `ba1fbfe131b65d97c738176b20cdbf2c2279e77f9220eae2c6a37f25dc7cb2f0`.
+- R1 `/init` SHA256: `3d20842d394e7b088aa0430dfdf79aa096be9bab6d05b4bfbc284f3281152ea5`.
+- Full uncompressed TF image SHA256: `708a95cb120247e6d30f4b22095a4bc27132d58a69fe37c71c84afee09fcde7e`.
+- The new uInitrd is an AArch64 gzip RAMDisk, data size 495,228 bytes. CI parsed `/init` with the actual ARM64 BusyBox ash, rejected `[`/`test` dependencies, round-tripped the cpio archive, compared embedded `/init` byte-for-byte, and verified executable mode and `ash`/`sh` links.
+- The image's `uInitrd` was compared byte-for-byte with the freshly generated file and its SHA256 matched. The ext4 partition passed `e2fsck -fn`; GPT and U-Boot payload checks passed.
+- R1 kernel Image, DTB, U-Boot proper, bootargs, load addresses and GPT geometry remain unchanged.
 
-Only after the workflow succeeds and the new artifact's initramfs and image hashes are reviewed can the corrected package be considered ready for a separately authorized TF-card operation. This report does not authorize writing SU08G or any other storage.
+The previous artifact from run `45735410519` (ID `15078283453`) is superseded and must not be used. The corrected artifact is **packaging-verified and eligible for the next separately authorized TF-card stage**, but has not been boot-tested on Panther X2. This is not proof of runtime success. The hybrid boot dependency remains: existing eMMC SPL is required; the TF image does not contain an independent SPL/IDB.
+
+No physical TF card or eMMC was accessed or written. This report does not authorize writing SU08G, SN64G, or eMMC.
