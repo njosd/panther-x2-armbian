@@ -543,3 +543,70 @@ Panther DTS 的 RK809 regulator consumer 引用包括：
 **判定：R3.5 BLOCKED（安全边界阻塞），不是功能 FAIL。R3.3–R3.4 同样因 MFD/regulator probe 写寄存器副作用保持 BLOCKED。R3.1、R3.2、R3.7 的既有 PASS-RUNTIME 不受影响；R3 整体 HOLD/BLOCKED，不放行 R4。**
 
 若未来要完成 R3.3–R3.5，必须先由用户单独决定是否允许 RK809 MFD probe 的 PMIC 写入及 PMU IO-domain consumer 的 GRF 写入，并明确可接受的电源/IO-domain 影响范围；在此之前不实施。
+
+
+## 18. R3 安全边界的分阶段释放条件与面向网络验证的路线（2026-11-26）
+
+### 18.1 原则修订：边界不是永久禁令
+
+R3 的 BLOCKED 表示“当前证据和授权不足以安全执行”，不表示 RK809 MFD、regulator 或 IO-domain 永远不能启用。项目最终目标是验证 Panther X2 在 Linux 6.18 下的真实硬件工作状态，并为 GMAC/PHY 网络传输提供可复现的正确电源、IO 电压域和驱动参数。后续允许逐步释放边界，但每次只开放一个明确动作集合，不把一次授权扩展为其他寄存器、其他 rail、其他驱动或网络发送授权。
+
+### 18.2 新增的 6.18.63 精确源码证据：RK809 MFD probe 写入范围
+
+冻结源码：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+- RK809 在 `rk8xx_probe()` 中走 RK817 family 分支，先注册 regmap IRQ，再遍历 `rk817_pre_init_reg[]` 执行 `regmap_update_bits()`，之后创建 MFD 子设备。
+- 该 pre-init 表包含 RTC_STOP、较大组 CODEC/ADC/DAC/耳机/音频 PLL/DI2S 配置、GPIO interrupt polarity，以及 SYS_CFG(1) 的 HOTDIE/TSD 温度阈值字段。它不是只读流程，也不是“仅设置 PHY 电源”。
+- 本次源码核对未在该 RK817 pre-init 表中发现直接针对 RK809 SWITCH_REG1 enable/voltage selector 的条目；这只能说明该表本身没有直接切换该 rail 的动作，不能推导完整 probe 无副作用。
+- `rk817_irq_chip` 使用 status/ack 与 mask 寄存器，并设置 `init_ack_masked=true`；regmap IRQ core 初始化可能读取/确认状态并写 mask/ack。其具体访问序列、W1C 语义和初始中断状态影响仍须逐项核对。
+- `system-power-controller` 在 probe 中注册 poweroff/restart handler；注册本身不等于立即关机，但 handler 被调用会写 DEV_OFF/DEV_RST。驱动 shutdown、suspend、resume 路径也会写 SYS_CFG(3)。实验阶段必须禁止执行系统关机、重启、suspend/resume；退出实验镜像应采用已确认不会触发意外 PMIC shutdown 的路径。
+- 因此，MFD-only probe 是可考虑的第一项主动验证，但必须先完成 IRQ mask/ack 写入范围和所有生命周期调用路径审计，再由用户对明确写入集合单独授权。
+
+### 18.3 regulator provider 释放条件
+
+`rk808_regulator_probe()` 会注册 RK809 全部 regulator descriptors，而不是天然只注册 `vcc_3v3`。DTS 对 DCDC、LDO 和 SWITCH_REG1 配置了多种约束：多个 rail 为 always-on/boot-on，部分带 init voltage、initial mode、suspend voltage/state；SWITCH_REG1 本身没有 always-on/boot-on 和固定电压约束，但在 GMAC DTS 中作为 PHY supply。
+
+provider 阶段必须先完成：
+1. 对 RK809 所有 regulator descriptor 建立完整表：寄存器地址、位域、读写属性、enable/disable、voltage selector、mode、ramp、suspend 操作。
+2. 对 Panther DTS 每个 regulator child 的约束逐项映射到 regulator core 的注册时行为，确认哪些属性会在注册阶段触发写入，哪些只在 consumer 请求或 suspend 时触发。
+3. 对 PMIC 写寄存器的地址和值建立预期变更白名单；不得把“所有 rail 都 always-on”或“注册不一定写”作为未经验证的假设。
+4. 先核实实际板级电压和既有运行状态。regulator framework 的 `get_voltage` 通常反映 selector/配置值，不是物理输出测量；关键 rail 应使用合适的外部测量手段核实，尤其是 SWITCH_REG1。
+5. 首次 provider 试验不启用 GMAC/MDIO/PHY，不执行任何 set_voltage/enable/disable 用户空间操作，不触发 suspend/resume；仅观察 provider 注册结果、只读 regulator 状态和受控寄存器差异。
+
+### 18.4 IO-domain consumer 释放条件
+
+RK3568 PMU IO-domain probe 会读取 regulator voltage 并按电压写 GRF/PMU-GRF IO voltage-select 位。它的目标不是切换 PMIC rail，而是让 SoC IO 电压域选择与外部供电相匹配；写错仍可能造成接口电平不匹配。
+
+释放条件：
+- 确认 RK3566/Panther 实际匹配的 IO-domain soc_data、bank index 与 GRF register/bit mapping。
+- 把 DTS 的每个 supply 与对应物理 bank/pin group、实际供电 rail 对齐；不能只凭 `vccioN` 名称推断。
+- 读取当前 GRF 选择位，并用外部测量核实对应 rail 的实际电压；确认驱动写入值与板级供电一致。
+- 仅在明确授权后启用 consumer；执行后只读回同一 GRF 位并核对预期变化，不做无关 GRF 写入。
+- 若驱动拟写值与实测 rail 不一致、映射有歧义或返回电压不可确定，停止，不允许 probe 继续写。
+
+### 18.5 建议的主动验证阶段门（本节是路线，不是操作授权）
+
+| 阶段 | 验证目标 | 允许的动作集合 | 通过证据 |
+|---|---|---|---|
+| G0 | 完成寄存器/配置/拓扑预审 | 源码、DTS、Kconfig、artifact 只读审计 | 精确写入白名单、风险表、回退方案 |
+| G1 | MFD-only | 用户单独授权后，仅绑定 RK809 MFD；regulator driver 和 IO-domain consumer 不启用 | probe/IRQ 成功；PMIC 访问与预期写入集合一致；未改变关键 rail |
+| G2 | regulator provider | G1 通过并单独授权后，启用 RK809 regulator provider；不启用网络节点 | rails 注册；约束与 selector 状态一致；关键 rail 外部实测合格 |
+| G3 | PMU IO-domain | G2 通过并单独授权后，启用 IO-domain consumer | bank mapping、供电电压、GRF 选择位相互一致 |
+| G4 | PHY supply path | 进入原计划 R7-A，经单独授权恢复 GMAC1/MDIO/PHY；核验 SWITCH_REG1 的实际 consumer 请求与电压 | PHY supply 获取/使能、MDIO/PHY probe/link 证据 |
+| G5 | TX-first | R7-D 独立授权 | 对端真实捕获 Panther 发出的原始 Ethernet 广播帧 |
+| G6 | 协议栈递进 | 仅 TX-PASS 后，按 R8 逐层放行 | RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS 分层双端证据 |
+
+### 18.6 回退与停止标准
+
+- 每阶段使用独立实验镜像/专用 SU08G TF；不写 SN64G，不写 eMMC。启动前核对 Image/DTB/initramfs 哈希与介质身份。
+- 每阶段开始前记录可安全读取的 PMIC/GRF 状态、关键 rail 外部电压、内核日志和相关设备状态；只对数据手册明确可读且无读副作用的寄存器执行读取。
+- 不把“恢复原寄存器值”作为通用回退：某些状态位、W1C、写一触发、锁存或电源时序寄存器不可简单回写。回退必须按具体寄存器语义设计。
+- 任一异常掉电、复位、PMIC 错误、rail 电压偏离、温度/中断异常、I2C 错误、设备 probe defer/error 或非预期 GRF 变化，立即停止后续阶段；保留日志与原始状态，不继续叠加驱动。
+- MFD probe 后如要退出，优先正常关机路径必须事先审计；不能假定 module unbind 或直接断电可恢复 PMIC 状态。首次实验不进入 suspend/resume，不调用 poweroff/restart handler。
+- 所有阶段仅为硬件验证，不授权写入生产系统、修改 eMMC、启用无线功能或执行网络传输测试。
+
+### 18.7 当前可执行的下一步（仍为只读）
+
+下一项只读工作是核对 R1 最终 `.config` 中 `CONFIG_ROCKCHIP_IODOMAIN`、`CONFIG_MFD_RK8XX_I2C`、`CONFIG_REGULATOR_RK808` 的实际值及对应 built-in/module 对象，并复核 R1 启动日志中 IO-domain deferred-probe 的最终状态。然后完成 RK817 IRQ mask/ack 初始化写入语义和 RK809 regulator registration constraints 的逐项审计，形成 G1/G2 写入白名单。
+
+**本节不改变当前授权：尚未授权 MFD probe、regulator provider、IO-domain consumer、GRF/PMIC 写入或 GMAC 恢复。**
