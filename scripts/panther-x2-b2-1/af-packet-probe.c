@@ -51,6 +51,7 @@ int main(int argc, char **argv)
     };
     int rawfd = -1, rxfd = -1, dgramfd = -1;
     int control_fd = -1, link_flags_saved = 0, link_flags_changed = 0;
+    short original_ifflags = 0;
     struct ifreq ifr;
     int ifindex = 0;
     int rc, saved_errno;
@@ -159,11 +160,11 @@ int main(int argc, char **argv)
         saved_errno = rc < 0 ? errno : 0;
         result("get_ifflags", rc, saved_errno);
         if (rc == 0) {
-            short original_flags = ifr.ifr_flags;
+            original_ifflags = ifr.ifr_flags;
             link_flags_saved = 1;
-            printf("ifflags_before=0x%04x\n", (unsigned short)original_flags);
-            if (!(original_flags & IFF_UP)) {
-                ifr.ifr_flags = (short)(original_flags | IFF_UP);
+            printf("ifflags_before=0x%04x\n", (unsigned short)original_ifflags);
+            if (!(original_ifflags & IFF_UP)) {
+                ifr.ifr_flags = (short)(original_ifflags | IFF_UP);
                 rc = ioctl(control_fd, SIOCSIFFLAGS, &ifr);
                 saved_errno = rc < 0 ? errno : 0;
                 result("set_if_up", rc, saved_errno);
@@ -248,10 +249,10 @@ out:
         memset(&ifr, 0, sizeof(ifr));
         snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
         if (ioctl(control_fd, SIOCGIFFLAGS, &ifr) == 0) {
-            ifr.ifr_flags = (short)(ifr.ifr_flags & (short)~IFF_UP);
+            ifr.ifr_flags = original_ifflags;
             rc = ioctl(control_fd, SIOCSIFFLAGS, &ifr);
             saved_errno = rc < 0 ? errno : 0;
-            result("restore_if_down", rc, saved_errno);
+            result("restore_ifflags", rc, saved_errno);
         } else {
             saved_errno = errno;
             result("restore_get_ifflags", -1, saved_errno);
