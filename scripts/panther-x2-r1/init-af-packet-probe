@@ -1,0 +1,33 @@
+#!/bin/sh
+# Panther X2 R1 AF_PACKET software probe.
+# RAM-only initramfs; no persistent storage or network configuration.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-r1-af-packet-probe) # '
+export PATH HOME PS1
+
+printf '\n=== Panther X2 R1 AF_PACKET software probe ===\n'
+printf 'Kernel network core only; GMAC1/MDIO/PHY remain disabled.\n'
+printf 'No IP address, route, or network service is configured.\n'
+printf 'Root filesystem: initramfs in RAM; no persistent filesystem is mounted.\n'
+
+mkdir -p /proc /sys
+if ! mount -t proc proc /proc; then
+    printf 'WARNING: could not mount procfs\n'
+fi
+if ! mount -t sysfs sysfs /sys; then
+    printf 'WARNING: could not mount sysfs\n'
+fi
+
+printf '\n--- Kernel ---\n'
+uname -a
+printf '\n--- Network interfaces ---\n'
+cat /sys/class/net/lo/ifindex
+printf '\n--- AF_PACKET probe: lo ---\n'
+/bin/af-packet-probe-aarch64 lo
+probe_rc=$?
+printf 'probe_process_exit=%s\n' "$probe_rc"
+printf '\n--- Mounts (RAM-only expected) ---\n'
+mount
+printf '\nAF_PACKET software probe finished. Interactive shell follows.\n'
+exec /bin/sh -i
