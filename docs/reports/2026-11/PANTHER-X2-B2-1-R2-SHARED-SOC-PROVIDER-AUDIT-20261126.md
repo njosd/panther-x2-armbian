@@ -4,7 +4,7 @@
 
 R2 的目标是：只补充 GMAC 路径实际需要、且 R0/B1 最终配置中确实缺失的共享 SoC provider。候选重点为 `MFD_SYSCON`、`GPIO_ROCKCHIP`；已经在 B1 启用的时钟、CRU、pinctrl、GPIOLIB、reset、GRF 不得重复加入。
 
-**结论：R2 PASS（零增量复用，无需新增配置或重建）。**
+**当前结论：R2 静态/构建核验通过（零增量复用）；R2 整体未结项，不放行 R3。** 黄金基线配置差异审计与现有 R1 镜像上的 provider 运行时注册/功能验证尚待完成。
 
 对 B1 和 R1 两份真实构建 artifact 的最终 `.config`、built-in 清单和 System.map 进行核验后，确认：
 - `MFD_SYSCON=y`、`GPIO_ROCKCHIP=y` 已存在于 B1 最终配置；
@@ -119,10 +119,10 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 | syscon 与 GPIO 实现符号 | PASS | 同构建 System.map |
 | provider 构建 | PASS | R1 Actions build job success |
 | GMAC1/MDIO1/PHY 仍隔离 | PASS | R1-VERIFICATION.txt |
-| provider 在 Panther 实机 probe | NOT TESTED | R1 硬件节点 disabled |
+| provider 在 Panther 实机 probe / controller 注册 | PENDING | 需使用现有 R1 镜像进行只读运行时检查；此前未执行 |
 | 物理 Ethernet TX/RX | NOT TESTED | 仅 R7 进行真实线侧测试 |
 
-**阶段判定：R2 PASS（零增量复用）。** 无新增 Kconfig 符号、无驱动源码修改、无 DTB 修改、无新构建、无设备操作。
+**阶段判定：R2 INCOMPLETE / HOLD。** 已完成子项：6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验，确认无须重复增加配置或重建。未完成子项：6.1.65 黄金基线对应 provider 配置/对象逐项对照；R1 镜像上的 GPIO controller 注册/驱动绑定与可安全观察的 SYSCON/Regmap provider 运行时证据。不得将上述静态/构建证据升级为实机功能 PASS。
 
 ## 7. 安全边界与下一阶段
 
@@ -132,4 +132,23 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 - 不启用 GMAC1、MDIO1、RTL8211F；不做网络发送测试。
 - 不触碰 Wi-Fi、蓝牙或 USB；此前约定的 USB2.0 旁线验证仍等待后续自然打包节点，不属于 R2。
 
-R2 结束后，下一阶段按计划为 **R3 — PHY 电源 provider（RK809 SWITCH_REG1）**。本报告不自动授权 R3 配置修改、构建或任何设备操作；进入 R3 前仍须先按原计划回读 R3 所需的源码、配置和证据。
+**下一步仍在 R2 内：** 先完成黄金基线差异核对，再使用现有 R1 镜像进行只读运行时检查。GMAC1/MDIO1/PHY 继续关闭；不重建、不刷写、不改变 GPIO/电源/reset 状态。只有 R2 所有必需验收项完成并归档后，才重新评估是否放行 R3。
+
+
+## 8. 2026-11-26 黄金基线对照补充与未决项
+
+### 8.1 第一黄金基线 6.1.65 已知证据
+
+仓库原始镜像审计报告已直接从 6.1.65 Kernel 二进制提取并解压内嵌 IKCONFIG，确认 CONFIG_IKCONFIG=y、CONFIG_IKCONFIG_PROC=y，并确认 STMMAC、Rockchip DWMAC、PHYLINK、PHYLIB、MDIO 等构建配置。原始镜像审计报告同时记录 modules.builtin 中的 STMMAC/Rockchip DWMAC/PHY/MDIO 对象。6.1.65 原版系统另有 Panther X2 实机正向网络验证记录。
+
+**证据缺口：** 当前已回读的 6.1.65 镜像审计摘要没有列出 MFD_SYSCON、GPIO_ROCKCHIP 及其关键依赖的最终配置值/对象逐项结果。因此本报告不能声称这些符号在 6.1.65 中为 y/n，也不能以整机网络正常替代 provider 独立配置差异对照。需要从已归档原始 Image 内嵌 IKCONFIG / modules.builtin 的可用原始资产或用户已有提取件中补齐；优先复用已有文件，不重复完整镜像提取。
+
+### 8.2 当前 6.18 默认配置结论
+
+6.18.63 的 MFD_SYSCON、GPIO_ROCKCHIP 与依赖闭包已在 B1/R1 最终 .config 和实际构建产物中确认存在；当前没有证据要求回移 6.1.65 配置，也没有理由制造配置增量。保留 6.18 默认实现。
+
+### 8.3 R2 实机只读验证范围
+
+下一轮仅使用现有已启动 R1 镜像读取：GPIO platform controller 设备、driver bind、gpiochip 注册及相关内核日志；对 SYSCON/GRF 仅检查设备树节点与可见的运行时注册证据。不得写 GPIO、读取未文档化 MMIO、触发 reset/power、启用 GMAC/MDIO/PHY 或更改设备状态。
+
+R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 rockchip,grf / reset GPIO 的真实 phandle 获取和调用无法在 R2 直接验证；若没有安全现存 consumer，此子项必须保留 BLOCKED，并明确由 R7-A/R7-C 首次使用时验证，不能据此声称 provider consumer 功能通过。
