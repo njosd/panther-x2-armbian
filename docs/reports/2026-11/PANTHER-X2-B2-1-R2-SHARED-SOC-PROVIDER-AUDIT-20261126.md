@@ -184,5 +184,5 @@ R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset 
 
 - `rk3566-panther-x2.dts` 的 RK3566 pinctrl node 引用 `rockchip,grf = <&grf>` 与 `rockchip,pmu = <&pmugrf>`。
 - `pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 调用 `syscon_node_to_regmap()` 获取 GRF regmap，并调用 `syscon_regmap_lookup_by_phandle_optional()` 处理可选 IOC phandle；probe 成功说明该 consumer 实际通过 syscon API 获得所需 regmap。
-- `rockchip_pinctrl_probe()` 随后调用 `of_platform_populate()` 注册 GPIO bank 子设备；`gpio-rockchip` 驱动绑定、gpiochip 出现可验证 GPIO provider 的运行时注册。
+- `rockchip_pinctrl_probe()` 随后调用 `of_platform_populate()` 注册 GPIO bank 子设备；`gpio-rockchip.o`（构建对象名）对应 platform driver 名称为 `rockchip-gpio`；检查 `/sys/bus/platform/drivers/rockchip-gpio/` 下 GPIO bank 设备链接，并在 `/sys/class/gpio/` 确认 gpiochip 注册，可验证 GPIO provider 的运行时注册。
 - 上述路径均可通过 sysfs 和 dmesg 只读观察，不需要写 GPIO、MMIO 或 PMIC 寄存器。
