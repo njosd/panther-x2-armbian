@@ -1,6 +1,10 @@
 name: Panther X2 B2-1 R1 AF_PACKET probe (build only)
 
 on:
+  push:
+    paths:
+      - "scripts/panther-x2-b2-1/af-packet-probe.c"
+      - ".github/workflows/build-panther-x2-b2-1-r1-af-packet-probe.yml"
   workflow_dispatch:
 
 permissions:
