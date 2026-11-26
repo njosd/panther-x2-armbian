@@ -66,4 +66,4 @@ I2C0 / i2c-dev -> RK809         │       ├─> STMMAC/DWMAC4 core
 
 ## 5. 下一步
 
-G0.1第一轮矩阵完成。下一项严格进入 G0.2：只读复核RK809 MFD/regulator自动写入的完整寄存器/调用路径和约束副作用，形成明确白名单与是否允许后续probe的决策依据；不启动硬件、不启用驱动。
+G0.1第一轮矩阵完成。G0.2 已完成 stock RK809 MFD/regulator 自动写入与约束副作用静态审计，结论为当前安全边界下 NO-GO；允许写入白名单为空。下一项严格进入 G0.3：只读归并 IO-domain supplier/deferred-probe 证据，不启用 MFD/regulator、不写 GRF、不启动硬件。
