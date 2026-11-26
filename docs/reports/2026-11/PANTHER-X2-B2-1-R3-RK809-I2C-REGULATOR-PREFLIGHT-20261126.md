@@ -2,7 +2,7 @@
 
 ## 1. 状态与范围
 
-**状态：R3 静态审计完成；R3.1 I2C0 controller PASS-RUNTIME；R3.2 RK809 ID 只读身份读取 PASS-RUNTIME；R3.3–R3.7 MFD/regulator/provider 与 consumer 验证仍 HOLD/BLOCKED；R3 整体不放行 R4。**
+**状态：R3.1 I2C0 controller 与 R3.2 RK809 ID 只读身份读取 PASS-RUNTIME；R3.7 的安全状态寄存器候选 PASS-STATIC，等待单独授权后实读；R3.3 MFD/regmap、R3.4 regulator provider、R3.5 consumer 与 R3.6 PHY supply consumer 仍 HOLD/BLOCKED；R3 整体不放行 R4。**
 
 本轮只读核验：
 - 复用既有 6.18.63 Kconfig/Makefile 与 GMAC PHY supply 静态审计；
@@ -110,9 +110,9 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 | R3.2 RK809 稳定通信/ID read | PASS-RUNTIME | 专用静态 AArch64 程序经 I2C_RDWR 对 0x20 仅读取 0xED/0xEE；两次 ioctl 均返回 2、errno=0；实测 0x80/0x94，符合 Linux RK809 masked ID 规则 |
 | R3.3 MFD/regmap parent/child | BLOCKED | 当前 R1 未构建 driver；probe 先注册 regmap IRQ，再执行 RK817 pre-init 写入；生命周期还有 shutdown/suspend/resume 写入 |
 | R3.4 regulator 注册 | BLOCKED | DTS 有多路 always-on/boot-on、initial voltage/mode 约束；regulator core 注册时可能写电压/模式/使能寄存器 |
-| R3.5 现有安全 regulator consumer | NOT TESTED | 需先有安全的 provider 注册证据 |
+| R3.5 现有安全 regulator consumer | BLOCKED | 当前没有安全 provider 注册路径；MFD/regulator probe 含 PMIC 写入和可能的 rail 配置副作用 |
 | R3.6 GMAC PHY supply consumer | BLOCKED / R7-A | GMAC1 仍 disabled，按原计划留到 R7-A |
-| R3.7 PMIC 状态寄存器只读观察 | BLOCKED | 先确认寄存器语义及无副作用的安全访问方法 |
+| R3.7 PMIC 状态寄存器只读观察 | PASS-STATIC-CANDIDATE / runtime pending | Rev 2.4 确认 0xF0、0xF6 全位 RO；尚未获准实机读取 |
 
 **阶段结论（更新至 2026-11-26 实机只读取证）：** R3 静态审计完成；R3.1 的 I2C0 platform controller 已绑定 rk3x-i2c，并有 FAN53555@0x1c 成功识别的启动日志，证明 I2C0 总线上至少一个非 RK809 从设备完成了实际通信。RK809@0x20 仅确认 DT 创建的 client 节点存在，尚无 RK809 ID/寄存器响应证据。R3.1 controller bind 可记 PASS-RUNTIME；adapter class 目录枚举未得到有效结果（终端缺少 echo 等命令），不单独判定 adapter class 注册状态。RK809 provider/regulator 链仍未验证，R3 整体 HOLD/BLOCKED，不放行 R4。
 
@@ -389,3 +389,39 @@ A successful ID read does not authorize loading RK8xx MFD/regulator drivers or a
 - **安全决定不变：** 不启用 `MFD_RK8XX_I2C` / `REGULATOR_RK808`，不进入 R4；后续若要研究 provider 必须先单独评估并明确授权 probe、shutdown、restart、suspend/resume 和 regulator constraint 的写寄存器副作用。
 
 **最终结论：R3.2 RK809 硬件身份只读验证 PASS；R3 整体仍 HOLD/BLOCKED，不放行 R4。**
+
+
+## 15. R3.7 PMIC 状态寄存器只读候选审计（2026-11-26）
+
+### 15.1 Datasheet Rev 2.4 精确寄存器语义
+
+复核 Rockchip RK809 Datasheet Rev 2.4（2024-01-02）第 117–121 页的寄存器定义：
+
+| 寄存器 | 地址 | 位属性 | 含义 | 只读候选结论 |
+|---|---:|---|---|---|
+| `PMIC_SYS_STS` | `0xF0` | bit 7:0 全部 RO | PWRON 状态、USB 插入、VCC9 UV/LO/OV、过热告警、热关断状态 | 可作为只读状态观察候选 |
+| `PMIC_OFF_SOURCE` | `0xF6` | bit 7:0 全部 RO | SLEEP、VCC9 OV/TSD/UV、DEV_OFF、长按 PWRON、VCC9 LO 等关机来源记录 | 可作为只读关机原因观察候选 |
+
+来源：Rockchip RK809 Datasheet Rev 2.4，寄存器描述第 117–121 页，PDF：
+`https://armboard.cn/download/Rockchip_RK809_Datasheet_V2.4-20240102.pdf`。
+
+### 15.2 明确排除的寄存器
+
+- `0xF5 PMIC_ON_SOURCE`：不是全位 RO；bit 1 `RESTART_DEV_RST` 标为 RW。此次最小只读状态方案不读取该寄存器。
+- `0xF8 PMIC_INT_STS0`：包含 W1C（write-one-to-clear）位；不纳入只读候选，避免把中断状态/清除语义混入当前验证。
+- `0xF1`、`0xF3`、`0xF4` 等配置寄存器含 RW 控制位，明确不访问。
+
+### 15.3 证据解释边界
+
+1. `0xF0` 可提供 PMIC 的 VCC9 欠压/过压、温度告警及按键/插入状态；它不是每一路 regulator 的输出电压遥测。
+2. `0xF6` 是关机来源记录；数据手册说明相关标志在 power down 或 RST 后复位/装载。它可辅助解释既往关机原因，不等于当前 rail 正常。
+3. 两个寄存器的所有位均定义为 RO，适合作为下一项精确 I2C 只读事务候选；但 datasheet 属性仅支持寄存器访问语义，不证明 SWITCH_REG1 的输出电压、纹波、负载能力或 PHY 端供电。
+4. 本次仅完成文档/数据手册静态审计，没有对 Panther X2 发起任何新 I2C 事务。此前用户对 `0xED/0xEE` 的授权不自动扩展到 `0xF0/0xF6`。
+5. 如获单独授权，下一次探测严格限制为 I2C0、地址 `0x20`、寄存器 `0xF0` 与 `0xF6` 两次单字节 combined read；不扫描总线、不读 `0xF5`/`0xF8` 或其他寄存器、不写 PMIC 数据、不绑定驱动、不调用 regulator API。
+
+### 15.4 当前 R3 安全放行判断
+
+- **PASS-RUNTIME：** R3.1 I2C0 controller/adapter；R3.2 RK809 ID `0x8094` 只读身份验证。
+- **PASS-STATIC-CANDIDATE：** R3.7 `PMIC_SYS_STS(0xF0)` 与 `PMIC_OFF_SOURCE(0xF6)` 全位 RO 的语义已由 Rev 2.4 数据手册核实；硬件读取尚待单独授权。
+- **BLOCKED：** R3.3 MFD/regmap parent、R3.4 regulator provider、R3.5 现有 regulator consumer、R3.6 PHY supply consumer。当前 6.18.63 MFD probe 和 regulator registration 并非只读，且 R3.6 依赖 R7-A GMAC probe，不能在 R3 提前执行。
+- **阶段决定：** 不为取得 MFD/regulator 注册证据而启用当前驱动，不重建/刷写内核镜像，不恢复 GMAC/MDIO/PHY。R3 整体继续 HOLD/BLOCKED，不放行 R4。
