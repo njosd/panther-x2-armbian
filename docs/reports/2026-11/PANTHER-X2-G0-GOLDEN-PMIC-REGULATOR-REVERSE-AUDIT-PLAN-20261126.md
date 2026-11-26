@@ -138,3 +138,24 @@ ABCD 设计继续保留，不因 PMIC 研究而延迟其准备：
 5. 在具备 netdev/open/DMA 条件的最早阶段做 ABCD 单帧物理发送验证。
 
 本报告没有执行设备操作、PMIC/GRF 访问、电压测量、镜像构建或网络发送。
+
+
+## 9. 已有证据复用与当前精确进度（2026-11-27）
+
+本节以已归档报告为准，不重新执行已经完成的审计：
+
+| 子项 | 现有证据 | 当前状态/动作 |
+|---|---|---|
+| 6.1.65 最终 config / built-in | `PANTHER-X2-6.1.65-ORIGINAL-IMAGE-AUDIT-20261123.md`、`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md` | 已确认 MFD_RK808=y、REGULATOR_RK808=y，rk808/rk808-regulator built-in；不重复提取 |
+| 6.1.116 最终 config | `PANTHER-X2-KERNEL-CONFIG-CLOSURE-AND-STMMAC-RX-DIFF-20261119.md` | 真实 7,677 符号配置已从归档提取，和官方 config-6.1 模板零差异；不重复提取 |
+| 6.1.116 PMIC 运行证据 | `evidence/network/panther-eth-baseline-redacted.txt`、`PANTHER-X2-P2-BOOT-ARCHITECTURE-AND-EMMC-VENDOR-DATA-REVIEW-20261120.md` | 正常启动 IRQ 记录含 rk817 / rk805_pwrkey；GMAC/RTL8211F 1Gbps Full 已有运行证据 |
+| 6.1.65 ↔ 6.1.116 MFD/regulator/IO-domain/glue 源码 | `PANTHER-X2-G0-GOLDEN-65-116-PMIC-PHY-SOURCE-COMMONALITY-20261127.md` | rk808.c、rk808-regulator.c、io-domain.c、dwmac-rk.c 与 Panther board DTS 完全相同；regulator core 四个关键函数相同 |
+| 黄金版本 ↔ 6.18 RK809 pre-init / IRQ / SWITCH_REG1 | R3 报告 §21–§26 | 已完成静态对照；pre-init 表相同，IRQ mapping 相同，SWITCH_REG1 descriptor 相同；保留源码身份和 datasheet 边界 |
+| regulator late cleanup / PHY supply consumer | R3 报告 §25–§26 | 已完成对照；约 30 秒 cleanup 是黄金与 6.18 共有行为；6.18 glue 错误传播更严格 |
+| 黄金 DTB binary | 6.1.65 原始 DTB hash 已归档；6.1.116 DTB 归档 SHA 已归档 | **尚未完成原始二进制提取和 PMIC/IO-domain 子树三版本结构化 diff；这是当前唯一软件资料补齐项** |
+
+### 当前下一步（唯一）
+
+提取并解析已归档 6.1.65 与 6.1.116 原始 Panther DTB，与 6.18.63 R1 实际 DTB 比较以下范围：RK809 IRQ/system-power-controller 属性、完整 regulator 子树约束、IO-domain supplies、GMAC1 phy-supply 和相关 phandle。无需重新提取完整镜像，不访问 SN64G，不写 eMMC/TF，不启动设备。三份 DTB 关键属性一致则关闭 DTS 变量；有差异则只追踪具体差异。
+
+G0-P1 配置恢复、G0-P2 黄金 PMIC 驱动行为、G0-P3 6.18 对照均已完成或已有报告覆盖；不得重复这些审计。G0-P4 最终准入决策待 DTB binary diff 后再做。
