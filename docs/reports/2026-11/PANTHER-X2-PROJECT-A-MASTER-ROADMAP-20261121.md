@@ -617,3 +617,10 @@ The probe separately records AF_PACKET/SOCK_RAW and SOCK_DGRAM socket creation, 
 **Current status:** source and build workflow are committed; CI execution/result and target runtime tests remain pending. No AF_PACKET API result is yet claimed. Loopback results, when obtained, will be software-only evidence and will not establish physical Ethernet TX. Physical TX remains unavailable until R7.
 
 **Authorization boundary:** this approval covers repository source, workflow and build-only CI. It does not authorize rebuilding/repackaging the R1 initramfs or TF image, writing SU08G/SN64G/eMMC, or accessing Panther X2. Those steps require separate approval after the static probe artifact is built and reviewed.
+
+
+### 2026-11-26 R1 AF_PACKET probe source audit corrections
+
+Before treating the probe as build-ready, source review removed a stale `ifreq` block left behind by the sysfs ifindex conversion and changed the test flow so failure of one socket-creation attempt does not suppress independent checks of the other packet-socket types. Current source contains no `AF_INET` control socket and no `struct ifreq` reference. Corrections: `337be3b`, `668e524`.
+
+The detailed probe plan now records these source-audit findings. Actions build status remains unconfirmed; no static build or QEMU self-test PASS is claimed yet. No Panther X2 access, initramfs repackaging, TF write, or eMMC write has occurred.
