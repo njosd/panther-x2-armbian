@@ -21,7 +21,7 @@ on:
         description: Successful static AF_PACKET probe build run
         required: true
         type: string
-        default: "45744318699"
+        default: "45747785913"
 
 permissions:
   contents: read
@@ -42,8 +42,6 @@ jobs:
       R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
       DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
       UBOOT_SHA: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
-      PROBE_SHA: "8ea3ac72a0c1f721ae673d1a29d3f9874cf5abd1e803cf63b9d5637e24764f3e"
-      PROBE_SOURCE_SHA: "063b4c27f5592aeb56f3352bcf7762f2fa240fbc800a78d9939210d4b76d1ab7"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -93,8 +91,9 @@ jobs:
           test "$(sha256sum work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
           test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
           test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | awk '{print $1}')" = "$UBOOT_SHA"
-          test "$(sha256sum work/probe/af-packet-probe-aarch64 | awk '{print $1}')" = "$PROBE_SHA"
-          test "$(sha256sum work/probe/af-packet-probe.c | awk '{print $1}')" = "$PROBE_SOURCE_SHA"
+          test -s work/probe/SHA256SUMS
+          (cd work/probe && sha256sum -c SHA256SUMS)
+          cmp scripts/panther-x2-b2-1/af-packet-probe.c work/probe/af-packet-probe.c
           cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
           for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do grep -qx "$key=y" work/r1/output/kernel.config; done
           for key in CONFIG_INET CONFIG_IPV6 CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY; do
