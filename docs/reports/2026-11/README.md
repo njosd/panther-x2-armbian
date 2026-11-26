@@ -10,8 +10,7 @@
 
 - [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
 - [B2-1 R3 RK809/I2C/regulator 专项审计](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计 COMPLETE（CONDITIONAL）；含 RK809 实机只读身份/状态寄存器证据、6.1.65/6.18.63 黄金对照、MFD/regulator 副作用及 PHY supply consumer 调用链。运行时 MFD/regulator 激活仍未授权。
-- [B2-1 R4 MDIO/PHY Kconfig 审计（进行中）](./PANTHER-X2-B2-1-R4-MDIO-PHY-KCONFIG-AUDIT-20261126.md)：R4 第一子项 Kconfig/Makefile 静态对照 PASS；PHYLIB/MDIO_BUS/OF_MDIO/PHYLINK 结构变化及 REALTEK_PHY 必须显式启用已记录。
-  - R4 第二子项 RTL8211F 驱动源码对照 PASS（STATIC / DIFFERENCES DOCUMENTED）：6.1.65/6.18.63 PHY ID、probe 副作用、ALDPS、RGMII delay、CLKOUT/soft reset、EEE、interrupt/resume 差异已归档；实际 PHY probe 仍禁止。
+- [B2-1 R4 MDIO/PHY 静态审计（已结项，CONDITIONAL）](./PANTHER-X2-B2-1-R4-MDIO-PHY-KCONFIG-AUDIT-20261126.md)：R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动差异、R4-3 MDIO/PHY 对象组织、R4-4 R1 配置隔离核验均完成。R1 明确关闭 MDIO/PHY/PHYLIB/REALTEK_PHY/PHYLINK/STMMAC/DWMAC，符合隔离目标；实机 PHY probe 仍未放行。
 
 - [原始 Armbian 6.1.65 镜像静态审计报告（2026-11-23）](./PANTHER-X2-6.1.65-ORIGINAL-IMAGE-AUDIT-20261123.md)：原始镜像布局、启动配置、Panther X2 DTB、Kernel built-in 配置及 Dropbox 证据保留清单；Kernel/uInitrd 二进制闭包仍待补齐。
 
@@ -57,6 +56,8 @@
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
 - [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：R2 已 PASS；复用 B1/R1 构建与配置、6.1.65 Golden 对照，现有 R1 镜像只读验证 pinctrl/SYSCON consumer、五个 GPIO bank 和五个 gpiochip 注册成功；零增量复用，无需重建。
+
+- [项目 A B2-1 实施计划（R3/R4 状态更新）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：R3 静态审计 COMPLETE（CONDITIONAL）；R4 静态审计 COMPLETE（CONDITIONAL）；下一阶段按路线进入 R5 STMMAC 核心与 TX/RX 数据路径审计。
 - [B2-1 / R3：RK809 / I2C / Regulator 前置审计（2026-11-26）](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3.1 I2C0 controller/adapter、R3.2 RK809 身份读取、R3.7 状态寄存器只读观察均 PASS-RUNTIME。RK809 ID 实测 `0x8094`；`PMIC_SYS_STS(0xF0)=0xC2`、`PMIC_OFF_SOURCE(0xF6)=0x00`，两个寄存器各一次 I2C_RDWR 只读事务成功。SU08G 专用 RAM-only initramfs 已验证，旧 uInitrd 备份保留；SN64G/eMMC 未涉及。MFD/regmap 与 regulator probe 存在 PMIC 写入及可能的 rail 配置副作用，R3.3–R3.5 保持 BLOCKED，R3.6 留待 R7-A，R3 整体 HOLD/BLOCKED，不放行 R4。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
