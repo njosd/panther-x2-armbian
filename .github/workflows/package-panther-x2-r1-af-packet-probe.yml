@@ -1,0 +1,242 @@
+name: Panther X2 R1 AF_PACKET probe TF image (PREPARE ONLY)
+
+on:
+  push:
+    paths:
+      - "scripts/panther-x2-r1/init-af-packet-probe"
+      - ".github/workflows/package-panther-x2-r1-af-packet-probe.yml"
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: Existing successful R1 kernel build run
+        required: true
+        type: string
+        default: "45611898629"
+      b1_run_id:
+        description: Frozen B1 boot-support artifact run
+        required: true
+        type: string
+        default: "45328201244"
+      probe_run_id:
+        description: Successful static AF_PACKET probe build run
+        required: true
+        type: string
+        default: "45744318699"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-r1-af-packet-probe-image
+  cancel-in-progress: false
+
+jobs:
+  package-probe-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      R1_RUN_ID: ${{ inputs.r1_run_id || '45611898629' }}
+      B1_RUN_ID: ${{ inputs.b1_run_id || '45328201244' }}
+      PROBE_RUN_ID: ${{ inputs.probe_run_id || '45744318699' }}
+      R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
+      DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+      UBOOT_SHA: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+      PROBE_SHA: "8ea3ac72a0c1f721ae673d1a29d3f9874cf5abd1e803cf63b9d5637e24764f3e"
+      PROBE_SOURCE_SHA: "063b4c27f5592aeb56f3352bcf7762f2fa240fbc800a78d9939210d4b76d1ab7"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y cpio e2fsprogs gdisk gzip qemu-user-static zstd u-boot-tools
+
+      - name: Download frozen R1, B1 and AF_PACKET probe artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.R1_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.B1_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-r1-af-packet-probe-static-aarch64
+          path: work/probe
+          repository: ${{ github.repository }}
+          run-id: ${{ env.PROBE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen inputs and probe binary identity
+        run: |
+          set -euo pipefail
+          test -s work/r1/output/Image
+          test -s work/r1/output/kernel.config
+          test -s work/r1/output/modules.tar.zst
+          test -s work/b1/output/JP-TvBox-u-boot.itb
+          test -s work/b1/output/busybox
+          test -s work/b1/output/boot.cmd
+          test -s work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/probe/af-packet-probe-aarch64
+          test -s work/probe/af-packet-probe.c
+          test "$(sha256sum work/r1/output/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | awk '{print $1}')" = "$UBOOT_SHA"
+          test "$(sha256sum work/probe/af-packet-probe-aarch64 | awk '{print $1}')" = "$PROBE_SHA"
+          test "$(sha256sum work/probe/af-packet-probe.c | awk '{print $1}')" = "$PROBE_SOURCE_SHA"
+          cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do grep -qx "$key=y" work/r1/output/kernel.config; done
+          for key in CONFIG_INET CONFIG_IPV6 CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY; do
+            if grep -Eq "^$key=[ym]$" work/r1/output/kernel.config; then echo "::error::Forbidden R1 option enabled: $key"; exit 1; fi
+          done
+          file work/probe/af-packet-probe-aarch64 | tee work/probe/file.txt
+          aarch64-linux-gnu-readelf -h work/probe/af-packet-probe-aarch64 > work/probe/elf-header.txt
+          aarch64-linux-gnu-readelf -l work/probe/af-packet-probe-aarch64 > work/probe/elf-program-headers.txt
+          grep -q AArch64 work/probe/elf-header.txt
+          if grep -q INTERP work/probe/elf-program-headers.txt; then echo "::error::Probe unexpectedly requires a dynamic interpreter"; exit 1; fi
+          qemu-aarch64-static work/probe/af-packet-probe-aarch64 --self-test | tee work/probe/self-test-recheck.txt
+          grep -qx 'self_test=PASS' work/probe/self-test-recheck.txt
+          mkdir -p work/output
+          sha256sum work/r1/output/Image work/r1/output/kernel.config work/r1/output/modules.tar.zst work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/JP-TvBox-u-boot.itb work/probe/af-packet-probe-aarch64 work/probe/af-packet-probe.c | tee work/output/input-sha256.txt
+
+      - name: Build and validate isolated AF_PACKET probe initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/probe-initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
+          install -m 0755 work/b1/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname printf; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 work/probe/af-packet-probe-aarch64 "$ROOT/bin/af-packet-probe-aarch64"
+          install -m 0755 scripts/panther-x2-r1/init-af-packet-probe "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          if grep -Fq '[' "$ROOT/init" || grep -Eq '(^|[[:space:]])test([[:space:]]|$)' "$ROOT/init"; then
+            echo "::error::Probe /init must not depend on the absent BusyBox test/[ applet"
+            exit 1
+          fi
+          qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx printf
+          (cd "$ROOT" && find . -print0 | sort -z | cpio --null -o --format=newc) | gzip -n -9 > work/output/af-packet-probe-initramfs.cpio.gz
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 R1 AF_PACKET software probe" -d work/output/af-packet-probe-initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/output/uinitrd-header.txt
+          mkdir -p work/probe-initramfs-check
+          gzip -dc work/output/af-packet-probe-initramfs.cpio.gz | (cd work/probe-initramfs-check && cpio -idm --quiet)
+          cmp scripts/panther-x2-r1/init-af-packet-probe work/probe-initramfs-check/init
+          cmp work/probe/af-packet-probe-aarch64 work/probe-initramfs-check/bin/af-packet-probe-aarch64
+          test -x work/probe-initramfs-check/init
+          test -x work/probe-initramfs-check/bin/af-packet-probe-aarch64
+          test "$(readlink work/probe-initramfs-check/bin/ash)" = busybox
+          test "$(readlink work/probe-initramfs-check/bin/printf)" = busybox
+          sha256sum work/output/uInitrd scripts/panther-x2-r1/init-af-packet-probe work/probe-initramfs-check/bin/af-packet-probe-aarch64 | tee work/output/initramfs-sha256.txt
+
+      - name: Regenerate boot script with frozen R1 bootargs and load addresses
+        run: |
+          set -euo pipefail
+          sed -e 's/B1 clean RAM-only Linux baseline/R1 AF_PACKET software probe/' -e 's/automatic clean RAM boot/automatic R1 AF_PACKET probe boot/' -e 's/Starting B1 Linux/Starting R1 AF_PACKET probe Linux/' work/b1/output/boot.cmd > work/output/boot.cmd
+          grep -Fq "console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init" work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x00280000 /Image' work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x0a200000 /uInitrd' work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x0a100000 /dtb/rockchip/rk3566-panther-x2.dtb' work/output/boot.cmd
+          mkimage -A arm64 -T script -C none -n "Panther X2 R1 AF_PACKET probe boot script" -d work/output/boot.cmd work/output/boot.scr
+
+      - name: Assemble PREPARE-ONLY AF_PACKET probe TF image
+        run: |
+          set -euo pipefail
+          mkdir -p work/tf-mnt
+          IMAGE=work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img
+          truncate -s 2G "$IMAGE"
+          sgdisk --clear --new=1:32768:4192255 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo install -m 0644 work/r1/output/Image work/tf-mnt/Image
+          sudo install -m 0644 work/output/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/output/boot.scr work/tf-mnt/boot.scr
+          sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo install -m 0644 work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
+          printf '%s\n' 'Panther X2 R1 AF_PACKET software probe image; PREPARE-ONLY.' 'Linux 6.18.63; generic network core and AF_PACKET enabled.' 'GMAC1/MDIO/PHY remain disabled; physical Ethernet TX is not tested.' 'Static AArch64 AF_PACKET probe runs on lo before interactive shell.' 'Existing R1 kernel, DTB, U-Boot proper, bootargs and load addresses are reused unchanged.' 'No TF IDB/SPL is installed; existing eMMC SPL is required.' | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          dd if=work/b1/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+          UBOOT_SIZE="$(stat -c %s work/b1/output/JP-TvBox-u-boot.itb)"
+          UBOOT_READBACK="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$UBOOT_SIZE" status=none | sha256sum | awk '{print $1}')"
+          test "$UBOOT_READBACK" = "$UBOOT_SHA"
+
+      - name: Read-only verify TF payload and create Etcher-ready gzip image
+        run: |
+          set -euo pipefail
+          LOOP="$(sudo losetup --find --show --partscan --read-only work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img)"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          sudo mount -o ro "${LOOP}p1" work/tf-mnt
+          for p in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do test -s "work/tf-mnt/$p"; done
+          test "$(sha256sum work/tf-mnt/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          cmp work/tf-mnt/uInitrd work/output/uInitrd
+          test "$(sha256sum work/tf-mnt/uInitrd | awk '{print $1}')" = "$(sha256sum work/output/uInitrd | awk '{print $1}')"
+          (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          sha256sum work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img > work/output/tf-image-sha256.txt
+          gzip -n -1 -c work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img > work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz
+          gzip -t work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz
+          test "$(gzip -dc work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz | sha256sum | awk '{print $1}')" = "$(awk '{print $1}' work/output/tf-image-sha256.txt)"
+          sha256sum work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz >> work/output/tf-image-sha256.txt
+          {
+            echo "result=PASS"
+            echo "mode=PREPARE-ONLY; no physical device access or storage writes"
+            echo "r1_build_run_id=$R1_RUN_ID"
+            echo "b1_support_run_id=$B1_RUN_ID"
+            echo "probe_build_run_id=$PROBE_RUN_ID"
+            echo "kernel_version=6.18.63"
+            echo "kernel_image_sha256=$R1_IMAGE_SHA"
+            echo "dtb_sha256=$DTB_SHA"
+            echo "uboot_sha256=$UBOOT_SHA"
+            echo "probe_binary_sha256=$PROBE_SHA"
+            echo "probe_binary_size_bytes=635984"
+            echo "bootargs=unchanged from frozen B1"
+            echo "initramfs=dedicated R1 AF_PACKET probe initramfs; BusyBox applets validated"
+            echo "init=executes AF_PACKET probe on lo before interactive shell"
+            echo "gmac1/mdio/phy=disabled"
+            echo "tf_layout=2GiB GPT; PANTHER_BOOT partition1; start LBA 32768; end LBA 4192255"
+            echo "etcher_image=panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz; gzip integrity and decompressed raw SHA256 verified"
+            echo "final_image_sha256=$(awk '{print $1}' work/output/tf-image-sha256.txt | head -n 1)"
+            echo "etcher_image_sha256=$(awk 'END{print $1}' work/output/tf-image-sha256.txt)"
+          } | tee work/output/R1-AF-PACKET-PROBE-TF-IMAGE-VERIFICATION.txt
+          rm -f work/output/panther-x2-r1-af-packet-probe-PREPARE-ONLY.img
+
+      - name: Publish PREPARE-ONLY Etcher-ready image and evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r1-af-packet-probe-TF-IMAGE-ETCHER-READY-PREPARE-ONLY
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
