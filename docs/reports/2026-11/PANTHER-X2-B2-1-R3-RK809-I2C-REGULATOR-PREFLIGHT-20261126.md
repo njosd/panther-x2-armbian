@@ -447,3 +447,58 @@ A successful ID read does not authorize loading RK8xx MFD/regulator drivers or a
 - 本次构建没有访问 Panther 设备或任何物理存储。尚未替换 SU08G 的当前 R3.2 `uInitrd`，尚未进行 `0xF0/0xF6` 硬件读取。
 
 **结论：R3.7 PASS-STATIC + PASS-BUILD + PASS-INITRAMFS；硬件读取仍 PENDING。** 只有完成 SU08G 专用 initramfs 启动并由用户手动执行 `/bin/rk809-status-ro-probe-aarch64` 后，才能给出 PASS-RUNTIME。R3.3–R3.5 仍 BLOCKED，R3.6 仍延后至 R7-A；R3 整体 HOLD/BLOCKED，不放行 R4。
+
+
+
+## 16. R3.7 Panther X2 实机状态寄存器只读验证（2026-11-26）
+
+### 16.1 SU08G 专用 initramfs 部署核验
+
+用户在 9.2 临时传输主机上执行了受保护的替换流程，全部前置条件与哈希校验通过：
+
+- 目标分区 UUID：`f77bac70-e4b3-4fec-9315-08f97ac210ec`，挂载点 `/mnt/mmcblk1p1`，确认是 SU08G 测试 TF。
+- 替换前当前 R3.2 `uInitrd` SHA256：`29114171087f60dd281245f41c49de24fede51b2e3216603caaf0f5908d70a30`。
+- 备份：`uInitrd.r3-2-before-r3-7-20261126`，SHA256 与替换前文件完全一致。
+- 新 R3.7 `uInitrd` SHA256：`39443dc6626ad40042a4144089afd7a6b2e9c543645deff48a854dbc55b1e663`，替换后再次核验一致。
+- 操作仅覆盖 SU08G 的 `uInitrd`；旧的 `uInitrd.original-20261126` 备份保留。SN64G 与 eMMC 未涉及。
+
+### 16.2 运行时自检与硬件读取结果
+
+新 initramfs 启动后，用户先执行：
+
+```sh
+/bin/rk809-status-ro-probe-aarch64 --self-test
+```
+
+输出：`architecture=aarch64`、`scope=RK809_STATUS_REGISTERS_0xF0_0xF6_ONLY`、`self_test=PASS`。
+
+随后执行实际硬件读取。关键输出：
+
+| 字段 | 实测结果 |
+|---|---|
+| adapter / device | `/dev/i2c-0` / `89:0` |
+| target address | `0x20` |
+| registers | `0xF0`、`0xF6` |
+| transfer | 每个寄存器一次 I2C_RDWR 两消息 repeated-start |
+| `0xF0` | `PMIC_SYS_STS`，RO，ioctl rc=2，errno=0，value=`0xC2` |
+| `0xF6` | `PMIC_OFF_SOURCE`，RO，ioctl rc=2，errno=0，value=`0x00` |
+| read results | `pmic_sys_sts_read=PASS`；`pmic_off_source_read=PASS` |
+| node action | `CREATED_TEMPORARY_CHAR_DEVICE_89_0` |
+
+### 16.3 安全边界与解释
+
+- 探针报告 `write_policy=NO_PMIC_DATA_REGISTER_WRITES`、`bus_scan=DISABLED`、`driver_binding=DISABLED`、`regulator_api=NOT_USED`；实际输出与预定访问范围一致。
+- `/dev/i2c-0` 是在 RAM 根文件系统中临时创建的字符设备节点；本次没有启用 RK8xx MFD/regulator 驱动。
+- `0xF0=0xC2`、`0xF6=0x00` 作为原始字节记录，不在缺少逐位状态与现场条件关联分析时推断具体电源状态或关机原因。
+- 两个寄存器全位 RO 的语义来自 RK809 Datasheet Rev 2.4；本次读取证明 I2C0 对这两个指定寄存器的只读事务成功。
+- 这些值不是各路 regulator 输出电压遥测；不证明 SWITCH_REG1/`vcc_3v3` 的实际电压、纹波、负载能力、时序或 GMAC PHY 端供电能力。
+
+### 16.4 更新后的分项状态
+
+- **R3.7 PASS-RUNTIME：** `0xF0` 与 `0xF6` 各一次只读事务成功；原始值分别为 `0xC2`、`0x00`。
+- **R3.1/R3.2 PASS-RUNTIME：** 维持此前 I2C0 controller/adapter 与 RK809 ID `0x8094` 只读身份验证结论。
+- **R3.3–R3.5 BLOCKED：** MFD/regmap、regulator provider 与 consumer 仍受 probe/注册写寄存器副作用约束；本次没有启用它们。
+- **R3.6 BLOCKED / R7-A：** GMAC PHY supply consumer 仍按原计划延后至 R7-A。
+- **R3 整体 HOLD/BLOCKED：** 本次只读状态寄存器成功不构成 provider/rail/consumer 功能验收，不放行 R4。
+
+**本次实机验证没有改变既定安全边界：不启用 RK8xx MFD/regulator，不写 PMIC，不操作 regulator，不恢复 GMAC/MDIO/PHY。**
