@@ -85,7 +85,7 @@ jobs:
           ROOT=work/r1-initramfs
           mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
           install -m 0755 work/b1/output/busybox "$ROOT/bin/busybox"
-          for applet in ash sh mount mkdir cat uname dmesg tail; do
+          for applet in ash sh mount mkdir cat uname dmesg tail printf; do
             qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
             ln -s busybox "$ROOT/bin/$applet"
           done
@@ -104,6 +104,7 @@ jobs:
           test -x work/r1-initramfs-check/init
           test "$(readlink work/r1-initramfs-check/bin/ash)" = "busybox"
           test "$(readlink work/r1-initramfs-check/bin/sh)" = "busybox"
+          test "$(readlink work/r1-initramfs-check/bin/printf)" = "busybox"
           sha256sum work/output/uInitrd scripts/panther-x2-r1/init | tee work/output/r1-initramfs-sha256.txt
       - name: Regenerate R1 boot script, preserving all bootargs and load addresses
         run: |
