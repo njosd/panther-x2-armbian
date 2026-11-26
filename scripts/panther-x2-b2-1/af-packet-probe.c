@@ -69,13 +69,11 @@ int main(int argc, char **argv)
     printf("uid=%u\n", (unsigned)getuid());
     printf("euid=%u\n", (unsigned)geteuid());
 
-    memset(&ifr, 0, sizeof(ifr));
     if (strlen(ifname) >= IFNAMSIZ) {
         puts("ifindex_rc=-1");
         puts("ifindex_errno=EINVAL");
         return 2;
     }
-    strcpy(ifr.ifr_name, ifname);
 
     rawfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     saved_errno = rawfd < 0 ? errno : 0;
