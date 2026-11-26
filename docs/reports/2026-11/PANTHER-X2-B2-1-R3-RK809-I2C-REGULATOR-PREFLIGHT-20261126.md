@@ -923,3 +923,56 @@ Rev 2.4 对 `PMIC_CHIP_VER` (0xEE) 定义 bit[7:4] 为 CHIP_NAME code low nibble
 5. G1 仍 HOLD。不要为了网络测试启用 codec/audio 功能；也不允许用整组 MFD probe 作为“只验证 I2C”的方法。
 
 **本节仅复核公开 datasheet 与冻结源码；未访问实机、未执行 PMIC 事务、未写入介质。**
+## 24. DCDC_REG3 上游补丁适用性与 PMIC_CHIP_VER 历史手册差异（2026-11-26）
+
+### 24.1 DCDC_REG3 apply_bit 补丁来源已查明
+
+找到上游补丁邮件：Mikhail Rudenko，2024-10-17，标题 `[PATCH] regulator: rk808: Add apply_bit for BUCK3 on RK809`，base commit `9852d85ec9d492ebef56dc5f229416c925758edc`。补丁解释：RK809 BUCK3（DCDC_REG3）虽然在 Linux 中被描述为 0.5–2.4V 可调 regulator，但当 `PMIC_POWER_CONFIG` bit 6 为 0（默认）时，输出实际由外部反馈电阻决定；当 regulator framework 设置电压时，驱动必须设置该 apply bit，才能切换为由内部 voltage selector 控制。补丁同时明确：设备树未指定 voltage constraints 的既有用户不会受影响，因为不会执行电压设置，也不会置位该 bit。
+
+来源：Linux Kernel Mailing List patch，https://lkml.iu.edu/2410.2/03214.html。
+
+### 24.2 Panther DTS 证明该补丁不会在当前板级配置中触发
+
+对照 6.1.65 候选与 6.18.63 Panther DTS 的 `vcc_ddr: DCDC_REG3` 节点，两版一致：
+
+```dts
+vcc_ddr: DCDC_REG3 {
+    regulator-always-on;
+    regulator-boot-on;
+    regulator-initial-mode = <0x2>;
+    regulator-name = "vcc_ddr";
+    regulator-state-mem {
+        regulator-on-in-suspend;
+    };
+};
+```
+
+该节点没有 `regulator-min-microvolt`、`regulator-max-microvolt`、`regulator-init-microvolt`，也没有其他显式电压约束。它只声明 always-on、boot-on、initial mode 和 suspend 状态。按补丁自身的触发条件，当前 Panther DTS 不请求 BUCK3 电压设置，因此新增 `.apply_reg/.apply_bit` 不应在本板级配置下触发。
+
+结论：这是 6.18 regulator driver 的真实修复，但不是当前 Panther X2 启动时的预期 PMIC 写入，也不是 SWITCH_REG1/PHY 的控制路径。将其列为 **SOURCE-DIFF / BOARD-DT NOT TRIGGERED**。除非后续修改 DTS 加入 vcc_ddr 电压约束，否则不应把它列为当前 TX 根因，也不需要为本项目单独做实机写寄存器验证。
+
+### 24.3 PMIC_CHIP_VER 0xEE 的手册历史差异
+
+进一步找到 Rockchip RK809 Datasheet Rev 1.01（2018-08）与 Rev 1.7/1.8/2.4 的差异：
+
+| 手册版本 | 0xEE bit[3:0] 定义 |
+|---|---|
+| Rev 1.01 | `CHIP_VER`，芯片版本编码 1–15，reset value 0x2 |
+| Rev 1.7 及之后公开版本 | `RESV`，保留字段，reset value 0x2 |
+
+因此，实测 `0xEE=0x94` 的低 nibble `0x4`：
+- 按早期 Rev 1.01 的定义，可以被解读为 CHIP_VER code 4；
+- 按 Rev 1.7、1.8、2.4 的定义，则是一个与文档 reset default 不同的 reserved nibble；
+- 目前没有 Rockchip 官方 revision history 说明该字段何时、为何从 CHIP_VER 改为 RESV，也没有对 `0x4` 的 silicon/OTP 对照表。
+
+这修正了此前“低 nibble 含义未知”的表述：不是所有历史资料都将其定义为 reserved，而是 **datasheet revision semantics changed / undocumented transition**。仍不能仅凭 0x94 宣称芯片就是 silicon revision 4，也不能判定芯片异常。建议保留实测值，不再重复读取；若需要最终解释，应向 Rockchip/BSP vendor 获取该字段的正式说明。
+
+### 24.4 对 G1 放行与 TX 主线的影响
+
+1. DCDC_REG3 apply_bit 来源和触发条件已查明；当前 Panther DTS 没有 BUCK3 电压约束，因此该差异不应在当前启动流程触发。
+2. SWITCH_REG1 descriptor 及其 DT 节点跨版本一致，仍是后续 PHY 供电链的重点；但 provider/consumer 的运行时行为和实际电压尚未验证。
+3. PMIC_CHIP_VER 的低 nibble 存在跨版本手册定义变化，不能用 0x94 单独决定 MFD 驱动兼容性。
+4. 本项降低了两个疑点对当前 TX 故障的优先级，但不改变 R3.3–R3.5 的 HOLD：MFD probe 仍会执行 IRQ 初始化和 pre-init 写入，regulator probe 仍会注册/处理多路 rail。需继续评估能否将必要网络供电功能与非必要 codec/IRQ 初始化安全分离。
+5. 原始 6.1.65 DTB 二进制对照仍未完成；当前 DTS 结论仍是候选源码比较，不得标记为 golden binary PASS。
+
+**本节为公开上游补丁、数据手册与冻结 DTS 的只读审计；未访问设备、未进行 PMIC 事务、未写入介质。**
