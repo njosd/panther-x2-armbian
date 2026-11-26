@@ -149,6 +149,13 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 
 ### 8.3 R2 实机只读验证范围
 
-下一轮仅使用现有已启动 R1 镜像读取：GPIO platform controller 设备、driver bind、gpiochip 注册及相关内核日志；对 SYSCON/GRF 仅检查设备树节点与可见的运行时注册证据。不得写 GPIO、读取未文档化 MMIO、触发 reset/power、启用 GMAC/MDIO/PHY 或更改设备状态。
+下一轮仅使用现有已启动 R1 镜像进行只读检查：`rockchip-pinctrl` platform driver 是否绑定；GPIO bank 子设备是否由 `gpio-rockchip` 绑定并注册 gpiochip；以及对应 probe/错误日志。源码已确认 Panther X2 pinctrl 节点带有 `rockchip,grf` / `rockchip,pmu` phandle，6.18.63 `pinctrl-rockchip` probe 调用 `syscon_node_to_regmap()` 获取对应 regmap，并通过 `of_platform_populate()` 创建 GPIO bank 子设备。因此 pinctrl 成功 probe 可作为 MFD_SYSCON 的实际 consumer 证据，GPIO bank bind/gpiochip 可作为 GPIO provider 注册证据。不得写 GPIO、读取未文档化 MMIO、触发 reset/power、启用 GMAC/MDIO/PHY 或更改设备状态。
 
 R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 rockchip,grf / reset GPIO 的真实 phandle 获取和调用无法在 R2 直接验证；若没有安全现存 consumer，此子项必须保留 BLOCKED，并明确由 R7-A/R7-C 首次使用时验证，不能据此声称 provider consumer 功能通过。
+
+### 8.4 已确认的 6.18 运行时 consumer 路径
+
+- `rk3566-panther-x2.dts` 的 RK3566 pinctrl node 引用 `rockchip,grf = <&grf>` 与 `rockchip,pmu = <&pmugrf>`。
+- `pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 调用 `syscon_node_to_regmap()` 获取 GRF regmap，并调用 `syscon_regmap_lookup_by_phandle_optional()` 处理可选 IOC phandle；probe 成功说明该 consumer 实际通过 syscon API 获得所需 regmap。
+- `rockchip_pinctrl_probe()` 随后调用 `of_platform_populate()` 注册 GPIO bank 子设备；`gpio-rockchip` 驱动绑定、gpiochip 出现可验证 GPIO provider 的运行时注册。
+- 上述路径均可通过 sysfs 和 dmesg 只读观察，不需要写 GPIO、MMIO 或 PMIC 寄存器。
