@@ -92,7 +92,7 @@ jobs:
           test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
           test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | awk '{print $1}')" = "$UBOOT_SHA"
           test -s work/probe/SHA256SUMS
-          (cd work/probe && sha256sum -c SHA256SUMS)
+          sed 's#work/output/##g' work/probe/SHA256SUMS | (cd work/probe && sha256sum -c -)
           cmp scripts/panther-x2-b2-1/af-packet-probe.c work/probe/af-packet-probe.c
           cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
           for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do grep -qx "$key=y" work/r1/output/kernel.config; done
