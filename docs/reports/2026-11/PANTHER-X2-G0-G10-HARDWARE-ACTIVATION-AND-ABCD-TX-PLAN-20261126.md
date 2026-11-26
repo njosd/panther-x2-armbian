@@ -32,7 +32,7 @@ G0 完成前不激活 RK809 MFD/regulator，不恢复 GMAC/MDIO/PHY，不做硬�
 
 - **G0.1 依赖矩阵**：将 R2–R6 证据映射为 provider→consumer→实际动作→证据等级→阻塞项；分别记录 6.1.65、6.1.116、6.18.63 默认配置/对象和已知实机行为。
 - **G0.2 PMIC 副作用：已完成静态审计，stock MFD/regulator NO-GO。** MFD probe 会执行 IRQ mask/条件 ACK、整组 RK817 pre-init 并创建全部子设备；regulator probe 注册全部 rail，约束处理及约 30 秒 late cleanup 可能写 PMIC/关闭未使用 rail。当前允许写入白名单为空；不得启用 stock driver。详见 G0.2 报告。
-- **G0.3 IO-domain**：核实 supplier、consumer、deferred-probe、各 bank/rail 映射和 GRF 写入行为。R1 已知因 regulator provider 缺失而 defer；不得把 defer 当成功，也不得为解除 defer 越权写 GRF。
+- **G0.3 IO-domain：静态拓扑/写入路径已完成，运行时最终 bind 状态 UNKNOWN。** 已确认 GMAC1 M0→GPIO3→VCCIO5；vccio5-supply 与 GMAC1 phy-supply 均指向 vcc_3v3/SWITCH_REG1；VCCIO5 selector 会写 PMU GRF 0x140/0x144。实际 rail 电压/selector readback 未验证，不放行 consumer probe。
 - **G0.4 clock/reset/PHY**：复核 GRF/CRU/reset/pinctrl、PHY reset 极性/时序、125MHz 外部时钟的真实来源候选及安全测量点；fixed-clock 只代表 CCF 模型，不代表板上波形。
 - **G0.5 ABCD 夹具**：审查 AF_PACKET 发送器、6.18 tracepoint/ftrace/kprobe 可观测性、同帧 sequence/hash 关联和外部抓包方案；只准备，不向目标网口发送。
 
@@ -73,7 +73,8 @@ G0 放行条件：依赖矩阵和关键副作用已说明；必需 provider 缺�
 - [x] G0–G10 总体门序、启动依赖和 ABCD-TX 同帧定义已建立。
 - [x] G0.1 provider/consumer 依赖矩阵第一轮归档；交叉复核仍待 G0 总审。
 - [x] G0.2 stock RK809 MFD/regulator 副作用审计；当前决策为 NO-GO，允许写入白名单为空。
-- [ ] G0.3 IO-domain/deferred-probe 证据闭环（当前唯一下一项）。
+- [x] G0.3 IO-domain 静态 supplier/deferred-probe 路径、GMAC1 VCCIO5 mapping 与 GRF 写入行为已归档；运行时最终 bind 状态仍 UNKNOWN。
+- [ ] G0.4 clock/reset/PHY 物理时钟来源与测量方案（当前唯一下一项）。
 - [ ] G0.4 PHY 125MHz 物理时钟与硬件资源测量方案。
 - [ ] G0.5 ABCD 发送器与观测夹具审查。
 - [ ] G0 总体准入评审。
