@@ -95,3 +95,4 @@
 - 独立专题历史报告不自动转化为项目 A 待办。
 - 保留原始日志、报告和哈希，不因项目拆分而删除证据。
 - 新增报告必须标注结论等级、证据来源和是否影响项目 A 当前阶段。
+\n- [G0.6 Fixed-Regulator 替代路径可行性（2026-11-26）](./PANTHER-X2-G0-6-FIXED-REGULATOR-ALTERNATIVE-FEASIBILITY-20261126.md)：R1 已包含 fixed regulator provider；可条件性绕过 stock RK809 MFD，但需先测量 VCC3V3_PMU/VCC_3V3 并确认 Panther 专用测点。下一项 G0.7 板级原理图/测点确认。\n
