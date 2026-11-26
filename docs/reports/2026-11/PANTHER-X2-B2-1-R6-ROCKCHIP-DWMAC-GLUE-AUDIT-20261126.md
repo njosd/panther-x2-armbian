@@ -276,3 +276,23 @@ R6-2 GRF/CRU clock/reset 静态核验：PASS（STATIC；bit7 硬件语义仍待 
 R6-3 GMAC1 DTB 核心属性语义对照：PASS（已有黄金原始解析证据 + 6.18 DTB 实物）；完整二进制 diff BLOCKED。
 
 下一步不重复导出已知证据。先补齐 RK3568 GRF CON1 bit7 的可信寄存器定义来源（TRM/官方 BSP）；同时审查 6.1.65 原始解析中已保存的完整 M0 pinctrl 和 clock cells 是否足够覆盖 R7-A。只有存在具体未决字段时才请求现有 04-device-tree 阶段包或单个 DTB，不要求重做原始镜像提取。
+
+
+## 7. R6-2 补充：RK3568 TRM 对 GRF CON1 bit7 的确认（2026-11-26）
+
+已取得 Rockchip 官方公开 RK3568 TRM Part1 Rev 1.3（2022-09-30）对应的 GRF 寄存器字段说明。GMAC1 CON1 bit7 定义为 `gmac1_qsgmii_mode`：
+- 属性：RW；
+- reset value：0；
+- 0：RMII/RGMII mode；
+- 1：SGMII/QSGMII mode。
+
+同一字段表给出 bits[6:4] 为 `gmac1_phy_intf_sel`，RGMII 编码为 `3'b001`，RMII 编码为 `3'b100`。这与 6.1.65 的 `RK3568_GMAC_PHY_INTF_SEL_RGMII`（bit4 set、bit5/6 clear）一致，也与 6.18 的通用 `GENMASK(6,4)` 编码路径一致。
+
+因此，之前标记的 bit7 差异现已可准确解释：
+- 6.1.65 RGMII 路径不显式写 bit7，依赖 TRM 定义的硬件 reset default=0；
+- 6.18 RGMII 路径显式写 bit7=0，保证进入 RMII/RGMII mode，而不依赖该位此前仍保留 reset default；
+- 对 Panther 的 RGMII 模式，两版最终目标值一致；6.18 的显式 clear 是更确定的初始化，不构成配置回归。
+
+仍不能仅凭 TRM reset value 证明当前运行时寄存器值；bootloader 或此前软件可能在 Linux probe 前修改 GRF。首次授权硬件 probe 时，应记录 Linux 接管前后/初始化后的寄存器值（如采用安全的只读观测点），但不得为了确认而先启用驱动或写寄存器。
+
+**bit7 语义与 reset default：PASS（官方 TRM 静态证据）。** R6-2 的 bit7 未决项关闭。
