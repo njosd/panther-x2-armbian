@@ -816,3 +816,63 @@ RK809 regulator probe 的代码组织略有变化：6.1.65 从 parent drvdata �
 - 然后完成 RK809 pre-init 表逐项寄存器访问属性表。未完成前继续不读取 0xF8–0xFD 实机寄存器、不启用 MFD、不进行 PMIC 写操作。
 
 **本节未访问实机、未读取 IRQ 状态寄存器、未执行任何硬件写入。**
+## 22. G0-A 后续：RK809 pre-init 与 regulator/DT 黄金基线差异复核（2026-11-26）
+
+### 22.1 pre-init 表逐项源文本比较
+
+对照冻结源码端点：
+- 6.1.65 高置信度候选：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`，`drivers/mfd/rk808.c`；
+- 6.18.63：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`，`drivers/mfd/rk8xx-core.c`。
+
+直接提取两端 `static const struct rk808_reg_data rk817_pre_init_reg[]` 的完整花括号数组，结果为**逐字节文本相同**（均 3,853 bytes，包含空白/注释）。因此该表不是 6.18 新增，也没有发现 6.1.65→6.18.63 的地址、mask、value 或顺序差异。
+
+表项包括 RTC_STOP、多个 RK817 CODEC DTOP/AREF/AADC/DADC/AMIC/DMIC/ADAC/DDAC/AHP/CLASSD/APLL/DI2S 寄存器，以及 GPIO interrupt polarity 和 thermal threshold 字段。源码自身明确注释 `CODEC_AREF_RTCFG0`、`CODEC_AADC_CFG1`、`CODEC_ADAC_CFG0` 未在所引用数据手册中定义。这些条目在两版都存在，故不能将其视为 6.18 regression；但它们仍是 probe 会执行的 PMIC 写入，必须依据正确器件手册/厂商资料确认适用性，不能仅因 6.1.65 曾正常联网就推定安全。
+
+### 22.2 RK809 regulator descriptor 的真实差异
+
+对照两版 `drivers/regulator/rk808-regulator.c` 中完整 `rk809_reg[]` descriptor 数组。数组不是完全相同：6.18 对 RK817 DCDC_REG3 descriptor 新增：
+
+```c
+.apply_reg = RK817_POWER_CONFIG,
+.apply_bit = RK817_BUCK3_FB_RES_INTER,
+```
+
+这是 DCDC_REG3（RK809 DCDC_REG3 / vcc_ddr）配置路径差异，不是 SWITCH_REG1。逐项核对 RK809 switch descriptors：
+
+| 项目 | 6.1.65 候选 | 6.18.63 |
+|---|---|---|
+| SWITCH_REG1 name | `SWITCH_REG1` | 相同 |
+| SWITCH_REG1 supply | `vcc9` | 相同 |
+| SWITCH_REG1 enable register | `RK817_POWER_EN_REG(3)` | 相同 |
+| SWITCH_REG1 enable mask | `ENABLE_MASK(2)` | 相同 |
+| SWITCH_REG1 enable/disable value | `ENABLE_MASK(2)` / `DISABLE_VAL(2)` | 相同 |
+| SWITCH_REG2 name/supply | `SWITCH_REG2` / `vcc8` | 相同 |
+| SWITCH_REG2 enable register/mask | `RK817_POWER_EN_REG(3)` / `ENABLE_MASK(3)` | 相同 |
+
+所以，针对 Panther GMAC `phy-supply` 指向的 SWITCH_REG1，未发现 6.1.65→6.18 descriptor 控制位差异。DCDC_REG3 的新增 apply register/bit 是真实跨版本差异，但目前没有证据表明它会影响 SWITCH_REG1 或 PHY 3.3V rail；应在后续 regulator 审计中独立记录，不能扩大解释。
+
+### 22.3 Panther RK809 DTS regulator 子树候选源码对照
+
+对照相同两个候选源码端点的 `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`，提取完整 `rk809: pmic@20` 节点（含 regulator 子树）后归一化空白及 system-power-controller 属性写法，节点内容完全相同。唯一源文本差异为：
+- 6.1.65 候选 DTS：`rockchip,system-power-controller;`（旧版 vendor 前缀写法）；
+- 6.18.63 DTS：`system-power-controller;`（标准属性写法）。
+
+regulator 子树中 DCDC_REG1–5、LDO_REG1–9、SWITCH_REG1/2 的名称、min/max/init voltage、always-on/boot-on、initial-mode、ramp-delay、suspend-state 等属性未发现差异。尤其 SWITCH_REG1 仅定义 `regulator-name = "vcc_3v3"` 与 `regulator-off-in-suspend`，未定义 `regulator-always-on`、`regulator-boot-on`、电压 selector constraints 或 init voltage。
+
+**证据限制：** 6.1.65 源码端点仍是 GOLDEN-CANDIDATE SOURCE，不是原始 6.1.65 image 对应 DTS/DTB 的二进制级绑定。仓库原始镜像审计记录已归档 `04-device-tree.tar.gz`（Dropbox `/04-device-tree.tar.gz`，2,256,475 bytes，SHA256 `b09451c53393353de55cbd4d7074eca593fd64a21ff9bc88cab223a9cdd6f3af`），但本轮没有解包其中的原始 DTB 并解析 PMIC 节点。因此上述 DT 比较暂记 **CANDIDATE-SOURCE MATCH**，不能升级为 GOLDEN-BINARY DTB PASS。
+
+### 22.4 对 G1 与网络 TX 路径的影响
+
+1. **可确认的跨版本一致部分：** RK809 pre-init 表逐字节一致；SWITCH_REG1/SWITCH_REG2 descriptor 的 enable 控制定义一致；候选 Panther DTS 的 RK809 regulator constraints 子树一致。
+2. **可确认的跨版本差异：** 6.18 regulator descriptor 为 DCDC_REG3 新增 apply register/bit；DTS system-power-controller 属性由 vendor-prefixed 写法改为标准写法。
+3. **仍不能安全放行 MFD/regulator：** pre-init 表包含数据手册未定义的 codec registers；IRQ 初始化仍涉及 status ACK；regulator registration 会根据多路 rail constraints 执行配置/enable。黄金基线正常启动只能证明整机曾在该版本下运行，不能证明这些初始化写入对当前 RK809 revision 的全部副作用。
+4. **网络链可利用的正向结论：** SWITCH_REG1 驱动描述符和候选 DTS constraints 在两版本间没有发现变化。后续 R7-A 可把它作为比较基准，重点验证 6.18 provider 是否注册、phy-supply consumer 是否成功获取/使能，以及物理 rail/PHY 上电是否正常；不能把当前静态结果当作已供电。
+
+### 22.5 下一步
+
+- 对归档的原始 `04-device-tree.tar.gz` 获取可解析的原始 6.1.65 DTB，验证其 RK809 节点是否与候选源码相同；这是本项尚缺的最小黄金二进制证据。
+- 对 pre-init 表的 codec 未定义寄存器及 RTC/GPIO/thermal 项，核对 RK809 datasheet Rev 2.4 和可取得的 RK809/RK817 codec supplement/vendor register map；标出 documented / undocumented / not applicable，不执行寄存器访问。
+- 查明 DCDC_REG3 `.apply_reg/.apply_bit` 变更的引入提交与适用 silicon 条件；当前不把它作为 PHY rail 根因。
+- 维持 R3.3–R3.5 BLOCKED；不读取 IRQ status 0xF8–0xFD，不启用 MFD/regulator，不改变 PMIC 电源配置。
+
+**本节为源码/归档元数据只读审计；未访问 Panther X2、未执行 I2C/PMIC 事务、未写入任何介质。**
