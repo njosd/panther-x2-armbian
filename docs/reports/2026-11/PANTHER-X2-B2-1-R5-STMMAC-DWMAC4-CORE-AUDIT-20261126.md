@@ -179,3 +179,77 @@ Ring mode jumbo 路径也在 6.18 显式写入 lower_32_bits DMA 地址，并使
 - Panther 实际 ring/chain 选择、DMA width、EAME、cache 属性仍未实机确认，留待 R6/R7。
 
 未运行设备测试、未启用驱动、未修改内核配置或源码。
+
+## 9. TX submit 与 completion/reclaim 对照（R5-4 第一轮，2026-11-26）
+
+### 9.1 6.1.65 与 6.18.63 TX submit 顺序
+
+两版 `stmmac_xmit()` 的共同核心顺序：
+1. 检查 TX ring 可用 descriptor；
+2. 选择 queue / descriptor；
+3. 通过 DMA API 映射 skb head 与 fragments；
+4. 写入 buffer address、length、FS/LS、checksum 等字段；
+5. 把 skb 和 DMA mapping 元数据挂到 TX queue；
+6. 设置首 descriptor OWN；
+7. `stmmac_enable_dma_transmission()`；
+8. flush/tail pointer 更新并启动 TX cleanup timer（6.18 timer/scheduling 细节有调整）。
+
+6.1.65 先处理 skb fragments，再映射/填写 linear head descriptor；6.18.63 先映射并准备 head descriptor（暂不置 OWN），再处理 fragments。两版最终都将首 descriptor OWN 留到所有 frame descriptors 已填写之后，因此核心 ownership handoff 保持一致。
+
+6.18 将 descriptor 访问统一经 `stmmac_get_tx_desc()` / `stmmac_set_desc_addr()` 等 helper，降低对 extended/TBS/basic descriptor 具体布局的直接依赖；6.1.65 在主路径中有更多显式分支访问 `dma_etx`、`dma_entx`、`dma_tx`。
+
+### 9.2 6.18 新增 TX 前置门控
+
+6.18 在常规 TX submit 前增加 EST max-SDU 检查：若 EST 已启用且 queue max_sdu 非零，帧长（若硬件 VLAN insertion 则加 VLAN_HLEN）超过 max_sdu 会 drop。R1/首轮 TX 不应启用 EST；R6 需确认 Panther platform data 不会意外启用 EST/queue gate。
+
+EEE 软件 LPI 退出路径从 6.1.65 的 `stmmac_disable_eee_mode()` 改为 6.18 的 `stmmac_stop_sw_lpi()`；completion 后恢复路径也改为 restart software LPI timer。该差异意味着 TX submit 前还可能涉及 MAC LPI 状态切换，后续实机日志需记录 EEE/LPI 是否 active。
+
+GSO 分支也有变化：6.1.65 仅当 `skb_is_gso(skb) && priv->tso` 时调用 TSO 路径，并检查 TCP/UDP GSO 类型；6.18 对 `skb_is_gso(skb)` 直接调用 `stmmac_tso_xmit()`。首轮 TX 测试应避免 GSO/TSO，先用普通小包隔离基础 descriptor/DMA/doorbell 路径。
+
+### 9.3 Descriptor OWN 与 doorbell 顺序
+
+6.18 普通 TX 路径明确：
+- head descriptor 先填充但不置 OWN；
+- fragments descriptors 按顺序填写；
+- 记录 last segment / skb pointer；
+- `stmmac_set_tx_owner(first_desc)`；
+- `netdev_tx_sent_queue()`；
+- `stmmac_enable_dma_transmission(..., queue)`；
+- `stmmac_flush_tx_descriptors()`，其中 `wmb()` 后调用 queue-aware tail pointer helper。
+
+DWMAC4 descriptor helper 在首 descriptor OWN 同时置位的路径中仍有 `dma_wmb()`，避免 DMA 在 frame 其余 descriptor 尚未准备完成时观察到首 descriptor OWN。此处两层 barrier 对应不同位置：descriptor helper 的 DMA ownership ordering 与 tail pointer doorbell 前的 write ordering，不能随意删减或合并。
+
+### 9.4 Completion/reclaim 差异
+
+两版 completion 都先读取 descriptor OWN/status；若 DMA 仍持有 descriptor 就停止清理；OWN 已清后执行 `dma_rmb()`，再读取完成状态；按 mapping 类型执行 `dma_unmap_single()` 或 `dma_unmap_page()`；清理 timestamp/descriptor metadata；释放 skb/XDP frame；推进 dirty_tx；最后唤醒已停止的 TX queue。
+
+6.18 主要变化：
+- `stmmac_tx_clean()` 增加 `pending_packets` 输出，由外层 NAPI poll 决定是否继续调度，而不是像 6.1.65 在该函数末尾直接 arm TX timer；
+- per-queue NAPI TX packet/error/clean 统计改用 `u64_stats_sync`；
+- completion 统计先累加局部 `tx_packets/tx_errors`，退出前统一合并；
+- XSK TX completion 增加 metadata completion callback，并在完成后将 slot 的 buf_type 复位，避免 teardown 重复计数；
+- 6.18 使用统一 descriptor getter/release helper。
+
+这属于 cleanup/scheduling 结构变化；未见普通 skb 路径删除 OWN 检查、DMA read barrier 或 streaming mapping unmap 的证据。
+
+### 9.5 当前可以确定与不能确定的事项
+
+可以确定：
+- 两版都采用 coherent descriptor ring + streaming payload mapping；
+- 两版均在所有 frame descriptors 准备后才交接首 descriptor OWN；
+- 6.18 仍保留 DMA write/read barrier；
+- TX doorbell 仍由 queue-specific tail pointer 路径触发；
+- completion 仍以 DMA 清除 OWN 作为可 reclaim 的必要条件。
+
+不能据源码单独确定：
+- Panther X2 当前 MAC DMA capability、实际 host DMA width / DMA mask；
+- 设备树/平台 glue 最终选择 ring 还是 chain、basic 还是 enhanced descriptor；
+- GMAC TX channel base/tail pointer 的最终寄存器值；
+- DMA 是否真正读取 descriptor、是否将帧送入 MAC/PHY；
+- PHY/link、RGMII delay、clock/rail 是否正常。
+
+### 9.6 R5-4 阶段性结论
+
+**TX submit/completion 主路径静态对照：PASS（STATIC / IMPORTANT DIFFERENCES DOCUMENTED）。** 普通 TX 路径的核心 DMA mapping、OWN 交接、barrier、doorbell 和 reclaim 语义两版连续；6.18 在 helper 抽象、EST max-SDU gate、EEE/LPI、GSO 分流、NAPI completion scheduling 与统计方面有结构性变化。
+
+R5-4 仍需完成 TX IRQ/NAPI poll/interrupt mask-unmask/queue wakeup 的完整调用链对照后才能结项。当前未执行硬件 TX/RX、未启用 GMAC/MDIO/PHY、未修改任何配置。
