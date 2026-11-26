@@ -38,7 +38,7 @@ jobs:
     env:
       R1_RUN_ID: ${{ inputs.r1_run_id || '45611898629' }}
       B1_RUN_ID: ${{ inputs.b1_run_id || '45328201244' }}
-      PROBE_RUN_ID: ${{ inputs.probe_run_id || '45747785913' }}
+      PROBE_RUN_ID: ${{ inputs.probe_run_id || '45750286867' }}
       R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
       DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
       UBOOT_SHA: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
