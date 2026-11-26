@@ -740,3 +740,10 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 **ABCD 定义：** A=用户态 AF_PACKET 提交；B=网络核心 skb；C=STMMAC ndo_start_xmit/stmmac_xmit；D=DMA mapping。必须关联同一测试帧的 sequence、length 与 payload hash；D 之后继续记录 descriptor/OWN、completion/reclaim，并以独立对端逐帧捕获作为物理 TX 决定性证据。没有目标 netdev/open/DMA 前置条件的阶段只记录 NOT EXECUTABLE，不伪造测试结果；每隔一至两阶段复核可执行性，一旦条件满足即优先单帧测试。测试帧采用实验 EtherType 0x88B5、ABCD 标识和序列号，不依赖 IPv4/ARP/DHCP/DNS。
 
 本次只同步计划和既有证据矩阵；没有访问 Panther、启动设备、写入存储、修改内核/DTB/PMIC/网络配置或执行发送测试。
+
+
+### G0 阶段进度更新（2026-11-26）
+
+- G0.1 provider/consumer 依赖矩阵第一轮已归档：`PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md`。
+- G0.2 RK809 MFD/regulator 副作用静态审计已归档：`PANTHER-X2-G0-2-RK809-MFD-REGULATOR-SIDE-EFFECTS-20261126.md`。当前 stock MFD/regulator 路径 NO-GO；MFD 的 IRQ ACK/pre-init 写入和 regulator 全量注册/约束/late cleanup 风险未解决，允许写入白名单为空。不是硬件 FAIL，也不是 6.18 网络功能 FAIL。
+- 下一项唯一任务：G0.3，只读归并 IO-domain supplier/deferred-probe 证据和 bank/rail mapping；不启用 MFD/regulator、不写 GRF、不启动设备。
