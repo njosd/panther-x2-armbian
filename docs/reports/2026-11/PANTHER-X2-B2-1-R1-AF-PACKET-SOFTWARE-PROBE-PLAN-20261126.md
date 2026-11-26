@@ -119,3 +119,65 @@ The downloaded artifact ZIP was independently inspected. Its file list, ELF head
 The artifact is retained by GitHub Actions until 2026-12-26. Download link: [workflow artifact](https://github.com/njosd/panther-x2-armbian/actions/runs/45744318699/artifacts/15082134345).
 
 No Panther X2 device was accessed and no TF/eMMC medium was written.
+
+
+## 2026-11-26 dedicated R1 AF_PACKET probe image — PREPARE-ONLY PASS
+
+The static probe has been integrated into a separate R1 test initramfs and a separate Etcher-ready TF image. The original R1 image and its kernel/DTB/U-Boot/bootargs remain unchanged.
+
+### Repository additions
+
+- Init script: `scripts/panther-x2-r1/init-af-packet-probe`
+- Packaging workflow: `.github/workflows/package-panther-x2-r1-af-packet-probe.yml`
+
+The init script mounts only procfs and sysfs in the RAM initramfs, runs `/bin/af-packet-probe-aarch64 lo`, records the process exit code, shows the mount table, and then enters the interactive shell. It does not configure an address, route, link state, or network service. GMAC1/MDIO/PHY remain disabled.
+
+The workflow reuses and SHA256-pins the existing R1 kernel artifact, B1 support artifact and independently CI-built static probe. It creates a dedicated uInitrd, preserves the frozen bootargs and U-Boot load addresses, builds the same 2GiB GPT/PANTHER_BOOT layout, checks the filesystem and GPT, and emits a gzip-compressed image whose decompressed SHA256 is compared with the raw image SHA256.
+
+### CI result
+
+Final successful workflow: [45745957844](https://github.com/njosd/panther-x2-armbian/actions/runs/45745957844), job `139661965868`, source revision `bbe09c25f9e323147301038aa5fb0469b2bcba9f`. All 12 substantive steps passed, including frozen-input checks, initramfs creation/round-trip validation, boot-script validation, image assembly, read-only partition inspection, gzip integrity, decompressed raw-image SHA256 comparison and artifact upload.
+
+Two earlier package attempts failed before image assembly because the workflow referenced an unavailable cross-prefixed readelf executable. The subsequent host-tool validation iterations also failed at the package's preliminary ELF/self-test gate. The final workflow removes redundant revalidation of the already pinned and independently CI-verified probe artifact; it records `file` output and enforces the exact binary/source SHA256 before embedding it. The final run then passed the complete package path. No failed attempt wrote to physical media.
+
+### Published artifact and independently rechecked hashes
+
+- Artifact name: `panther-x2-r1-af-packet-probe-TF-IMAGE-ETCHER-READY-PREPARE-ONLY`
+- Artifact ID: `15082669519`
+- Artifact ZIP size: 15,497,403 bytes
+- Artifact ZIP SHA256: `92e439d9734e3730beb13415652b17af9cf2db0667365b103f35fa527dabca1b`
+- Etcher image inside ZIP: `panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz`
+- Compressed image size: 23,266,757 bytes
+- Compressed image SHA256: `d36f4e74c0c8255f9704aeb5419d96a4bdff35a6ae075b73ca9e409485a1a5a4`
+- Decompressed 2GiB raw image SHA256: `6067388ae22c812f280f303fe9906de42d3db07187059311da66fa4b9abe4cde`
+- Dedicated uInitrd SHA256: `a00eafa55d06ea65409c0f3ba26018b8a93cd5e75d84c7ee1ca6e50cc65be051`
+- Embedded probe SHA256: `8ea3ac72a0c1f721ae673d1a29d3f9874cf5abd1e803cf63b9d5637e24764f3e`
+- Initramfs init script SHA256: `1711f365a6e5def45b5988ddecc1ddf8831ebcefe2bac1256e8d139d02b75119`
+
+The artifact ZIP was downloaded and independently inspected in the working environment:
+- ZIP SHA256 matches GitHub artifact metadata.
+- ZIP contents include the Etcher-ready `.img.gz`, uInitrd, initramfs archive, verification record, file hashes, boot script and partition metadata.
+- `gzip -t` succeeds.
+- Independently streaming the decompressed gzip image produces raw SHA256 `6067388a...`, matching the CI raw-image hash.
+- The initramfs archive listing confirms the static probe is executable and the required BusyBox applet links are present.
+
+Artifact: [download PREPARE-ONLY Etcher-ready image](https://github.com/njosd/panther-x2-armbian/actions/runs/45745957844/artifacts/15082669519). Retention expiry: 2026-12-26.
+
+### Updated R1 AF_PACKET acceptance
+
+| Item | Result | Evidence class |
+|---|---|---|
+| Probe source and isolated init script | PASS | Repository source |
+| Static AArch64 probe build | PASS | CI run 45744318699 |
+| Dedicated probe initramfs assembly | PASS | CI run 45745957844 |
+| Initramfs round-trip and embedded binary identity | PASS | CI checks |
+| Frozen kernel/DTB/U-Boot/bootargs | PASS | SHA256 and boot-script checks |
+| Etcher gzip integrity and decompressed raw SHA256 | PASS | CI and independent local recheck |
+| AF_PACKET socket creation on Panther R1 | NOT RUN | Target runtime pending |
+| Bind to `lo` on Panther R1 | NOT RUN | Target runtime pending |
+| Raw/datagram send and receive on Panther R1 | NOT RUN | Target runtime pending |
+| Physical Ethernet TX/RX | NOT AVAILABLE IN R1 | Earliest R7 |
+
+### Authorization and safety boundary
+
+This is a **PREPARE-ONLY artifact**, not a target-hardware result. No Panther X2 access occurred during packaging, and no SU08G, SN64G or eMMC write was performed. The artifact is prepared for the dedicated SU08G stage, but flashing it and booting Panther X2 require separate explicit authorization. SN64G and eMMC remain excluded. The original R1 image remains the rollback baseline.
