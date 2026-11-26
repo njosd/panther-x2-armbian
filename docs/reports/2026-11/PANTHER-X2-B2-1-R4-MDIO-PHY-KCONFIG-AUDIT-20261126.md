@@ -218,3 +218,40 @@ R4-4 将从 R1 已归档构建产物提取原始 config 与对象清单，核验
 ### 8.5 R4-3 结论
 
 R4-3 源码对象归属与依赖架构：PASS（STATIC）。R1 当前配置/最终对象实证：PENDING，转入 R4-4。未构建、未加载驱动、未执行 MDIO 事务、未访问硬件。
+
+## 9. R1 当前配置与构建产物核验（R4 第四子项，2026-11-26）
+
+### 9.1 证据来源与构建身份
+
+复核 R1 构建 workflow：`.github/workflows/build-panther-x2-b2-1-r1-network-core.yml`，run `45611898629`，job `139197305317`，成功完成。该 workflow 固定 Linux 6.18.63 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，R1 kernel config SHA256 `480645537537abdadc9e2e07f404b85c1bc9411232df04ecb284c5270d2af23a`（与项目已归档记录一致）。
+
+### 9.2 R1 明确将 MDIO/PHY 配置全部关闭
+
+R1 workflow 的 Kconfig gate 使用 `require_off` 明确要求以下符号不得为 y/m：
+
+- `CONFIG_MDIO`、`CONFIG_MDIO_DEVICE`、`CONFIG_MDIO_BUS`、`CONFIG_MDIO_DEVRES`；
+- `CONFIG_PHYLINK`、`CONFIG_PHYLIB`、`CONFIG_REALTEK_PHY`、`CONFIG_FIXED_PHY`；
+- `CONFIG_STMMAC_ETH`、`CONFIG_STMMAC_PLATFORM`、`CONFIG_DWMAC_ROCKCHIP`。
+
+workflow 同时要求 R1 的网络基础仅启用 `NET`、`NETDEVICES`、`NET_CORE`、`ETHERNET`、`PACKET`，并检查网络硬件/PHY/USB/Wi-Fi/蓝牙驱动不得出现在 modules 或 modules.builtin。构建审计还验证 Panther DTB 的 GMAC1、MDIO、PHY 节点全部 disabled。
+
+因此，R1 当前状态不是“PHYLIB 对象可能漏编译”，而是**按设计明确不包含 MDIO/PHY 驱动闭包**。这与 R1 的隔离目标一致，不应为了让 R4 静态审计 PASS 而修改 R1。
+
+### 9.3 R4 目标配置闭包（只作为未来配置审查清单，不在 R1 启用）
+
+后续进入 PHY/GMAC 实机阶段时，按 6.18.63 对象模型至少核对：
+
+- `CONFIG_PHYLIB=y`：libphy 核心与 `phy_link_topology.o`、`phy_caps.o`、`mdio_bus_provider.o` 等聚合对象；
+- `CONFIG_MDIO_BUS=y`：独立 `mdio-bus.o`；
+- `CONFIG_OF_MDIO=y`：`drivers/net/mdio/of_mdio.o`；
+- `CONFIG_REALTEK_PHY=y`：`drivers/net/phy/realtek/` 对象；
+- `CONFIG_PHYLINK=y`：phylink 对象（由 STMMAC 依赖链带入，但必须核对最终 .config）；
+- 最终 `vmlinux`/`modules.builtin`/模块清单中应与配置值一致。
+
+是否全部 built-in，必须结合后续 R5/R6 的最小配置设计决定；首轮硬件 bring-up 不应无理由将所有驱动做成模块，以免引入模块加载时序变量。此处仅定义核验项，不预先修改配置。
+
+### 9.4 R4 静态审计结论
+
+R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动实现、R4-3 MDIO/PHY 核心对象组织、R4-4 R1 当前配置边界均已完成源码/构建定义审计。结论：**R4 STATIC AUDIT COMPLETE（CONDITIONAL）**。R1 对 MDIO/PHY 的关闭是有意隔离，不是缺陷；未来配置闭包清单已建立，但尚未进入 R5/R6 配置构建。
+
+R4 结项不授权 PHY probe、MDIO 事务或 GMAC 启用。实际硬件阶段仍须完成原始 6.1.65 DTB 对照、确认 Panther phy-mode/delay/clock/reset/rail 参数，并另行授权受控 bring-up。
