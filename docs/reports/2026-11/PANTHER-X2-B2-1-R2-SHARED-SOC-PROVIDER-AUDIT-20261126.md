@@ -186,3 +186,11 @@ R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset 
 - `pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 调用 `syscon_node_to_regmap()` 获取 GRF regmap，并调用 `syscon_regmap_lookup_by_phandle_optional()` 处理可选 IOC phandle；probe 成功说明该 consumer 实际通过 syscon API 获得所需 regmap。
 - `rockchip_pinctrl_probe()` 随后调用 `of_platform_populate()` 注册 GPIO bank 子设备；`gpio-rockchip.o`（构建对象名）对应 platform driver 名称为 `rockchip-gpio`；检查 `/sys/bus/platform/drivers/rockchip-gpio/` 下 GPIO bank 设备链接，并在 `/sys/class/gpio/` 确认 gpiochip 注册，可验证 GPIO provider 的运行时注册。
 - 上述路径均可通过 sysfs 和 dmesg 只读观察，不需要写 GPIO、MMIO 或 PMIC 寄存器。
+
+### 8.5 R1 最终 AF_PACKET probe 镜像的只读检查工具约束
+
+当前 R2 实机检查使用的不是早期 R1 镜像，而是最终专用 AF_PACKET probe 镜像：Actions run `45750601995`，artifact `15084948644`。该镜像复用冻结的 R1 `Image`/DTB，并使用专用 RAM initramfs；`/init` 先挂载 procfs/sysfs，执行修正后的 AF_PACKET probe，再进入交互式 `/bin/sh`。
+
+该 initramfs 的 BusyBox 构建/打包脚本仅创建 `ash`、`sh`、`mount`、`mkdir`、`cat`、`uname`、`printf` applet 链接；明确禁止依赖 `[`/`test`。因此后续检查不得使用 `echo`、`[`、`test`、`ls`、`grep`、`dmesg`、`readlink` 等未包含 applet。使用 `printf` 输出标题，使用 `cat` 读取已知 sysfs 文件，并利用 shell pathname expansion 枚举设备/driver 链接。
+
+此前尝试的通用 BusyBox 检查脚本因调用未包含的 applet 而未执行；其输出不构成任何 GPIO/SYSCON 正反证据，也未改变设备状态。
