@@ -253,3 +253,50 @@ DWMAC4 descriptor helper 在首 descriptor OWN 同时置位的路径中仍有 `d
 **TX submit/completion 主路径静态对照：PASS（STATIC / IMPORTANT DIFFERENCES DOCUMENTED）。** 普通 TX 路径的核心 DMA mapping、OWN 交接、barrier、doorbell 和 reclaim 语义两版连续；6.18 在 helper 抽象、EST max-SDU gate、EEE/LPI、GSO 分流、NAPI completion scheduling 与统计方面有结构性变化。
 
 R5-4 仍需完成 TX IRQ/NAPI poll/interrupt mask-unmask/queue wakeup 的完整调用链对照后才能结项。当前未执行硬件 TX/RX、未启用 GMAC/MDIO/PHY、未修改任何配置。
+
+## 10. TX IRQ / NAPI / DMA status decode：6.18 增量复核（R5-4 完成，2026-11-26）
+
+### 10.1 复用既有 D3-7，不重复四版本审计
+
+项目 B2-0 方向三报告 `PANTHER-X2-B2-0-DIRECTION-3-D3-7-IRQ-NAPI-WATCHDOG-RECOVERY-20261125.md` 已完成 6.1.65、6.1.116、实际构建 6.1.174-rk35xx、6.12.81-rk35xx 四版本 IRQ/NAPI/watchdog/recovery 审计。本节不重跑、不复制该四版本矩阵，只针对 R5 新目标 6.18.63 相对 6.1.65 的增量进行核对，并引用 D3-7 的既有结论。
+
+### 10.2 主 IRQ 与 NAPI schedule/complete
+
+6.18.63 的 `stmmac_interrupt()` 仍按 adapter DOWN 检查、common interrupt、DMA interrupt 顺序处理。变化是 safety IRQ 的分流：当独立 `sfty_irq` 不存在时，主 IRQ handler 才执行 safety-feature status check；6.1.65 在主 IRQ handler 中直接检查。Panther DTS 没有 dedicated safety IRQ，因此 6.18 仍会在主 IRQ 检查 safety status。该分支是否实际产生额外阻断，取决于硬件 safety capability/status，当前没有 Panther 运行时 feature dump，不能假设其置位。
+
+6.18 的 `stmmac_napi_check()` 与 6.1.65 的核心流程一致：读取 DMA status，区分 RI/TI/TBU，分别 schedule RX/TX NAPI，并在 NAPI schedule 成功时持锁屏蔽相应 channel IRQ。NAPI poll 在 work_done 小于 budget 且 `napi_complete_done()` 成功后，持锁重新启用对应 IRQ。未发现 6.18 改变普通 TX IRQ mask→NAPI schedule→complete→unmask 的核心顺序。
+
+### 10.3 DWMAC4 status decode 的增量差异
+
+两版 `dwmac4_dma_interrupt()` 均：
+- 读取 channel status 与 interrupt enable；
+- 根据 RX/TX 方向 mask status；
+- RI 返回 `handle_rx`；
+- TI 返回 `handle_tx`；
+- TBU 也触发 `handle_tx`；
+- TPS/FBE 产生 TX hard error；
+- 最后以 `intr_status & intr_en` 写回 status，执行 W1C ack。
+
+6.18 相对 6.1.65 的差异：
+1. NIS summary 的 `normal_irq_n` 统计不再递增；
+2. RX/TX per-queue IRQ 统计改为 per-CPU `u64_stats`；
+3. RWT 计数从 AIS 条件块中移出，单独判断；因此 RWT 统计不再依赖 AIS 同时置位；
+4. status/enable 寄存器地址统一使用 `dwmac4_addrs` register-map helper，函数签名新增 `priv` 参数；Panther 若 `dwmac4_addrs == NULL`，需依赖默认标准 DWMAC4 offset fallback。该 fallback 已在 D3-7 对 6.1.174/6.12 路径核实，但 6.18 Panther glue 最终是否保持 NULL 仍由 R6 确认。
+
+普通 RI/TI/TBU/TPS/FBE 的判定与返回语义保持一致；W1C ack 仍写 `intr_status & intr_en`。未发现 6.18 在普通 TX completion 中断上增加新的屏蔽条件或丢弃 TI/TBU 的变化。
+
+### 10.4 TX NAPI pending 与 timer
+
+6.1.65 的 TX NAPI poll 调用 `stmmac_tx_clean()`，在 work_done 小于 budget 时完成 NAPI 并重新启用 TX IRQ。6.18 新增 `pending_packets` 输出参数：clean 阶段若仍有待处理 TX packet，NAPI poll 在 IRQ re-enable 后调用 `stmmac_tx_timer_arm()`。Combined RX/TX NAPI 也使用相同 pending 标志。这与 D3-4 已记录的 timer/coalescing 演进相呼应；不重复 D3-4 结论。其意义是 6.18 对“仍有 pending TX 但本轮 NAPI 可以结束”的情形增加显式 timer 衔接，实机必须同时观察 TX IRQ 与 timer 触发，不能只检查 IRQ counter。
+
+### 10.5 R5-4 完成结论
+
+**R5-4 IRQ/NAPI/TX completion 增量审计：PASS（STATIC；结合既有 D3-7）。** 6.18 保留普通 RI/TI/TBU decode、TPS/FBE hard-error、W1C ack、NAPI schedule/mask 与 complete/unmask 核心路径。新增/变化主要是 safety IRQ 分流、RWT 统计条件、per-CPU IRQ stats、register-map helper 和 TX pending timer 协作。
+
+### 10.6 R5 总结与边界
+
+**R5 STATIC AUDIT COMPLETE（CONDITIONAL）。** R5-1 Kconfig/Makefile、R5-2 open/stop 与 DMA reset/init 生命周期、R5-3 descriptor/ring-chain/DMA coherency、R5-4 TX submit/completion/IRQ/NAPI 均已完成源码增量对照。
+
+结论不是“6.18 已经可用”或“TX 已打通”。R1 仍按隔离设计关闭 STMMAC/DWMAC。R5 只确认未来启用驱动时的源码调用链与版本差异，未验证 Panther 实际 MAC/DMA capability、register map、DMA mask、reset outcome、queue/channel 配置和 PHY link。
+
+下一阶段按既定顺序进入 R6：Rockchip DWMAC glue、Panther DTS/clock/reset/GRF/PHY interface 参数对照。R6 必须将原始 6.1.65 黄金 DTB 与 6.18.63 DTB 二进制属性逐项比对；在完成 R6 和安全边界审查前，不启用 GMAC/MDIO/PHY、不执行硬件 TX。
