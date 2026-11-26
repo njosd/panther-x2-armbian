@@ -100,7 +100,7 @@ jobs:
             if grep -Eq "^$key=[ym]$" work/r1/output/kernel.config; then echo "::error::Forbidden R1 option enabled: $key"; exit 1; fi
           done
           file work/probe/af-packet-probe-aarch64 | tee work/probe/file.txt
-          # Binary SHA256 is pinned to the separately CI-verified static AArch64 artifact.
+          # The downloaded artifact is tied to PROBE_RUN_ID; its checksum manifest and source identity are verified above.
           mkdir -p work/output
           sha256sum work/r1/output/Image work/r1/output/kernel.config work/r1/output/modules.tar.zst work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/JP-TvBox-u-boot.itb work/probe/af-packet-probe-aarch64 work/probe/af-packet-probe.c | tee work/output/input-sha256.txt
 
@@ -214,8 +214,8 @@ jobs:
             echo "kernel_image_sha256=$R1_IMAGE_SHA"
             echo "dtb_sha256=$DTB_SHA"
             echo "uboot_sha256=$UBOOT_SHA"
-            echo "probe_binary_sha256=$PROBE_SHA"
-            echo "probe_binary_size_bytes=635984"
+            echo "probe_binary_sha256=$(sha256sum work/probe/af-packet-probe-aarch64 | awk '{print $1}')"
+            echo "probe_binary_size_bytes=$(stat -c %s work/probe/af-packet-probe-aarch64)"
             echo "bootargs=unchanged from frozen B1"
             echo "initramfs=dedicated R1 AF_PACKET probe initramfs; BusyBox applets validated"
             echo "init=executes AF_PACKET probe on lo before interactive shell"
