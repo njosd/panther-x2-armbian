@@ -876,3 +876,50 @@ regulator 子树中 DCDC_REG1–5、LDO_REG1–9、SWITCH_REG1/2 的名称、min
 - 维持 R3.3–R3.5 BLOCKED；不读取 IRQ status 0xF8–0xFD，不启用 MFD/regulator，不改变 PMIC 电源配置。
 
 **本节为源码/归档元数据只读审计；未访问 Panther X2、未执行 I2C/PMIC 事务、未写入任何介质。**
+## 23. RK809 codec pre-init 手册版本复核与 DCDC_REG3 差异定性（2026-11-26）
+
+### 23.1 修订此前“未定义寄存器”的表述
+
+进一步核对 Rockchip 官方 RK809 Datasheet Rev 1.8（2021-10）与 Rev 2.4（2024-01）后，发现此前将三个寄存器笼统称为“数据手册未定义”不够精确，现修订为：
+
+| 驱动 pre-init 项 | 地址 | Rev 1.8 | Rev 2.4 | 精确结论 |
+|---|---:|---|---|---|
+| `CODEC_AREF_RTCFG0` | 0x16 | Register Summary 有条目，无详细 bit-field 说明 | Register Summary 有条目，无详细 bit-field 说明 | 地址已列出，但 bit semantics 未文档化；不能称为完全不存在 |
+| `CODEC_AADC_CFG1` | 0x19 | Register Summary 未列出 | Register Summary 未列出 | 两份公开 datasheet 均无条目/bit-field 说明 |
+| `CODEC_ADAC_CFG0` | 0x2E | Register Summary 未列出 | Register Summary 未列出 | 两份公开 datasheet 均无条目/bit-field 说明 |
+
+因此 Linux 源码注释“not defined in data sheet”对 0x19 和 0x2E 符合公开手册；对 0x16 更准确的说法应为“summary listed, detailed bit definition absent”。Rev 1.8 与 Rev 2.4 在这一点上没有补充这些字段定义。不能因为 0x16 在 summary 中出现，就假设向其写 0x00 的语义已被充分定义。
+
+还需区分：`CODEC_AREF_RTCFG1`（0x17）及 `CODEC_ADAC_CFG1`（0x2F）在两份 datasheet 中有详细 bit-field 定义；驱动写入值分别为 0x06 和 0x07。公开资料显示其字段为 RW，但包含内部使用/保留字段；这类整字节写入仍须按实际字段语义审查，而不能只以寄存器整体标注 RW 就直接判为无风险。
+
+### 23.2 两版 pre-init 数组相同，但不等于整套初始化适用于所有 RK809 silicon
+
+6.1.65 候选与 6.18.63 固定源码中的 pre-init 数组仍为逐字节一致。该数组对 0x16、0x19、0x2E 均使用 `MASK_ALL` 写入 0x00；因此两个内核版本对这些 undocumented/partially documented 地址具有相同写入行为。黄金基线运行成功只证明该完整系统组合曾工作，不能证明每个 codec 保留/未定义寄存器写入对所有 RK809 revision 都无副作用。
+
+本项目的实际用途不涉及 RK809 codec/audio，因此安全放行时应优先考虑能否在后续受控构建中隔离非网络必需的 codec pre-init 写入；但不能直接改动驱动。必须先确认 RTC/GPIO/thermal 必需初始化与 codec 写入可否独立拆分、MFD 代码是否允许安全地保留必要功能，并以 6.1.65 行为作对照。
+
+### 23.3 0xEE=0x94 的含义边界
+
+Rev 2.4 对 `PMIC_CHIP_VER` (0xEE) 定义 bit[7:4] 为 CHIP_NAME code low nibble，默认 0x9；bit[3:0] 标为 RO/RESV，reset value 0x2。实测 0x94 与高 nibble 0x9 一致，但低 nibble 0x4 与手册列出的 reset value 0x2 不同。手册将低 nibble 标为 reserved，并没有公开给出从 0x2 到 0x4 的 silicon revision 对照表。因此不能把 0x94 擅自解释为“revision 4”，也不能单凭该差异断言芯片异常。应向 Rockchip/BSP 资料寻找该字段的 silicon/OTP 说明；在取得说明前标记为 **RO reserved nibble differs from documented reset default; interpretation UNKNOWN**。
+
+### 23.4 DCDC_REG3 `.apply_reg/.apply_bit` 差异
+
+6.18.63 的 RK809 DCDC_REG3 descriptor 新增 `.apply_reg = RK817_POWER_CONFIG` 与 `.apply_bit = RK817_BUCK3_FB_RES_INTER`，6.1.65 候选 descriptor 没有这两个字段。此项是 descriptor/voltage-change 应用机制差异，不是 SWITCH_REG1 enable path 差异。
+
+当前已确认：
+- DCDC_REG3 属于 vcc3 / SoC DDR 供电相关 regulator，不是 PHY 的 SWITCH_REG1/vcc9 provider；
+- 该 apply bit 会改变 DCDC_REG3 电压设置提交/应用行为；
+- 没有证据表明它改变 SWITCH_REG1 的使能寄存器、mask 或值；
+- 尚未取得引入该字段的确切上游 commit 和针对 RK809 silicon 的适用说明，因此引入原因及硬件适用条件标记 UNKNOWN。
+
+在取得 commit provenance 前，不将其列为 TX 故障根因，也不进行实机寄存器读写。后续若分析 SoC DDR rail 稳定性，可再独立评估；当前网络 TX 主线不扩展到此专题。
+
+### 23.5 本轮结论与安全边界
+
+1. 6.1.65 / 6.18 pre-init 表逐字节一致；codec pre-init 中 0x16 是 summary listed but bitfield undocumented，0x19/0x2E 在 Rev 1.8 和 Rev 2.4 均未列入 register summary。
+2. 两个内核版本都执行相同的这些写入；这是历史兼容行为而非 6.18 regression，但不自动构成对当前 0x8094 器件 revision 的安全证明。
+3. 0xEE=0x94 的高 nibble 符合 RK809 code；低 nibble 0x4 是 reserved，且与 Rev 2.4 reset default 0x2 不同，含义 UNKNOWN。
+4. DCDC_REG3 apply 字段是独立的 6.18 descriptor 差异；目前不影响 SWITCH_REG1 对照结论。
+5. G1 仍 HOLD。不要为了网络测试启用 codec/audio 功能；也不允许用整组 MFD probe 作为“只验证 I2C”的方法。
+
+**本节仅复核公开 datasheet 与冻结源码；未访问实机、未执行 PMIC 事务、未写入介质。**
