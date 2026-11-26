@@ -12,7 +12,8 @@
 - [G0.1 Provider/Consumer 依赖矩阵（2026-11-26）](./PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md)：归并 R2–R6 现有证据，列出已通过、静态条件通过、阻塞及未验证资源。
 - [G0.2 RK809 MFD/Regulator 副作用与准入决策（2026-11-26）](./PANTHER-X2-G0-2-RK809-MFD-REGULATOR-SIDE-EFFECTS-20261126.md)：静态审计完成；stock MFD/regulator 当前 NO-GO，允许写入白名单为空。
 - [G0.3 IO-domain Supplier / GMAC1 VCCIO5 映射审计（2026-11-26）](./PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-AND-GMAC1-VCCIO5-MAPPING-20261126.md)：静态拓扑和 GRF 写入路径完成；GMAC1 M0→VCCIO5，且与 PHY 共用 vcc_3v3/SWITCH_REG1；最终 deferred-probe 状态仍 UNKNOWN。
-- [G0.4 GMAC1 Clock/Reset/PHY 125MHz 来源审计（2026-11-26）](./PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md)：CRU clock/reset、PHY reset、RGMII mode/delay 静态链完成；RTL8211F CLKOUT pin35 仅为候选，实际物理波形未验证。下一项 G0.5 ABCD 发送夹具审查。
+- [G0.4 GMAC1 Clock/Reset/PHY 125MHz 来源审计（2026-11-26）](./PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md)：CRU clock/reset、PHY reset、RGMII mode/delay 静态链完成；RTL8211F CLKOUT pin35 仅为候选，实际物理波形未验证。
+- [G0.5 ABCD-TX Sender 与观测夹具审查（2026-11-26）](./PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md)：独立 sender 规格、A/B/C/D 观测链、同帧关联和对端 pcap 规范已固定；未构建新 sender、未发送目标帧。下一项为 G0 总体准入复核。
 
 - [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
 - [B2-1 R3 RK809/I2C/regulator 专项审计](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计 COMPLETE（CONDITIONAL）；含 RK809 实机只读身份/状态寄存器证据、6.1.65/6.18.63 黄金对照、MFD/regulator 副作用及 PHY supply consumer 调用链。运行时 MFD/regulator 激活仍未授权。
