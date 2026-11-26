@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS；R3 静态审计 COMPLETE（CONDITIONAL）：RK809 I2C0/身份读取 PASS-RUNTIME（`0xED=0x80`、`0xEE=0x94`、ID `0x8094`），只读状态寄存器 `0xF0=0xC2`、`0xF6=0x00` PASS-RUNTIME；6.1.65/6.18.63 pre-init、SWITCH_REG1 descriptor、regulator late-cleanup、Rockchip PHY-supply consumer 调用路径已完成静态对照。R3 MFD/regulator 实机激活仍 NOT AUTHORIZED / DEFERRED，不代表 rail/PHY 已验证。下一步按 R0–R8 顺序进入 R4 MDIO/PHY 框架与 RTL8211F 静态/Kconfig/对象审计，GMAC/MDIO/PHY DT 节点继续 disabled。原始 6.1.65 DTB 二进制核对作为 R7-A 硬件准入条件，不再阻塞 R3 静态结项。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094` 与状态寄存器 `0xF0=0xC2`、`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）：Kconfig/Makefile、RTL8211F 两版驱动差异、MDIO/PHY 对象组织、R1 配置隔离均已归档。R1 明确关闭 MDIO/PHY/PHYLIB/REALTEK_PHY/PHYLINK/STMMAC/DWMAC 驱动，符合隔离目标。下一步进入 R5：STMMAC 通用核心及 TX/RX 数据路径静态对照；GMAC/MDIO/PHY DT 节点继续 disabled。原始 6.1.65 DTB 二进制核对仍是 R7-A 硬件准入条件。
 
 ## 0. 统一项目定义
 
