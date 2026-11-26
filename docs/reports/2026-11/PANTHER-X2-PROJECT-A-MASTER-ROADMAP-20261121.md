@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094` 与状态寄存器 `0xF0=0xC2`、`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）。R5 STMMAC/DWMAC4 静态审计 COMPLETE（CONDITIONAL），已对照 6.1.65 黄金基线。R6 进行中：R6-1 Rockchip glue/DTS 源码对照 PASS；R6-2 GRF/CRU clock/reset PASS，官方 RK3568 TRM Rev1.3 确认 GMAC1 CON1 bit7 reset=0、0=RMII/RGMII、1=SGMII/QSGMII；6.1.65 不显式写 bit7、6.18 显式 clear，最终目标一致。R6-3 已提取 6.18.63 DTB 实物，与 6.1.116 磁盘 DTB SHA256 完全相同，GMAC1 核心属性与 6.1.65 已归档原始解析一致；6.1.65 原始 DTB 全属性自动 diff 仍 BLOCKED（无需重提取 IMG）。R6-4 已定义 R7-A Gate 0–4：PMIC/provider 单独验证→rail/125MHz 时钟验证→GMAC platform probe→TX-first；每阶段均需独立授权。当前 GMAC/MDIO/PHY 继续 disabled，未访问硬件寄存器。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094`、状态寄存器 `0xF0=0xC2`/`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）。R5 STMMAC/DWMAC4 静态审计 COMPLETE（CONDITIONAL），已对照 6.1.65 黄金基线。R6 静态审计 CONDITIONAL CLOSE：R6-1 Rockchip glue/DTS PASS；R6-2 GRF/CRU clock/reset PASS，官方 RK3568 TRM 确认 CON1 bit7 reset=0 且 0=RMII/RGMII、1=SGMII/QSGMII；R6-3 6.18.63 DTB 实物已核验，与 6.1.116 DTB SHA256 完全相同，GMAC1 核心属性与 6.1.65 已归档原始解析一致，但 6.1.65 全 DTB 自动 diff 仍 BLOCKED；R6-4 定义 R7-A Gate 0–4；R6-5 纠正 125MHz 时钟链：DTS fixed-clock 仅为 CCF 逻辑模型，RK809 CLKOUT 与 gmac1_clkin 无连接声明，RTL8211F CLKOUT pin35 是待验证物理来源候选。GMAC/MDIO/PHY 继续 disabled；R7-A 前仍需黄金 DTB 原始 PMIC 子树对照、供电/provider 风险审查、PHYCLKOUT 物理来源/波形方案及单独硬件授权。
 
 ## 0. 统一项目定义
 
