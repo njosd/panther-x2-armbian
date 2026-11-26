@@ -502,3 +502,44 @@ A successful ID read does not authorize loading RK8xx MFD/regulator drivers or a
 - **R3 整体 HOLD/BLOCKED：** 本次只读状态寄存器成功不构成 provider/rail/consumer 功能验收，不放行 R4。
 
 **本次实机验证没有改变既定安全边界：不启用 RK8xx MFD/regulator，不写 PMIC，不操作 regulator，不恢复 GMAC/MDIO/PHY。**
+
+
+## 17. R3.5 现有 RK809 regulator consumer 安全路径审计（2026-11-26）
+
+### 17.1 复用证据与本轮目标
+
+复用本报告 §4 的 R1 最终 DTB 二进制解析、§7/§11 的 RK809 MFD 与 regulator probe 副作用分析，以及 B2-0 已归档的 Panther 电源/IO-domain 拓扑审计。本轮不重复解析 DTB 或重做四版本源码比较，只确认 R3.5 是否存在不改变 PMIC/SoC 电源域状态的现有 consumer 验证路径。
+
+### 17.2 已识别的现有 consumer 拓扑
+
+冻结源码端点：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+Panther DTS 的 RK809 regulator consumer 引用包括：
+
+- GMAC1 `phy-supply = <&vcc_3v3>`，指向 RK809 SWITCH_REG1；GMAC1 在 R1 最终 DTB 中 disabled，不能作为 R3 当前的现有运行 consumer。
+- `pmu_io_domains` 引用 `vcc3v3_pmu`、`vcc_3v3`、`vcc_1v8`、`vccio_sd` 等 RK809 rails；该节点在板级 DTS 中启用，是候选现有 consumer。
+- eMMC `sdhci` 使用 `vcc_3v3` 与 `vcc_1v8`；TF `sdmmc0` 使用 `vccio_sd`；GPU 使用 `vdd_gpu`。这些是其他潜在 consumer 路径，但不能仅凭 DTS 引用推断其 R1 运行时已 probe 或成功取得 regulator。
+- CPU `vdd_cpu` 来自 I2C0 上独立的 TCS4525，不属于 RK809 regulator consumer；BT/Wi-Fi 路径按项目边界排除。
+
+### 17.3 PMU IO-domain consumer 的精确源码行为
+
+读取冻结 6.18.63 源码 `drivers/soc/rockchip/io-domain.c`：
+
+1. `rockchip_iodomain_probe()` 首先获取 GRF regmap。
+2. 对 RK3568 PMU IO-domain 的每个已定义 supply name，调用 `devm_regulator_get_optional()`。
+3. 若 provider 尚未注册，返回 `-EPROBE_DEFER` 并退出该次 probe；不会进入后续电压处理。
+4. 若 regulator 获取成功，调用 `regulator_get_voltage()`，随后调用 `iod->write(supply, uV)`。
+5. RK3568 PMU IO-domain 的 `iod->write` 实现会对 PMU GRF 的 IO voltage-select 寄存器执行 `regmap_write()`；其他通用分支同样会写 GRF。之后还会注册 regulator notifier，供后续电压变化时调整 IO-domain 设置。
+
+因此，这条现有 consumer 路径并非只读枚举：即使 regulator voltage 查询本身是读取，probe 也会根据返回电压写入 SoC GRF/PMU-GRF。若启用 RK809 provider，MFD pre-init 又会写 PMIC 寄存器；两层副作用均超出当前“不写 PMIC、不改变电源/IO-domain 状态”的授权范围。
+
+### 17.4 R3.5 结论与状态
+
+- 已确认存在真实 DTS regulator consumer 拓扑，且 PMU IO-domain 是优先候选；但其正常 probe 会写 GRF，不能作为当前只读约束下的安全 consumer 验证。
+- GMAC PHY consumer 仍 disabled，最早按计划在 R7-A；eMMC/TF/GPU consumer 也不能替代无副作用的 RK809 provider 验收。
+- R1 最终 `.config` 中 `ROCKCHIP_IODOMAIN` 的最终值及该 consumer 在当前专用 initramfs 中的实际绑定状态，本轮未取得直接证据，明确记为 UNKNOWN；不从 DTS status 或源码存在推断运行时绑定。
+- 本轮没有启用任何驱动、没有运行 consumer probe、没有读取/写入 GRF 或 PMIC、没有构建或操作设备。
+
+**判定：R3.5 BLOCKED（安全边界阻塞），不是功能 FAIL。R3.3–R3.4 同样因 MFD/regulator probe 写寄存器副作用保持 BLOCKED。R3.1、R3.2、R3.7 的既有 PASS-RUNTIME 不受影响；R3 整体 HOLD/BLOCKED，不放行 R4。**
+
+若未来要完成 R3.3–R3.5，必须先由用户单独决定是否允许 RK809 MFD probe 的 PMIC 写入及 PMU IO-domain consumer 的 GRF 写入，并明确可接受的电源/IO-domain 影响范围；在此之前不实施。
