@@ -529,7 +529,7 @@ R3 静态与实机只读证据报告：`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-P
 - 专用只读探测 initramfs 已从固定 R1 Image/config/DTB、B1 BusyBox 与已验证 probe artifact 构建；实机启动成功，RAM-only，无持久化存储挂载。仅替换 SU08G 的 uInitrd，原始 uInitrd 已备份；Image/DTB/boot scripts 未改，SN64G 与 eMMC 未触碰。详细哈希和完整输出见 R3 专项报告第 14 节。
 - 精确源码确认 6.18.63 `rk8xx_i2c_probe()` 根据 OF compatible 选择 RK809 variant 并初始化 regmap，不读取 silicon ID；随后进入 `rk8xx_probe()`。Panther DTS 含 GPIO0 PA3 IRQ 与 `system-power-controller`。MFD probe 的 regmap IRQ 初始化及 pre-init 存在 PMIC 写操作；shutdown/suspend/resume 与 power-off/restart handler 也会写 PMIC。Regulator 注册应用 DTS constraints，可能写寄存器并启用电源轨。因此 MFD/regulator probe 不是只读验证。
 - R3.7 静态审计确认 `PMIC_SYS_STS(0xF0)` 与 `PMIC_OFF_SOURCE(0xF6)` 全位 RO，排除含 RW 的 `0xF5` 与 W1C 的 `0xF8`。用户已明确授权仅读取 `0xF0/0xF6`；独立固定范围探测程序与 RAM-only initramfs 已通过构建和产物验证（Actions run `45800613904`，artifact `15106894148`），尚未部署到 SU08G，实机读取待执行。
-- **当前状态：R3.1 I2C0 controller/adapter PASS-RUNTIME；R3.2 RK809 ID 只读读取 PASS-RUNTIME；R3.7 状态寄存器 PASS-STATIC-CANDIDATE、runtime pending；R3.3 MFD/regmap、R3.4 regulator provider、R3.5 consumer BLOCKED；R3.6 PHY supply consumer 最早在 R7-A 验证。** 不启用 RK8xx driver、不切换 regulator 或电源状态。R3 整体 HOLD/BLOCKED，不放行 R4。
+- **历史状态，已由 2026-11-26 R3 结项更新取代：** R3.1/R3.2/R3.7 的安全只读 runtime 项均 PASS；R3 静态审计 COMPLETE（CONDITIONAL）。R3.3–R3.5 实机激活仍 NOT AUTHORIZED / DEFERRED；R3.6 留待 R7-A。
 
 ### 4E.6 R3.7 实机状态寄存器只读验证完成（2026-11-26）
 
@@ -537,7 +537,7 @@ R3 专项报告第 16 节已归档实机证据。SU08G 目标 UUID 与挂载点�
 
 R3.7 专用探针在目标机 self-test PASS；随后对 RK809@0x20 的 `PMIC_SYS_STS(0xF0)`、`PMIC_OFF_SOURCE(0xF6)` 各执行一次 I2C_RDWR repeated-start 只读事务，ioctl 均返回 2、errno=0，原始值分别为 `0xC2`、`0x00`。未扫描总线、未写 PMIC 数据寄存器、未绑定驱动、未调用 regulator API。
 
-**更新状态：R3.7 PASS-RUNTIME。R3.1/R3.2/R3.7 的安全只读项目均 PASS-RUNTIME；R3.3–R3.5 仍 BLOCKED，R3.6 仍留待 R7-A。R3 整体继续 HOLD/BLOCKED，不放行 R4。** 状态寄存器不提供 regulator 输出电压遥测，不能证明 SWITCH_REG1 或 PHY 供电能力。
+**历史状态，已由 2026-11-26 R3 结项更新取代：** R3.7 PASS-RUNTIME；R3 静态审计 COMPLETE（CONDITIONAL）。实机 MFD/regulator activation 仍 deferred；不代表 rail/PHY 已验证。 状态寄存器不提供 regulator 输出电压遥测，不能证明 SWITCH_REG1 或 PHY 供电能力。
 
 ## R3 状态收敛更新（2026-11-26）
 
@@ -548,3 +548,9 @@ R3 的静态源码审计已完成，结论为 **COMPLETE (STATIC / CONDITIONAL)*
 R3 专项报告第 26 节已记录固定源码端点、调用顺序、错误传播和边界，commit `c403d3505721949a4963dff544406aa9b00cd45e`。
 
 **后续顺序：** 结束 R3 专题，不再扩大 PMIC 静态审计；进入 R4（MDIO/PHY 框架与 RTL8211F）静态/Kconfig/对象审计，GMAC/MDIO/PHY DT 节点继续 disabled。原始 6.1.65 DTB 二进制对照保留为 R7-A 硬件准入条件，不再阻塞 R3 静态结项。R4 审计完成后再逐项构建/配置验收，严格按计划推进；任何实际 MFD/regulator/PHY probe 或供电动作仍须另行授权。
+
+## R4 状态结项更新（2026-11-26）
+
+**R4 STATIC AUDIT COMPLETE（CONDITIONAL）。** R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动实现差异、R4-3 MDIO/PHY 核心对象组织、R4-4 R1 当前配置隔离边界均已完成。R1 运行构建 `45611898629` 的 workflow 明确要求 `CONFIG_MDIO`、`CONFIG_MDIO_DEVICE`、`CONFIG_MDIO_BUS`、`CONFIG_MDIO_DEVRES`、`CONFIG_PHYLINK`、`CONFIG_PHYLIB`、`CONFIG_REALTEK_PHY`、`CONFIG_FIXED_PHY`、`CONFIG_STMMAC_ETH`、`CONFIG_STMMAC_PLATFORM`、`CONFIG_DWMAC_ROCKCHIP` 全部关闭；网络硬件/PHY 模块与 built-in 驱动也被排除。该配置符合 R1 隔离目标，不是缺陷。
+
+6.18 未来 PHY/GMAC bring-up 的配置核验清单已明确：PHYLIB、MDIO_BUS、OF_MDIO、REALTEK_PHY、PHYLINK 及其最终对象映射；实际 built-in/module 取舍留待后续阶段，不在 R1 修改。R4 结项不授权 PHY probe/MDIO 事务。下一步按既定顺序进入 R5（STMMAC 通用核心与 TX/RX 数据路径静态对照），GMAC/MDIO/PHY 节点仍保持 disabled；任何实机启用另行授权。
