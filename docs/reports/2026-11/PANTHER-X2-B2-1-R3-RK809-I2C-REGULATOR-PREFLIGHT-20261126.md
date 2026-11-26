@@ -537,7 +537,7 @@ Panther DTS 的 RK809 regulator consumer 引用包括：
 
 - 已确认存在真实 DTS regulator consumer 拓扑，且 PMU IO-domain 是优先候选；但其正常 probe 会写 GRF，不能作为当前只读约束下的安全 consumer 验证。
 - GMAC PHY consumer 仍 disabled，最早按计划在 R7-A；eMMC/TF/GPU consumer 也不能替代无副作用的 RK809 provider 验收。
-- R1 最终 `.config` 中 `ROCKCHIP_IODOMAIN` 的最终值及该 consumer 在当前专用 initramfs 中的实际绑定状态，本轮未取得直接证据，明确记为 UNKNOWN；不从 DTS status 或源码存在推断运行时绑定。
+- R1 最终 `.config` 已从冻结 artifact 直接核验：`CONFIG_ROCKCHIP_IODOMAIN=y`，`rockchip_iodomain_probe` 等符号存在于 `System.map`，证明驱动 built-in；R1 启动日志记录 IO-domain 设备等待 RK809 regulator supplier 的 deferred-probe。结合源码控制流，`devm_regulator_get_optional()` 返回 `-EPROBE_DEFER` 后直接跳到退出路径，早于 `regulator_get_voltage()` 与 `iod->write()`，因此本次 R1 启动的该次 probe 没有执行 IO-domain GRF 写入。尚未取得该设备后续 deferred-probe 是否再次发生及最终绑定状态的完整日志，故不能据此宣布 consumer 最终 probe 成功。
 - 本轮没有启用任何驱动、没有运行 consumer probe、没有读取/写入 GRF 或 PMIC、没有构建或操作设备。
 
 **判定：R3.5 BLOCKED（安全边界阻塞），不是功能 FAIL。R3.3–R3.4 同样因 MFD/regulator probe 写寄存器副作用保持 BLOCKED。R3.1、R3.2、R3.7 的既有 PASS-RUNTIME 不受影响；R3 整体 HOLD/BLOCKED，不放行 R4。**
@@ -610,3 +610,77 @@ RK3568 PMU IO-domain probe 会读取 regulator voltage 并按电压写 GRF/PMU-G
 下一项只读工作是核对 R1 最终 `.config` 中 `CONFIG_ROCKCHIP_IODOMAIN`、`CONFIG_MFD_RK8XX_I2C`、`CONFIG_REGULATOR_RK808` 的实际值及对应 built-in/module 对象，并复核 R1 启动日志中 IO-domain deferred-probe 的最终状态。然后完成 RK817 IRQ mask/ack 初始化写入语义和 RK809 regulator registration constraints 的逐项审计，形成 G1/G2 写入白名单。
 
 **本节不改变当前授权：尚未授权 MFD probe、regulator provider、IO-domain consumer、GRF/PMIC 写入或 GMAC 恢复。**
+
+
+## 19. G0 补充：R1 最终 IO-domain 配置、deferred-probe 与 RK809 IRQ 写入边界（2026-11-26）
+
+### 19.1 R1 最终 artifact 的配置与对象实证
+
+直接下载并解包冻结 artifact `b2-1-r1-network-core`（artifact ID `15023630465`），核对 `output/kernel.config`、`output/System.map` 与 `output/modules.tar.zst`。配置文件 SHA256 再次匹配 `480645537537abdadc9e2e07f404b85c1bc9411232df04ecb284c5270d2af23a`。
+
+| 配置/对象 | R1 最终证据 | 判定 |
+|---|---|---|
+| `CONFIG_ROCKCHIP_IODOMAIN` | `y` | built-in |
+| `rockchip_iodomain_probe` / `rockchip_iodomain_write` | 存在于 `System.map` | built-in 代码已进入 Image |
+| `CONFIG_REGULATOR` | `y` | regulator core built-in |
+| `CONFIG_MFD_RK8XX_I2C` | not set | RK8xx I2C transport 未构建 |
+| `CONFIG_MFD_RK8XX_SPI` | not set | RK8xx SPI transport 未构建 |
+| `CONFIG_REGULATOR_RK808` | 无启用项 | RK809/RK808 regulator provider 未构建 |
+| RK8xx core/I2C/regulator objects | `modules.tar.zst` 无对应对象 | 未以模块形式构建 |
+
+注意：`CONFIG_ROCKCHIP_IODOMAIN=y` 不是 UNKNOWN；这是已验证的 R1 配置事实。与此同时，MFD transport/provider 缺失，导致 IO-domain 所需 RK809 supplies 无法取得。
+
+### 19.2 R1 启动时 IO-domain deferred-probe 的安全意义
+
+R3.1 实机启动日志归档已记录 MMC、SARADC、IO-domain 等设备等待 `/i2c@fdd40000/pmic@20/regulators/...` supplier 的 deferred-probe。结合冻结 6.18.63 `drivers/soc/rockchip/io-domain.c` 的精确控制流：
+
+1. probe 先取得 GRF regmap；
+2. 对每个供电 rail 调用 `devm_regulator_get_optional()`；
+3. 若返回 `-EPROBE_DEFER`，直接进入清理/退出路径；
+4. 只有取得 regulator 后才调用 `regulator_get_voltage()`；
+5. 再之后才调用 `iod->write(supply, uV)` 执行 GRF/PMU-GRF 写入。
+
+因此，在 R1 缺少 RK809 provider 的已记录 deferred-probe 情况下，该次 probe 不会执行 regulator voltage 查询或 IO-domain 写入。这是一个重要的安全事实：R1 的 IO-domain driver 虽然 built-in 并尝试 probe，但因供电 provider 缺失而 defer，未走到 GRF 写操作。
+
+仍未取得 deferred-probe 后续重试的最终日志，因此最终设备绑定状态保留 UNKNOWN；不能将“曾 defer”夸大为“始终未绑定”，也不能将其解释为 consumer 已正常工作。
+
+### 19.3 RK809 MFD IRQ 初始化写入：新的明确风险项
+
+冻结源码 `drivers/mfd/rk8xx-core.c` 对 RK809 选择 `rk817_irq_chip`：
+
+- `num_regs=3`；
+- `irq_reg_stride=2`；
+- `status_base=RK817_INT_STS_REG0`；
+- `mask_base=RK817_INT_STS_MSK_REG0`；
+- `ack_base=RK817_INT_STS_REG0`；
+- `init_ack_masked=true`。
+
+冻结头文件定义对应寄存器：
+
+| 地址 | 名称 |
+|---|---|
+| `0xF8` | `RK817_INT_STS_REG0` |
+| `0xF9` | `RK817_INT_STS_MSK_REG0` |
+| `0xFA` | `RK817_INT_STS_REG1` |
+| `0xFB` | `RK817_INT_STS_MSK_REG1` |
+| `0xFC` | `RK817_INT_STS_REG2` |
+| `0xFD` | `RK817_INT_STS_MSK_REG2` |
+
+冻结 Linux `drivers/base/regmap/regmap-irq.c` 的 `regmap_irq_sync_unlock()` 显示：
+- 初始化 mask 同步会对 mask registers 执行 `regmap_update_bits()`；
+- `init_ack_masked=true` 时，会对被 mask 的 IRQ 在 ack_base 上执行 `regmap_write()`；
+- RK817 的 ack_base 与 status_base 相同，因此可能对 `0xF8/0xFA/0xFC` 执行写入；这些地址是中断状态/ack 寄存器，不是普通配置寄存器。
+
+这意味着 MFD-only probe 不只是写入 pre-init 表中的普通配置位，还会初始化 IRQ mask，并对 masked IRQ 状态执行 ack 写入。必须将 0xF8/0xFA/0xFC 的 W1C/ack 语义、当前中断锁存状态与具体写入值核对清楚；不能把它们视为无影响的普通写操作。此前 R3.7 对 `0xF0`、`0xF6` 的只读成功并不覆盖这些 IRQ registers。
+
+### 19.4 G0 当前结论与下一项审计
+
+- **PASS-STATIC：** R1 IO-domain built-in 配置与对象已确认；RK8xx MFD transport/provider 缺失已由真实 config 和 modules archive 交叉确认。
+- **PASS-RUNTIME（有限）：** R1 IO-domain 发生 regulator supplier deferred-probe；源码控制流证明该次 defer 路径不会进入 GRF 写入。
+- **UNKNOWN：** IO-domain 后续 deferred-probe 最终状态。
+- **BLOCKED：** MFD-only probe 仍不能放行；IRQ mask/ack 写入已确认是必须纳入白名单的新副作用。
+- **网络目标关联：** IO-domain 的作用是让 SoC IO bank 电平选择匹配实际供电 rail。只有 provider 与实际电压匹配后，才能把它纳入后续 PHY/GMAC 正常工作参数验证；但不能假设 GMAC RGMII bank 对应哪路 rail，仍需逐 pin/bank 映射。
+
+下一项只读 G0 工作：把 RK809 IRQ 三组状态/屏蔽寄存器的位定义、W1C 行为与 Linux regmap IRQ 初始化初始 mask 值逐位对照；同时把 RK809 pre-init 表逐项映射到 datasheet 的寄存器访问属性。完成后再决定 G1 是否可按“允许的 IRQ ack + mask + pre-init 白名单”申请单独授权。
+
+**本节未授权任何新增硬件写操作；未启用 MFD/regulator，未执行 GRF 写入或网络发包。**
