@@ -38,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y e2fsprogs gdisk zstd u-boot-tools
+          sudo apt-get install -y cpio e2fsprogs gdisk gzip qemu-user-static zstd u-boot-tools
 
       - name: Download existing R1 and B1 artifacts (no rebuild)
         uses: actions/download-artifact@v6
@@ -64,6 +64,7 @@ jobs:
           test -s work/r1/output/modules.tar.zst
           test -s work/b1/output/JP-TvBox-u-boot.itb
           test -s work/b1/output/uInitrd
+          test -s work/b1/output/busybox
           test -s work/b1/output/boot.cmd
           test -s work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
           test "$(sha256sum work/r1/output/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
@@ -78,6 +79,32 @@ jobs:
           mkdir -p work/output
           sha256sum work/r1/output/Image work/r1/output/kernel.config work/r1/output/modules.tar.zst work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/JP-TvBox-u-boot.itb work/b1/output/uInitrd | tee work/output/input-sha256.txt
 
+      - name: Build and validate R1-specific initramfs (do not reuse defective B1 /init)
+        run: |
+          set -euo pipefail
+          ROOT=work/r1-initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,run}
+          install -m 0755 work/b1/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname dmesg tail; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-r1/init "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          if grep -Eq '(^|[[:space:]])(\\[|test)([[:space:]]|$)' "$ROOT/init"; then
+            echo "::error::R1 /init must not depend on the absent BusyBox test/[ applet"
+            exit 1
+          fi
+          (cd "$ROOT" && find . -print0 | sort -z | cpio --null -o --format=newc) | gzip -n -9 > work/output/r1-initramfs.cpio.gz
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 R1 network-core initramfs" -d work/output/r1-initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/output/r1-uinitrd-header.txt
+          mkdir -p work/r1-initramfs-check
+          gzip -dc work/output/r1-initramfs.cpio.gz | (cd work/r1-initramfs-check && cpio -idm --quiet)
+          cmp scripts/panther-x2-r1/init work/r1-initramfs-check/init
+          test -x work/r1-initramfs-check/init
+          test "$(readlink work/r1-initramfs-check/bin/ash)" = "busybox"
+          test "$(readlink work/r1-initramfs-check/bin/sh)" = "busybox"
+          sha256sum work/output/uInitrd scripts/panther-x2-r1/init | tee work/output/r1-initramfs-sha256.txt
       - name: Regenerate R1 boot script, preserving all bootargs and load addresses
         run: |
           set -euo pipefail
@@ -105,12 +132,12 @@ jobs:
           sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
           sudo mount "$PART" work/tf-mnt
           sudo install -m 0644 work/r1/output/Image work/tf-mnt/Image
-          sudo install -m 0644 work/b1/output/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/output/uInitrd work/tf-mnt/uInitrd
           sudo install -m 0644 work/output/boot.scr work/tf-mnt/boot.scr
           sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
           sudo mkdir -p work/tf-mnt/dtb/rockchip
           sudo install -m 0644 work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
-          printf '%s\n' 'Panther X2 R1 network-core test image; PREPARE-ONLY.' 'Linux 6.18.63 R1: NET/NETDEVICES/NET_CORE/ETHERNET/PACKET enabled.' 'GMAC1/MDIO/PHY remain disabled; R1 cannot perform physical Ethernet TX.' 'Boot support assets reused from frozen B1; bootargs and load addresses unchanged.' 'No TF IDB/SPL is installed; existing eMMC SPL is required.' | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          printf '%s\n' 'Panther X2 R1 network-core test image; PREPARE-ONLY.' 'Linux 6.18.63 R1: NET/NETDEVICES/NET_CORE/ETHERNET/PACKET enabled.' 'GMAC1/MDIO/PHY remain disabled; R1 cannot perform physical Ethernet TX.' 'U-Boot proper and bootargs reused from frozen B1; R1-specific initramfs rebuilt and shell-validated.' 'B1 /init was not reused: its test/[ applet dependency was missing.' 'No TF IDB/SPL is installed; existing eMMC SPL is required.' | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
           sync
           sudo umount work/tf-mnt
           sudo e2fsck -fn "$PART"
@@ -136,6 +163,8 @@ jobs:
           for p in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do test -s "work/tf-mnt/$p"; done
           test "$(sha256sum work/tf-mnt/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
           test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          cmp work/tf-mnt/uInitrd work/output/uInitrd
+          test "$(sha256sum work/tf-mnt/uInitrd | awk '{print $1}')" = "$(sha256sum work/output/uInitrd | awk '{print $1}')"
           (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
           sudo umount work/tf-mnt
           sudo losetup -d "$LOOP"
@@ -153,7 +182,7 @@ jobs:
             echo "dtb_sha256=$DTB_SHA"
             echo "uboot_sha256=$UBOOT_SHA"
             echo "bootargs=unchanged from frozen B1"
-            echo "initramfs=unchanged frozen B1 uInitrd"
+            echo "initramfs=R1-specific rebuilt from frozen B1 static BusyBox; B1 /init not reused"
             echo "gmac1/mdio/phy=disabled"
             echo "tf_layout=2GiB GPT; PANTHER_BOOT partition1; start LBA 32768; end LBA 4192255"
             echo "final_image_sha256=$(sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img | awk '{print $1}')"
