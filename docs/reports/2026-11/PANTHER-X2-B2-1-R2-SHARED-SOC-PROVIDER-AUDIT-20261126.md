@@ -4,7 +4,7 @@
 
 R2 的目标是：只补充 GMAC 路径实际需要、且 R0/B1 最终配置中确实缺失的共享 SoC provider。候选重点为 `MFD_SYSCON`、`GPIO_ROCKCHIP`；已经在 B1 启用的时钟、CRU、pinctrl、GPIOLIB、reset、GRF 不得重复加入。
 
-**当前结论：R2 静态/构建核验通过（零增量复用）；R2 整体未结项，不放行 R3。** 6.1.65 黄金基线的相关最终配置对照已补齐，所比较符号与 6.18.63 均为 y、未发现配置值差异；但运行时注册/功能验证尚待完成，6.1.65 精确源码来源也仍未达到二进制级绑定。
+**当前结论：R2 已完成并通过本阶段验收（零增量复用，现有 R1 最终镜像实机只读验证通过）。** 6.1.65 黄金基线的相关最终配置对照已补齐，所比较符号与 6.18.63 均为 y、未发现配置值差异；R1 最终镜像实测 pinctrl 成功绑定、五个 GPIO bank 全部绑定 `rockchip-gpio`，五个 gpiochip 均已注册。6.1.65 精确源码来源仍未达到二进制级绑定，此限制保留，但不影响本阶段对 6.18 默认 provider 功能的实机验收。
 
 对 B1 和 R1 两份真实构建 artifact 的最终 `.config`、built-in 清单和 System.map 进行核验后，确认：
 - `MFD_SYSCON=y`、`GPIO_ROCKCHIP=y` 已存在于 B1 最终配置；
@@ -120,10 +120,12 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 | syscon 与 GPIO 实现符号 | PASS | 同构建 System.map |
 | provider 构建 | PASS | R1 Actions build job success |
 | GMAC1/MDIO1/PHY 仍隔离 | PASS | R1-VERIFICATION.txt |
-| provider 在 Panther 实机 probe / controller 注册 | PENDING | 需使用现有 R1 镜像进行只读运行时检查；此前未执行 |
+| Panther 实机 pinctrl probe / SYSCON consumer | PASS | R1 最终镜像 `/sys/bus/platform/devices/pinctrl/uevent` 显示 `DRIVER=rockchip-pinctrl`；DTS 含 `rockchip,grf`/`rockchip,pmu` phandle，6.18.63 probe 成功返回 |
+| 五个 GPIO bank 的 platform driver 绑定 | PASS | R1 最终镜像下 gpio0–gpio4 均出现在 `/sys/bus/platform/drivers/rockchip-gpio/`，各自 `uevent` 显示 `DRIVER=rockchip-gpio` |
+| 五个 gpiochip 注册 | PASS | `/sys/class/gpio/` 与 `/sys/bus/gpio/devices/` 均列出 gpio0–gpio4；每个 `ngpio=32`，base 分别为 512/544/576/608/640 |
 | 物理 Ethernet TX/RX | NOT TESTED | 仅 R7 进行真实线侧测试 |
 
-**阶段判定：R2 INCOMPLETE / HOLD。** 已完成子项：6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验，确认无须重复增加配置或重建。未完成子项：R1 镜像上的 GPIO controller 注册/驱动绑定与 SYSCON/Regmap 现存 consumer 运行时证据。6.1.65 对应 provider/依赖配置逐项对照已完成，所比符号均为 y；6.1.65 精确源码构建来源仍未达到二进制级绑定，不将候选源码当作确定来源。不得将上述静态/构建证据升级为实机功能 PASS。
+**阶段判定：R2 PASS / 可评估放行 R3。** 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验、6.1.65 黄金基线配置对照，以及 R1 最终 AF_PACKET probe 镜像上的只读运行时验证。实机证据确认 `rockchip-pinctrl` 成功绑定，pinctrl probe 所需的 GRF syscon regmap 获取路径成功，GPIO0–GPIO4 五个 bank 全部绑定 `rockchip-gpio` 并注册为五个 32-line gpiochip。未写 GPIO、未操作 reset/电源，GMAC1/MDIO1/PHY 仍保持禁用。6.1.65 精确源码构建来源仍未达到二进制级绑定，此历史来源限制如实保留，不将候选源码当作确定来源。
 
 ## 7. 安全边界与下一阶段
 
@@ -133,7 +135,7 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 - 不启用 GMAC1、MDIO1、RTL8211F；不做网络发送测试。
 - 不触碰 Wi-Fi、蓝牙或 USB；此前约定的 USB2.0 旁线验证仍等待后续自然打包节点，不属于 R2。
 
-**下一步仍在 R2 内：** 黄金基线配置差异核对已完成；使用现有 R1 镜像进行只读运行时检查。GMAC1/MDIO1/PHY 继续关闭；不重建、不刷写、不改变 GPIO/电源/reset 状态。只有 R2 所有必需验收项完成并归档后，才重新评估是否放行 R3。
+**R2 实机验收已完成。** 证据来自用户在现有 R1 最终 AF_PACKET probe 镜像上的只读 sysfs 检查；期间没有重建、刷写或改变 GPIO/电源/reset 状态。GMAC1/MDIO1/PHY 继续关闭。R2 已具备进入 R3 放行评估的证据；是否开始 R3 仍按总路线图及实施计划的顺序执行。
 
 
 ## 8. 2026-11-26 黄金基线对照补充与未决项
@@ -194,3 +196,19 @@ R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset 
 该 initramfs 的 BusyBox 构建/打包脚本仅创建 `ash`、`sh`、`mount`、`mkdir`、`cat`、`uname`、`printf` applet 链接；明确禁止依赖 `[`/`test`。因此后续检查不得使用 `echo`、`[`、`test`、`ls`、`grep`、`dmesg`、`readlink` 等未包含 applet。使用 `printf` 输出标题，使用 `cat` 读取已知 sysfs 文件，并利用 shell pathname expansion 枚举设备/driver 链接。
 
 此前尝试的通用 BusyBox 检查脚本因调用未包含的 applet 而未执行；其输出不构成任何 GPIO/SYSCON 正反证据，也未改变设备状态。
+
+### 8.6 R1 最终 AF_PACKET probe 镜像：R2 运行时验收结果（2026-11-26）
+
+**镜像身份：** 用户确认当前启动的是 R1 最后一次专用 AF_PACKET probe 验证镜像，而非早期 R1 镜像。对应 Actions run `45750601995`，artifact ID `15084948644`。本次仅读取已有 sysfs 内容。
+
+**pinctrl：** `/sys/bus/platform/drivers/rockchip-pinctrl/pinctrl/uevent` 与 `/sys/bus/platform/devices/pinctrl/uevent` 均显示 `DRIVER=rockchip-pinctrl`、`OF_COMPATIBLE_0=rockchip,rk3568-pinctrl`、`OF_FULLNAME=/pinctrl`，确认驱动已绑定。
+
+**SYSCON consumer：** 精确 6.18.63 源码 `drivers/pinctrl/pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 对 `rockchip,grf` phandle 调用 `syscon_node_to_regmap()`，若返回错误会直接使 probe 失败；对 `rockchip,pmu` 调用 optional syscon regmap lookup。实际 Panther X2 RK356x DTS 的 pinctrl 节点同时声明 `rockchip,grf = <&grf>` 和 `rockchip,pmu = <&pmugrf>`。当前 pinctrl 驱动成功绑定，且其 `of_platform_populate()` 创建的五个 GPIO bank 均成功绑定并注册，构成该现存 consumer 的运行时成功证据。此项验证的是 pinctrl 对 GRF/PMU syscon 的路径，不代表 GMAC consumer 已测试。
+
+**GPIO bank：** `/sys/bus/platform/drivers/rockchip-gpio/` 实际列出 `fdd60000.gpio`、`fe740000.gpio`、`fe750000.gpio`、`fe760000.gpio`、`fe770000.gpio`；五个 `uevent` 均显示 `DRIVER=rockchip-gpio`、`OF_COMPATIBLE_0=rockchip,gpio-bank`，alias 分别为 gpio0–gpio4。
+
+**gpiochip：** `/sys/class/gpio/` 显示五个 chip：gpio0 base 512、gpio1 base 544、gpio2 base 576、gpio3 base 608、gpio4 base 640；每个 `ngpio=32`。`/sys/bus/gpio/devices/gpiochip0` 至 `gpiochip4` 均显示 `DEVTYPE=gpio_chip`，OF_FULLNAME 与对应 GPIO bank 地址一致。
+
+**功能证据边界：** 本次证明 pinctrl/SYSCON consumer probe、GPIO bank driver bind 和 gpiochip 注册成功；没有执行 GPIO line 读写/中断测试，没有验证 GMAC reset GPIO consumer，也没有验证 GMAC/MDIO/PHY。上述后续功能仍留在其原定阶段，不得把本次 R2 PASS 扩大解释。
+
+**操作边界：** 检查为只读 sysfs 查询；没有写 GPIO、MMIO、reset 或电源，没有启用 GMAC/MDIO/PHY，没有重建或重刷。
