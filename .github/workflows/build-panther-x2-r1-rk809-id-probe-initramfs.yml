@@ -108,7 +108,7 @@ jobs:
           install -m 0755 work/probe/rk809-id-ro-probe-aarch64 "$ROOT/bin/rk809-id-ro-probe-aarch64"
           install -m 0755 scripts/panther-x2-r1/init-rk809-id-probe "$ROOT/init"
           qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
-          if grep -Fq 'rk809-id-ro-probe-aarch64' "$ROOT/init" | grep -Fqv 'printf'; then
+          if grep -Eq '^[[:space:]]*/bin/rk809-id-ro-probe-aarch64([[:space:]]|$)' "$ROOT/init"; then
             echo "::error::The init script must not execute the probe automatically"
             exit 1
           fi
@@ -129,7 +129,7 @@ jobs:
           test "$(readlink work/verify/bin/printf)" = busybox
           test -d work/verify/dev
           test -d work/verify/tmp
-          if grep -Fq '/bin/rk809-id-ro-probe-aarch64' work/verify/init | grep -Fqv 'printf'; then
+          if grep -Eq '^[[:space:]]*/bin/rk809-id-ro-probe-aarch64([[:space:]]|$)' work/verify/init; then
             echo "::error::Probe invocation found in /init; execution must remain manual"
             exit 1
           fi
