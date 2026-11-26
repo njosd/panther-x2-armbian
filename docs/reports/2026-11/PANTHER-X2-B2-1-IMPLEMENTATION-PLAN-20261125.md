@@ -504,4 +504,4 @@ STMMAC/DWMAC4 的进一步追踪候选已确定：`stmmac_xmit` 入口读取 pay
 
 ### 4E.4 当前 R2 状态
 
-R2 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置与构建对象核验；但此前归档报告没有完成 6.1.65 对应 provider 的逐项配置对照，也没有完成现有 R1 镜像上的 GPIO/SYSCON 运行时注册/功能验证。因此 R2 只可标记 PASS-STATIC / PASS-BUILD（限已完成子项），**整体未结项，不放行 R3**。继续使用现有 R1 镜像做只读核验；不重建、不写卡、不启用 GMAC/MDIO/PHY。
+R2 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置与构建对象核验；6.1.65 与 6.18.63 对应 provider/关键依赖的逐项配置对照已完成，比较项均为 y、无配置值差异；但现有 R1 镜像上的 GPIO/SYSCON 运行时注册/功能验证尚未完成。因此 R2 只可标记 PASS-STATIC / PASS-BUILD（限已完成子项），**整体未结项，不放行 R3**。继续使用现有 R1 镜像做只读核验；不重建、不写卡、不启用 GMAC/MDIO/PHY。
