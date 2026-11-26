@@ -554,3 +554,27 @@ R3 专项报告第 26 节已记录固定源码端点、调用顺序、错误传�
 **R4 STATIC AUDIT COMPLETE（CONDITIONAL）。** R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动实现差异、R4-3 MDIO/PHY 核心对象组织、R4-4 R1 当前配置隔离边界均已完成。R1 运行构建 `45611898629` 的 workflow 明确要求 `CONFIG_MDIO`、`CONFIG_MDIO_DEVICE`、`CONFIG_MDIO_BUS`、`CONFIG_MDIO_DEVRES`、`CONFIG_PHYLINK`、`CONFIG_PHYLIB`、`CONFIG_REALTEK_PHY`、`CONFIG_FIXED_PHY`、`CONFIG_STMMAC_ETH`、`CONFIG_STMMAC_PLATFORM`、`CONFIG_DWMAC_ROCKCHIP` 全部关闭；网络硬件/PHY 模块与 built-in 驱动也被排除。该配置符合 R1 隔离目标，不是缺陷。
 
 6.18 未来 PHY/GMAC bring-up 的配置核验清单已明确：PHYLIB、MDIO_BUS、OF_MDIO、REALTEK_PHY、PHYLINK 及其最终对象映射；实际 built-in/module 取舍留待后续阶段，不在 R1 修改。R4 结项不授权 PHY probe/MDIO 事务。下一步按既定顺序进入 R5（STMMAC 通用核心与 TX/RX 数据路径静态对照），GMAC/MDIO/PHY 节点仍保持 disabled；任何实机启用另行授权。
+
+
+## 12. R5 结项及 R6 当前起点（2026-11-26）
+
+本节为当前执行状态的最新记录；第 11 节中“R0–R8 尚未执行”“B1 尚未正式通过”等文字属于 2026-11-25 初版计划快照，不能覆盖后续已完成的实际验证记录。
+
+**R5 STATIC AUDIT COMPLETE（CONDITIONAL）。** 已完成：
+- R5-1：STMMAC Kconfig/Makefile 与对象依赖；
+- R5-2：open/stop、runtime PM/PHY/SerDes、DMA reset/init、hw_setup；
+- R5-3：DWMAC4 descriptor OWN、ring/chain、DMA coherent/streaming mapping、DMA mask 与屏障；
+- R5-4：TX submit/doorbell/completion、DMA status decode、IRQ/NAPI mask/schedule/complete/unmask、TX pending timer。
+
+对照基准为 6.1.65 `unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`，目标为 6.18.63 `ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。R5 报告：`PANTHER-X2-B2-1-R5-STMMAC-DWMAC4-CORE-AUDIT-20261126.md`。
+
+R5 的结论仅限静态源码：未证明 Panther 当前 GMAC/DMA capability、register map fallback、DMA mask、实际 reset 结果、TX channel 参数或物理发送成功。R1 仍保持 GMAC/MDIO/PHY disabled；不因 R5 结项自动解除边界。
+
+**下一阶段 R6：** 审计 Rockchip DWMAC platform glue 与 Panther X2 DTS/硬件参数，严格对照 6.1.65 黄金基线和 6.18.63：
+1. Rockchip glue probe、resource、clock/reset、GRF/syscon、DMA width 与 platform data；
+2. Panther GMAC1 节点的 compatible、reg、interrupt、clock、reset、phy-mode、TX/RX delay、PHY reset GPIO、phy-supply；
+3. 原始 6.1.65 黄金 DTB 与 6.18.63 DTB 的二进制属性差异，确认真实节点参数，不以源码 DTS 或人工转录代替原始 DTB；
+4. 各项寄存器/电源/时钟操作的副作用和最早安全验证阶段；
+5. R6 结束前列出 R7-A 硬件准入清单及最小 TX-only 配置，但不执行硬件 probe。
+
+所有 R6 阶段继续保持 GMAC/MDIO/PHY disabled，不访问硬件寄存器、不加载驱动、不发送网络帧。完成 R6 后再单独审查“放开边界”的条件；R7 实机 TX-first 必须取得单独明确授权，并使用 SU08G 等专用测试介质，绝不写 SN64G 黄金 TF 或 eMMC。
