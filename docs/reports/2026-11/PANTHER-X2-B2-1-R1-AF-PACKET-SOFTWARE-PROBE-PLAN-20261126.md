@@ -252,3 +252,41 @@ Artifact: [download corrected PREPARE-ONLY image](https://github.com/njosd/panth
 ### Authorization boundary
 
 The corrected image is only prepared. It has not been written to any physical medium and has not been booted. The earlier authorization to write/boot the previous probe image does not automatically authorize replacing it with this new image. Any new write is restricted to the dedicated SU08G TF and requires explicit confirmation. SN64G and eMMC remain excluded. No persistent system configuration has been changed.
+
+
+## 2026-11-26 runtime root-cause audit — bind ordering
+
+The corrected target-runtime log showed that the probe successfully raised `lo` to `IFF_UP` (flags changed from `0x0008` to `0x0049`), but RAW and DGRAM `sendto()` still returned `ENETDOWN`; the RX socket reported `POLLERR`.
+
+A source-level audit against upstream Linux `v6.18` `net/packet/af_packet.c` established the cause:
+
+- `packet_do_bind()` checks the selected device's `IFF_UP` state when a packet socket is bound.
+- If the device is down, it records `sk->sk_err = ENETDOWN`.
+- The `NETDEV_UP` notifier path re-registers the packet protocol hook for the socket, but does not clear the previously recorded `sk_err`.
+- Therefore setting `lo` UP after binding does not repair the already-bound sockets. The earlier runtime result is explained by the probe's operation order, not evidence of a Panther X2 GMAC/PHY issue.
+
+The probe source was corrected to:
+1. create packet sockets and obtain the interface index;
+2. save the original interface flags;
+3. raise the selected test interface if required and verify `IFF_UP`;
+4. bind RAW/RX/DGRAM sockets only after the interface is confirmed UP;
+5. perform the send and receive observations;
+6. restore the original interface flags before process exit.
+
+If the interface cannot be confirmed UP, binding is skipped rather than creating sockets with a known-down device. The DGRAM bind errno reporting was also corrected in the final source commit.
+
+Source commits:
+- `ccdeca7b5e2e2a5ff0068e432a05804a9db9a8c3` — move packet-socket bind after confirmed interface UP.
+- `78f425ebf149e1aae91b0fc9046681c707cfdb7b` — correct DGRAM bind errno reporting.
+
+Build-only CI:
+- Run [45750270491](https://github.com/njosd/panther-x2-armbian/actions/runs/45750270491) passed static AArch64 build and QEMU non-network self-test for the bind-order correction.
+- Run [45750286867](https://github.com/njosd/panther-x2-armbian/actions/runs/45750286867) builds the final source including the DGRAM errno-reporting correction; status was in progress when this report section was prepared.
+
+This diagnosis is source-confirmed. The corrected probe has **not yet been rerun on Panther X2**. No new initramfs/image has been packaged, and no TF/eMMC write has been performed. The previous runtime evidence remains historical evidence for the old probe ordering only.
+
+### Loopback receive interpretation
+
+Linux `v6.18` loopback TX feeds packets back into the local receive path, while the AF_PACKET `packet_rcv()` callback explicitly drops packets marked `PACKET_LOOPBACK`. The packet transmit tap can separately expose an outgoing clone marked `PACKET_OUTGOING`. Consequently, the R1 `lo` RX observation is only a software-path probe; a lack of a received packet must not be interpreted as physical NIC RX failure, and a received outgoing clone must not be interpreted as wire-level reception.
+
+Physical Ethernet TX/RX remains unavailable in R1 by design and belongs to the later hardware-enabled stage.
