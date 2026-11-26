@@ -517,4 +517,14 @@ STMMAC/DWMAC4 的进一步追踪候选已确定：`stmmac_xmit` 入口读取 pay
 
 ### 4E.4 当前 R2 状态
 
-R2 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置与构建对象核验；6.1.65 与 6.18.63 对应 provider/关键依赖的逐项配置对照已完成，比较项均为 y、无配置值差异；但现有 R1 镜像上的 GPIO/SYSCON 运行时注册/功能验证尚未完成。因此 R2 只可标记 PASS-STATIC / PASS-BUILD（限已完成子项），**整体未结项，不放行 R3**。继续使用现有 R1 镜像做只读核验；不重建、不写卡、不启用 GMAC/MDIO/PHY。
+R2 已完成 6.18.63 精确 Kconfig/Makefile 依赖、B1/R1 最终配置与构建对象、6.1.65 Golden 配置对照，以及现有 R1 最终镜像的只读运行时验收：pinctrl/SYSCON consumer probe 成功，GPIO0–GPIO4 五个 bank 均绑定 `rockchip-gpio`，五个 gpiochip 均注册。**R2 PASS，零增量复用，无需重建；不放行额外 provider 配置。**
+
+### 4E.5 当前 R3 状态（2026-11-26）
+
+R3 静态审计报告：`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md`。
+
+- R1 最终 DTB 已直接解析 I2C0、RK809@0x20、SWITCH_REG1 `vcc_3v3` 与 GMAC1 `phy-supply` phandle，引用一致；GMAC1/MDIO1/PHY 仍 disabled。
+- R1 最终配置已内建 `I2C`、`I2C_RK3X`、`REGMAP_I2C`、`REGULATOR`，但没有 `MFD_RK8XX_I2C`、RK8xx core 或 `REGULATOR_RK808` 对象。6.1.65 Golden 含旧版 RK808 MFD、regulator 和 I2C controller built-in。
+- 已确认 6.18.63 `rk8xx_i2c_probe()` 后续进入 `rk8xx_probe()`；RK809 variant 选择 `rk817_pre_init_reg`，并在 probe 中执行多项 `regmap_update_bits()`。因此不能把启用 built-in RK809 MFD driver 当作只读验证。
+- R3.1 I2C0 adapter、R3.2 PMIC 只读通信、R3.3 MFD/regmap、R3.4 regulator 注册及 R3.5 consumer 尚未取得运行时证据；其中 PMIC probe 相关项 BLOCKED，直到单独审查并批准其写寄存器副作用。
+- **R3 静态审计完成；运行时 HOLD/BLOCKED，整体不 PASS，不放行 R4。** 不启用 RK809 driver、不执行 PMIC I2C 事务/寄存器访问、不切换 regulator 或电源状态。
