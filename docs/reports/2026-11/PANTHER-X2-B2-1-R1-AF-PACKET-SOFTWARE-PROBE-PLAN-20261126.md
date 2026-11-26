@@ -311,3 +311,50 @@ Final-source build workflow [45750286867](https://github.com/njosd/panther-x2-ar
 The image-packaging workflow default probe run ID has been updated to `45750286867` in commit `2b4b8448b7849dbbf74acba0840bd6e0cdd1919b`. The package workflow has not yet run for this final probe artifact. Its `workflow_dispatch` entry is available in GitHub Actions; start it using the updated default input to generate the new PREPARE-ONLY image. This does not authorize writing any physical medium.
 
 **Current status:** source diagnosis and source correction are complete; final static build and smoke test pass. New image packaging is pending manual workflow dispatch. Corrected target-runtime retest is pending separate explicit SU08G write/boot authorization. No device or storage medium was accessed for this correction.
+
+
+## 2026-11-26 corrected AF_PACKET probe — Panther X2 runtime PASS (software loopback only)
+
+The user supplied the UART log from the corrected dedicated R1 probe image, booted on the authorized SU08G TF. This is target-hardware runtime evidence for the AF_PACKET software path on `lo`.
+
+### Runtime evidence
+
+- Linux `6.18.63+` booted on Panther X2 (4 CPUs, 4 GiB RAM) and ran the dedicated RAM initramfs probe.
+- The only network interface was `lo`; the mount table showed rootfs, procfs and sysfs only. No persistent filesystem was mounted.
+- AF_PACKET `SOCK_RAW` (transmit and receive sockets) and `SOCK_DGRAM` creation all succeeded.
+- Interface-index lookup succeeded: `ifindex=1`.
+- Initial `lo` flags were `0x0008` (`IFF_LOOPBACK`, administratively down). The probe brought it UP; resulting flags were `0x0049` (`IFF_UP | IFF_LOOPBACK | IFF_RUNNING | IFF_LOWER_UP`).
+- RAW and DGRAM binds succeeded after the interface was UP.
+- RAW `sendto()` returned 22 bytes; DGRAM `sendto()` returned 8 bytes.
+- RX poll returned `1`, with `revents=0x0001` (`POLLIN`). The receive call returned a 22-byte frame:
+  - destination: `ff:ff:ff:ff:ff:ff`
+  - source: `02:00:00:00:00:01`
+  - EtherType: `0x88b5`
+  - payload: ASCII `PX2R1TX!`
+  - packet type: `4` (`PACKET_OUTGOING`)
+- The probe restored the original `lo` flags successfully and exited 0.
+
+### Interpretation and evidence boundary
+
+**PASS — AF_PACKET software API and local loopback transmit-tap observation on Panther X2/Linux 6.18.63+.** Socket creation, binding, send calls and outgoing packet observation all completed successfully with the corrected operation order.
+
+The received frame is explicitly marked `PACKET_OUTGOING`. It is a local software observation, not evidence that a physical Ethernet controller transmitted the frame. R1 still has GMAC1/MDIO/PHY disabled and only `lo` present. Physical Ethernet TX/RX remains **NOT TESTED** and is not promoted by this result; the first physical TX stage remains R7 under the existing plan.
+
+The previous `ENETDOWN` result is superseded as a probe-order defect: the earlier probe bound sockets while `lo` was down. The source audit established that the bind path records `sk_err=ENETDOWN`, and the later interface-UP notifier does not clear that stored error. The corrected probe raises and confirms `lo` before binding.
+
+### Updated acceptance matrix
+
+| Item | Result | Evidence |
+|---|---|---|
+| Static AArch64 build and QEMU non-network self-test | PASS | Actions 45750286867 |
+| Dedicated corrected probe image packaging | PASS | Actions 45750601995; artifact 15084948644 |
+| Panther X2 AF_PACKET RAW/RX/DGRAM socket creation | PASS | User-supplied UART runtime log |
+| Interface-index lookup and bind to `lo` | PASS | User-supplied UART runtime log |
+| RAW/DGRAM send calls | PASS | 22-byte / 8-byte return values |
+| RX poll and outgoing frame observation | PASS — software only | POLLIN; `PACKET_OUTGOING`; EtherType 0x88b5 |
+| Restore original `lo` flags | PASS | User-supplied UART runtime log |
+| Physical Ethernet TX/RX | NOT TESTED | GMAC1/MDIO/PHY disabled in R1; earliest physical TX stage R7 |
+
+### Safety and scope
+
+The test used the dedicated SU08G TF. SN64G and eMMC were not written. The probe's temporary `lo` state change was restored before exit. No persistent filesystem was mounted and no persistent network configuration was created. No further device action is required to close this R1 AF_PACKET software supplement.
