@@ -1,0 +1,160 @@
+name: Panther X2 R1 RK809 identity probe initramfs (build only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: Frozen successful R1 kernel artifact run
+        required: true
+        type: string
+        default: "45611898629"
+      b1_run_id:
+        description: Frozen B1 BusyBox and boot-support artifact run
+        required: true
+        type: string
+        default: "45328201244"
+      probe_run_id:
+        description: Successful static RK809 identity-probe build run
+        required: true
+        type: string
+        default: "45764956914"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-r1-rk809-id-probe-initramfs
+  cancel-in-progress: false
+
+jobs:
+  build-probe-initramfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      R1_RUN_ID: ${{ inputs.r1_run_id }}
+      B1_RUN_ID: ${{ inputs.b1_run_id }}
+      PROBE_RUN_ID: ${{ inputs.probe_run_id }}
+      R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
+      DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+      PROBE_SHA: "4b8ff213c41250e992cf71a1f0579502d68633ae9e4de48d0a77f6b37bfa7b99"
+      PROBE_SOURCE_SHA: "7e575795e37494f52f0985fdcf0e3993a95c866f71489d0780907bfc63069480"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install initramfs packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils cpio file gzip qemu-user-static u-boot-tools
+
+      - name: Download frozen R1, B1 and RK809 probe artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.R1_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.B1_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-r3-rk809-id-ro-probe-static-aarch64
+          path: work/probe
+          repository: ${{ github.repository }}
+          run-id: ${{ env.PROBE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen inputs and exact probe identity
+        run: |
+          set -euo pipefail
+          test -s work/r1/output/Image
+          test -s work/r1/output/kernel.config
+          test -s work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/b1/output/busybox
+          test -s work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/probe/rk809-id-ro-probe-aarch64
+          test -s work/probe/rk809-id-ro-probe.c
+          test "$(sha256sum work/r1/output/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/probe/rk809-id-ro-probe-aarch64 | awk '{print $1}')" = "$PROBE_SHA"
+          test "$(sha256sum work/probe/rk809-id-ro-probe.c | awk '{print $1}')" = "$PROBE_SOURCE_SHA"
+          test -s work/probe/SHA256SUMS
+          (cd work/probe && sha256sum -c SHA256SUMS)
+          cmp scripts/panther-x2-b2-1/rk809-id-ro-probe.c work/probe/rk809-id-ro-probe.c
+          cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          file work/probe/rk809-id-ro-probe-aarch64 | tee work/probe/elf-file.txt
+          mkdir -p work/output
+          sha256sum work/r1/output/Image work/r1/output/kernel.config work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/busybox work/probe/rk809-id-ro-probe-aarch64 work/probe/rk809-id-ro-probe.c | tee work/output/input-sha256.txt
+
+      - name: Assemble dedicated RAM-only initramfs without auto-running the probe
+        run: |
+          set -euo pipefail
+          ROOT=work/rk809-probe-initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,tmp}
+          install -m 0755 work/b1/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname printf; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 work/probe/rk809-id-ro-probe-aarch64 "$ROOT/bin/rk809-id-ro-probe-aarch64"
+          install -m 0755 scripts/panther-x2-r1/init-rk809-id-probe "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          if grep -Fq 'rk809-id-ro-probe-aarch64' "$ROOT/init" | grep -Fqv 'printf'; then
+            echo "::error::The init script must not execute the probe automatically"
+            exit 1
+          fi
+          (cd "$ROOT" && find . -print0 | sort -z | cpio --null -o --format=newc) | gzip -n -9 > work/output/rk809-id-probe-initramfs.cpio.gz
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 R1 RK809 ID-only probe shell" -d work/output/rk809-id-probe-initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/output/uinitrd-header.txt
+
+      - name: Round-trip verify initramfs and embedded probe
+        run: |
+          set -euo pipefail
+          mkdir -p work/verify
+          gzip -dc work/output/rk809-id-probe-initramfs.cpio.gz | (cd work/verify && cpio -idm --quiet)
+          cmp scripts/panther-x2-r1/init-rk809-id-probe work/verify/init
+          cmp work/probe/rk809-id-ro-probe-aarch64 work/verify/bin/rk809-id-ro-probe-aarch64
+          test -x work/verify/init
+          test -x work/verify/bin/rk809-id-ro-probe-aarch64
+          test "$(readlink work/verify/bin/ash)" = busybox
+          test "$(readlink work/verify/bin/printf)" = busybox
+          test -d work/verify/dev
+          test -d work/verify/tmp
+          if grep -Fq '/bin/rk809-id-ro-probe-aarch64' work/verify/init | grep -Fqv 'printf'; then
+            echo "::error::Probe invocation found in /init; execution must remain manual"
+            exit 1
+          fi
+          sha256sum work/output/uInitrd work/output/rk809-id-probe-initramfs.cpio.gz work/verify/init work/verify/bin/rk809-id-ro-probe-aarch64 | tee work/output/initramfs-sha256.txt
+          {
+            echo "result=PASS"
+            echo "mode=BUILD_ONLY; no TF image assembled; no physical device or storage accessed"
+            echo "r1_run_id=$R1_RUN_ID"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "rk809_probe_run_id=$PROBE_RUN_ID"
+            echo "kernel_image_sha256=$R1_IMAGE_SHA"
+            echo "panther_dtb_sha256=$DTB_SHA"
+            echo "rk809_probe_sha256=$PROBE_SHA"
+            echo "rk809_probe_size_bytes=$(stat -c %s work/verify/bin/rk809-id-ro-probe-aarch64)"
+            echo "auto_probe_execution=DISABLED"
+            echo "initramfs_root=RAM_ONLY"
+            echo "persistent_storage_mounts=NONE"
+            echo "kernel_config_dtB_uboot_bootargs=UNCHANGED"
+            echo "rk8xx_mfd_regulator_drivers=NOT_ADDED"
+          } | tee work/output/RK809-ID-PROBE-INITRAMFS-VERIFICATION.txt
+
+      - name: Publish initramfs-only artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r1-rk809-id-probe-initramfs-only
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
