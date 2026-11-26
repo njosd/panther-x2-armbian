@@ -8,6 +8,8 @@
 
 ## 项目 A：当前权威文档
 
+- [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
+
 - [原始 Armbian 6.1.65 镜像静态审计报告（2026-11-23）](./PANTHER-X2-6.1.65-ORIGINAL-IMAGE-AUDIT-20261123.md)：原始镜像布局、启动配置、Panther X2 DTB、Kernel built-in 配置及 Dropbox 证据保留清单；Kernel/uInitrd 二进制闭包仍待补齐。
 
 - [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](./PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 纯 RAM 构建实现、输入锁定、隔离策略与待验证事项。
@@ -48,10 +50,10 @@
 - [B2-0 方向四：Rockchip GMAC glue / CCF / CRU / clock / reset 四版本审计进度（2026-11-25）](./PANTHER-X2-B2-0-DIRECTION-4-ROCKCHIP-GMAC-GLUE-CCF-CRU-AUDIT-PROGRESS-20261125.md)：已完成四版本 reset ID/provider、CCF/PLL、probe/setup/power handoff 与 RGMII callback 首轮核对，并形成第一轮总矩阵；已识别 clock enable API/错误检查/settle delay、GRF 写入顺序差异；补齐 HCLK_USB 与 PCLK_USB 两项 critical flag 的四版本对照，并区分二者与 GMAC1 parent chain 的关系；PCLK_USB critical 经 CCF parent recursion 保持共用 ACLK_USB 父链；若 ACLK_USB 实际选择 GPLL 且当时 GPLL enable reference 为 0，PCLK_USB critical parent recursion 可能触发后期 GPLL callback；历史 parent/reference/时序未验证；HCLK_USB 不在 GMAC1 父链。方向四已完成与方向二、方向三的跨层一致性审校：generic network-core 与 Rockchip glue 层结论不冲突；方向三 DMA reset 前 1500ms 与方向四 glue clocks 5ms/100–200µs 是不同调用层和等待对象，禁止合并归因；STMMAC pclk/pclk_mac 与 CRU PCLK_GMAC1/ACLK_GMAC1 不可混同。方向四已完成原定静态审计子项及四版本总矩阵，补齐 RGMII speed callback、powerdown/suspend/resume 与跨方向一致性核对，现按“证据边界明确的有条件结项”归档。未验证的历史 clock/PLL/GRF/PHY 电气状态继续保留，不代表已找到 TX 根因；不启动 B2.1。
 - [B2-0 方向五：MDIO / PHYLIB / PHYLINK / RTL8211F 四版本静态审计进度（2026-11-25）](./PANTHER-X2-B2-0-DIRECTION-5-MDIO-PHYLIB-PHYLINK-RTL8211F-AUDIT-PROGRESS-20261125.md)：已完成四版本普通 RTL8211F-CG 驱动、PHY paged API 锁与错误恢复、PHYLIB 状态机、PHYLINK MLO_AN_PHY 路径及剩余 autoneg/link callback 覆盖；复核 15 份既有专题并形成四版本差异矩阵。明确区分 Realtek config_init 与 STMMAC 前置 JL2xx1 workaround：黄金版本有 0x1801/BMCR 写入、故障版本缺失；0x1801 会清 bit1 RXC 与 bit5 EEE，仍缺历史寄存器读回/波形，不能认定根因。另单独核对 6.18.63 EEE bit5 单 bit 清除、soft reset 与 speed status 差异。方向五原定静态审计范围已全部覆盖，用户已批准按“证据边界明确的有条件结项”归档；运行时 PHYCR2/MDIO 回读与 RXC/CLKOUT 波形仍未验证。运行时 PHYCR2/MDIO 回读与 RXC/CLKOUT 波形仍未验证；既有 PHYCR2/CLKOUT/MDIO trace 等专题只复用、不重做。
 - [B2-0 决策阶段：版本选择与组件恢复顺序（第一轮，2026-11-25）](./PANTHER-X2-B2-0-VERSION-AND-COMPONENT-RECOVERY-DECISION-PROGRESS-20261125.md)：汇总方向一至五，提出 6.18.63 连续基线候选、历史候选差异分级和 B1 通过后的 R0–R8 组件依赖引入顺序；作为 B2-1 实施计划的技术决策依据。
-- [B2-1：实施计划与执行归档基准（2026-11-25）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：将 B2-0 决策转化为可审计实施步骤；2026-11-25 修订为 TX-first：最小 Ethernet/AF_PACKET 发送路径先发自定义 EtherType 广播帧，由局域网对端逐帧确认；TX-PASS 后才逐项引入 RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS。首轮不启用 INET/IPv4；本文件仅为计划，不授权设备访问、构建、写卡或实测。
+- [B2-1：实施计划与执行归档基准（2026-11-25，2026-11-26 修订）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：在 TX-first 与 R0–R8 顺序基础上，新增全阶段 6.1.65 第一黄金基线、6.1.116 第二黄金行为参照、6.18 默认配置优先、实际功能验证及未完成不放行规则。
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
-- [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：以 B1/R1 实际构建 artifact 的最终 .config、modules.builtin、System.map 和 6.18.63 精确源码核验 MFD_SYSCON、GPIO_ROCKCHIP 及其依赖；两项 provider 已由 B1 提供并在 R1 保留，R2 按零增量复用通过，不重复打开配置、不重建、不访问设备。
+- [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：6.18.63 精确 Kconfig/Makefile 依赖、B1/R1 最终配置及 built-in 对象/符号核验已完成，确认零增量复用、无需重建；但 6.1.65 对应 provider 的最终配置/对象逐项对照及现有 R1 镜像运行时注册/功能检查待补。R2 当前 INCOMPLETE/HOLD，不放行 R3。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
 
