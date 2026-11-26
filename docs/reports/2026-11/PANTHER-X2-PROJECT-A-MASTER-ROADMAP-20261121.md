@@ -624,3 +624,25 @@ The probe separately records AF_PACKET/SOCK_RAW and SOCK_DGRAM socket creation, 
 Before treating the probe as build-ready, source review removed a stale `ifreq` block left behind by the sysfs ifindex conversion and changed the test flow so failure of one socket-creation attempt does not suppress independent checks of the other packet-socket types. Current source contains no `AF_INET` control socket and no `struct ifreq` reference. Corrections: `337be3b`, `668e524`.
 
 The detailed probe plan now records these source-audit findings. Actions build status remains unconfirmed; no static build or QEMU self-test PASS is claimed yet. No Panther X2 access, initramfs repackaging, TF write, or eMMC write has occurred.
+
+
+### 2026-11-26 R1 AF_PACKET dedicated probe image — PREPARE-ONLY PASS
+
+The dedicated probe image preparation has passed CI and independent artifact checks. New repository files:
+- `scripts/panther-x2-r1/init-af-packet-probe`
+- `.github/workflows/package-panther-x2-r1-af-packet-probe.yml`
+- Detailed result: [R1 AF_PACKET software probe plan and test report](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md)
+
+Successful package workflow: [45745957844](https://github.com/njosd/panther-x2-armbian/actions/runs/45745957844), job `139661965868`. Artifact `panther-x2-r1-af-packet-probe-TF-IMAGE-ETCHER-READY-PREPARE-ONLY`, ID `15082669519`.
+
+Etcher-ready image: `panther-x2-r1-af-packet-probe-PREPARE-ONLY.img.gz`
+- Compressed SHA256: `d36f4e74c0c8255f9704aeb5419d96a4bdff35a6ae075b73ca9e409485a1a5a4`
+- Decompressed raw 2GiB image SHA256: `6067388ae22c812f280f303fe9906de42d3db07187059311da66fa4b9abe4cde`
+- Dedicated uInitrd SHA256: `a00eafa55d06ea65409c0f3ba26018b8a93cd5e75d84c7ee1ca6e50cc65be051`
+- Artifact ZIP SHA256: `92e439d9734e3730beb13415652b17af9cf2db0667365b103f35fa527dabca1b`
+
+The image reuses the frozen R1 kernel, DTB, U-Boot proper, bootargs, load addresses and 2GiB GPT/PANTHER_BOOT layout. Only the R1 RAM initramfs and init script are specialized to run the static AF_PACKET probe against `lo` before presenting the shell. GMAC1/MDIO/PHY remain disabled.
+
+The artifact was downloaded and independently checked: ZIP digest matches GitHub metadata, gzip integrity passes, and decompressed image SHA256 matches the CI raw-image hash.
+
+**Stage status:** build and image preparation PASS; Panther runtime AF_PACKET API checks remain pending. This artifact is PREPARE-ONLY. Flashing and booting it on the dedicated SU08G TF require separate explicit user authorization. SN64G and eMMC are excluded; no physical storage was written during this work. The existing R1 image remains the rollback baseline.
