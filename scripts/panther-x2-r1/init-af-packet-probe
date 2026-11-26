@@ -9,6 +9,7 @@ export PATH HOME PS1
 printf '\n=== Panther X2 R1 AF_PACKET software probe ===\n'
 printf 'Kernel network core only; GMAC1/MDIO/PHY remain disabled.\n'
 printf 'No IP address, route, or network service is configured.\n'
+printf 'The probe may temporarily raise lo and restores its original flags before exit.\n'
 printf 'Root filesystem: initramfs in RAM; no persistent filesystem is mounted.\n'
 
 mkdir -p /proc /sys
