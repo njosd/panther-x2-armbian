@@ -107,9 +107,9 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 | R3 R1 最终配置/对象 | PASS-STATIC | 真实 R1 artifact 已解包 |
 | R3 6.1.65 Golden 配置/对象对照 | PASS-STATIC | Dropbox 原始 config 与 modules.builtin |
 | R3.1 I2C0 controller bind | PASS-RUNTIME | 实机 sysfs 显示 DRIVER=rk3x-i2c；启动日志识别 0-001c 的 FAN53555，证明 I2C0 至少一个从设备完成通信；adapter class 枚举本轮未能确认 |
-| R3.2 RK809 稳定通信/ID read | BLOCKED | driver probe 有 PMIC 写操作；独立只读事务方案尚未获准 |
-| R3.3 MFD/regmap parent/child | BLOCKED | 当前 R1 未构建 driver；启动 built-in driver 会触发上述写操作 |
-| R3.4 regulator 注册 | BLOCKED | 当前 R1 未构建 driver；不操作 regulator |
+| R3.2 RK809 稳定通信/ID read | NOT VERIFIED | 精确 6.18.63 Linux driver 根据 DT compatible 选择 RK809 variant，不读取芯片 ID；独立 ID 读取需另做诊断工具，尚未执行 |
+| R3.3 MFD/regmap parent/child | BLOCKED | 当前 R1 未构建 driver；probe 先注册 regmap IRQ，再执行 RK817 pre-init 写入；生命周期还有 shutdown/suspend/resume 写入 |
+| R3.4 regulator 注册 | BLOCKED | DTS 有多路 always-on/boot-on、initial voltage/mode 约束；regulator core 注册时可能写电压/模式/使能寄存器 |
 | R3.5 现有安全 regulator consumer | NOT TESTED | 需先有安全的 provider 注册证据 |
 | R3.6 GMAC PHY supply consumer | BLOCKED / R7-A | GMAC1 仍 disabled，按原计划留到 R7-A |
 | R3.7 PMIC 状态寄存器只读观察 | BLOCKED | 先确认寄存器语义及无副作用的安全访问方法 |
@@ -139,6 +139,66 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 
 本轮不执行 `i2cget`、`i2cdetect`、`/dev/i2c-*` 访问、regulator 操作、PMIC 寄存器读写或驱动启用。R3 整体仍为 HOLD/BLOCKED，不放行 R4。
 
+
+## 11. R3.2–R3.4 精确源码副作用与安全访问路径审计（2026-11-26）
+
+### 11.1 精确源码端点
+
+以下代码均从本项目冻结的 Linux 源码端点直接读取，而非用其他版本猜测：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+- `drivers/mfd/rk8xx-i2c.c`
+- `drivers/mfd/rk8xx-core.c`
+- `include/linux/mfd/rk808.h`
+- `drivers/regulator/rk808-regulator.c`
+- `drivers/regulator/core.c`
+- `arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts`
+
+### 11.2 Linux 6.18.63 的 RK809 匹配并不读取芯片 ID
+
+精确源码中 `rk809_data` 将 `variant = RK809_ID`、`regmap_cfg = &rk817_regmap_config`。`rk8xx_i2c_probe()` 的实际顺序是：
+
+1. `device_get_match_data()` 根据 OF compatible 取得 RK809 静态 platform data；
+2. `devm_regmap_init_i2c()` 建立 I2C regmap；
+3. 直接调用 `rk8xx_probe(..., data->variant, client->irq, regmap)`。
+
+该 probe 路径没有先读取 RK809 silicon ID。头文件定义 `RK817_ID_MSB=0xed`、`RK817_ID_LSB=0xee`，但这两个寄存器没有在该 I2C probe 路径中被读取。因此，即使未来 MFD probe 成功，也只能证明 compatible 匹配和后续访问可运行，不能把它误称为已独立读取并核验芯片 ID。
+
+### 11.3 当前 Panther DTB 满足了 IRQ 描述条件，不能依赖“无 IRQ”绕过写入
+
+冻结源码 DTS 的 RK809 节点含：
+- `interrupt-parent = <&gpio0>`；
+- `interrupts = <RK_PA3 IRQ_TYPE_LEVEL_LOW>`；
+- `pinctrl-0 = <&pmic_int_l>`；
+- `system-power-controller`。
+
+`rk8xx_probe()` 确实在 `if (!irq) return -EINVAL` 后才继续；但 DT 已描述 GPIO0 PA3 中断。当前尚未实测该 IRQ 是否成功映射，因此不能声称 probe 一定通过 IRQ 阶段；同样也不能把它当作可安全阻断 probe 的可靠保护。若 IRQ 成功，源码会先调用 `devm_regmap_add_irq_chip()`，然后进入 pre-init register loop。
+
+### 11.4 MFD probe 与生命周期存在多处 PMIC 写操作
+
+RK809 与 RK817 共用 `rk817_pre_init_reg`。`rk8xx_probe()` 在 regmap IRQ chip 注册后，对 pre-init 表逐项执行 `regmap_update_bits()`。表中包括 `RK817_RTC_CTRL_REG` 的 `RTC_STOP` 位，以及多项 codec register 的整字/掩码写入。
+
+此外，RK809 DTB 设置 `system-power-controller`，core 会注册 power-off handler 和 restart handler：
+- power-off handler 对 `RK817_SYS_CFG(3)` 的 `DEV_OFF` 位执行 `regmap_update_bits()`；
+- restart handler对同一配置寄存器的 `DEV_RST` 位执行写入；
+- `rk8xx_shutdown()` 对 `RK817_SYS_CFG(3)` 的 sleep-pin function 写入 `SLPPIN_DN_FUN`；
+- suspend/resume 分别写入 `SLPPIN_SLP_FUN` / `SLPPIN_NULL_FUN`。
+
+因此，即使尝试仅绕过 pre-init 表，驱动仍会在系统关机、重启、挂起/恢复路径写 PMIC。当前不能将 MFD parent 视为只读探针。
+
+### 11.5 Regulator provider 注册本身也不是被动枚举
+
+`rk808-regulator.c` 对 RK809 选择 `rk809_reg[]` 并逐项调用 `devm_regulator_register()`。Panther DTS 中多个 regulator 明确标记 `regulator-always-on`、`regulator-boot-on`，DCDC_REG1/2/4 还包含 `regulator-init-microvolt`、`regulator-initial-mode` 和 ramp-delay 等约束。
+
+冻结的 `drivers/regulator/core.c` 在 `set_machine_constraints()` 中会按这些约束调用 voltage/current、initial state/mode、ramp 等操作；对于 `always_on` 或 `boot_on`，还可能执行 regulator enable。RK809 regulator ops 最终通过 regmap 读写 PMIC 寄存器。因此，regulator provider probe 可能主动调整多个电源轨，不只是注册名称；即使目标 SWITCH_REG1 自身没有 `always-on`/`boot-on`，也不能把整个 regulator probe 当作无副作用测试。
+
+### 11.6 可以安全继续的验证与当前限制
+
+- **已完成静态验证：** 精确 6.18.63 RK809 OF match、regmap transport、IRQ 前置条件、pre-init 写入、sys-off/suspend/resume 写入、regulator 注册/约束应用路径；冻结 DTS 的 RK809 IRQ 与 `system-power-controller` 属性。
+- **可考虑的独立芯片 ID 验证：** 0xed/0xee 是头文件定义的 ID 寄存器地址，但仅凭寄存器命名不足以证明读取无副作用。需要进一步核对对应芯片 datasheet 的访问语义；之后才可决定是否采用隔离的只读 I2C_RDWR 诊断程序。当前 R1 极简 initramfs 没有 `i2cget`/`i2ctransfer` 等工具；本轮没有构建/注入诊断程序，也没有执行 `/dev/i2c-*` ioctl 或 PMIC 事务。
+- **adapter class 目录枚举：** 前一轮失败仅因极简 shell 的 `echo`/`command` 等工具不可用；`printf` 已证实可用，可在不访问 PMIC 的前提下用 shell builtin 完成最后一次只读枚举。
+
+**安全结论：** 当前能不触及 PMIC 的源码/DTB/Kconfig/构建产物审计已完成。RK809 ID 读取与 MFD/regulator 实机验证不属于现有镜像可直接完成的无副作用测试；不通过启用驱动或访问 PMIC 来强行结项。
+
 ## 9. 复用与新增证据
 
 ### 复用既有证据
@@ -153,4 +213,5 @@ R1 artifact：Actions run `45611898629`，job `139197305317`，artifact ID `1502
 - 对 R1 最终 DTB 二进制解析 I2C0/RK809/SWITCH_REG1/GMAC1 phandle。
 - 对照 6.1.65 Golden 的 RK809 相关 config 与 built-in 对象。
 - 发现 6.18.63 RK809 MFD probe 会执行 `regmap_update_bits()`，确认它不能按只读步骤直接启用。
+- 精确复核冻结源码的 RK809 variant 匹配路径不读取 silicon ID；核实 Panther DTS 提供 GPIO0 PA3 IRQ 与 `system-power-controller`；补充 MFD 生命周期写操作及 regulator core 对 boot-on/always-on/初始电压/模式约束的潜在写入风险。
 
