@@ -290,3 +290,24 @@ This diagnosis is source-confirmed. The corrected probe has **not yet been rerun
 Linux `v6.18` loopback TX feeds packets back into the local receive path, while the AF_PACKET `packet_rcv()` callback explicitly drops packets marked `PACKET_LOOPBACK`. The packet transmit tap can separately expose an outgoing clone marked `PACKET_OUTGOING`. Consequently, the R1 `lo` RX observation is only a software-path probe; a lack of a received packet must not be interpreted as physical NIC RX failure, and a received outgoing clone must not be interpreted as wire-level reception.
 
 Physical Ethernet TX/RX remains unavailable in R1 by design and belongs to the later hardware-enabled stage.
+
+
+### Final corrected source build — PASS
+
+Final-source build workflow [45750286867](https://github.com/njosd/panther-x2-armbian/actions/runs/45750286867), job `139676349775`, completed successfully for commit `78f425ebf149e1aae91b0fc9046681c707cfdb7b`.
+
+- Strict static AArch64 compilation with `-Wall -Wextra -Werror`: PASS
+- ELF architecture: 64-bit little-endian AArch64: PASS
+- Static link / no `PT_INTERP`: PASS
+- QEMU user-mode non-network self-test: PASS
+- Binary size: 701,680 bytes
+- Artifact: `panther-x2-r1-af-packet-probe-static-aarch64`
+- Artifact ID: `15085490793`
+- Artifact ZIP size: 297,623 bytes
+- Artifact ZIP SHA256: `7256cf71be84e6a43660cbd5f387041d212988436cd482d2be8db581acd651f7`
+- Artifact download: [build artifact](https://github.com/njosd/panther-x2-armbian/actions/runs/45750286867/artifacts/15085490793)
+- Artifact expiry: 2026-12-26.
+
+The image-packaging workflow default probe run ID has been updated to `45750286867` in commit `2b4b8448b7849dbbf74acba0840bd6e0cdd1919b`. The package workflow has not yet run for this final probe artifact. Its `workflow_dispatch` entry is available in GitHub Actions; start it using the updated default input to generate the new PREPARE-ONLY image. This does not authorize writing any physical medium.
+
+**Current status:** source diagnosis and source correction are complete; final static build and smoke test pass. New image packaging is pending manual workflow dispatch. Corrected target-runtime retest is pending separate explicit SU08G write/boot authorization. No device or storage medium was accessed for this correction.
