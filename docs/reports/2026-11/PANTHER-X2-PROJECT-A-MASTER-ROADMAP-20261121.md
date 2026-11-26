@@ -646,3 +646,18 @@ The image reuses the frozen R1 kernel, DTB, U-Boot proper, bootargs, load addres
 The artifact was downloaded and independently checked: ZIP digest matches GitHub metadata, gzip integrity passes, and decompressed image SHA256 matches the CI raw-image hash.
 
 **Stage status:** build and image preparation PASS; Panther runtime AF_PACKET API checks remain pending. This artifact is PREPARE-ONLY. Flashing and booting it on the dedicated SU08G TF require separate explicit user authorization. SN64G and eMMC are excluded; no physical storage was written during this work. The existing R1 image remains the rollback baseline.
+
+
+## 2026-11-26 R1 AF_PACKET runtime supplement — loopback initially DOWN; corrected retest image prepared
+
+The user booted the first dedicated R1 AF_PACKET probe image on the authorized SU08G TF. AF_PACKET SOCK_RAW (two sockets) and SOCK_DGRAM creation all succeeded; all three sockets bound to lo. Both sendto() attempts returned ENETDOWN and no packet was received. The subsequent read-only check of /sys/class/net/lo/flags returned 0x8: IFF_LOOPBACK set, IFF_UP absent. Thus the first send failure is explained by lo being administratively down; this was not evidence of an AF_PACKET implementation failure. The initial poll output omitted revents, so it cannot establish the exact poll readiness/error condition.
+
+The probe source was corrected in commit 0e6c590cdc27ddd43d819c4d11e4163fad262133 to query interface flags through the AF_PACKET socket, temporarily set only IFF_UP when needed, report the resulting flags and poll revents, and restore the original flags before normal exit. No AF_INET, IP address, route, network service, GMAC1, MDIO or PHY was introduced.
+
+- Static AArch64 build passed: [Actions 45747785913](https://github.com/njosd/panther-x2-armbian/actions/runs/45747785913), artifact ID 15084530876; binary SHA256 d74ad0a1012e1f345cab5ee3901872c800f872d4b57b023fe84ac91f6b617b3e.
+- Corrected Etcher PREPARE-ONLY package passed: [Actions 45748363770](https://github.com/njosd/panther-x2-armbian/actions/runs/45748363770), artifact ID 15084507127; ZIP SHA256 b77a6ed8df90f72218c3fabc8b22419af91d937cadf8197da1cab95f0bc98a7b.
+- Etcher image SHA256 f7a3c6f21d9150af062b3dc7229a42bc4d7ba2cf83267fc984836a18036da821; decompressed 2GiB raw image SHA256 beac3df7e770dbcb39d4e22995bafbaebfd38317222e387e5a3ee497a7f40d22; uInitrd SHA256 f18503eee87bdb9d65e6b2b64604490a43465e94fac17f243cf3a55f793f4cbd.
+
+Detailed test and artifact record: [PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md).
+
+**Current boundary:** corrected image is PREPARE-ONLY and has not been written or booted. Previous authorization for the earlier image does not authorize replacing it. A new write requires explicit confirmation and is limited to SU08G; SN64G and eMMC remain excluded. R1 AF_PACKET send/receive acceptance remains pending the corrected target-runtime retest. Physical Ethernet TX remains unavailable in R1 and is still first tested at R7.
