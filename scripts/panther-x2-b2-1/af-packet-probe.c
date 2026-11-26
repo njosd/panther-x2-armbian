@@ -190,7 +190,7 @@ int main(int argc, char **argv)
 
         if (dgramfd >= 0) {
             bind_dgram_rc = bind(dgramfd, (struct sockaddr *)&sll, sizeof(sll));
-            saved_errno = dgramfd < 0 ? errno : 0;
+            saved_errno = bind_dgram_rc < 0 ? errno : 0;
             result("bind_dgram", bind_dgram_rc, saved_errno);
         } else {
             puts("bind_dgram_rc=SKIPPED_SOCKET_CREATE_FAILED");
