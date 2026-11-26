@@ -96,3 +96,5 @@
 - 保留原始日志、报告和哈希，不因项目拆分而删除证据。
 - 新增报告必须标注结论等级、证据来源和是否影响项目 A 当前阶段。
 \n- [G0.6 Fixed-Regulator 替代路径可行性（2026-11-26）](./PANTHER-X2-G0-6-FIXED-REGULATOR-ALTERNATIVE-FEASIBILITY-20261126.md)：R1 已包含 fixed regulator provider；可条件性绕过 stock RK809 MFD，但需先测量 VCC3V3_PMU/VCC_3V3 并确认 Panther 专用测点。下一项 G0.7 板级原理图/测点确认。\n\n- [G0.7 Panther X2 专用 Rail/测量点资料检索（2026-11-26）](./PANTHER-X2-G0-7-PANTHER-X2-BOARD-RAIL-TESTPOINT-RESEARCH-20261126.md)：公开资料未找到 Panther X2 原理图/netlist/testpoint；VCC3V3_PMU 与 VCC_3V3 的安全测量点待板级资料确认。\n
+
+- [G0 Golden 基准 PMIC/Regulator 反向追踪计划（2026-11-26）](./PANTHER-X2-G0-GOLDEN-PMIC-REGULATOR-REVERSE-AUDIT-PLAN-20261126.md)：纠正 G0 优先级，先恢复 6.1.65/6.1.116 的真实配置/对象和驱动初始化行为，再对照 6.18.63；G0.6 fixed-regulator 降为备选，G0.7 PCB 测点不再作为准入条件。
