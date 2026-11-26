@@ -601,3 +601,19 @@ The initial inspection's echo: not found messages were caused by the optional Bu
 **Stage boundary:** R1 is closed. Continue with R2 strictly in the existing R0–R8 order, after reviewing the R2 detailed implementation/acceptance materials. Do not jump to R3 or R7, do not restore GMAC/MDIO/PHY in R1, and do not repeat R1 writing/boot checks. R7 remains the first physical TX-first stage after R2–R6 are independently passed.
 
 The test used the authorized SU08G TF. SN64G and eMMC were not written. No persistent mount is evidenced. No additional storage write or eMMC modification is authorized by this record.
+
+
+## 2026-11-26 R1 AF_PACKET software API supplement — build preparation
+
+Following the R1 runtime acceptance, the user confirmed the rule that each stage must complete every test that is feasible within that stage; only genuinely unavailable tests may be deferred with an explicit earliest verification stage.
+
+The existing R1 runtime record proved PF_PACKET family registration, but did not create an AF_PACKET socket. A narrow static AArch64 userspace probe has therefore been added:
+- `scripts/panther-x2-b2-1/af-packet-probe.c`
+- `.github/workflows/build-panther-x2-b2-1-r1-af-packet-probe.yml`
+- [R1 AF_PACKET software probe plan](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md)
+
+The probe separately records AF_PACKET/SOCK_RAW and SOCK_DGRAM socket creation, binds to the existing `lo` interface, attempts raw/datagram sends, and checks for software packet receive observation. It reads the interface index from sysfs rather than opening an AF_INET control socket, preserving R1's `CONFIG_INET=n` boundary. The workflow performs a static AArch64 build, ELF checks and a QEMU non-network self-test only; it does not perform AF_PACKET syscalls under QEMU.
+
+**Current status:** source and build workflow are committed; CI execution/result and target runtime tests remain pending. No AF_PACKET API result is yet claimed. Loopback results, when obtained, will be software-only evidence and will not establish physical Ethernet TX. Physical TX remains unavailable until R7.
+
+**Authorization boundary:** this approval covers repository source, workflow and build-only CI. It does not authorize rebuilding/repackaging the R1 initramfs or TF image, writing SU08G/SN64G/eMMC, or accessing Panther X2. Those steps require separate approval after the static probe artifact is built and reviewed.
