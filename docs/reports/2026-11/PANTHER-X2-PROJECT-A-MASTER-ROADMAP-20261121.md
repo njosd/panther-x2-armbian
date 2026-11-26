@@ -747,3 +747,10 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 - G0.1 provider/consumer 依赖矩阵第一轮已归档：`PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md`。
 - G0.2 RK809 MFD/regulator 副作用静态审计已归档：`PANTHER-X2-G0-2-RK809-MFD-REGULATOR-SIDE-EFFECTS-20261126.md`。当前 stock MFD/regulator 路径 NO-GO；MFD 的 IRQ ACK/pre-init 写入和 regulator 全量注册/约束/late cleanup 风险未解决，允许写入白名单为空。不是硬件 FAIL，也不是 6.18 网络功能 FAIL。
 - 下一项唯一任务：G0.3，只读归并 IO-domain supplier/deferred-probe 证据和 bank/rail mapping；不启用 MFD/regulator、不写 GRF、不启动设备。
+
+
+### G0.3 阶段进度更新（2026-11-26）
+
+G0.3 静态拓扑和写入路径已归档：`PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-AND-GMAC1-VCCIO5-MAPPING-20261126.md`。关键结果是 Panther GMAC1 M0 使用 GPIO3 pin bank，Rockchip RK3568 硬件设计指南标注 GMAC1 M0 属于 VCCIO5；DTS 中 `vccio5-supply` 与 GMAC1 `phy-supply` 均指向 `vcc_3v3`（RK809 SWITCH_REG1）。IO-domain 成功 probe 会写 PMU GRF VSEL0/VSEL1；R1 缺少 regulator provider 时的该次 defer 路径在写入前退出。后续 deferred-probe 最终 bind 状态仍 UNKNOWN，实际 rail/selector 未验证。
+
+下一项唯一任务为 G0.4：只读整理 clock/reset/PHY reset 与 125MHz 物理时钟来源/测量方案；不启动设备、不写 PMIC/GRF、不做 ABCD 发送。
