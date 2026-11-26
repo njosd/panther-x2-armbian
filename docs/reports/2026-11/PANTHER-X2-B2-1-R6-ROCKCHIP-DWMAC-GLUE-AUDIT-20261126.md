@@ -112,3 +112,83 @@ board DTS 中 GMAC1 和 MDIO1 在两版源码均写为 `status = "okay"`。R1 �
 5. GMAC1 DMA width、寄存器 capability 与实际 reset 结果仍待后续 R6/R7 阶段。
 
 不因此放开任何硬件边界。下一步 R6-2：对 RK3568 GRF/CRU clock/reset 定义、寄存器位含义及 6.1.65/6.18.63 clock provider 实现做专项静态核验；再进入原始 DTB 二进制属性对照。
+
+## 5. R6-2：RK3568 GRF / CRU clock / reset 静态核验（2026-11-26）
+
+### 5.1 GRF write-mask 语义
+
+两版 glue 都使用 Rockchip GRF high-word write-mask 形式：
+- 6.1.65：`GRF_BIT(n) = BIT(n) | BIT(n+16)`；`GRF_CLR_BIT(n) = BIT(n+16)`；delay 使用 `HIWORD_UPDATE(val, 0x7f, shift)`。
+- 6.18.63：`GRF_BIT/GRF_CLR_BIT` 语义保持；delay 改用 `GRF_FIELD(hi, lo, val) = FIELD_PREP_WM16(GENMASK_U16(hi,lo),val)`。
+
+两版 GMAC1 delay 寄存器仍是 CON0 0x0388，RX delay bit[14:8]、TX delay bit[6:0]；delay 配置仍是 7-bit 字段，TX/RX enable 仍在 CON1 0x038c bit0/bit1。
+
+### 5.2 GRF CON1 的实质差异：bit7
+
+6.1.65 的 RGMII 写入：
+- 设置 PHY interface selection bit4；
+- 清 bit5、bit6；
+- 设置 delay enable bit0/bit1；
+- **没有把 bit7 纳入写 mask**，即保留该位原状态。
+
+6.18.63 的 RGMII 路径：
+- generic powerup 先按 `gmac_phy_intf_sel_mask = GENMASK_U16(6,4)` 写 interface selection；
+- RK3568 专用 `set_to_rgmii()` 随后明确写 `GRF_CLR_BIT(7)`，并设置 delay enable bit0/bit1。
+
+6.18 将 bit7 定义为 `MODE_RMII_RGMII`（clear）/ `MODE_SGMII_QSGMII`（set），而 6.1.65 在 RK3568 宏中将 bit7 定义为 `GMII_MODE`，但 RGMII 写入并未触碰该位。
+
+这属于真实的初始化语义差异：6.18 明确把 GMAC1 CON1 bit7 设为 0；6.1.65 RGMII 路径只保证 bit4:6、bit0:1，不保证 bit7 初始值。不能将其简单判定为“6.18 回归”或“必然修复”；需用 RK3568 TRM/可信 Rockchip BSP 确认 bit7 复位值及 mode 编码，并在 R7 前纳入寄存器写入核对表。没有 TRM/硬件读值前不推断 bit7 上电状态。
+
+### 5.3 CRU clocks：ID、mux、gate 对照
+
+两版 `include/dt-bindings/clock/rk3568-cru.h` 中相关 clock ID 保持一致：
+- `ACLK_GMAC1=195`，`PCLK_GMAC1=196`；
+- `CLK_MAC1_REFOUT=199`，`CLK_GMAC1_PTP_REF=200`；
+- `SCLK_GMAC1=390`，`SCLK_GMAC1_RGMII_SPEED=391`；
+- `SCLK_GMAC1_RMII_SPEED=392`，`SCLK_GMAC1_RX_TX=393`。
+
+两版 `clk-rk3568.c` 中相关定义也一致：
+- ACLK_GMAC1：CLKGATE_CON(17) bit3；
+- PCLK_GMAC1：CLKGATE_CON(17) bit4；
+- CLK_MAC1_2TOP：CLKSEL_CON(33) bits[9:8]，gate bit5；
+- CLK_MAC1_OUT：CLKSEL_CON(33) bits[15:14]，gate bit6；
+- CLK_MAC1_REFOUT：gate bit10；
+- SCLK_GMAC1：CLKSEL_CON(33) bit2，在 `clk_mac1_2top` 与 `gmac1_clkin` 间 mux；
+- SCLK_GMAC1_RGMII_SPEED：CLKSEL_CON(33) bits[5:4]；
+- SCLK_GMAC1_RX_TX：CLKSEL_CON(33) bits[1:0]。
+
+parent 列表两版一致：`SCLK_GMAC1` 的 parent 为 `clk_mac1_2top` 或 `gmac1_clkin`。Panther board DTS 将 `SCLK_GMAC1` parent 指向 `gmac1_clkin`，并声明 `clock_in_out = "input"`。board DTS 同时将 `gmac1_clkin` 声明为 125 MHz fixed-clock。
+
+因此软件设计意图是从 GMAC1 外部 clock input 路径取 125 MHz 参考时钟；这只是 DT/clock tree 声明，**不证明板上 pin 实际存在 125 MHz 波形，也不证明 RTL8211F 在当前供电状态下输出该时钟**。两版 clock provider 对上述 GMAC1 mux/gate 没有发现影响本路径的 ID 或寄存器位置变化。
+
+6.18 新增的 `rk_configure_io_clksel()` 对 RK3568 ops 是 no-op：RK3568 ops 没有设置 `io_clksel_io_mask/io_clksel_cru_mask`。因此不能把 6.18 其他 Rockchip SoC 的 IO clock select 变化套用到 RK3566/Panther。
+
+### 5.4 CRU reset：SRST_A_GMAC1
+
+两版 clock binding 都定义 `SRST_A_GMAC1=236`；两版 RK3568 CRU 都注册 30 个 reset registers，并使用 `ROCKCHIP_SOFTRST_HIWORD_MASK`。reset 控制器两版的 hiword assert/deassert 写法相同。
+
+按 16 resets/register 计算，ID 236 对应：
+- bank = 14；
+- bit offset = 12；
+- `RK3568_SOFTRST_CON(0)=0x400`，寄存器偏移为 `0x400 + 14*4 = 0x438`；
+- assert 写 bit12 与 bit28 mask；deassert 写 bit28 mask。
+
+SoC DTS 的 GMAC1 节点使用 `resets = <&cru SRST_A_GMAC1>`，name `stmmaceth`。两版 DTS reset ID 和 reset provider 处理逻辑一致。此处是静态映射计算；未访问 CRU 寄存器，也未执行 assert/deassert。
+
+### 5.5 R6-2 阶段结论
+
+**R6-2 GRF/CRU clock/reset 静态核验：PASS（STATIC；一个需 TRM 复核的 GRF bit7 差异已明确）。**
+
+目前可确认：
+- delay 字段位置/宽度、enable 位位置一致；
+- clock IDs、主要 mux/gate 位置与 parent 列表一致；
+- 外部输入时钟路径在 DTS 中被声明为 125 MHz fixed-clock，并被选为 SCLK_GMAC1 parent；
+- GMAC1 reset ID/provider 逻辑一致。
+
+仍不能确认：
+- CON1 bit7 的硬件实际语义及上电值；
+- 外部 125 MHz 时钟实际波形/质量；
+- 该时钟是否确由 PHY 输出，以及 PHY 供电/复位是否满足；
+- 真实硬件 CRU/GRF 当前寄存器状态。
+
+R6-3 转向原始 DTB 二进制属性对照。需要取得并校验原始 6.1.65 黄金 DTB、R1 6.18.63 隔离 DTB 和目标 6.18.63 完整 Panther DTB 的确切文件及 SHA256。若原始黄金 DTB 不在仓库可访问文件中，先定位既有审计附件/归档，不重新构建、不触碰 SN64G/eMMC，也不让用户重复已完成的导出工作。
