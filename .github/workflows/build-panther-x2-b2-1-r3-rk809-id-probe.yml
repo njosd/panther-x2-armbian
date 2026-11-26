@@ -1,6 +1,10 @@
 name: Panther X2 B2-1 R3 RK809 identity probe (build only)
 
 on:
+  push:
+    paths:
+      - "scripts/panther-x2-b2-1/rk809-id-ro-probe.c"
+      - ".github/workflows/build-panther-x2-b2-1-r3-rk809-id-probe.yml"
   workflow_dispatch:
 
 permissions:
