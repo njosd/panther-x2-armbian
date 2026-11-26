@@ -175,8 +175,11 @@ int main(int argc, char **argv)
         printf("rk809_id_raw=0x%02X%02X\n", chip_name, chip_ver);
         puts("datasheet_expected_name=0x80");
         puts("datasheet_expected_version=0x92");
-        printf("identity_matches_datasheet=%s\n",
+        printf("datasheet_default_exact_match=%s\n",
                (chip_name == 0x80 && chip_ver == 0x92) ? "YES" : "NO");
+        printf("identity_matches_linux_rk809_id=%s\n",
+               (chip_name == 0x80 && (chip_ver & 0xF0) == 0x90)
+                   ? "YES" : "NO");
     }
 
     close(fd);
