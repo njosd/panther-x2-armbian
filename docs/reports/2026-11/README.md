@@ -8,6 +8,9 @@
 
 ## 项目 A：当前权威文档
 
+- [G0–G10 硬件准入与 ABCD-TX 分层验证计划（2026-11-26）](./PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md)：冻结硬件激活门序、provider/consumer 依赖、ABCD 同帧发送验证边界及后续 RX/ARP/IP/TCP/UDP 放行步骤。
+- [G0.1 Provider/Consumer 依赖矩阵（2026-11-26）](./PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md)：归并 R2–R6 现有证据，列出已通过、静态条件通过、阻塞及未验证资源；下一项为 G0.2 PMIC 副作用只读审计。
+
 - [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
 - [B2-1 R3 RK809/I2C/regulator 专项审计](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计 COMPLETE（CONDITIONAL）；含 RK809 实机只读身份/状态寄存器证据、6.1.65/6.18.63 黄金对照、MFD/regulator 副作用及 PHY supply consumer 调用链。运行时 MFD/regulator 激活仍未授权。
 - [B2-1 R4 MDIO/PHY 静态审计（已结项，CONDITIONAL）](./PANTHER-X2-B2-1-R4-MDIO-PHY-KCONFIG-AUDIT-20261126.md)：R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动差异、R4-3 MDIO/PHY 对象组织、R4-4 R1 配置隔离核验均完成。R1 明确关闭 MDIO/PHY/PHYLIB/REALTEK_PHY/PHYLINK/STMMAC/DWMAC，符合隔离目标；实机 PHY probe 仍未放行。
