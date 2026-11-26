@@ -54,7 +54,7 @@
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
 - [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：R2 已 PASS；复用 B1/R1 构建与配置、6.1.65 Golden 对照，现有 R1 镜像只读验证 pinctrl/SYSCON consumer、五个 GPIO bank 和五个 gpiochip 注册成功；零增量复用，无需重建。
-- [B2-1 / R3：RK809 / I2C / Regulator 前置审计（2026-11-26）](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3.1 实机只读验收：I2C0 绑定 `rk3x-i2c`，FAN53555@0x1c 被识别；RK809@0x20 仅确认 DT client 节点存在。精确 6.18.63 源码进一步确认 RK809 variant 由 OF compatible 选择而非 silicon ID 读取；MFD probe、sys-off/suspend/resume 生命周期及 regulator constraints 均含 PMIC 写入/电源轨配置副作用。无 PMIC 写操作的静态验证已完成；Rockchip Datasheet Rev 2.4 证实 0xED/0xEE 为 RO 芯片 ID 寄存器，已形成精确只读读取方案但尚未实机执行；MFD/regulator provider 实机验证仍 BLOCKED，R3 整体 HOLD/BLOCKED，不放行 R4。
+- [B2-1 / R3：RK809 / I2C / Regulator 前置审计（2026-11-26）](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3.1 I2C0 controller/adapter 与 R3.2 RK809 身份读取均 PASS-RUNTIME：实测 `0xED=0x80`、`0xEE=0x94`、ID `0x8094`，符合 Linux RK809 masked ID 规则。R3.7 已静态确认 `0xF0`/`0xF6` 为全位 RO 候选，尚待单独授权实读；MFD/regulator probe 含 PMIC 写入及可能的 rail 配置副作用，R3.3–R3.5 保持 BLOCKED，R3.6 留待 R7-A，R3 整体 HOLD/BLOCKED，不放行 R4。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
 
