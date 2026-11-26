@@ -771,3 +771,14 @@ G0.1–G0.5 子项报告已齐备；下一步不是启动设备，而是进行 G
 \n\n### G0.6 阶段进度更新（2026-11-26）\n\nG0.6 已归档 `PANTHER-X2-G0-6-FIXED-REGULATOR-ALTERNATIVE-FEASIBILITY-20261126.md`。R1 artifact 直接确认 `CONFIG_REGULATOR_FIXED_VOLTAGE=y` 且 `reg_fixed_voltage_probe` built-in；6.18 fixed-regulator 无 GPIO/控制 ops 时由 regulator core 标为 always-on，consumer enable 不触发 PMIC 写入。理论上可将经实测已上电的 PMUIO1/2 与 VCCIO5 rail 映射成固定 provider，避开 stock RK809 MFD pre-init/IRQ 副作用；但 IO-domain 仍会写 PMU GRF。VCC3V3_PMU、VCC_3V3 实际电压与 Panther 专用测点尚未确认，方案不得实现或启动。\n\n下一项唯一任务为 G0.7：只读查找 Panther X2 专用原理图/PCB/netlist/官方文档，确认两条 rail 来源及可安全测量点；找不到则列出需用户提供的最小资料。\n\n\n### G0.7 阶段进度更新（2026-11-26）\n\nG0.7 公开资料检索已归档：`PANTHER-X2-G0-7-PANTHER-X2-BOARD-RAIL-TESTPOINT-RESEARCH-20261126.md`。已确认 SoC 级映射为 GMAC1 M0→VCCIO5，UART2 M0/I2C0→PMUIO2；但公开 Panther X2 仓库/产品资料没有板级原理图、PCB netlist 或测试点信息。VCC3V3_PMU、VCC_3V3 的测量位置和实际电压因此 BLOCKED。不能借用其他 RK3566 开发板的测点，也不要求用户盲测。
 
 下一步需要 Panther X2 专用原理图 PDF/PCB netlist，或可读清 RK809、RTL8211F 及周边元件位号的 PCB 正反面高清照片。收到后先静态 net tracing，再单独制定测量方案；资料缺失时不进入 G0 总准入、不启动硬件。
+
+
+## 2026-11-27 纠正 G0 优先级：Golden-first software reverse audit
+
+用户明确指出：6.1.65 与 6.1.116 两条黄金基线已在同一 Panther X2 硬件上证明板载 Ethernet 正常。当前应优先反向提取黄金系统的真实软件配置、设备树、驱动对象与启动/运行行为，再与 6.18 默认实现比较；不应先追踪 3.3V rail 或要求 Panther PCB 测点资料。
+
+已新增执行计划：`PANTHER-X2-G0-GOLDEN-PMIC-REGULATOR-REVERSE-AUDIT-PLAN-20261126.md`，按 G0-P1 配置/对象恢复、G0-P2 黄金驱动与 DTS 初始化行为、G0-P3 6.18 差异矩阵、G0-P4 最小验证决策顺序执行。
+
+现有证据已确认：6.1.65 Golden `MFD_RK808=y`、`REGULATOR_RK808=y`，built-in 包含 `rk808`、`rk808-regulator`；6.1.116 实机启动日志确认 GMAC1/RTL8211F 成功并达到 1Gbps Full，设备上曾存在 `config-6.1.116-ophub` 与 `System.map-6.1.116-ophub`，但其配置内容尚需从原始归档恢复；6.18.63 R1 未构建 RK8xx MFD 与 RK809 regulator 对象。故当前优先补齐 6.1.116 配置证据并反向审计黄金 RK809 驱动，而不是设计 fixed-regulator 替代方案。
+
+G0.2 原先“stock MFD/regulator NO-GO”修订为 **HOLD / awaiting golden comparison**：6.18 probe 有 PMIC 写入路径是事实，但尚未比较黄金版本的相同初始化行为；不能仅凭存在写操作就判定不安全。仍维持未经授权不启用驱动的操作约束。G0.6 fixed-regulator 仅保留备选；G0.7 PCB/testpoint 搜索降级为背景资料，不再阻塞 G0。没有安排电压测量或要求用户提供原理图。
