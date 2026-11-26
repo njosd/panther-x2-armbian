@@ -1,0 +1,39 @@
+#!/bin/sh
+# Panther X2 R1: network-core-only RAM userspace; no persistent storage is mounted.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-r1-network-core) # '
+export PATH HOME PS1
+
+printf '\n=== Panther X2 R1 network-core baseline ===\n'
+printf 'Generic network core is enabled; MAC/PHY/MDIO drivers remain disabled.\n'
+printf 'Linux MMC/eMMC/TF and USB are not part of this R1 test.\n'
+printf 'Root filesystem: initramfs in RAM; no persistent filesystem is mounted.\n'
+
+mkdir -p /proc /sys
+
+if ! mount -t proc proc /proc; then
+    printf 'WARNING: could not mount procfs\n'
+fi
+if ! mount -t sysfs sysfs /sys; then
+    printf 'WARNING: could not mount sysfs\n'
+fi
+
+printf '\n--- Kernel ---\n'
+uname -a
+printf '\n--- Device model ---\n'
+cat /proc/device-tree/model || printf 'Device-tree model unavailable\n'
+
+printf '\n--- Kernel command line ---\n'
+cat /proc/cmdline
+printf '\n--- CPU ---\n'
+cat /proc/cpuinfo
+printf '\n--- Memory ---\n'
+cat /proc/meminfo
+printf '\n--- Mounts (no persistent storage expected) ---\n'
+mount
+printf '\n--- Last 120 kernel messages ---\n'
+dmesg | tail -n 120
+
+printf '\nR1 baseline ready. Interactive shell follows.\n'
+exec /bin/sh -i
