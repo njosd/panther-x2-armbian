@@ -684,3 +684,68 @@ R3.1 实机启动日志归档已记录 MMC、SARADC、IO-domain 等设备等待 
 下一项只读 G0 工作：把 RK809 IRQ 三组状态/屏蔽寄存器的位定义、W1C 行为与 Linux regmap IRQ 初始化初始 mask 值逐位对照；同时把 RK809 pre-init 表逐项映射到 datasheet 的寄存器访问属性。完成后再决定 G1 是否可按“允许的 IRQ ack + mask + pre-init 白名单”申请单独授权。
 
 **本节未授权任何新增硬件写操作；未启用 MFD/regulator，未执行 GRF 写入或网络发包。**
+
+
+## 20. G0-A：RK809 IRQ 24-bit Linux 映射与 Rev 2.4 数据手册差异（2026-11-26）
+
+### 20.1 冻结源码的实际映射
+
+源码端点仍为 `ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+- `rk8xx-i2c.c` 将 `rockchip,rk809` 选择为 `variant=RK809_ID`，但其 regmap config 复用 `rk817_regmap_config`。
+- `rk8xx-core.c` 对 RK809 与 RK817 共用 `rk817_irq_chip`，配置 `num_regs=3`、`irq_reg_stride=2`、status base 0xF8、mask base 0xF9、ack base 0xF8、`init_ack_masked=true`。
+- `REGMAP_IRQ_REG_LINE(id,8)` 将 24 个 Linux IRQ 编号映射为三组寄存器，每组 8 位：
+  - IRQ 0–7 → STS0 0xF8 / MSK0 0xF9，bit 0–7；
+  - IRQ 8–15 → STS1 0xFA / MSK1 0xFB，bit 0–7；
+  - IRQ 16–23 → STS2 0xFC / MSK2 0xFD，bit 0–7。
+- RK809 regmap 使用 8-bit register / 8-bit value，默认 register stride 为 1；IRQ stride 2 因而对应地址 F8/FA/FC 与 F9/FB/FD。
+
+### 20.2 Linux IRQ 事件表
+
+| 状态寄存器 | bit | Linux 事件名 |
+|---|---:|---|
+| 0xF8 | 0–7 | PWRON_FALL、PWRON_RISE、PWRON、PWMON_LP、HOTDIE、RTC_ALARM、RTC_PERIOD、VB_LO |
+| 0xFA | 0–7 | PLUG_IN、PLUG_OUT、CHRG_TERM、CHRG_TIME、CHRG_TS、USB_OV、CHRG_IN_CLMP、BAT_DIS_ILIM |
+| 0xFC | 0–7 | GATE_GPIO、TS_GPIO、CODEC_PD、CODEC_PO、CLASSD_MUTE_DONE、CLASSD_OCP、BAT_OVP、CHRG_BAT_HI |
+
+### 20.3 RK809 Datasheet Rev 2.4 位属性对照
+
+官方寄存器表对上述寄存器的定义并不完全支持 Linux 的 24 个有效事件映射：
+
+| 地址 | Rev 2.4 定义 | Linux 映射差异 |
+|---|---|---|
+| 0xF8 STS0 | bit 0–7 全部 W1C，依次为 PWRON_FALL、PWRON_RISE、PWRON、PWRON_LP、HOTDIE、RTC_ALARM、RTC_PERIOD、VCC9_LO | Linux 将 bit7 命名为 VB_LO；名称差异需核实，但 bit 位及 W1C 属性一致 |
+| 0xF9 MSK0 | bit 0–7 全部 RW mask | 与 Linux 8-bit mask 对应 |
+| 0xFA STS1 | bit 0 PLUG_IN、bit 1 PLUG_OUT；bit 2–7 标为 W1C RESV | Linux 把 bit 2–7 定义为 CHRG_TERM/TIME/TS、USB_OV、CHRG_IN_CLMP、BAT_DIS_ILIM |
+| 0xFB MSK1 | bit 0–1 为 PLUG mask；bit 2–7 标为 RW RESV | Linux 对 8 bit 全部建立 IRQ mask |
+| 0xFC STS2 | bit 2–5 为 CODEC_PD、CODEC_PO、CLASSD_MUTE_DONE、CLASSD_OCP；bit 7–6 标为 RC RESV；bit 1–0 标为 W1C RESV | Linux 将 bit0–1 定义为 GATE_GPIO/TS_GPIO，将 bit2–5 定义为 CODEC/CLASSD，将 bit6–7 定义为 BAT_OVP/CHRG_BAT_HI |
+| 0xFD MSK2 | bit 2–5 为 CODEC/CLASSD mask；bit 7–6 与 bit 1–0 标为 RW RESV | Linux 对 8 bit 全部建立 IRQ mask |
+
+来源：Rockchip RK809 Datasheet Rev 2.4（2024-01-02），§5.2，PDF 页 122–125；冻结 Linux 源码中的 `rk817_irqs[]`、`rk817_irq_chip` 与 `REGMAP_IRQ_REG_LINE`。
+
+### 20.4 probe 阶段实际写入和清状态条件
+
+冻结 `drivers/base/regmap/regmap-irq.c` 的 `regmap_add_irq_chip_fwnode()` 初始化过程：
+
+1. 根据 `rk817_irqs[]` 构造 `mask_buf_def`。24 个 IRQ 每个都占一个 bit，因此三组默认 mask 均为 `0xFF`。
+2. 默认将全部 IRQ mask，并通过 `regmap_update_bits()` 更新 mask registers：预期目标为 `0xF9=0xFF`、`0xFB=0xFF`、`0xFD=0xFF`（实际总线写值由 regmap_update_bits 的读改写及硬件当前值决定）。
+3. 因 `init_ack_masked=true`，初始化会读取 0xF8、0xFA、0xFC 的状态。
+4. 若某组状态非零，则对对应 ACK/status register 写入 `status_buf & mask_buf`。由于初始 mask 为 `0xFF`，写入值等于该组读取到的状态字节；这会对该字节所有置位的 W1C 状态执行 ACK。
+5. 这不是无条件写 `0xFF` 到状态寄存器；只有读取状态非零时才发生 ACK 写入。但它可能清除当时已锁存的 PMIC 事件。对于 0xFA/0xFC 中手册标为 reserved 的位，Linux 映射与数据手册定义冲突，不能保证清除语义安全。
+
+### 20.5 G1 放行判断
+
+- **已确认：** Linux 对 RK809 使用 RK817 的 24-bit IRQ 描述；默认 mask 三组 8-bit；初始化读取状态并可能向状态/ACK 寄存器写回当前置位值。
+- **已确认：** RK809 Rev 2.4 对 STS1 bit2–7 标为 W1C reserved；对 STS2 bit0–1 标为 W1C reserved、bit6–7 标为 RC reserved。Linux 却将这些位置分配给额外 IRQ。
+- **未确认：** 当前实机芯片 ID 读到 `0x8094` 对应的具体 RK809 子型号/硅版本是否使用了与 Rev 2.4 表格不同的 IRQ 布局；以及这些保留位在 Panther 实际芯片上是否存在额外功能。
+- **风险：** 若按 Linux 通用映射初始化，mask registers 的 reserved bits 也可能被写 1；若 status reserved bits 读出 1，初始化 ACK 可能对其写 1 或在 RC 位上发生读副作用。不能仅凭 datasheet 的 RESV 字样断定写入一定无害，也不能假定 Linux 映射一定适用于当前硅版本。
+- **结论：G0-A 静态审计发现未解决的 silicon/documentation mismatch；G1 不放行。** 不应为了让驱动 probe 成功而直接接受这项差异。
+
+### 20.6 下一步只读核查
+
+1. 追查 RK809/RK817 IRQ layout 的上游提交历史、Rockchip BSP 与当前 6.18 分支差异，确认 Linux 24 IRQ 定义适用的器件/版本范围。
+2. 对照 RK809 Rev 2.4、可取得的其他修订版和芯片 ID/版本寄存器字段；当前读到的 0xEE=0x94 保留为原始证据，不自行推断具体 silicon revision。
+3. 核对 RK809 I2C regmap 的 volatile/cache 行为，确认 IRQ status/mask 读写是否会经 cache 或触发读副作用。
+4. 在完成上述核查前，不读取 0xF8–0xFD 实机寄存器，不做总线扫描，不进行任何 PMIC 写入；现有 R3.7 对 0xF0/0xF6 的授权不包含 IRQ register 访问。
+
+**G1 释放条件新增：必须解释并解决 RK809 Rev 2.4 与 Linux 24 IRQ bit map 的差异，且明确保留位处理策略。**
