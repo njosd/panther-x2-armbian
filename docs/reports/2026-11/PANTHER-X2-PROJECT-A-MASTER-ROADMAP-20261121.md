@@ -710,5 +710,5 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 
 - R1 AF_PACKET 软件 API 与 loopback outgoing 观察已实机通过；不证明物理 Ethernet TX/RX。
 - **R2 已 PASS。** 复用现有 R1 最终镜像，只读确认 `rockchip-pinctrl` 绑定、GRF/PMU SYSCON consumer probe 成功、GPIO0–GPIO4 五个 bank 绑定且五个 32-line gpiochip 注册；6.1.65 Golden 与 6.18.63 provider/关键依赖配置对照均为 y。没有写 GPIO、操作 reset/电源或重建刷写。
-- **R3 静态审计完成；R3.1 controller bind PASS-RUNTIME；R3 整体仍 HOLD/BLOCKED。** 实机 sysfs 确认 I2C0 platform controller 绑定 `rk3x-i2c`，启动日志识别 FAN53555@0x1c；RK809@0x20 仅有 DT client 节点证据。精确 6.18.63 RK809 I2C probe 根据 OF compatible 选择 variant，不读取 silicon ID；MFD probe、IRQ chip 初始化、pre-init、system-power-controller 生命周期及 regulator constraints 均存在 PMIC 写入/电源轨配置副作用。无 PMIC 操作的静态审查已完成；RK809 ID 实测/provider 实机验证仍未执行。R3 不整体 PASS，不放行 R4。
+- **R3 静态审计完成；R3.1 controller bind PASS-RUNTIME；R3 整体仍 HOLD/BLOCKED。** 实机 sysfs 确认 I2C0 platform controller 绑定 `rk3x-i2c`，启动日志识别 FAN53555@0x1c；RK809@0x20 仅有 DT client 节点证据。精确 6.18.63 RK809 I2C probe 根据 OF compatible 选择 variant，不读取 silicon ID；MFD probe、IRQ chip 初始化、pre-init、system-power-controller 生命周期及 regulator constraints 均存在 PMIC 写入/电源轨配置副作用。无 PMIC 写操作的静态审查已完成；Rockchip Datasheet Rev 2.4 确认 0xED/0xEE 为 RO 芯片 ID 寄存器，精确只读读取方案已形成但尚未实机执行；provider 实机验证仍未执行。R3 不整体 PASS，不放行 R4。
 - GMAC1/MDIO1/RTL8211F 在 R3 期间继续 disabled；不执行 PMIC 写入、regulator 开关/电压切换、电源循环、网络发送或镜像重建。
