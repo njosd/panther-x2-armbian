@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS（6.1.65 Golden 配置对照及现有 R1 镜像 pinctrl/SYSCON/GPIO 只读运行时验证完成）；R3.1 I2C0 controller bind 已 PASS-RUNTIME（rk3x-i2c 绑定，FAN53555@0x1c 识别），但 RK809 实际响应及 MFD/regulator provider 仍未验证或 BLOCKED；R3 整体 HOLD，不放行 R4。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 已 PASS；R3.1 I2C0 controller/adapter 与 R3.2 RK809 身份读取 PASS-RUNTIME（`0xED=0x80`、`0xEE=0x94`、ID `0x8094`，符合 Linux masked ID）；R3.7 `0xF0`/`0xF6` 已静态核实为全位 RO 候选，实读待单独授权；R3.3–R3.5 MFD/regmap/regulator provider/consumer BLOCKED，R3.6 留待 R7-A；R3 整体 HOLD，不放行 R4。
 
 ## 0. 统一项目定义
 
@@ -710,5 +710,5 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 
 - R1 AF_PACKET 软件 API 与 loopback outgoing 观察已实机通过；不证明物理 Ethernet TX/RX。
 - **R2 已 PASS。** 复用现有 R1 最终镜像，只读确认 `rockchip-pinctrl` 绑定、GRF/PMU SYSCON consumer probe 成功、GPIO0–GPIO4 五个 bank 绑定且五个 32-line gpiochip 注册；6.1.65 Golden 与 6.18.63 provider/关键依赖配置对照均为 y。没有写 GPIO、操作 reset/电源或重建刷写。
-- **R3 静态审计完成；R3.1 controller bind PASS-RUNTIME；R3 整体仍 HOLD/BLOCKED。** 实机 sysfs 确认 I2C0 platform controller 绑定 `rk3x-i2c`，启动日志识别 FAN53555@0x1c；RK809@0x20 仅有 DT client 节点证据。精确 6.18.63 RK809 I2C probe 根据 OF compatible 选择 variant，不读取 silicon ID；MFD probe、IRQ chip 初始化、pre-init、system-power-controller 生命周期及 regulator constraints 均存在 PMIC 写入/电源轨配置副作用。无 PMIC 写操作的静态审查已完成；Rockchip Datasheet Rev 2.4 确认 0xED/0xEE 为 RO 芯片 ID 寄存器，精确只读读取方案已形成但尚未实机执行；provider 实机验证仍未执行。R3 不整体 PASS，不放行 R4。
+- **R3.1 I2C0 controller/adapter 与 R3.2 RK809 身份读取均 PASS-RUNTIME。** 专用 RAM-only initramfs 成功启动，RK809@0x20 两次 I2C_RDWR 只读事务成功，实测 `0xED=0x80`、`0xEE=0x94`、ID `0x8094`，符合 Linux masked ID 规则。R3.7 的 `PMIC_SYS_STS(0xF0)`、`PMIC_OFF_SOURCE(0xF6)` 已静态核实为全位 RO 候选，硬件读取仍待单独授权。MFD/regmap 与 regulator probe 存在 PMIC 写入/rail 配置副作用，R3.3–R3.5 BLOCKED；R3.6 PHY supply consumer 最早在 R7-A 验证。R3 整体仍 HOLD/BLOCKED，不放行 R4。
 - GMAC1/MDIO1/RTL8211F 在 R3 期间继续 disabled；不执行 PMIC 写入、regulator 开关/电压切换、电源循环、网络发送或镜像重建。
