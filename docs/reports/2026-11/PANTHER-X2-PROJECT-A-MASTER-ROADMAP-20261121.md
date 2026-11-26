@@ -552,3 +552,22 @@ B2-0 方向一至五静态审计及第一轮版本/组件决策已形成归档�
 用户明确要求网络组件不得一次性全部加入。首项网络实测应在最小必要网络组件集合下，验证 Panther X2 发出的特定 Ethernet 广播帧能否被局域网对端真实接收；未通过不得引入更高层组件。B2-1 已据此修订为 TX-first、one-component-at-a-time：首轮不配置 IPv4，不依赖 DHCP/DNS/ARP/ICMP/路由；通过最小 AF_PACKET/SOCK_RAW 发送程序发送自定义 EtherType（计划采用实验 EtherType 0x88B5）广播帧，携带项目标识、序列号、长度和校验字段，由 iMac/局域网对端抓包逐帧核对。明确核验 CONFIG_PACKET；INET/IPv4 延后到 TX-PASS 后单独引入。TX-PASS 必须以对端实际捕获、帧内容准确、多轮重复、两端计数器与驱动统计相互印证为依据；probe、link up 或 Panther TX counter 增长均不足以通过。TX 通过后再按 RX、ARP、IPv4、ICMP、路由、TCP、UDP、DHCP、DNS 顺序逐层放行，每次只增加一个组件/最小依赖闭包，且 TX 广播测试作为后续回归项。
 
 本次仅修订计划、索引和路线图，没有访问设备、构建、写卡、修改系统或启动网络实测。
+
+
+## 2026-11-26 R1 first Panther X2 runtime boot — shell reached, initramfs applet defect remains
+
+R1 hybrid PREPARE-ONLY image was written by the user to the dedicated 8GB SU08G TF card and booted on Panther X2. This is the first target-hardware runtime result for the R1 image; it is not an Ethernet test.
+
+**Verified from UART log:**
+- Existing eMMC SPL → TF JP-TvBox U-Boot proper → TF Kernel/DTB/uInitrd handoff completed.
+- Linux 6.18.63 reached execution of `/init`; Panther X2 model, four CPUs and approximately 4GiB RAM were recognized.
+- RAM initramfs became root and BusyBox v1.37.0 ash reached an interactive prompt.
+- No persistent filesystem mount or storage write is evidenced in the reviewed log.
+
+**Defect:** `/init` invokes `printf`, but the R1 packaging workflow did not create the BusyBox `printf` applet link. Runtime output repeatedly reported `printf: not found`; initialization diagnostics are incomplete. This is a packaging applet omission, not a kernel boot failure.
+
+**Minimal source correction:** commit `4efd7c7e56abfbc43a8309b4d797cd4cc5c40891` adds `printf` to the R1 BusyBox applet allowlist and validates the extracted `bin/printf -> busybox` link. Kernel, DTB, U-Boot, bootargs, load addresses, image geometry and `/init` source are unchanged. CI repackaging and a subsequent runtime confirmation are pending.
+
+**Not verified:** complete `/init` diagnostics; any Ethernet TX/RX or network connectivity. GMAC1/MDIO/PHY remain disabled in R1 by design. Deferred USB/MMC/PMIC/power-domain probe messages remain recorded observations, not declared fatal without further evidence.
+
+**Safety:** only the authorized SU08G TF was used. SN64G and eMMC were not written. No further storage write or eMMC change is authorized by this record. Detailed evidence: `PANTHER-X2-B2-1-R1-INITRAMFS-DEFECT-CORRECTION-20261126.md`.
