@@ -371,3 +371,67 @@ Gate 1 完成仅允许准备一次独立的实机授权申请，不自动允许�
 **当前不具备 Gate 2/3/4 的自动放行条件。** 缺少的关键不是 STMMAC 源码，而是 RK809 MFD/regulator 的受控运行时验证、vcc_3v3 电气验证、外部 125MHz clock 实际波形验证，以及首次硬件操作的单独授权。
 
 R6 当前可以形成的结论是：驱动/DTS/GRF/CRU 的静态设计参数已基本明确；解除边界必须从 provider/供电/时钟开始分层，而不是直接把 GMAC1 status 改为 okay。
+
+
+## 9. R6-5：125MHz 外部时钟的真实来源与 DTS fixed-clock 语义（2026-11-26）
+
+### 9.1 关键纠正：gmac1_clkin 不是 RK809 clock output
+
+重新逐段检查 6.1.65 与 6.18.63 Panther board DTS：
+- `gmac1_clkin: external-gmac1-clock` 是根节点下独立的 `compatible = "fixed-clock"`；
+- `clock-frequency = <125000000>`；
+- `clock-output-names = "gmac1_clkin"`；
+- GMAC1 `assigned-clock-parents` 第三项将 `SCLK_GMAC1` parent 指向这个 fixed-clock；
+- GMAC1 `clock_in_out = "input"`。
+
+RK809 节点另有 `#clock-cells = <1>` 和 `clock-output-names = "rk808-clkout1", "rk808-clkout2"`，它们是 RK809 MFD clock-output provider 的独立 clock 输出，DTS 中没有将其 phandle 连接到 `gmac1_clkin`。因此此前报告中将“RK809 clock output”与 GMAC1 125MHz 输入作为一条可能链路的表述不严谨，现明确纠正：**当前 Panther DTS 没有声明 GMAC1 时钟来自 RK809 CLKOUT1/2。**
+
+### 9.2 fixed-clock 是 Linux 时钟框架中的逻辑描述，不是实体振荡器驱动
+
+6.1.65 与 6.18.63 的 `drivers/clk/clk-fixed-rate.c` 中 `of_fixed_clk_setup()` 都是：
+1. 从 DT 读取 `clock-frequency`；
+2. 调用 `clk_hw_register_fixed_rate_with_accuracy()` 注册固定频率 clock；
+3. 将该 clock hw 注册为 OF clock provider。
+
+该路径没有 GPIO、I2C、PMIC、PWM、PLL 或外部振荡器控制操作，也没有测量输入引脚频率。故 DTS 中 125MHz 只表示 Linux CCF 把这个 parent 建模为 125MHz；它本身不生成 125MHz，也不验证板上存在该信号。两版 fixed-clock 注册实现对本场景没有发现实质差异。
+
+### 9.3 实际物理来源的候选：RTL8211F CLKOUT
+
+结合既有 P2 PHY clock handoff 报告：
+- Linux 的 `clock_in_out=input` 和 `clock input from PHY` 表示 GMAC 侧按外部 PHY 时钟输入方向配置；
+- RTL8211F CLKOUT pin 35 是与该方向相符的候选 125MHz 来源；
+- 既有 PHYCR2 审计指出，6.1.116 曾使用 JL2xx1 workaround 写入 PHYCR2 值 `0x1801`；而 6.1.65/6.18 的通用 RTL8211F driver 对 PHYCR2 的常规处理只缓存/恢复 CLKOUT enable bit0，不主动设置 bit11 的 125MHz 选择位；
+- PHY config_init 还会执行 generic PHY soft reset。当前公开证据不能证明 PHYCR2 bit11 在该 reset 后一定保留，也不能证明当前 6.18 初始化最终在 pin35 输出 125MHz。
+
+因此最可能的板级时钟链假设为：
+`RTL8211F CLKOUT pin35 (125MHz) → PCB clock trace → RK3566 GMAC1 external clock input → CRU gmac1_clkin parent model → SCLK_GMAC1 → RGMII clock branch`
+
+其中只有 DTS/driver 对“输入方向”和 CCF parent model 的软件配置已确认；pin35 是否确实连到 RK3566 对应输入、PHYCR2 当前值、soft reset retention、实际波形质量仍未验证。不能把上述候选链路写成已经确认的原理图事实。
+
+### 9.4 6.1.65 黄金基线如何帮助定位
+
+6.1.65 黄金基线能够证明：在该板卡、当时 bootloader/PHY 状态、内核和 DTB 的组合下，GMAC1 曾实现 1000M Full Duplex 和实际网络通信。但它不能单独证明：
+- Linux 6.1.65 一定由自己的 PHY driver 重新启用了 CLKOUT；
+- PHY soft reset 后 bit11 仍保持 125MHz 选择；
+- U-Boot 已经正确配置了 CLKOUT 并由 Linux 继承；
+- 当前 6.18.63 的 PHY reset/config_init 顺序产生相同的 pin35 波形。
+
+因此后续 A/B 对照应保留黄金基线中实际成功的整机状态作为参照，但不能仅凭相同 DTS fixed-clock 值就认为两个系统的物理 clock 条件相同。
+
+### 9.5 真实时钟验证应如何安排
+
+在不启用 GMAC 的当前隔离状态下，不建议仅为验证时钟而主动 reset PHY 或写 PHYCR2。进入 Gate 2/3 前，先取得可复核的板级连线证据（Panther X2 原理图、PCB 网络表或厂商硬件资料）；若资料无法取得，则在获得单独授权后，将示波器/频率计的高阻探测作为首次 PHY/GMAC 硬件验证的一部分：
+1. 明确 RTL8211F pin35 和 RK3566 GMAC1 clock input 的测点/走线；
+2. 对照 6.1.65 黄金系统与 6.18 候选系统，记录 PHY reset 前后 pin35 频率、幅度、占空比及稳定性；
+3. 同时记录 PHYCR2 的只读值及 Linux reset/config_init 的时间点（若读取方式经单独审查并授权）；
+4. 不先写入 PHYCR2、不先强制 CLKOUT、不修改 DTS clock direction；
+5. 若 pin35 无 125MHz，先定位 PHYCLKOUT 配置/复位保持/物理连接，不进入 DMA/TX 测试。
+
+### 9.6 R6-5 结论
+
+- **PASS-STATIC：** 两版 Panther DTS 均将 GMAC1 外部 clock parent 指向独立 125MHz fixed-clock；两版 fixed-clock provider 只注册逻辑频率模型。
+- **PASS-CORRECTION：** RK809 CLKOUT1/2 与 gmac1_clkin 是两个不同 clock provider，当前 DTS 没有连接关系。
+- **CONDITIONAL：** RTL8211F CLKOUT pin35 是符合 input 方向的物理时钟候选，既有 6.1.116 PHYCR2 workaround 提供旁证。
+- **BLOCKED-HARDWARE：** pin35 到 SoC 输入的实际走线、PHYCR2 bit11 reset retention、125MHz 物理波形均未确认。
+
+本项不要求新的 PMIC I2C 读写，不要求当前设备启动 GMAC，不触碰任何存储介质。
