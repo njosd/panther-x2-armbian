@@ -712,3 +712,18 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 - **R2 已 PASS。** 复用现有 R1 最终镜像，只读确认 `rockchip-pinctrl` 绑定、GRF/PMU SYSCON consumer probe 成功、GPIO0–GPIO4 五个 bank 绑定且五个 32-line gpiochip 注册；6.1.65 Golden 与 6.18.63 provider/关键依赖配置对照均为 y。没有写 GPIO、操作 reset/电源或重建刷写。
 - **R3.1 I2C0 controller/adapter、R3.2 RK809 身份读取与 R3.7 状态寄存器只读观察均 PASS-RUNTIME。** 专用 RAM-only initramfs 在 Panther X2 实机运行；RK809@0x20 身份寄存器实测 `0xED=0x80`、`0xEE=0x94`、ID `0x8094`，符合 Linux masked ID 规则。R3.7 对全位 RO 的 `PMIC_SYS_STS(0xF0)` 与 `PMIC_OFF_SOURCE(0xF6)` 各执行一次 I2C_RDWR 只读事务，均 ioctl rc=2、errno=0，实测原始值分别为 `0xC2`、`0x00`。SU08G 仅替换专用 uInitrd，旧 R3.2 uInitrd 备份与哈希核验通过；SN64G/eMMC 未涉及。未扫描总线、未写 PMIC 数据寄存器、未绑定驱动、未调用 regulator API。状态寄存器不提供 rail 电压遥测，不能证明 SWITCH_REG1 或 PHY 供电能力。MFD/regmap 与 regulator probe 存在 PMIC 写入/rail 配置副作用，R3.3–R3.5 BLOCKED；R3.6 PHY supply consumer 最早在 R7-A 验证。R3 整体仍 HOLD/BLOCKED，不放行 R4。
 - GMAC1/MDIO1/RTL8211F 在 R3 期间继续 disabled；不执行 PMIC 写入、regulator 开关/电压切换、电源循环、网络发送或镜像重建。
+
+### 全阶段强制执行：6.1.65 黄金基线逐项对照（2026-11-26 补充）
+
+用户再次明确要求：后续每一个阶段、每一项硬件验证，都必须同步对照 Panther X2 已实机正常工作的 Linux 6.1.65 第一黄金基线；不能只在阶段总结时笼统提及，也不能只审计 6.18 单边。
+
+具体执行规则：
+
+1. 每个硬件子项建立 6.1.65 / 6.18 对照记录，至少覆盖 DTS 节点及属性、compatible/match、Kconfig 最终值、驱动源码版本与关键调用路径、built-in/module 对象、probe 顺序与依赖、寄存器初始化/写入、运行时绑定状态、实测功能结果。
+2. 对当前阶段所需的硬件行为，明确记录 6.1.65 实际如何完成、6.18 当前如何实现、两者差异，以及差异是否可能解释 6.18 行为。6.1.65 的实机成功是功能行为基准，但不能自动证明某个 6.18 寄存器映射或初始化写入正确。
+3. 特别对 R3：逐项比较 RK809/RK808 PMIC compatible 与 variant 识别、I2C regmap、IRQ 数量/bit mapping、status/mask/ack 寄存器、pre-init 表、MFD 子设备、regulator descriptors/constraints、IO-domain consumer 依赖与实际 probe 结果。对 Linux 6.18 把 RK809 复用 RK817 24-bit IRQ layout 的疑点，必须先核实 6.1.65 使用的旧驱动是否采用相同映射、是否有 Rockchip BSP 修订，以及黄金基线启动日志/配置能证明到哪一步。
+4. 对后续 R4–R8，同样按功能链比较 clock/reset、GMAC、MDIO、PHY 电源/复位/时钟、RGMII delay 与 pinctrl、DMA/descriptor/IRQ、TX ring/queue、DMA cache/coherency、MAC/PHY link、TX frame 实际对端捕获。不得因某版本名称相同就假定驱动实现相同。
+5. 如果 6.1.65 证据不足，标记 UNKNOWN 并提出最小只读补证；不得重复已完成的黄金基线审计，也不得擅自访问/写入 SN64G 黄金介质。复用已归档的 6.1.65 审计报告、源码快照、DTB/config 和实测日志。
+6. 每个阶段报告必须有明确的“6.1.65 黄金基线对照”小节；没有该小节及证据对照，不得宣布该硬件子项 PASS 或放行下一阶段。
+
+本规则适用于 R3 及所有后续网络硬件和软件发送阶段，优先级高于临时对话中的局部执行建议。
