@@ -53,7 +53,7 @@
 - [B2-1：实施计划与执行归档基准（2026-11-25，2026-11-26 修订）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：在 TX-first 与 R0–R8 顺序基础上，新增全阶段 6.1.65 第一黄金基线、6.1.116 第二黄金行为参照、6.18 默认配置优先、实际功能验证及未完成不放行规则。
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
-- [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：6.18.63 精确 Kconfig/Makefile 依赖、B1/R1 最终配置及 built-in 对象/符号核验已完成，确认零增量复用、无需重建；但 6.1.65 对应 provider 的最终配置/对象逐项对照及现有 R1 镜像运行时注册/功能检查待补。R2 当前 INCOMPLETE/HOLD，不放行 R3。
+- [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：6.18.63 精确 Kconfig/Makefile 依赖、B1/R1 最终配置及 built-in 对象/符号核验已完成，确认零增量复用、无需重建；6.1.65 与 6.18.63 的 provider/依赖配置逐项对照已完成，比较项均为 y；现有 R1 镜像运行时注册/功能检查待补。R2 当前 INCOMPLETE/HOLD，不放行 R3。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
 
