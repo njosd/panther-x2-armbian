@@ -1,6 +1,10 @@
 name: Panther X2 R1 RK809 identity probe initramfs (build only)
 
 on:
+  push:
+    paths:
+      - "scripts/panther-x2-r1/init-rk809-id-probe"
+      - ".github/workflows/build-panther-x2-r1-rk809-id-probe-initramfs.yml"
   workflow_dispatch:
     inputs:
       r1_run_id:
