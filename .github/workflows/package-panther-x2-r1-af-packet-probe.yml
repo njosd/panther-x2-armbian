@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y cpio e2fsprogs gdisk gzip qemu-user-static zstd u-boot-tools
+          sudo apt-get install -y binutils cpio e2fsprogs file gdisk gzip qemu-user-static zstd u-boot-tools
 
       - name: Download frozen R1, B1 and AF_PACKET probe artifacts
         uses: actions/download-artifact@v6
@@ -101,8 +101,8 @@ jobs:
             if grep -Eq "^$key=[ym]$" work/r1/output/kernel.config; then echo "::error::Forbidden R1 option enabled: $key"; exit 1; fi
           done
           file work/probe/af-packet-probe-aarch64 | tee work/probe/file.txt
-          aarch64-linux-gnu-readelf -h work/probe/af-packet-probe-aarch64 > work/probe/elf-header.txt
-          aarch64-linux-gnu-readelf -l work/probe/af-packet-probe-aarch64 > work/probe/elf-program-headers.txt
+          readelf -h work/probe/af-packet-probe-aarch64 > work/probe/elf-header.txt
+          readelf -l work/probe/af-packet-probe-aarch64 > work/probe/elf-program-headers.txt
           grep -q AArch64 work/probe/elf-header.txt
           if grep -q INTERP work/probe/elf-program-headers.txt; then echo "::error::Probe unexpectedly requires a dynamic interpreter"; exit 1; fi
           qemu-aarch64-static work/probe/af-packet-probe-aarch64 --self-test | tee work/probe/self-test-recheck.txt
