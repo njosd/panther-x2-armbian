@@ -538,3 +538,13 @@ R3 专项报告第 16 节已归档实机证据。SU08G 目标 UUID 与挂载点�
 R3.7 专用探针在目标机 self-test PASS；随后对 RK809@0x20 的 `PMIC_SYS_STS(0xF0)`、`PMIC_OFF_SOURCE(0xF6)` 各执行一次 I2C_RDWR repeated-start 只读事务，ioctl 均返回 2、errno=0，原始值分别为 `0xC2`、`0x00`。未扫描总线、未写 PMIC 数据寄存器、未绑定驱动、未调用 regulator API。
 
 **更新状态：R3.7 PASS-RUNTIME。R3.1/R3.2/R3.7 的安全只读项目均 PASS-RUNTIME；R3.3–R3.5 仍 BLOCKED，R3.6 仍留待 R7-A。R3 整体继续 HOLD/BLOCKED，不放行 R4。** 状态寄存器不提供 regulator 输出电压遥测，不能证明 SWITCH_REG1 或 PHY 供电能力。
+
+## R3 状态收敛更新（2026-11-26）
+
+R3 的静态源码审计已完成，结论为 **COMPLETE (STATIC / CONDITIONAL)**；这不代表 RK809 MFD/regulator 已在 6.18 实机激活，也不代表 PHY rail 已验证。R3 runtime provider/consumer activation 仍为 **NOT AUTHORIZED / DEFERRED**。
+
+本轮黄金基线对照新增结论：6.1.65 与 6.18.63 的 regulator core 都在 DT 系统启动约 30 秒后执行 unused regulator cleanup；这不是 6.18 regression。6.18 新增 `regulator_ignore_unused` 参数，但不得作为正式修复或默认启动参数。两版 Rockchip GMAC glue 都通过 `devm_regulator_get(dev, "phy")` 获取 `phy-supply`，并在 STMMAC 完成正常注册前尝试 power-up。关键差异是 6.1.65 helper 吞掉 `regulator_enable()` 错误并返回 0；6.18 返回真实错误并阻止后续 power-up。6.18 行为应保留，不回退。
+
+R3 专项报告第 26 节已记录固定源码端点、调用顺序、错误传播和边界，commit `c403d3505721949a4963dff544406aa9b00cd45e`。
+
+**后续顺序：** 结束 R3 专题，不再扩大 PMIC 静态审计；进入 R4（MDIO/PHY 框架与 RTL8211F）静态/Kconfig/对象审计，GMAC/MDIO/PHY DT 节点继续 disabled。原始 6.1.65 DTB 二进制对照保留为 R7-A 硬件准入条件，不再阻塞 R3 静态结项。R4 审计完成后再逐项构建/配置验收，严格按计划推进；任何实际 MFD/regulator/PHY probe 或供电动作仍须另行授权。
