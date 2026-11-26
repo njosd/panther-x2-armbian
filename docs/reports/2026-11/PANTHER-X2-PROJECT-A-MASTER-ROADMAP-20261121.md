@@ -727,3 +727,16 @@ Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/acti
 6. 每个阶段报告必须有明确的“6.1.65 黄金基线对照”小节；没有该小节及证据对照，不得宣布该硬件子项 PASS 或放行下一阶段。
 
 本规则适用于 R3 及所有后续网络硬件和软件发送阶段，优先级高于临时对话中的局部执行建议。
+
+
+## 2026-11-26 G0–G10 硬件准入与 ABCD-TX 验证计划
+
+新增执行文件：
+- `PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md`：规定 G0 只读准入、G1–G10 硬件/网络分层激活顺序、每门停止条件及 ABCD 同帧 TX 证据要求。
+- `PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md`：归并 R2–R6 既有 provider/consumer 证据，避免重复审计。
+
+当前状态：G0.1 第一轮依赖矩阵已归档；G0 尚未完成，不放行硬件激活。下一项唯一任务为 G0.2：只读复核 RK809 MFD/regulator 的 pre-init、IRQ、生命周期与 regulator constraint 自动写入副作用，形成寄存器访问/副作用白名单。不得启用驱动或访问设备。
+
+**ABCD 定义：** A=用户态 AF_PACKET 提交；B=网络核心 skb；C=STMMAC ndo_start_xmit/stmmac_xmit；D=DMA mapping。必须关联同一测试帧的 sequence、length 与 payload hash；D 之后继续记录 descriptor/OWN、completion/reclaim，并以独立对端逐帧捕获作为物理 TX 决定性证据。没有目标 netdev/open/DMA 前置条件的阶段只记录 NOT EXECUTABLE，不伪造测试结果；每隔一至两阶段复核可执行性，一旦条件满足即优先单帧测试。测试帧采用实验 EtherType 0x88B5、ABCD 标识和序列号，不依赖 IPv4/ARP/DHCP/DNS。
+
+本次只同步计划和既有证据矩阵；没有访问 Panther、启动设备、写入存储、修改内核/DTB/PMIC/网络配置或执行发送测试。
