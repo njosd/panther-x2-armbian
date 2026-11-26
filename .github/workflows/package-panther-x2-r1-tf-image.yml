@@ -1,0 +1,169 @@
+name: Package Panther X2 R1 hybrid TF image (reuse only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: Existing successful R1 build run
+        required: true
+        type: string
+        default: "45611898629"
+      b1_run_id:
+        description: Frozen B1 boot-support artifact run
+        required: true
+        type: string
+        default: "45328201244"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-r1-tf-image-package
+  cancel-in-progress: false
+
+jobs:
+  package-r1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      R1_RUN_ID: ${{ inputs.r1_run_id }}
+      B1_RUN_ID: ${{ inputs.b1_run_id }}
+      R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
+      DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+      UBOOT_SHA: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y e2fsprogs gdisk zstd u-boot-tools
+
+      - name: Download existing R1 and B1 artifacts (no rebuild)
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.r1_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.b1_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify exact input identities and R1 isolation
+        run: |
+          set -euo pipefail
+          test -s work/r1/output/Image
+          test -s work/r1/output/kernel.config
+          test -s work/r1/output/modules.tar.zst
+          test -s work/b1/output/JP-TvBox-u-boot.itb
+          test -s work/b1/output/uInitrd
+          test -s work/b1/output/boot.cmd
+          test -s work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test "$(sha256sum work/r1/output/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | awk '{print $1}')" = "$UBOOT_SHA"
+          cmp work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          for key in CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET; do grep -qx "$key=y" work/r1/output/kernel.config; done
+          for key in CONFIG_INET CONFIG_IPV6 CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY; do
+            if grep -Eq "^$key=[ym]$" work/r1/output/kernel.config; then echo "::error::Forbidden R1 option enabled: $key"; exit 1; fi
+          done
+          mkdir -p work/output
+          sha256sum work/r1/output/Image work/r1/output/kernel.config work/r1/output/modules.tar.zst work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/b1/output/JP-TvBox-u-boot.itb work/b1/output/uInitrd | tee work/output/input-sha256.txt
+
+      - name: Regenerate R1 boot script, preserving all bootargs and load addresses
+        run: |
+          set -euo pipefail
+          sed -e 's/B1 clean RAM-only Linux baseline/R1 network-core Linux test/' -e 's/automatic clean RAM boot/automatic R1 network-core boot/' -e 's/Starting B1 Linux/Starting R1 Linux/' work/b1/output/boot.cmd > work/output/boot.cmd
+          grep -Fq "console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init" work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x00280000 /Image' work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x0a200000 /uInitrd' work/output/boot.cmd
+          grep -Fq 'load mmc 1:1 0x0a100000 /dtb/rockchip/rk3566-panther-x2.dtb' work/output/boot.cmd
+          mkimage -A arm64 -T script -C none -n "Panther X2 R1 boot script" -d work/output/boot.cmd work/output/boot.scr
+
+      - name: Assemble PREPARE-ONLY R1 hybrid TF image
+        run: |
+          set -euo pipefail
+          mkdir -p work/tf-mnt
+          IMAGE=work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img
+          truncate -s 2G "$IMAGE"
+          sgdisk --clear --new=1:32768:4192255 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="${LOOP}p1"
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo install -m 0644 work/r1/output/Image work/tf-mnt/Image
+          sudo install -m 0644 work/b1/output/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/output/boot.scr work/tf-mnt/boot.scr
+          sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo install -m 0644 work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
+          printf '%s\n' 'Panther X2 R1 network-core test image; PREPARE-ONLY.' 'Linux 6.18.63 R1: NET/NETDEVICES/NET_CORE/ETHERNET/PACKET enabled.' 'GMAC1/MDIO/PHY remain disabled; R1 cannot perform physical Ethernet TX.' 'Boot support assets reused from frozen B1; bootargs and load addresses unchanged.' 'No TF IDB/SPL is installed; existing eMMC SPL is required.' | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          dd if=work/b1/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+          UBOOT_SIZE="$(stat -c %s work/b1/output/JP-TvBox-u-boot.itb)"
+          UBOOT_READBACK="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$UBOOT_SIZE" status=none | sha256sum | awk '{print $1}')"
+          test "$UBOOT_READBACK" = "$UBOOT_SHA"
+
+      - name: Read-only verify partition payload and publish hashes
+        run: |
+          set -euo pipefail
+          LOOP="$(sudo losetup --find --show --partscan --read-only work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img)"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          sudo mount -o ro "${LOOP}p1" work/tf-mnt
+          for p in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do test -s "work/tf-mnt/$p"; done
+          test "$(sha256sum work/tf-mnt/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img > work/output/tf-image-sha256.txt
+          zstd -T0 -10 work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img -o work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.zst
+          sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img.zst >> work/output/tf-image-sha256.txt
+          {
+            echo "result=PASS"
+            echo "mode=PREPARE-ONLY; no physical device access or storage writes"
+            echo "r1_build_run_id=$R1_RUN_ID"
+            echo "b1_support_run_id=$B1_RUN_ID"
+            echo "kernel_version=6.18.63"
+            echo "kernel_image_sha256=$R1_IMAGE_SHA"
+            echo "dtb_sha256=$DTB_SHA"
+            echo "uboot_sha256=$UBOOT_SHA"
+            echo "bootargs=unchanged from frozen B1"
+            echo "initramfs=unchanged frozen B1 uInitrd"
+            echo "gmac1/mdio/phy=disabled"
+            echo "tf_layout=2GiB GPT; PANTHER_BOOT partition1; start LBA 32768; end LBA 4192255"
+            echo "final_image_sha256=$(sha256sum work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img | awk '{print $1}')"
+          } | tee work/output/R1-TF-IMAGE-VERIFICATION.txt
+          rm -f work/output/panther-x2-r1-hybrid-PREPARE-ONLY.img
+
+      - name: Upload R1 PREPARE-ONLY TF image and verification evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r1-hybrid-PREPARE-ONLY
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
