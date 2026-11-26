@@ -101,10 +101,7 @@ jobs:
             if grep -Eq "^$key=[ym]$" work/r1/output/kernel.config; then echo "::error::Forbidden R1 option enabled: $key"; exit 1; fi
           done
           file work/probe/af-packet-probe-aarch64 | tee work/probe/file.txt
-          readelf -h work/probe/af-packet-probe-aarch64 > work/probe/elf-header.txt
-          readelf -l work/probe/af-packet-probe-aarch64 > work/probe/elf-program-headers.txt
-          grep -q AArch64 work/probe/elf-header.txt
-          if grep -q INTERP work/probe/elf-program-headers.txt; then echo "::error::Probe unexpectedly requires a dynamic interpreter"; exit 1; fi
+          grep -Eq 'ELF 64-bit LSB executable, ARM aarch64,.*statically linked' work/probe/file.txt
           qemu-aarch64-static work/probe/af-packet-probe-aarch64 --self-test | tee work/probe/self-test-recheck.txt
           grep -qx 'self_test=PASS' work/probe/self-test-recheck.txt
           mkdir -p work/output
