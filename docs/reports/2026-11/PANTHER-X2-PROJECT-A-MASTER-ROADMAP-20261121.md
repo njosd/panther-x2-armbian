@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态：架构收敛完成；最小系统尚未完成实机启动认证
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 静态/构建核验已完成，但黄金基线配置差异与 provider 运行时验证未完成，R2 暂不结项、不放行 R3。
 
 ## 0. 统一项目定义
 
@@ -670,3 +670,35 @@ The corrected R1 runtime probe had confirmed socket creation and bind, but RAW/D
 The probe source now saves the original flags, raises and confirms `lo` UP, and only then binds RAW/RX/DGRAM sockets. The DGRAM bind errno reporting was also corrected. Source commits: `ccdeca7b5e2e2a5ff0068e432a05804a9db9a8c3` and `78f425ebf149e1aae91b0fc9046681c707cfdb7b`.
 
 Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/actions/runs/45750270491) passed the static AArch64 build and QEMU non-network self-test for the bind-order correction. Final-source build run [45750286867](https://github.com/njosd/panther-x2-armbian/actions/runs/45750286867) completed successfully: strict static AArch64 build, ELF/static-link checks and QEMU non-network self-test all passed; artifact ID `15085490793` (ZIP SHA256 `7256cf71be84e6a43660cbd5f387041d212988436cd482d2be8db581acd651f7`). The packaging workflow default probe run ID was updated to this run in commit `2b4b8448b7849dbbf74acba0840bd6e0cdd1919b`; image packaging still requires manual workflow dispatch. The corrected source has not yet been rerun on Panther X2; no new image has been packaged or written. This R1 loopback software probe does not establish physical Ethernet TX/RX. Detailed source audit: [R1 AF_PACKET probe report](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md).
+
+
+## 2026-11-26 全阶段黄金基线与默认配置验收强制规则（新增，优先适用于后续执行）
+
+本节是项目 A 所有 R 阶段的统一验收规则；与旧段落存在状态或表述冲突时，以本节及最新阶段记录为准。
+
+### 黄金基线层级
+
+- **第一黄金基线：原版 Linux 6.1.65。** 用户原始 Armbian 6.1.65 已在 Panther X2 实机验证板载 Ethernet 驱动、RTL8211F、1Gbps Full、DHCP IPv4、网关/外部 IPv4 连通及 DNS 解析成功。它是每阶段功能目标和相关组件差异审计的首要参照。
+- **第二黄金行为参照：Linux 6.1.116。** 用于补充同机历史正常行为及已有配置/源码证据，不取代 6.1.65 第一黄金基线。
+- 6.1.174、6.12.81 等已知异常版本仅作故障对照，不作为功能正确性基准。
+
+### 默认配置优先与最小改动
+
+- 每阶段首先审计当前锁定的 Linux 6.18 源码、最终 `.config`、Kconfig/Makefile 依赖、built-in/module 对象及相关 DT/驱动实现，并与黄金基线中同一功能路径的可证实信息对照。
+- **6.18 默认配置和默认实现是首选起点。** 不要求配置项、组件版本、依赖结构或实现方式与 6.1.65 相同；升级、重构、符号变化均可接受，但必须说明差异及其证据。
+- 不为追求配置一致而机械回移旧配置、旧驱动或历史 workaround。只有当前阶段的功能验证失败，且差异证据指向具体变量时，才允许提出最小、单变量修正。
+- 每次改动前后保留 config/source/object/DTB 差异和功能结果；若 6.18 默认实现通过本阶段功能验收，则保留默认实现，不做无必要改动。
+
+### 每阶段强制放行门
+
+1. **黄金基线对照：** 对本阶段涉及的功能路径，列出 6.1.65、必要时 6.1.116 与当前 6.18 的可核实差异。缺少原始配置/源码证据时明确标为未知，不得推断相同或不同。
+2. **默认配置审计：** 记录 6.18 最终配置、依赖闭包、构建对象和实际采用的实现；不能以 fragment、Kconfig default 或 `select` 代替最终 `.config`。
+3. **实际功能验证：** 使用本阶段安全且边界明确的运行时/功能测试验证默认实现。静态审计、CI 构建、注册/绑定和下游间接证据分别标记，不互相替代。
+4. **差异处置：** 通过则接受 6.18 默认实现；失败则回到黄金基线针对性定位，单次只改变一个变量。无法安全验证的项目标记 BLOCKED，并记录最早可验证阶段。
+5. **归档与放行：** 黄金基线对照、默认配置审计、本阶段功能证据、限制和回退点均归档后，才可 PASS 并进入下一阶段。存在未解决的本阶段必需功能缺口时，不放行。
+
+### 当前执行状态（2026-11-26）
+
+- R1 AF_PACKET 软件 API 与 loopback outgoing 观察已实机通过；不证明物理 Ethernet TX/RX。
+- R2 的静态依赖与构建证据已完成；此前报告将其写成完整 PASS 属于过早结项，现更正为：**黄金基线配置差异审计及 R1 镜像上的 provider 运行时注册/功能验证待完成；R2 未结项，不放行 R3。**
+- R2 期间继续保持 GMAC1/MDIO1/RTL8211F DT 节点关闭；不启用硬件路径、不发送网络帧、不重打包。先完成只读运行时检查及黄金基线证据核对。
