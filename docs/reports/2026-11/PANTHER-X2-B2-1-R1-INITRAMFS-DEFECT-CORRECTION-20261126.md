@@ -81,3 +81,26 @@ The workflow change is committed as `4efd7c7e56abfbc43a8309b4d797cd4cc5c40891`. 
 The observed boot used the user-authorized SU08G TF card. SN64G and eMMC remain outside the write scope. The boot log does not establish that Linux accessed persistent storage; no storage write is reported. This record does not authorize further storage writes or eMMC changes.
 
 Source: user-provided UART boot log, full 1,567-line record reviewed in this conversation.
+
+
+## CI repackaging result — 2026-11-26
+
+Workflow run: `45739520034`; job: `139640803045` (`package-r1`); checked-out source revision: `f6a98bb2bf48a36e2b4598b2ce815ce2516855bc`.
+
+**Result: SUCCESS.** All 11 substantive job steps completed successfully. The log explicitly confirms:
+- BusyBox `--list` contains `printf`;
+- the packaging loop creates the `printf` applet link;
+- the extracted initramfs validation passes `readlink .../bin/printf = busybox`;
+- the final image payload is read back and checked, the compressed image passes `gzip -t`, and decompression reproduces the raw image SHA256.
+
+Published artifact:
+- Name: `panther-x2-r1-hybrid-PREPARE-ONLY`
+- Artifact ID: `15079994261`
+- ZIP size: `26,716,923` bytes
+- ZIP SHA256: `9b0f4d4310dad56b866934b0b46832079ae6e6a02073d376351ae8fab3d7852b`
+- Raw image SHA256: `e6744be80273f1cb0a6a40b4d6ed46e82361751a359305d538d7578b1892ec44`
+- Artifact expiry: 2026-12-26
+
+This closes the source-level applet correction and CI packaging verification. **It does not prove runtime execution of `/init` after the fix.** A second target-hardware boot is still pending. R1 remains PREPARE-ONLY; GMAC1/MDIO/PHY are disabled, so Ethernet TX/RX remains outside this test.
+
+Source: GitHub Actions run 45739520034, job 139640803045 and its uploaded artifact metadata.
