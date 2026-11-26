@@ -34,7 +34,7 @@ G0 完成前不激活 RK809 MFD/regulator，不恢复 GMAC/MDIO/PHY，不做硬�
 - **G0.2 PMIC 副作用：已完成静态审计，stock MFD/regulator NO-GO。** MFD probe 会执行 IRQ mask/条件 ACK、整组 RK817 pre-init 并创建全部子设备；regulator probe 注册全部 rail，约束处理及约 30 秒 late cleanup 可能写 PMIC/关闭未使用 rail。当前允许写入白名单为空；不得启用 stock driver。详见 G0.2 报告。
 - **G0.3 IO-domain：静态拓扑/写入路径已完成，运行时最终 bind 状态 UNKNOWN。** 已确认 GMAC1 M0→GPIO3→VCCIO5；vccio5-supply 与 GMAC1 phy-supply 均指向 vcc_3v3/SWITCH_REG1；VCCIO5 selector 会写 PMU GRF 0x140/0x144。实际 rail 电压/selector readback 未验证，不放行 consumer probe。
 - **G0.4 clock/reset/PHY：静态审计完成，物理来源/波形 UNKNOWN。** CRU clock IDs/mux/gate、SRST_A_GMAC1 ID236、GPIO3_PA1 active-low、RGMII delay/mode 已复用 R6 证据确认；RTL8211F CLKOUT pin35 仅为 125MHz 候选，DTS fixed-clock 不证明实际波形。
-- **G0.5 ABCD 夹具**：审查 AF_PACKET 发送器、6.18 tracepoint/ftrace/kprobe 可观测性、同帧 sequence/hash 关联和外部抓包方案；只准备，不向目标网口发送。
+- **G0.5 ABCD 夹具：静态设计完成。** R1 loopback probe 仅作为软件 API 回归，不可充当目标 TX sender；新建独立 sender 规格，固定 0x88B5/ABCD/run_id/sequence/digest 帧格式，复用 R1 tracepoint/kprobe/DMA trace 能力和外部 pcap。运行时 tracefs/kprobe 可用性仍待后续授权阶段验证。
 
 G0 放行条件：依赖矩阵和关键副作用已说明；必需 provider 缺口及 deferred-probe 原因可追溯；未解决项明确列 BLOCKED；ABCD 发送器/观测点/对端抓包方案可执行；无未审查的自动硬件副作用。G0 通过仅允许提交 G1 单独操作计划，不自动授权设备操作。
 
@@ -75,7 +75,8 @@ G0 放行条件：依赖矩阵和关键副作用已说明；必需 provider 缺�
 - [x] G0.2 stock RK809 MFD/regulator 副作用审计；当前决策为 NO-GO，允许写入白名单为空。
 - [x] G0.3 IO-domain 静态 supplier/deferred-probe 路径、GMAC1 VCCIO5 mapping 与 GRF 写入行为已归档；运行时最终 bind 状态仍 UNKNOWN。
 - [x] G0.4 clock/reset/PHY 静态依赖及 125MHz 候选来源审计完成；物理连线/波形和 reset 电气行为未验证。
-- [ ] G0.5 ABCD 发送器与观测夹具审查（当前唯一下一项）。
+- [x] G0.5 ABCD sender 规格、tracepoint/kprobe/DMA mapping 观测链和对端 pcap 夹具审查完成（静态设计）。
+- [ ] G0 总体准入复核与 regulator provider 安全替代路径决策。
 - [ ] G0.4 PHY 125MHz 物理时钟与硬件资源测量方案。
 - [ ] G0.5 ABCD 发送器与观测夹具审查。
 - [ ] G0 总体准入评审。
