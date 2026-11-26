@@ -295,3 +295,14 @@ Relevant commits:
 - **BLOCKED:** RK809 MFD/regmap and regulator-provider functional validation; no driver enablement is authorized.
 
 R3 remains HOLD/BLOCKED. Do not proceed to R4 on the basis of adapter registration, source submission, or a successful userspace self-test alone.
+
+
+### 13.4 Identity comparison correction
+
+The probe source was refined after reviewing the Linux RK809 masked ID definition. It now reports two distinct comparisons:
+- exact datasheet default byte match (`0xED=0x80`, `0xEE=0x92`);
+- Linux RK809 identity match (`0xED=0x80` and high nibble of `0xEE` equals `0x9`), consistent with the kernel's masked silicon ID semantics.
+
+This avoids treating the datasheet's default revision byte as the only acceptable identity result. Source update commit: `df6fca415f34e310d97ea15b62f4270be0beeff7`.
+
+The source change also triggers the existing build workflow via its configured push path filter. No completed Actions run or downloadable artifact has been retrieved in this session, so build and QEMU self-test remain unverified.
