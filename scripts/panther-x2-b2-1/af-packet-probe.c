@@ -153,29 +153,33 @@ int main(int argc, char **argv)
         puts("send_dgram_rc=SKIPPED_BIND_FAILED");
     }
 
-    pfd.fd = rxfd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-    rc = poll(&pfd, 1, 500);
-    saved_errno = rc < 0 ? errno : 0;
-    result("poll_rx", rc, saved_errno);
-    if (rc > 0 && (pfd.revents & POLLIN)) {
-        struct sockaddr_ll from;
-        socklen_t fromlen = sizeof(from);
-        ssize_t n = recvfrom(rxfd, rxbuf, sizeof(rxbuf), MSG_DONTWAIT,
-                             (struct sockaddr *)&from, &fromlen);
-        saved_errno = n < 0 ? errno : 0;
-        result("recv_rx", n, saved_errno);
-        if (n > 0) {
-            printf("recv_packet_type=%u\n", from.sll_pkttype);
-            printf("recv_protocol=0x%04x\n", ntohs(from.sll_protocol));
-            printf("recv_prefix_hex=");
-            for (ssize_t i = 0; i < n && i < 32; i++)
-                printf("%02x", rxbuf[i]);
-            putchar('\n');
+    if (bind_rx_rc == 0) {
+        pfd.fd = rxfd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        rc = poll(&pfd, 1, 500);
+        saved_errno = rc < 0 ? errno : 0;
+        result("poll_rx", rc, saved_errno);
+        if (rc > 0 && (pfd.revents & POLLIN)) {
+            struct sockaddr_ll from;
+            socklen_t fromlen = sizeof(from);
+            ssize_t n = recvfrom(rxfd, rxbuf, sizeof(rxbuf), MSG_DONTWAIT,
+                                 (struct sockaddr *)&from, &fromlen);
+            saved_errno = n < 0 ? errno : 0;
+            result("recv_rx", n, saved_errno);
+            if (n > 0) {
+                printf("recv_packet_type=%u\n", from.sll_pkttype);
+                printf("recv_protocol=0x%04x\n", ntohs(from.sll_protocol));
+                printf("recv_prefix_hex=");
+                for (ssize_t i = 0; i < n && i < 32; i++)
+                    printf("%02x", rxbuf[i]);
+                putchar('\n');
+            }
+        } else {
+            puts("recv_rx_rc=NO_PACKET_WITHIN_500MS");
         }
     } else {
-        puts("recv_rx_rc=NO_PACKET_WITHIN_500MS");
+        puts("poll_rx_rc=SKIPPED_BIND_FAILED");
     }
 
 out:
