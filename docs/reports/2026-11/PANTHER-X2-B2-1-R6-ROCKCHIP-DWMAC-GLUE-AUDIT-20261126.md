@@ -296,3 +296,78 @@ R6-3 GMAC1 DTB 核心属性语义对照：PASS（已有黄金原始解析证据 
 仍不能仅凭 TRM reset value 证明当前运行时寄存器值；bootloader 或此前软件可能在 Linux probe 前修改 GRF。首次授权硬件 probe 时，应记录 Linux 接管前后/初始化后的寄存器值（如采用安全的只读观测点），但不得为了确认而先启用驱动或写寄存器。
 
 **bit7 语义与 reset default：PASS（官方 TRM 静态证据）。** R6-2 的 bit7 未决项关闭。
+
+## 8. R6-4：R7-A 首次硬件准入清单与解除边界规则（2026-11-26）
+
+### 8.1 R7-A 不是单纯把 status 改为 okay
+
+恢复 Panther GMAC1/MDIO/PHY DTB 节点并让 platform driver probe，会触发实际硬件动作。依据 6.18.63 Rockchip glue：
+1. rk_gmac_probe() 读取资源、解析 DT、创建 regulator/clock/reset 资源句柄并配置 STMMAC platform callbacks；
+2. rk_gmac_clk_init() 获取 bulk clocks；Panther clock_in_out=input，不走 RMII 50MHz clock rate 分支；
+3. STMMAC platform init 进入 rk_gmac_powerup()；
+4. gmac_clk_enable(true) 使能 bulk clocks、PHY clock handle（如适用），配置 clock selection 并等待 5ms；
+5. generic interface-selection 路径写 GRF；
+6. RK3568 RGMII 路径写 CON0 delay、CON1 mode/delay-enable；
+7. rk_phy_powerup() 对 phy-supply 调用 regulator enable；
+8. runtime PM get；随后 STMMAC core 继续 MAC/DMA 初始化。
+
+这会启用时钟、写 GRF、使能 regulator，并可能触发后续 PHY reset/MDIO 活动。它不是“只观察 probe 是否成功”的无副作用操作。
+
+### 8.2 依赖闭包与当前状态
+
+| 依赖 | R7-A 必须满足的条件 | 当前状态 |
+|---|---|---|
+| Kernel/STMMAC/DWMAC4/Rockchip glue | R1–R6 对应对象、Kconfig、源码闭包固定 | R5 static PASS；R6 static PASS/CONDITIONAL |
+| GMAC1/MDIO/PHY DTB | compatible/reg/IRQ/clock/reset/GRF/phandle 正确；GMAC1、MDIO、PHY 节点状态按单一变量恢复 | 当前 R1 仍 disabled；6.18 DTB 属性已核验 |
+| GRF | CON0/CON1 offset、write-mask、RGMII bit4:6、bit7、delay field 确认 | TRM 静态 PASS；运行时值未知 |
+| CRU clock | IDs、mux parents、gate、rate path 正确；外部 input clock 真实存在 | DTS/CRU 静态 PASS；真实波形未测 |
+| CRU reset | SRST_A_GMAC1 ID 236 映射正确 | 静态 PASS；实际 reset 未执行 |
+| Pinctrl/GPIO | GMAC1 M0 pin groups 与 GPIO3_PA1 reset line 的 pinmux/方向/极性正确 | Golden/DTB 静态 PASS；R2 GPIO/pinctrl provider runtime PASS；GMAC pinmux 尚未应用 |
+| RK809 I2C/MFD/regulator | provider 可注册，vcc_3v3 consumer mapping/constraints 正确，probe 写入副作用已审查 | I2C0 与 RK809 ID/RO status 已验证；MFD/regulator provider runtime 未启用 |
+| PHY supply | vcc_3v3 实际 enable 成功，输出满足 RTL8211F 供电要求 | 未验证；0xF0/0xF6 不是电压遥测 |
+| PHY reset | GPIO3_PA1 active-low 与 reset timing 可靠 | DTB 静态 PASS；实机时序未验证 |
+| External 125MHz clock | gmac1_clkin 物理来源与频率确认，且 PHY 与 SoC 输入方向一致 | DTS 声明 125MHz input；物理波形/来源未测 |
+| PHY/MDIO | RTL8211F address 0、MDIO transaction、ID/attach、link negotiation | 6.1.65/6.1.116 golden runtime PASS；6.18 当前未启用 |
+| TX witness | 独立对端抓包、测试帧夹具、MAC 对端链路固定 | 既有计划已定义；本轮未执行 |
+
+### 8.3 解除边界的分层规则
+
+**Gate 0 — 当前隔离（现状）**
+- GMAC1、MDIO1、PHY 仍 disabled；
+- 不加载 DWMAC/Rockchip glue；
+- 不启用 RK809 MFD/regulator provider；
+- 不读写 GRF/CRU/GMAC/PHY 寄存器；
+- 不发出测试帧。
+
+**Gate 1 — 静态放行准备（R6 收尾）**
+- R5、R6 源码/Kconfig/DTB 依赖闭包归档；
+- RK3568 TRM 字段、clock/reset 映射、黄金基线参数明确；
+- R3 provider probe 的每项写入/约束副作用已有可审计清单；
+- 6.1.65 黄金 DTB 核心 GMAC 属性解析与 6.18 DTB 对照闭合；如要完整全 DTB diff，只使用现存 04-device-tree 阶段包，不重提取原始镜像；
+- 构建产物、DTB、bootargs、initramfs、SU08G 介质哈希冻结。
+
+Gate 1 完成仅允许准备一次独立的实机授权申请，不自动允许驱动 probe。
+
+**Gate 2 — PMIC/provider 单独验证（独立授权）**
+- 先在 GMAC/MDIO/PHY 仍 disabled 的 DTB 下，单独考虑启用 RK809 MFD/regulator 最小闭包；
+- 执行前必须完成 MFD pre-init、IRQ、regulator constraints、unused-regulator cleanup、poweroff/restart/suspend/resume 的完整写入副作用审计；
+- 需要验证 vcc_3v3 时，应有独立电气测量/安全测量方案；I2C RO 状态寄存器不能代替电压测量；
+- 此阶段不绑定 GMAC、不扫描 MDIO、不执行 PHY reset。
+
+**Gate 3 — 首次 GMAC platform probe（独立授权）**
+- 只有 Gate 2 provider/rail 与外部 clock 条件已验证，才恢复最小 GMAC1/MDIO/PHY 节点闭包；
+- 首次启动只观察 probe、clock/reset、PHY attach/link；不配置 IP，不运行 DHCP/ARP/ICMP；
+- 任何 regulator/clock/reset 失败立即停止，不通过忽略错误、强制寄存器写或回移旧版代码绕过。
+
+**Gate 4 — TX-first 真实帧（独立授权）**
+- 固定 Kernel/config/initramfs/DTB/bootargs，只使用专用 SU08G；
+- 对端抓包夹具先用已知正常设备验证；
+- Panther 不配置 IPv4，使用固定 EtherType 0x88B5 广播帧；
+- 对端逐帧确认所有序列号与 payload；counter、completion 和抓包交叉核验；
+- 只有真实对端捕获通过才判 TX-PASS，之后才允许进入 RX 与上层协议。
+
+### 8.4 当前 R7-A 结论
+
+**当前不具备 Gate 2/3/4 的自动放行条件。** 缺少的关键不是 STMMAC 源码，而是 RK809 MFD/regulator 的受控运行时验证、vcc_3v3 电气验证、外部 125MHz clock 实际波形验证，以及首次硬件操作的单独授权。
+
+R6 当前可以形成的结论是：驱动/DTS/GRF/CRU 的静态设计参数已基本明确；解除边界必须从 provider/供电/时钟开始分层，而不是直接把 GMAC1 status 改为 okay。
