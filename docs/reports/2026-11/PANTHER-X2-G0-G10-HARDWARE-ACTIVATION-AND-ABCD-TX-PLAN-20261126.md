@@ -82,9 +82,9 @@ G0 放行条件：完成黄金基线真实配置/对象/DTB/启动行为恢复�
 - [x] G0.5 ABCD sender 规格、tracepoint/kprobe/DMA mapping 观测链和对端 pcap 夹具审查完成（静态设计）。
 - [x] G0.6 fixed-regulator 替代路径静态可行性研究归档为备选，不进入当前执行路线。
 - [x] G0.7 公开板级资料检索归档为背景，不作为准入条件。
-- [ ] G0-P1：恢复 6.1.65 / 6.1.116 的最终配置、built-in/module 对象、DTB 与启动日志。
-- [ ] G0-P2：反向追踪两套黄金系统的 RK809/MFD/regulator/IO-domain 驱动源码与初始化行为。
-- [ ] G0-P3：逐项对照 6.18.63 默认实现，形成差异与风险矩阵。
-- [ ] G0-P4：仅根据明确的软件差异决定最小补证与最小适配。
+- [x] G0-P1：6.1.65 最终 config/built-in 已归档；6.1.116 真实 config 7,677 项已提取且与官方模板零差异；实机启动/IRQ/GMAC/PHY 日志已归档。黄金 DTB binary 仍待补齐。
+- [x] G0-P2：6.1.65/6.1.116 RK809 MFD、regulator、IO-domain、GMAC glue 源码共性已逐文件核验；关键文件完全相同，详见 G0 Golden Source Commonality 报告。
+- [x] G0-P3：黄金与 6.18.63 的 RK809 IRQ/pre-init/SWITCH_REG1 descriptor、regulator late cleanup、PHY-supply consumer 路径已在 R3 §21–§26 对照；保留已知差异及证据边界。
+- [ ] G0-P4：提取 6.1.65/6.1.116 原始 DTB，与 6.18.63 R1 DTB 做 RK809/regulator/IO-domain/GMAC supply 子树结构化 diff；不重提大镜像。
 - [ ] G0 总体准入评审；不以 3.3V rail 测量或 PCB testpoint 资料作为前置条件。
 - G0 未完成前不启动下一硬件门。
