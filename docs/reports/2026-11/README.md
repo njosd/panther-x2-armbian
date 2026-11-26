@@ -51,6 +51,7 @@
 - [B2-1：实施计划与执行归档基准（2026-11-25）](./PANTHER-X2-B2-1-IMPLEMENTATION-PLAN-20261125.md)：将 B2-0 决策转化为可审计实施步骤；2026-11-25 修订为 TX-first：最小 Ethernet/AF_PACKET 发送路径先发自定义 EtherType 广播帧，由局域网对端逐帧确认；TX-PASS 后才逐项引入 RX、ARP、IPv4、ICMP、路由、TCP/UDP、DHCP/DNS。首轮不启用 INET/IPv4；本文件仅为计划，不授权设备访问、构建、写卡或实测。
 
 - [B2-1 / R0：基线资产与 TX 前置核查（2026-11-25）](./PANTHER-X2-B2-1-R0-BASELINE-PREFLIGHT-20261125.md)：追溯 B1 Actions Kernel/DTB artifact、复用关系、分支文件差异和实机验收边界；R0 尚未通过，不放行网络组件引入。
+- [B2-1 / R2：共享 SoC provider 配置与构建核验（2026-11-26）](./PANTHER-X2-B2-1-R2-SHARED-SOC-PROVIDER-AUDIT-20261126.md)：以 B1/R1 实际构建 artifact 的最终 .config、modules.builtin、System.map 和 6.18.63 精确源码核验 MFD_SYSCON、GPIO_ROCKCHIP 及其依赖；两项 provider 已由 B1 提供并在 R1 保留，R2 按零增量复用通过，不重复打开配置、不重建、不访问设备。
 
 - [B2-1：Linux 6.18.63 TX 追踪观测能力审计（2026-11-25）](./PANTHER-X2-B2-1-TX-TRACE-OBSERVABILITY-AUDIT-20261125.md)：直接核对 R1 实际 artifact 的 tracepoint/kprobe/tracefs/DWARF 配置、System.map 符号与 Linux 6.18.63 网络/DMA/STMMAC/DWMAC4 源码；确认 net_dev_*、dma_map_phys/unmap_phys、skb 生命周期事件可用，kprobe 可补读 skb payload 与 descriptor OWN/status，STMMAC debugfs 可只读快照 descriptor ring。明确 tracefs 挂载、目标 kprobe 注册、同构建结构偏移和硬件 TX 均未验证；未访问设备或改变 tracing 状态。
 
