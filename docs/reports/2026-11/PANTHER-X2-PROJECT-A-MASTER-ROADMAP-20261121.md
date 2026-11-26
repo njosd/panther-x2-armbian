@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094` 与状态寄存器 `0xF0=0xC2`、`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）。R5 STMMAC/DWMAC4 静态审计 COMPLETE（CONDITIONAL）：Kconfig/Makefile、open/stop 与 DMA reset/init、descriptor/ring-chain/DMA coherency、TX submit/doorbell/completion、IRQ/NAPI 状态 decode 与调度均已对照 6.1.65 黄金基线归档。6.18 保留普通 RI/TI/TBU、TPS/FBE、W1C ack 和 NAPI 核心流程；新增差异已列明。上述不等于 Panther 实际 DMA/PHY/物理 TX 已验证。下一步进入 R6：Rockchip DWMAC glue、Panther DTS、clock/reset/GRF/PHY 参数和原始 DTB 二进制对照；GMAC/MDIO/PHY 节点继续 disabled，R6 结束后另行审查解除边界条件。
+- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094` 与状态寄存器 `0xF0=0xC2`、`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）。R5 STMMAC/DWMAC4 静态审计 COMPLETE（CONDITIONAL）：Kconfig/Makefile、open/stop 与 DMA reset/init、descriptor/ring-chain/DMA coherency、TX submit/doorbell/completion、IRQ/NAPI 状态 decode 与调度均已对照 6.1.65 黄金基线归档。6.18 保留普通 RI/TI/TBU、TPS/FBE、W1C ack 和 NAPI 核心流程；新增差异已列明。上述不等于 Panther 实际 DMA/PHY/物理 TX 已验证。R6 已启动。R6-1 静态对照发现 6.18 RK3568 glue 将 interface selection 移入通用 ops/mask 写入路径，RGMII 初始化增加 bit7 mode 明确设置；probe/powerup 生命周期也改为 platform init/exit 回调。PHY regulator enable、clock enable/rate 和 GRF 写入均有真实硬件副作用。下一步 R6-2 核验 RK3568 GRF/CRU clock/reset 定义，再进行原始 DTB 二进制属性对照。GMAC/MDIO/PHY 节点继续 disabled，R6 结束后另行审查解除边界条件。
 
 ## 0. 统一项目定义
 
