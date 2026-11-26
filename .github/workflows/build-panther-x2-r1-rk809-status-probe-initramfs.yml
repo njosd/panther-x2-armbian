@@ -1,0 +1,164 @@
+name: Panther X2 R1 RK809 R3.7 status probe initramfs (build only)
+
+on:
+  push:
+    paths:
+      - "scripts/panther-x2-b2-1/rk809-status-ro-probe.c"
+      - "scripts/panther-x2-r1/init-rk809-status-probe"
+      - ".github/workflows/build-panther-x2-r1-rk809-status-probe-initramfs.yml"
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: Frozen successful R1 kernel artifact run
+        required: true
+        type: string
+        default: "45611898629"
+      b1_run_id:
+        description: Frozen B1 BusyBox and boot-support artifact run
+        required: true
+        type: string
+        default: "45328201244"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-r1-rk809-status-probe-initramfs
+  cancel-in-progress: false
+
+jobs:
+  build-status-probe-initramfs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      R1_RUN_ID: ${{ inputs.r1_run_id || '45611898629' }}
+      B1_RUN_ID: ${{ inputs.b1_run_id || '45328201244' }}
+      R1_IMAGE_SHA: "63cbb8bbb012186d568cdbd149d09571c75a43a403969885a696cb36361781f1"
+      DTB_SHA: "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+      R1_CONFIG_SHA: "480645537537abdadc9e2e07f404b85c1bc9411232df04ecb284c5270d2af23a"
+      B1_BUSYBOX_SHA: "2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install isolated AArch64 build and initramfs tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            binutils-aarch64-linux-gnu qemu-user-static binutils cpio file gzip u-boot-tools
+
+      - name: Download frozen R1 and B1 artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.R1_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.B1_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen inputs and compile fixed-scope probe
+        run: |
+          set -euo pipefail
+          test -s work/r1/output/Image
+          test -s work/r1/output/kernel.config
+          test -s work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s work/b1/output/busybox
+          test -s work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test "$(sha256sum work/r1/output/Image | awk '{print $1}')" = "$R1_IMAGE_SHA"
+          test "$(sha256sum work/r1/output/kernel.config | awk '{print $1}')" = "$R1_CONFIG_SHA"
+          test "$(sha256sum work/r1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$DTB_SHA"
+          test "$(sha256sum work/b1/output/busybox | awk '{print $1}')" = "$B1_BUSYBOX_SHA"
+          mkdir -p work/output
+          SRC=scripts/panther-x2-b2-1/rk809-status-ro-probe.c
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror \
+            -D_FORTIFY_SOURCE=2 "$SRC" -o work/output/rk809-status-ro-probe-aarch64
+          file work/output/rk809-status-ro-probe-aarch64 | tee work/output/elf-file.txt
+          aarch64-linux-gnu-readelf -h work/output/rk809-status-ro-probe-aarch64 > work/output/elf-header.txt
+          aarch64-linux-gnu-readelf -l work/output/rk809-status-ro-probe-aarch64 > work/output/elf-program-headers.txt
+          grep -q 'AArch64' work/output/elf-header.txt
+          if grep -q 'INTERP' work/output/elf-program-headers.txt; then
+            echo "::error::Probe must be static and have no PT_INTERP"
+            exit 1
+          fi
+          qemu-aarch64-static work/output/rk809-status-ro-probe-aarch64 --self-test | tee work/output/self-test.txt
+          grep -qx 'scope=RK809_STATUS_REGISTERS_0xF0_0xF6_ONLY' work/output/self-test.txt
+          grep -qx 'self_test=PASS' work/output/self-test.txt
+          cp "$SRC" work/output/
+          sha256sum work/output/rk809-status-ro-probe-aarch64 work/output/rk809-status-ro-probe.c > work/output/probe-SHA256SUMS
+
+      - name: Assemble manual-only RAM initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/status-probe-initramfs
+          mkdir -p "$ROOT"/{bin,dev,proc,sys,tmp}
+          install -m 0755 work/b1/output/busybox "$ROOT/bin/busybox"
+          for applet in ash sh mount mkdir cat uname printf; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 work/output/rk809-status-ro-probe-aarch64 "$ROOT/bin/rk809-status-ro-probe-aarch64"
+          install -m 0755 scripts/panther-x2-r1/init-rk809-status-probe "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          if grep -Eq '^[[:space:]]*/bin/rk809-status-ro-probe-aarch64([[:space:]]|$)' "$ROOT/init"; then
+            echo "::error::Probe must not execute automatically"
+            exit 1
+          fi
+          (cd "$ROOT" && find . -print0 | sort -z | cpio --null -o --format=newc) | gzip -n -9 > work/output/rk809-status-probe-initramfs.cpio.gz
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 R1 RK809 R3.7 RO status probe shell" -d work/output/rk809-status-probe-initramfs.cpio.gz work/output/uInitrd
+          mkimage -l work/output/uInitrd | tee work/output/uinitrd-header.txt
+
+      - name: Round-trip verify exact payload and publish evidence
+        run: |
+          set -euo pipefail
+          mkdir -p work/verify
+          gzip -dc work/output/rk809-status-probe-initramfs.cpio.gz | (cd work/verify && cpio -idm --quiet)
+          cmp scripts/panther-x2-r1/init-rk809-status-probe work/verify/init
+          cmp work/output/rk809-status-ro-probe-aarch64 work/verify/bin/rk809-status-ro-probe-aarch64
+          test -x work/verify/init
+          test -x work/verify/bin/rk809-status-ro-probe-aarch64
+          test "$(readlink work/verify/bin/ash)" = busybox
+          test "$(readlink work/verify/bin/printf)" = busybox
+          test -d work/verify/dev
+          test -d work/verify/tmp
+          if grep -Eq '^[[:space:]]*/bin/rk809-status-ro-probe-aarch64([[:space:]]|$)' work/verify/init; then
+            echo "::error::Automatic probe execution detected"
+            exit 1
+          fi
+          sha256sum work/output/uInitrd work/output/rk809-status-probe-initramfs.cpio.gz \
+            work/output/rk809-status-ro-probe-aarch64 work/output/rk809-status-ro-probe.c \
+            work/verify/init | tee work/output/SHA256SUMS
+          {
+            echo "result=PASS"
+            echo "mode=BUILD_ONLY; no TF image assembled; no physical device or storage accessed"
+            echo "r1_run_id=$R1_RUN_ID"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "kernel_image_sha256=$R1_IMAGE_SHA"
+            echo "panther_dtb_sha256=$DTB_SHA"
+            echo "kernel_config_sha256=$R1_CONFIG_SHA"
+            echo "busybox_sha256=$B1_BUSYBOX_SHA"
+            echo "probe_scope=I2C0_ADDRESS_0x20_REGISTERS_0xF0_AND_0xF6_ONLY"
+            echo "probe_self_test=PASS"
+            echo "auto_probe_execution=DISABLED"
+            echo "initramfs_root=RAM_ONLY"
+            echo "persistent_storage_mounts=NONE"
+            echo "kernel_config_dtb_uboot_bootargs=UNCHANGED"
+            echo "rk8xx_mfd_regulator_drivers=NOT_ADDED"
+          } | tee work/output/RK809-R3.7-STATUS-PROBE-VERIFICATION.txt
+
+      - name: Publish verified status-probe initramfs
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r1-rk809-r3-7-status-probe-initramfs-only
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
