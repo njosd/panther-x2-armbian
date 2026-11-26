@@ -91,7 +91,7 @@ jobs:
           done
           install -m 0755 scripts/panther-x2-r1/init "$ROOT/init"
           qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
-          if grep -Eq '(^|[[:space:]])(\\[|test)([[:space:]]|$)' "$ROOT/init"; then
+          if grep -Fq '[' "$ROOT/init" || grep -Eq '(^|[[:space:]])test([[:space:]]|$)' "$ROOT/init"; then
             echo "::error::R1 /init must not depend on the absent BusyBox test/[ applet"
             exit 1
           fi
