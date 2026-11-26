@@ -782,3 +782,12 @@ G0.1–G0.5 子项报告已齐备；下一步不是启动设备，而是进行 G
 现有证据已确认：6.1.65 Golden `MFD_RK808=y`、`REGULATOR_RK808=y`，built-in 包含 `rk808`、`rk808-regulator`；6.1.116 实机启动日志确认 GMAC1/RTL8211F 成功并达到 1Gbps Full，设备上曾存在 `config-6.1.116-ophub` 与 `System.map-6.1.116-ophub`，但其配置内容尚需从原始归档恢复；6.18.63 R1 未构建 RK8xx MFD 与 RK809 regulator 对象。故当前优先补齐 6.1.116 配置证据并反向审计黄金 RK809 驱动，而不是设计 fixed-regulator 替代方案。
 
 G0.2 原先“stock MFD/regulator NO-GO”修订为 **HOLD / awaiting golden comparison**：6.18 probe 有 PMIC 写入路径是事实，但尚未比较黄金版本的相同初始化行为；不能仅凭存在写操作就判定不安全。仍维持未经授权不启用驱动的操作约束。G0.6 fixed-regulator 仅保留备选；G0.7 PCB/testpoint 搜索降级为背景资料，不再阻塞 G0。没有安排电压测量或要求用户提供原理图。
+
+
+### 2026-11-27 Golden reverse audit 证据复用更新
+
+进一步回读仓库发现，6.1.116 的真实 `kernel.config` 并非缺失：它已从归档提取，7,677 个符号与对应 Ophub `config-6.1` 模板零差异。6.1.65 的原始 config 与 `modules.builtin` 也已归档，包含 `MFD_RK808=y`、`REGULATOR_RK808=y` 及 rk808/rk808-regulator built-in 对象。
+
+新增逐文件源码比较报告 `PANTHER-X2-G0-GOLDEN-65-116-PMIC-PHY-SOURCE-COMMONALITY-20261127.md`：6.1.65 高置信度候选与 6.1.116 锁定源码的 `drivers/mfd/rk808.c`、`drivers/regulator/rk808-regulator.c`、`drivers/soc/rockchip/io-domain.c`、`dwmac-rk.c` 和 Panther board DTS 完全相同；regulator core 的 `set_machine_constraints`、`regulator_late_cleanup`、late-cleanup work/init 函数也逐字节相同。两条黄金基准在这条软件链上可共享同一行为模型。
+
+因此，前一段“6.1.116 配置内容尚需从原始归档恢复”的表述已被修正为已完成；不再重复配置提取。当前只剩黄金 DTB binary 证据补齐：从已归档的 6.1.65/6.1.116 DTB 包提取原始 DTB，与 6.18.63 R1 DTB 对 PMIC/regulator/IO-domain/GMAC supply 子树做结构化 diff。无须重新提取完整镜像，不访问黄金介质，也不测量 3.3V。
