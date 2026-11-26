@@ -661,3 +661,12 @@ The probe source was corrected in commit 0e6c590cdc27ddd43d819c4d11e4163fad26213
 Detailed test and artifact record: [PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md).
 
 **Current boundary:** corrected image is PREPARE-ONLY and has not been written or booted. Previous authorization for the earlier image does not authorize replacing it. A new write requires explicit confirmation and is limited to SU08G; SN64G and eMMC remain excluded. R1 AF_PACKET send/receive acceptance remains pending the corrected target-runtime retest. Physical Ethernet TX remains unavailable in R1 and is still first tested at R7.
+
+
+### 2026-11-26 R1 AF_PACKET probe root cause and source correction
+
+The corrected R1 runtime probe had confirmed socket creation and bind, but RAW/DGRAM sends returned `ENETDOWN` and RX poll reported `POLLERR`, despite `lo` subsequently showing `IFF_UP`. A read-only audit against upstream Linux v6.18 `net/packet/af_packet.c` identified the probe-order defect: it bound packet sockets while `lo` was DOWN. `packet_do_bind()` records `sk_err=ENETDOWN`; the later `NETDEV_UP` notifier re-registers the hook but does not clear that error.
+
+The probe source now saves the original flags, raises and confirms `lo` UP, and only then binds RAW/RX/DGRAM sockets. The DGRAM bind errno reporting was also corrected. Source commits: `ccdeca7b5e2e2a5ff0068e432a05804a9db9a8c3` and `78f425ebf149e1aae91b0fc9046681c707cfdb7b`.
+
+Build-only CI run [45750270491](https://github.com/njosd/panther-x2-armbian/actions/runs/45750270491) passed the static AArch64 build and QEMU non-network self-test for the bind-order correction. Final-source build run [45750286867](https://github.com/njosd/panther-x2-armbian/actions/runs/45750286867) was still running at this update. The corrected source has not yet been rerun on Panther X2; no new image has been packaged or written. This R1 loopback software probe does not establish physical Ethernet TX/RX. Detailed source audit: [R1 AF_PACKET probe report](PANTHER-X2-B2-1-R1-AF-PACKET-SOFTWARE-PROBE-PLAN-20261126.md).
