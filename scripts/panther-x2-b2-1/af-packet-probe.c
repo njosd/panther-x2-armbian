@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
+#include <sys/ioctl.h>
 #include <net/if.h>
 #include <poll.h>
 #include <stdio.h>
@@ -49,6 +50,8 @@ int main(int argc, char **argv)
         'P', 'X', '2', '-', 'R', '1', '!', '!'
     };
     int rawfd = -1, rxfd = -1, dgramfd = -1;
+    int control_fd = -1, link_flags_saved = 0, link_flags_changed = 0;
+    struct ifreq ifr;
     int ifindex = 0;
     int rc, saved_errno;
     int bind_raw_rc = -2, bind_rx_rc = -2, bind_dgram_rc = -2;
@@ -142,6 +145,45 @@ int main(int argc, char **argv)
         puts("bind_dgram_rc=SKIPPED_SOCKET_CREATE_FAILED");
     }
 
+    /*
+     * Bring only the selected test interface up for this process's bounded
+     * loopback test. Use an AF_PACKET socket for generic interface-flag
+     * ioctls; do not require AF_INET or an IP control socket. Restore the
+     * original UP state before exit.
+     */
+    control_fd = rawfd >= 0 ? rawfd : (dgramfd >= 0 ? dgramfd : rxfd);
+    if (control_fd >= 0) {
+        memset(&ifr, 0, sizeof(ifr));
+        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+        rc = ioctl(control_fd, SIOCGIFFLAGS, &ifr);
+        saved_errno = rc < 0 ? errno : 0;
+        result("get_ifflags", rc, saved_errno);
+        if (rc == 0) {
+            short original_flags = ifr.ifr_flags;
+            link_flags_saved = 1;
+            printf("ifflags_before=0x%04x\n", (unsigned short)original_flags);
+            if (!(original_flags & IFF_UP)) {
+                ifr.ifr_flags = (short)(original_flags | IFF_UP);
+                rc = ioctl(control_fd, SIOCSIFFLAGS, &ifr);
+                saved_errno = rc < 0 ? errno : 0;
+                result("set_if_up", rc, saved_errno);
+                if (rc == 0)
+                    link_flags_changed = 1;
+            } else {
+                puts("set_if_up_rc=ALREADY_UP");
+            }
+            memset(&ifr, 0, sizeof(ifr));
+            snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+            rc = ioctl(control_fd, SIOCGIFFLAGS, &ifr);
+            saved_errno = rc < 0 ? errno : 0;
+            result("get_ifflags_after_up", rc, saved_errno);
+            if (rc == 0)
+                printf("ifflags_after_up=0x%04x\n", (unsigned short)ifr.ifr_flags);
+        }
+    } else {
+        puts("get_ifflags_rc=SKIPPED_NO_PACKET_SOCKET");
+    }
+
     /* A deterministic test frame. Loopback is not an Ethernet device. */
     memset(raw_frame, 0, sizeof(raw_frame));
     memset(raw_frame, 0xff, 6);
@@ -178,6 +220,7 @@ int main(int argc, char **argv)
         rc = poll(&pfd, 1, 500);
         saved_errno = rc < 0 ? errno : 0;
         result("poll_rx", rc, saved_errno);
+        printf("poll_rx_revents=0x%04x\n", (unsigned short)pfd.revents);
         if (rc > 0 && (pfd.revents & POLLIN)) {
             struct sockaddr_ll from;
             socklen_t fromlen = sizeof(from);
@@ -201,6 +244,19 @@ int main(int argc, char **argv)
     }
 
 out:
+    if (link_flags_saved && link_flags_changed && control_fd >= 0) {
+        memset(&ifr, 0, sizeof(ifr));
+        snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ifname);
+        if (ioctl(control_fd, SIOCGIFFLAGS, &ifr) == 0) {
+            ifr.ifr_flags = (short)(ifr.ifr_flags & (short)~IFF_UP);
+            rc = ioctl(control_fd, SIOCSIFFLAGS, &ifr);
+            saved_errno = rc < 0 ? errno : 0;
+            result("restore_if_down", rc, saved_errno);
+        } else {
+            saved_errno = errno;
+            result("restore_get_ifflags", -1, saved_errno);
+        }
+    }
     if (rawfd >= 0) close(rawfd);
     if (rxfd >= 0) close(rxfd);
     if (dgramfd >= 0) close(dgramfd);
