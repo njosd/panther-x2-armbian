@@ -306,3 +306,27 @@ The probe source was refined after reviewing the Linux RK809 masked ID definitio
 This avoids treating the datasheet's default revision byte as the only acceptable identity result. Source update commit: `df6fca415f34e310d97ea15b62f4270be0beeff7`.
 
 The source change also triggers the existing build workflow via its configured push path filter. No completed Actions run or downloadable artifact has been retrieved in this session, so build and QEMU self-test remain unverified.
+
+
+### 13.5 Build run 45764956914 verified (2026-11-26)
+
+GitHub Actions run `45764956914` completed with conclusion `success`, run attempt 1, on source commit `df6fca415f34e310d97ea15b62f4270be0beeff7`. Job `build-rk809-id-probe` (job ID `139723544670`) completed successfully; all five substantive steps passed: checkout, isolated AArch64 toolchain install, static probe build, and artifact publication (including setup).
+
+Evidence from job log:
+- Compiler: `aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=2`.
+- ELF: 64-bit LSB executable, ARM aarch64, statically linked; program-header check found no `PT_INTERP`.
+- QEMU non-hardware self-test output includes `architecture=aarch64`, `scope=RK809_ID_REGISTERS_ONLY`, `self_test=PASS`.
+- Binary size: 635,064 bytes.
+- Artifact: `panther-x2-r3-rk809-id-ro-probe-static-aarch64`, artifact ID `15090758525`, ZIP size 294,327 bytes, expiry 2026-12-26.
+- Artifact ZIP digest: `sha256:0a9fe5c7c59b8e07f830453f9ff47ef95dbbbbb25f4735c577161642f1601fe3`.
+- Independently downloaded and inspected artifact ZIP. Binary SHA256: `4b8ff213c41250e992cf71a1f0579502d68633ae9e4de48d0a77f6b37bfa7b99`.
+- Source copied into artifact SHA256: `7e575795e37494f52f0985fdcf0e3993a95c866f71489d0780907bfc63069480`.
+- Local archive inspection confirmed 8 files and the same 635,064-byte AArch64 static ELF. This verifies artifact integrity and format independently of the CI log.
+
+**Interpretation:** static AArch64 build and QEMU non-hardware self-test are PASS. This does not test actual I2C hardware, device-node creation permissions, RK809 ACK, or PMIC register values.
+
+### 13.6 Hardware execution remains pending
+
+The verified binary has not yet been run on Panther X2. The next operation must first stage the binary into the live R1 RAM environment without touching TF/eMMC. Then execute it once as root. The program will create only `/dev/i2c-0` (89:0) if absent and read only RK809 address `0x20`, registers `0xED` and `0xEE`. Preserve the complete stdout/stderr and exit status.
+
+R3 remains HOLD until the hardware read returns valid values and the RK809 identity is confirmed. Even a successful ID read does not authorize loading RK8xx MFD/regulator drivers or advancing to power-provider functional testing.
