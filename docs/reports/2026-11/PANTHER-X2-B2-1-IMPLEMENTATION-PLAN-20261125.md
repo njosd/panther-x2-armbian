@@ -519,12 +519,12 @@ STMMAC/DWMAC4 的进一步追踪候选已确定：`stmmac_xmit` 入口读取 pay
 
 R2 已完成 6.18.63 精确 Kconfig/Makefile 依赖、B1/R1 最终配置与构建对象、6.1.65 Golden 配置对照，以及现有 R1 最终镜像的只读运行时验收：pinctrl/SYSCON consumer probe 成功，GPIO0–GPIO4 五个 bank 均绑定 `rockchip-gpio`，五个 gpiochip 均注册。**R2 PASS，零增量复用，无需重建；不放行额外 provider 配置。**
 
-### 4E.5 当前 R3 状态（2026-11-26）
+### 4E.5 当前 R3 状态（2026-11-26，含 R3.1 实机补充）
 
-R3 静态审计报告：`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md`。
+R3 静态与实机只读证据报告：`PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md`。
 
 - R1 最终 DTB 已直接解析 I2C0、RK809@0x20、SWITCH_REG1 `vcc_3v3` 与 GMAC1 `phy-supply` phandle，引用一致；GMAC1/MDIO1/PHY 仍 disabled。
 - R1 最终配置已内建 `I2C`、`I2C_RK3X`、`REGMAP_I2C`、`REGULATOR`，但没有 `MFD_RK8XX_I2C`、RK8xx core 或 `REGULATOR_RK808` 对象。6.1.65 Golden 含旧版 RK808 MFD、regulator 和 I2C controller built-in。
+- 实机只读证据确认 `/sys/bus/platform/devices/fdd40000.i2c` 的 driver 为 `rk3x-i2c`；启动日志识别 FAN53555@0x1c，证明 I2C0 至少一个从设备完成实际通信。RK809@0x20 的 DT client 节点存在，但没有 RK809 芯片 ID/寄存器响应证据。adapter class 枚举因极简 shell 缺少 `echo` 未得到有效结果。
 - 已确认 6.18.63 `rk8xx_i2c_probe()` 后续进入 `rk8xx_probe()`；RK809 variant 选择 `rk817_pre_init_reg`，并在 probe 中执行多项 `regmap_update_bits()`。因此不能把启用 built-in RK809 MFD driver 当作只读验证。
-- R3.1 I2C0 adapter、R3.2 PMIC 只读通信、R3.3 MFD/regmap、R3.4 regulator 注册及 R3.5 consumer 尚未取得运行时证据；其中 PMIC probe 相关项 BLOCKED，直到单独审查并批准其写寄存器副作用。
-- **R3 静态审计完成；运行时 HOLD/BLOCKED，整体不 PASS，不放行 R4。** 不启用 RK809 driver、不执行 PMIC I2C 事务/寄存器访问、不切换 regulator 或电源状态。
+- **R3.1 I2C0 controller bind：PASS-RUNTIME；R3.1 adapter class enumeration：未验证；RK809 实际响应、R3.2–R3.5 provider/consumer 功能：未验证或 BLOCKED。R3 整体 HOLD/BLOCKED，不放行 R4。** 不启用 RK809 driver、不执行 PMIC I2C 事务/寄存器访问、不切换 regulator 或电源状态。
