@@ -100,12 +100,18 @@ The next steps are:
 
 No G2-PROBE, regulator activation, IO-domain activation, GMAC enable, AF_PACKET physical send, TF write or Panther X2 boot is authorized by this packaging preparation.
 
+## 7.1 First packaging attempt and gate correction (2026-11-27)
+
+Run `45933429153`, job `140291064301`, completed artifact downloads and validated both frozen ZIP SHA256 digests and every internal `SHA256SUMS` entry. It then stopped at the first forbidden Kconfig check: `CONFIG_BLOCK=y`. This was a false positive: the frozen B1/R1/G2 `.config` intentionally contains `CONFIG_BLOCK=y`, `CONFIG_MMC=y`, `CONFIG_USB=y`, `CONFIG_USB_STORAGE=y`, and `CONFIG_MODULES=y`. The job correctly skipped all later steps; no initramfs, TF image or runtime artifact was generated.
+
+The workflow was corrected to allow the frozen storage/USB host baseline while continuing to reject concrete USB NIC drivers and all out-of-scope network/PHY drivers. DTB assertions now match the exact frozen state: TF/eMMC enabled, SDIO disabled, USB host/PHY0 enabled, unused SDHCI/second USB controller/PHY disabled, UART1/UART2 enabled with no Bluetooth child, and RK809/GMAC1/MDIO/PHY disabled. The next run remains PREPARE-ONLY and must still pass all remaining offline packaging and image-integrity gates.
+
 ## 8. Status
 
 - G2-B build-only: **PASS**.
 - B1 BusyBox/U-Boot support artifact identity: **verified**.
 - New G2 runtime init/boot scripts: **committed**.
-- G2 runtime packaging workflow: **committed; awaiting manual Actions run**.
-- Runtime image build and offline artifact audit: **PENDING**.
+- G2 runtime packaging workflow: **first run `45933429153` failed at the Kconfig preflight because `CONFIG_BLOCK=y` was incorrectly listed as forbidden; immutable input artifact SHA256 checks all passed. No initramfs/image/package steps ran. The concrete-driver and DTB gates have since been corrected to match frozen B1/R1/G2 artifact evidence; awaiting a fresh manual Actions run.**
+- Runtime image build and offline artifact audit: **PENDING; no runtime image artifact was produced by run `45933429153`**.
 - G2-PROBE: **HOLD / NOT AUTHORIZED**.
 - Physical media write / Panther X2 boot: **NOT AUTHORIZED**.
