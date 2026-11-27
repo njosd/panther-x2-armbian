@@ -158,3 +158,12 @@ G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASS
 - 本轮只更新源码证据与准入文件，没有启动设备、没有访问 PMIC、没有写 TF/eMMC。
 
 状态更新：G2-S PASS；G2-B BUILD PASS（历史 artifact 保留）；G2 stock-runtime candidate = PREPARATION AUTHORIZED（build-only only）；G2-PROBE = HOLD / NOT AUTHORIZED。
+## 11. G2 stock-runtime candidate 构建工作流已准备（尚未执行）
+
+本轮在仓库新增：
+- `scripts/panther-x2-g2/g2-stock-runtime.fragment`：在冻结 R1 config 上启用 `CONFIG_I2C=y`、`CONFIG_MFD_RK8XX_I2C=y`、`CONFIG_RTC_DRV_RK808=y`、`CONFIG_INPUT_RK805_PWRKEY=y`；明确不启用 `CONFIG_REGULATOR_RK808`。
+- `.github/workflows/build-panther-x2-g2-stock-runtime.yml`：独立 build-only workflow，复用 R1 成功 artifact 和固定 6.18.63 source/compat patch；仅在 Actions runner 编译 Image，输出 PMIC node `okay`、GMAC1/MDIO/PHY `disabled` 的候选 DTB；增加 MFD core/I2C、RTC、PWRKEY object 与 vmlinux symbol 检查，并保留对象哈希和配置/DTB 清单。
+
+该 workflow 尚未 dispatch、尚未产生新的 build artifact；当前只完成仓库文件准备与静态核对。它不会写实体 TF/eMMC，也不会连接 Panther X2。其候选 DTB 启用 RK809，只有在后续明确授权后才可用于实机启动；目前绝不能刷写或启动。
+
+最新仓库提交：fragment `4d76f055fb3b9b5829d293d0bdb5f9fb86459889`；workflow 初建 `fbc778be75b0848590768845cb8813e89b82e4dd`，后续对象检查与 shell continuation 修订提交 `8c57039a1703a414e6bdd06511aa332549b64451`、`51d15c4f7d469b90eb44c35b740a01c740a3fbda`、`40f460b510876314e6e39589e9f3724e1d5d8f56`。
