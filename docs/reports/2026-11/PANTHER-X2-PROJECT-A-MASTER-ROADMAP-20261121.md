@@ -850,3 +850,9 @@ GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.1
 所有知识条目按 COMMON-VERIFIED、VERSION-DIFF、SOC-ADAPTATION、BOARD-VERIFIED、BOARD-UNVERIFIED、CROSS-LAYER-RISK 及 STATIC-ONLY/BUILD-ONLY/RUNTIME-OBSERVED/E2E-VERIFIED 标注证据范围。该分类只调整知识组织和风险权重，不增加测试阶段、不改变 G0–G10 门序。
 
 当前唯一执行下一步仍为 G2-B build-only；不访问 PMIC、不触发 probe、不恢复 GMAC/MDIO/PHY。G2-PROBE 仍须独立副作用审查与明确授权。
+
+## 2026-11-27 G2-B workflow 已准备
+
+G2-B 专用 workflow 已新增：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，配置片段为 `scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。它复用成功 R1 artifact（run `45611898629`）中的 R1 最终配置和 Panther DTB，固定 6.18.63 源码重建 Image/modules，只增加 `MFD_RK8XX_I2C=y`；`REGULATOR_RK808`、`INPUT_RK805_PWRKEY` 关闭，构建用 DTB 中 RK809、GMAC1、MDIO、PHY 均 disabled。输出构建配置、对象/符号、Image、modules、DTB、manifest 和哈希。
+
+该 workflow 目前仅已提交、尚未触发；G2-B 状态仍为 **PREPARED / NOT RUN**，不得标记 build PASS。QEMU 通用 virt 不模拟 RK3566/Panther X2，因此不执行无代表性的 QEMU system boot。workflow 不访问设备、不写 TF/eMMC、不访问 PMIC、不触发 probe。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
