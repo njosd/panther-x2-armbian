@@ -240,7 +240,7 @@ jobs:
             echo "rk8xx_i2c_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-i2c.o" | awk '{print $1}')"
             echo "rtc_rk808_object_sha256=$(sha256sum "$OUT/drivers/rtc/rtc-rk808.o" | awk '{print $1}')"
             echo "rk805_pwrkey_object_sha256=$(sha256sum "$OUT/drivers/input/misc/rk805-pwrkey.o" | awk '{print $1}')"
-            echo "built_in_symbols=rk8xx_probe,rk8xx_i2c_probe"
+            echo "built_in_symbols=rk8xx_probe,rk8xx_i2c_probe,rk808_rtc_probe,rk805_pwrkey_probe"
             echo "rk809_node=okay"
             echo "rtc_drv_rk808=built-in"
             echo "input_rk805_pwrkey=built-in"
