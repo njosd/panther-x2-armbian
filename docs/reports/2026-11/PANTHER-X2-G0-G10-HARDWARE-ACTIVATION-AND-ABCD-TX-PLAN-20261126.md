@@ -171,6 +171,6 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 
 - [x] 四层技术知识库与风险模型已归档；不改变 G0–G10 门序。
 - [x] G2-S 静态源码对照完成。
-- [x] G2-B 专用 build-only workflow 与最小配置片段已提交并完成静态修复（YAML 尾部重复残片、补丁路径、built-in-only Image 构建），复用 R1 artifact run `45611898629`。
+- [x] G2-B 专用 build-only workflow 与最小配置片段已提交并完成静态修复（YAML 尾部重复残片、补丁路径、built-in-only Image 构建，并显式声明 I2C core/OF 依赖），复用 R1 artifact run `45611898629`。
 - [ ] G2-B Actions 实际运行与 artifact 审查尚未完成；修复 commit `797ad7802911337352cb7efb9c1a4f096ccc3895`，当前状态 PREPARED / NOT RUN。
 - [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe。
