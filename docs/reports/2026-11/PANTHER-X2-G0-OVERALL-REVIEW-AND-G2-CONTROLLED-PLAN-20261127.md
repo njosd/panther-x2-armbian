@@ -118,6 +118,14 @@ ABCD 各边界必须关联同一 run_id/sequence/payload hash：
 G0 只允许进入 G2 实施计划评审，不允许自动启用驱动。G2 需要用户对 stock RK809 MFD probe 及其已知初始化写入单独授权后才可实施。本报告不构成授权，不修改任何设备或构建产物。
 
 
+## 9. 2026-11-27 G2-PROBE 追加副作用审计（状态优先级更新）
+
+新增静态报告：`PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md`。
+
+G2-B 最终 config 已从 artifact 实际核验：`RTC_DRV_RK808` 未启用。6.18 RK809 MFD pre-init 却会将 RTC_STOP 置位；只启用 RK809 DT 节点而不启用 RTC child，会使 RTC 不执行恢复启动操作。若启用 RTC child，则增加 RTC_CTRL 0x0D 清 STOP/设置 READSEL、RTC_STATUS 0x0E W1C 清状态，以及 RTC alarm IRQ unmask/ACK 写入。与此同时，RK809 Rev 2.4/2.5 对 0xFA/0xFC reserved W1C/RC 位的定义与 Linux RK817 24-bit mapping 尚未解释；不能通过额外读取 0xFC 代替芯片 errata 证据。pre-init 中途失败也没有 PMIC register rollback；sys-off/shutdown/suspend/resume 存在 0xF4 状态写入。
+
+因此，原第 4 节的 G2 受控计划只能视为历史方案草案，不能直接执行。**当前 G2-PROBE 继续 HOLD / NOT AUTHORIZED**。G2-B build-only 与 G2 runtime PREPARE-ONLY PASS 不构成 probe 授权，也不允许直接把 runtime DTB 中 RK809 改为 enabled。解除 HOLD 前须完成实际芯片版本 register-map/errata 证据、RTC child 取舍与写入审查、失败/退出回退方案，并另行取得明确授权。
+
 ## 8. 2026-11-27 G2 静态差异复核修订
 
 G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md` §8。6.1.116 与 6.18.63 的 RK817 IRQ chip 布局、24-bit mapping、pre-init 表、MFD cell 集合相同；没有发现 6.18 新增 RK809 pre-init 写入。黄金 6.1.116 IRQ 38/39 与 RTC 子 IRQ 的注册记录是正向运行证据，但中断计数为 0，不证明物理按键事件/所有 ACK 位状态。
