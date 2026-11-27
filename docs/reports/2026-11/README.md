@@ -129,3 +129,5 @@
 - [G4-P IO-domain 运行时写入与回退准备审查（2026-11-27）](./PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md)：展开 9 supplies / 14 次 PMU GRF hiword-mask write 矩阵；确认 stock driver 写入错误检查与部分失败回滚缺口、debugfs 默认只读；G4-P 当前 NO-GO / HOLD / NOT AUTHORIZED。
 
 - [G4-P-SAFE 驱动事务设计审查（2026-11-27）](./PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md)：固定 6.18.63 io-domain/regulator core 锁序、probe 失败回退、notifier 并发和 remove/unbind 安全边界审查。
+
+- [G4-P-SAFE 并发与失败路径深化审查（2026-11-27）](./PANTHER-X2-G4-P-SAFE-CONCURRENCY-AND-FAILURE-ANALYSIS-20261127.md)：审查 generation-counter 初始采样竞态、regulator notifier 并发、probe 失败后的 notifier/rollback 生命周期；结论仍 NO-GO，不含补丁或实机操作。
