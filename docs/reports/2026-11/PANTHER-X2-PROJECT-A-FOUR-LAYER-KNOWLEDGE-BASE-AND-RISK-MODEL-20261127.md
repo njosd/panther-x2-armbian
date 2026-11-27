@@ -91,6 +91,6 @@
 
 **知识库分类与风险模型：已建立（架构决策）。** 它提供后续审计统一标签和优先级，不代表 K1–K4 全部通过。
 
-当前执行下一项仍为 **G2-B build-only**：启用 `MFD_RK8XX_I2C=y)，可选 `INPUT_RK805_PWRKEY=y)，不启用 `REGULATOR_RK808`；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。只审查最终配置、依赖闭包、built-in 对象、编译/链接和产物，QEMU 仅作非硬件启动自检。G2-B 不访问 PMIC、不触发 probe、不构成 PMIC runtime PASS。G2-PROBE 仍须独立副作用审查和明确授权。
+当前执行下一项仍为 **G2-B build-only**：启用 `MFD_RK8XX_I2C=y`，不启用 `INPUT_RK805_PWRKEY` 与 `REGULATOR_RK808`；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。只审查最终配置、依赖闭包、built-in 对象、编译/链接和产物。通用 QEMU virt 不模拟 RK3566/Panther X2，不安排无代表性的 kernel system boot；如后续执行 QEMU user-mode 工具自检，单独标记为用户态测试。G2-B 不访问 PMIC、不触发 probe、不构成 PMIC runtime PASS。G2-PROBE 仍须独立副作用审查和明确授权。
 
 ---
