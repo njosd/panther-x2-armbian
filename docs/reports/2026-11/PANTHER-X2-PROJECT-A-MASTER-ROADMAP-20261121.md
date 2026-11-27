@@ -926,3 +926,30 @@ G3 runtime packaging workflow 已由 PR validation run `45991658437` **PASS**，
 Artifact ZIP 外层 SHA256（GitHub Actions artifact digest）：`befae7113ddd98bbd8f668b2c33886909fc33431bc125fb4ca8d09f516c62bca`。下载入口见 Actions run `45991658437` / artifact `15193991660`。
 
 该 artifact 仍为 **PREPARE-ONLY**：CI 仅在 runner 内构建和验证镜像，没有写入实体 TF/eMMC，没有启动 Panther X2，没有 PMIC 访问。G3-P 的用户授权仍有效，但 G3-P **尚未执行**。后续只能将此镜像用于获准的 SU08G RAM-only 会话；不得写 eMMC/SN64G，也不得启用已隔离 consumer。
+
+
+## 2026-11-27 G3-P RK809 regulator-provider runtime PASS（执行结果，覆盖前述 PREPARE-ONLY 状态）
+
+前一节记录的是打包完成时的 PREPARE-ONLY 状态。现已由用户在 Panther X2 / RK3566 实机 SU08G 上完成获准的一次 RAM-only 启动，G3-P 已执行，以下运行时结果为后续状态。
+
+**直接运行时证据**
+- Kernel 为 Linux 6.18.63+，设备识别为 Panther X2，内存 4 GiB。
+- 挂载表仅见 rootfs、proc、sysfs；没有挂载 TF/eMMC 持久化文件系统。
+- RK809 I2C parent `0-0020` 绑定 `rk8xx-i2c`。
+- platform child `rk808-regulator.3.auto` 的 sysfs `driver` symlink 指向 `/bus/platform/drivers/rk808-regulator`，直接证明 provider platform driver 已绑定。
+- provider 的 `regulator/` 目录包含 16 个 regulator class symlink（全局 ID `regulator.5` 至 `regulator.20`），均指向该 provider 目录，证明 16 个 regulator 对象已注册。
+- 16 个对象的 sysfs name 已由用户完整采集。global regulator ID 不是 RK809 通道号，因此本次不依据 ID 推断 DCDC/LDO/SWITCH 逐通道映射。完整名称清单与证据边界见 `PANTHER-X2-G3-RK809-REGULATOR-PROVIDER-RUNTIME-RESULT-20261127.md`。
+- dmesg 未见明确 RK809 regulator probe failure；出现 `regulator: Not disabling unused regulators`，与 bootarg `regulator_ignore_unused` 相符。该信息不证明任何 rail 的实际输出电压。
+
+**采集限制**
+采集脚本存在 BusyBox `[ : not found` 错误。因此脚本产生的 DTB/controller isolation、`devices_deferred` 与 regulator-summary 状态字段均不作为运行时证据；debugfs regulator summary 未取得。G3 隔离状态以 G3-B 构建产物审计为依据。该脚本错误不影响独立人工读取的 driver symlink、provider regulator symlink 和 name 输出。
+
+**门结论**
+- G3-S：PASS（静态审计）。
+- G3-B：BUILD PASS。
+- G3 runtime package：PREPARE-ONLY package integrity/structure PASS。
+- G3-P：**RUNTIME PASS，严格限定为 RK809 regulator provider driver binding 与 16 个 regulator 对象注册。**
+
+**未验证范围**：物理 rail 电压/电流、各 rail 实际使能状态、逐通道 descriptor 映射、IO-domain consumer probe/GRF 写入、suspend/resume，以及任何网络物理功能。此次没有手动 I2C/PMIC 写入，没有 suspend，没有持久化存储挂载/写入，没有操作 eMMC/SN64G，也没有启用 G3 隔离的下游设备。
+
+下一门按既定顺序进入 G4：先完成 IO-domain supplier/consumer 依赖与 6.1.65 黄金基线对照审计，再制定单独的受控验证方案。G3-P 结果不构成启用 IO-domain 或写 GRF 的授权。
