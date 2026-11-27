@@ -1,6 +1,12 @@
 name: Panther X2 Project A G3 RK809 regulator provider build-only
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/panther-x2-g3/**"
+      - ".github/workflows/build-panther-x2-g3-rk809-regulator-provider.yml"
   workflow_dispatch:
     inputs:
       r1_run_id:
