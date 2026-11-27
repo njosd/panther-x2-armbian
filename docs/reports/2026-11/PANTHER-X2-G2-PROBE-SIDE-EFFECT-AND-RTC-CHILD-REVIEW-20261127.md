@@ -209,14 +209,14 @@ Rev 2.5 对 PMIC_INT_STS2 (0xFC) 的定义：
 - bit[5:2]：W1C，codec status；
 - bit[1:0]：W1C，reserved。
 
-因此读取 0xFC 会按 RC 定义清除 bit[7:6]；对 W1C 位的清除由后续写 1 完成。不能把“读取会清除 RC 位”描述为未知副作用，但也不能把 RC 位当作普通 RO 状态位重复读取。
+因此读取 0xFC 会按 RC 定义清除 bit[7:6]；若读回状态非零，regmap-irq 后续按 `status & mask_buf` 向对应状态/ACK 寄存器写回，W1C 位据此清除。不能把“读取会清除 RC 位”描述为未知副作用，但也不能把 RC 位当作普通 RO 状态位重复读取。
 
 ### 10.2 Linux 6.18 regmap-irq 的初始化访问顺序已由源码精确确认
 
 对 rk817_irq_chip：
 - num_irqs=24、num_regs=3、irq_reg_stride=2；
 - 24 个 REGMAP_IRQ_REG_LINE(id, 8) 使三组 mask_buf_def 均为 0xFF；
-- 初始化先将 mask buffer 写入 0xF9、0xFB、0xFD；
+- 初始化对 0xF9、0xFB、0xFD 分别调用 `regmap_update_bits()`，目标 mask 值均为 0xFF；该 API 会先读后比较，只有目标位与当前值不同时才发生实际写事务；
 - init_ack_masked=true 时，逐组读取 0xF8、0xFA、0xFC；
 - 若某组 status 非零，向对应 ACK/status 地址写入 status & mask_buf；
 - 然后建立 IRQ domain 并请求 parent threaded IRQ。
