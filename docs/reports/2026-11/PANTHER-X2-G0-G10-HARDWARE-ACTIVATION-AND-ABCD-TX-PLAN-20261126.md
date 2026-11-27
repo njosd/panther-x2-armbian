@@ -172,6 +172,7 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 - [x] 四层技术知识库与风险模型已归档；不改变 G0–G10 门序。
 - [x] G2-S 静态源码对照完成。
 - [x] G2-B 专用 build-only workflow 与最小配置片段已提交并完成静态修复（YAML 尾部重复残片、补丁路径、built-in-only Image 构建，并显式声明 I2C core/OF 依赖），复用 R1 artifact run `45611898629`。
-- [x] G2-B 首次 Actions 运行 `45923164270` 已完成日志审查：R1 artifact 下载成功，DTB 哈希核验通过；旧 R1 config gate 因要求不存在的显式 `# CONFIG_... is not set` 行而误报失败。已修复为检查相关符号不处于 `=y`/`=m`（commit `fbb17c96cb047136d113d2401f9abec3b4613c1c`）。
-- [ ] G2-B 需重新运行并审查完整 build/artifact；首次运行在源码获取和编译前终止，没有 G2 artifact，不能标记 BUILD PASS。
+- [x] G2-B run `45923873517` 日志与 evidence artifact 已审查：R1 输入、源码 commit、兼容补丁、Kconfig merge 和 `olddefconfig` 均通过；失败点是 workflow 错误禁止 R1 原有 `CONFIG_MODULES=y`。真实 R1 artifact 已证实该项开启；G2 不应改变该基线能力。
+- [x] 已修复 workflow：`CONFIG_MODULES=y` 改为 required，仍只构建 Image、不构建 modules（commit `3833277a469932c16bf02f83a53f1e57e4658ce4`）。
+- [ ] G2-B 需再次运行并审查 Image 编译、RK8xx built-in objects/linked symbols、DTB 隔离及最终 artifact；run `45923873517` 在 Image 编译前结束，不能标记 BUILD PASS。
 - [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe。
