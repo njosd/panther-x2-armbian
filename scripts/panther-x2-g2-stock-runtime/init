@@ -1,0 +1,104 @@
+#!/bin/sh
+# Project-A 6.18.63 minimal runtime packaging baseline.
+# PMIC, GMAC1, MDIO and PHY are intentionally disabled in this PREPARE-ONLY image.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-project-a-g2-runtime) # '
+export PATH HOME PS1
+
+echo
+echo "=== Panther X2 Project-A G2 stock PMIC runtime ==="
+echo "Linux network core and AF_PACKET are built in; no physical NIC is enabled."
+echo "RK809 MFD, RTC and PWRKEY are built in; RK809 DT node is enabled. PMIC probe and register writes are expected."
+echo "GMAC1/MDIO/RTL8211F remain disabled: no physical Ethernet activation."
+echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted or written by /init."
+echo "Frozen B1/R1/G2 baseline keeps eMMC, TF/SD and USB host/PHY available; SDIO/Wi-Fi remains disabled."
+echo "U-Boot loads Image/uInitrd/DTB from TF; Linux root is initramfs in RAM, and /init does not mount or write persistent filesystems."
+echo "USB network adapters, GMAC1, MDIO and RTL8211F remain disabled."
+
+mkdir -p /proc /sys /dev /run
+
+if ! mount -t proc proc /proc; then
+    echo "WARNING: could not mount procfs"
+fi
+if ! mount -t sysfs sysfs /sys; then
+    echo "WARNING: could not mount sysfs"
+fi
+
+echo
+echo "--- Kernel ---"
+uname -a
+
+echo
+echo "--- Device model ---"
+if [ -r /proc/device-tree/model ]; then
+    cat /proc/device-tree/model
+    echo
+else
+    echo "Device-tree model unavailable"
+fi
+
+echo
+echo "--- Kernel command line ---"
+cat /proc/cmdline
+
+echo
+echo "--- Memory ---"
+cat /proc/meminfo
+
+echo
+echo "--- Network interfaces (no physical NIC expected; RK809 PMIC is expected to probe) ---"
+if [ -d /sys/class/net ]; then
+    for item in /sys/class/net/*; do
+        [ -e "$item" ] && echo "${item##*/}"
+    done
+else
+    echo "sysfs network class unavailable"
+fi
+
+echo
+echo "--- Device-tree isolation ---"
+for node in \
+    /proc/device-tree/i2c@fdd40000/pmic@20/status \
+    /proc/device-tree/ethernet@fe010000/status \
+    /proc/device-tree/ethernet@fe010000/mdio/status \
+    /proc/device-tree/ethernet@fe010000/mdio/ethernet-phy@0/status \
+    /proc/device-tree/mmc@fe2c0000/status \
+    /proc/device-tree/mmc@fe310000/status \
+    /proc/device-tree/mmc@fe2b0000/status \
+    /proc/device-tree/mmc@fe000000/status \
+    /proc/device-tree/usb@fcc00000/status \
+    /proc/device-tree/usb@fd000000/status \
+    /proc/device-tree/usb@fd800000/status \
+    /proc/device-tree/usb@fd840000/status \
+    /proc/device-tree/usb@fd880000/status \
+    /proc/device-tree/usb@fd8c0000/status \
+    /proc/device-tree/usb2phy@fe8a0000/status \
+    /proc/device-tree/usb2phy@fe8a0000/host-port/status \
+    /proc/device-tree/usb2phy@fe8a0000/otg-port/status \
+    /proc/device-tree/usb2phy@fe8b0000/status; do
+    parent=${node%/status}
+    if [ -d "$parent" ]; then
+        echo "$node:"
+        if [ -r "$node" ]; then
+            cat "$node"
+            echo
+        else
+            echo "okay (implicit default)"
+        fi
+    else
+        echo "$parent: node absent"
+    fi
+done
+
+echo
+echo "--- Mounts (RAM-only expected) ---"
+mount
+
+echo
+echo "--- Last 120 kernel messages ---"
+dmesg | tail -n 120
+
+echo
+echo "Project-A G2 safe runtime ready. Interactive shell follows."
+exec /bin/sh -i
