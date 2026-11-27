@@ -115,6 +115,9 @@ jobs:
           cp work/g2/output/G2-DTB-ISOLATION.txt work/output/G2-DTB-ISOLATION.txt
           cp work/g2/output/BUILD-MANIFEST.txt work/output/G2-BUILD-MANIFEST.txt
           cp work/b1/output/busybox work/initramfs/busybox
+          cp work/b1/output/busybox work/output/busybox
+          cp work/b1/output/busybox.config work/output/busybox.config
+          cp work/b1/output/busybox-applets.txt work/output/busybox-applets.txt
           cp work/b1/output/JP-TvBox-u-boot.itb work/output/JP-TvBox-u-boot.itb
           cp work/g2/output/kernel.config work/output/kernel.config
           {
