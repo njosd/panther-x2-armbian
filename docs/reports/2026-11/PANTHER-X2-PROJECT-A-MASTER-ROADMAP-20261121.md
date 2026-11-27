@@ -953,3 +953,24 @@ Artifact ZIP 外层 SHA256（GitHub Actions artifact digest）：`befae7113ddd98
 **未验证范围**：物理 rail 电压/电流、各 rail 实际使能状态、逐通道 descriptor 映射、IO-domain consumer probe/GRF 写入、suspend/resume，以及任何网络物理功能。此次没有手动 I2C/PMIC 写入，没有 suspend，没有持久化存储挂载/写入，没有操作 eMMC/SN64G，也没有启用 G3 隔离的下游设备。
 
 下一门按既定顺序进入 G4：先完成 IO-domain supplier/consumer 依赖与 6.1.65 黄金基线对照审计，再制定单独的受控验证方案。G3-P 结果不构成启用 IO-domain 或写 GRF 的授权。
+
+
+## 2026-11-27 G4-S IO-domain static/golden audit PASS
+
+G3-P 已完成实机 provider 验证：RK809 `rk808-regulator` platform driver 已绑定，16 个 provider regulator objects 已注册。该结果不证明 rail 实际电压或 IO-domain consumer 已绑定。
+
+G4-S 新增报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN-SOURCE-AND-WRITE-AUDIT-20261127.md`。
+
+固定源码对照结果：
+- `drivers/soc/rockchip/io-domain.c`：6.1.65 candidate 与 6.1.116 blob 完全相同；6.1.116 与 6.18.63 的 RK3568 `rk3568_iodomain_write()`、`soc_data_rk3568_pmu`、`rockchip_iodomain_notify()`、`rockchip_iodomain_probe()` 函数体逐字节相同。
+- Panther X2 DTS：6.1.65 candidate 与 6.1.116 完整 board DTS blob 相同；6.18 的 `&pmu_io_domains`、`vcc_3v3: SWITCH_REG1` 关键块与两条黄金基线相同。
+- 未发现 6.18 新增的 RK3568 IO-domain 功能回归。
+
+重要准入发现：
+1. 当前 DTS 声明 9 个 IO-domain supplies；全部成功解析时，probe 初始路径预期执行 14 次 PMU GRF `regmap_write()`，涉及 VSEL0/VSEL1/VSEL2，不只是 GMAC1 的 VCCIO5。
+2. RK3568 写函数不检查 `regmap_write()` 返回值，probe bind/success 不能证明寄存器写入成功；后续必须设计只读 GRF readback。
+3. 若后续 supply/notifier 在部分 selector 已写入后失败，cleanup 只注销 notifier，不回滚已写 GRF。
+4. RK809 SWITCH_REG1 的电压读取可能沿 `vcc9` fallback 到固定上游 `vcc3v3_sys` 的 3.3V；这不证明 SWITCH_REG1 输出已使能或物理电压为 3.3V。IO-domain probe 不会调用 `regulator_enable()`。
+5. G4 恢复 IO-domain 节点会处理全部 9 个 supply，即使其他外围控制器仍 disabled；不能把它描述为单独 VCCIO5 测试。
+
+**状态：G4-S PASS（静态/黄金对照）；G4-P HOLD / NOT AUTHORIZED。** 下一步仅准备 G4-B build-only candidate：启用 `CONFIG_ROCKCHIP_IODOMAIN=y` 和 `pmu_io_domains` 节点，其他 GMAC/MDIO/PHY、存储、SDIO、GPU、SARADC 节点继续 disabled。Actions 只构建 PREPARE-ONLY artifact，不访问硬件。任何 G4-P consumer probe/GRF 写入必须另行提交完整副作用和 readback 方案并取得明确授权。ABCD 仍 NOT EXECUTABLE。
