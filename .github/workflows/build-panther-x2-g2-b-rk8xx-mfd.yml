@@ -1,0 +1,246 @@
+name: Panther X2 Project A G2-B RK8xx MFD build-only
+
+on:
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: "Successful R1 network-core run containing the frozen R1 config and Panther DTB"
+        required: true
+        type: string
+        default: "45611898629"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g2-b-rk8xx-mfd
+  cancel-in-progress: false
+
+env:
+  KERNEL_VERSION: "6.18.63"
+  KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+  KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+  R1_RUN_ID: ${{ inputs.r1_run_id }}
+
+jobs:
+  g2-b-build-only:
+    name: Build RK8xx MFD objects without PMIC probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install isolated build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential curl device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git libelf-dev \
+            libncurses-dev libssl-dev make perl python3 \
+            binutils kmod zstd
+
+      - name: Restore the successful R1 configuration and Panther DTB artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1-reference
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.r1_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify and freeze R1 input identity
+        run: |
+          set -euo pipefail
+          test -s work/r1-reference/kernel.config || test -s work/r1-reference/output/kernel.config
+          if test -s work/r1-reference/output/kernel.config; then
+            R1_CONFIG=work/r1-reference/output/kernel.config
+            R1_DTB=work/r1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb
+          else
+            R1_CONFIG=work/r1-reference/kernel.config
+            R1_DTB=work/r1-reference/dtb/rockchip/rk3566-panther-x2.dtb
+          fi
+          test -s "$R1_CONFIG"
+          test -s "$R1_DTB"
+          grep -qx 'CONFIG_NET=y' "$R1_CONFIG"
+          grep -qx 'CONFIG_PACKET=y' "$R1_CONFIG"
+          grep -qx '# CONFIG_STMMAC_ETH is not set' "$R1_CONFIG"
+          grep -qx '# CONFIG_DWMAC_ROCKCHIP is not set' "$R1_CONFIG"
+          grep -qx '# CONFIG_MDIO_BUS is not set' "$R1_CONFIG"
+          grep -qx '# CONFIG_PHYLIB is not set' "$R1_CONFIG"
+          mkdir -p work/reference
+          cp "$R1_CONFIG" work/reference/r1-kernel.config
+          cp "$R1_DTB" work/reference/r1-panther-x2.dtb
+          {
+            echo "r1_run_id=${R1_RUN_ID}"
+            echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')"
+            echo "r1_dtb_sha256=$(sha256sum work/reference/r1-panther-x2.dtb | awk '{print $1}')"
+            echo "r1_input=artifact:b2-1-r1-network-core"
+          } | tee work/r1-reference-lock.txt
+
+      - name: Fetch the exact Linux source and apply the already-audited R1 compatibility patch
+        run: |
+          set -euo pipefail
+          mkdir -p work/logs work/output work/kernel-out work/modules-root
+          git init work/linux
+          git -C work/linux remote add origin "${KERNEL_SOURCE_REPO}"
+          git -C work/linux fetch --depth=1 origin "${KERNEL_SOURCE_COMMIT}"
+          git -C work/linux checkout --detach FETCH_HEAD
+          ACTUAL_COMMIT="$(git -C work/linux rev-parse HEAD)"
+          test "$ACTUAL_COMMIT" = "${KERNEL_SOURCE_COMMIT}"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          PATCH="$GITHUB_WORKSPACE/scripts/panther-x2-b2-1/patches/0001-broadcast-uevent-net-only-api.patch"
+          test -s "$PATCH"
+          git -C work/linux apply --check "$PATCH"
+          git -C work/linux apply "$PATCH"
+          git -C work/linux diff --check
+          {
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=$ACTUAL_COMMIT"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "r1_compat_patch=$PATCH"
+            echo "r1_compat_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
+            echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')"
+            echo "g2_fragment_sha256=$(sha256sum scripts/panther-x2-g2/g2-rk8xx-mfd.fragment | awk '{print $1}')"
+          } | tee work/source-lock.txt
+
+      - name: Merge only the G2 MFD delta into the frozen R1 configuration
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          BASE="$GITHUB_WORKSPACE/work/reference/r1-kernel.config"
+          FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-g2/g2-rk8xx-mfd.fragment"
+          mkdir -p "$OUT"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$BASE" "$FRAGMENT" \
+            2>&1 | tee work/logs/g2-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/output/kernel.config
+          diff -u "$BASE" work/output/kernel.config > work/logs/g2-config-diff.txt || test "$?" -eq 1
+
+          require_y() {
+            grep -qx "$1=y" work/output/kernel.config || {
+              echo "::error::Expected $1=y"
+              exit 1
+            }
+          }
+          require_off() {
+            if grep -Eq "^$1=[ym]$" work/output/kernel.config; then
+              echo "::error::Forbidden $1 enabled"
+              grep -E "^$1=" work/output/kernel.config
+              exit 1
+            fi
+          }
+          for key in CONFIG_NET CONFIG_PACKET CONFIG_I2C CONFIG_I2C_RK3X CONFIG_REGMAP_I2C \
+                     CONFIG_REGMAP_IRQ CONFIG_MFD_CORE CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C; do
+            require_y "$key"
+          done
+          for key in CONFIG_REGULATOR_RK808 CONFIG_INPUT_RK805_PWRKEY CONFIG_STMMAC_ETH \
+                     CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY \
+                     CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 \
+                     CONFIG_RFKILL; do
+            require_off "$key"
+          done
+          cp "$FRAGMENT" work/output/g2-rk8xx-mfd.fragment
+          echo "G2 Kconfig dependency and isolation gates: PASS" | tee work/logs/g2-config-gates.txt
+
+      - name: Build the configured kernel and modules
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          MODULES_ROOT="$GITHUB_WORKSPACE/work/modules-root"
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image modules \
+            2>&1 | tee work/logs/g2-kernel-build.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            modules_install INSTALL_MOD_PATH="$MODULES_ROOT"
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          install -m 0644 "$OUT/System.map" work/output/System.map
+          install -m 0644 "$OUT/vmlinux" work/output/vmlinux
+          install -m 0644 "$OUT/modules.builtin" work/output/modules.builtin
+          install -m 0644 "$OUT/modules.order" work/output/modules.order
+          file work/output/Image | tee work/output/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+          tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
+
+      - name: Verify MFD built-in objects and isolate the PMIC in the DTB
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          for obj in drivers/mfd/rk8xx-core.o drivers/mfd/rk8xx-i2c.o; do
+            test -s "$OUT/$obj" || {
+              echo "::error::Expected built-in object missing: $obj"
+              exit 1
+            }
+          done
+          nm -a "$OUT/drivers/mfd/rk8xx-core.o" > work/logs/rk8xx-core-symbols.txt
+          nm -a "$OUT/drivers/mfd/rk8xx-i2c.o" > work/logs/rk8xx-i2c-symbols.txt
+          grep -q 'rk8xx_probe' work/logs/rk8xx-core-symbols.txt
+          grep -q 'rk8xx_i2c_probe' work/logs/rk8xx-i2c-symbols.txt
+          nm -a work/output/vmlinux > work/logs/g2-vmlinux-symbols.txt
+          grep -q 'rk8xx_probe' work/logs/g2-vmlinux-symbols.txt
+          grep -q 'rk8xx_i2c_probe' work/logs/g2-vmlinux-symbols.txt
+
+          mkdir -p work/output/dtb/rockchip
+          cp work/reference/r1-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          DTB=work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          fdtput -t s "$DTB" /i2c@fdd40000/pmic@20 status disabled
+          test "$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000 status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)" = "disabled"
+          {
+            echo "model=$(fdtget -t s "$DTB" / model)"
+            echo "compatible=$(fdtget -t s "$DTB" / compatible)"
+            echo "rk809_status=$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)"
+            echo "gmac1_status=$(fdtget -t s "$DTB" /ethernet@fe010000 status)"
+            echo "mdio_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)"
+            echo "phy_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)"
+            sha256sum "$DTB"
+          } | tee work/output/G2-DTB-ISOLATION.txt
+          grep -qx 'rk809_status=disabled' work/output/G2-DTB-ISOLATION.txt
+          grep -qx 'gmac1_status=disabled' work/output/G2-DTB-ISOLATION.txt
+          grep -qx 'mdio_status=disabled' work/output/G2-DTB-ISOLATION.txt
+          grep -qx 'phy_status=disabled' work/output/G2-DTB-ISOLATION.txt
+
+          find "$OUT/drivers/mfd" -maxdepth 1 -type f \
+            \( -name 'rk8xx-core.o' -o -name 'rk8xx-i2c.o' \) -print0 \
+            | sort -z | xargs -0 sha256sum | tee work/output/G2-MFD-OBJECTS-SHA256.txt
+          {
+            echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "Image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
+            echo "vmlinux_sha256=$(sha256sum work/output/vmlinux | awk '{print $1}')"
+            echo "modules_sha256=$(sha256sum work/output/modules.tar.zst | awk '{print $1}')"
+            echo "dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
+            echo "rk8xx_core_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-core.o" | awk '{print $1}')"
+            echo "rk8xx_i2c_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-i2c.o" | awk '{print $1}')"
+            echo "built_in_symbols=rk8xx_probe,rk8xx_i2c_probe"
+            echo "rk809_node=disabled"
+            echo "gmac1_mdio_phy=disabled"
+            echo "regulator_rk808=not-set"
+            echo "purpose=G2-B build-only; no hardware probe or PMIC access"
+          } | tee work/output/BUILD-MANIFEST.txt
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+
+      - name: Upload G2-B build-only evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g2-b-rk8xx-mfd-build-only
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/r1-reference-lock.txt
+          if-no-files-found: warn
+          retention-days: 30
