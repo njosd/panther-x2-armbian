@@ -167,3 +167,19 @@ G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASS
 该 workflow 尚未 dispatch、尚未产生新的 build artifact；当前只完成仓库文件准备与静态核对。它不会写实体 TF/eMMC，也不会连接 Panther X2。其候选 DTB 启用 RK809，只有在后续明确授权后才可用于实机启动；目前绝不能刷写或启动。
 
 最新仓库提交：fragment `4d76f055fb3b9b5829d293d0bdb5f9fb86459889`；workflow 初建 `fbc778be75b0848590768845cb8813e89b82e4dd`，后续对象检查与 shell continuation 修订提交 `8c57039a1703a414e6bdd06511aa332549b64451`、`51d15c4f7d469b90eb44c35b740a01c740a3fbda`、`40f460b510876314e6e39589e9f3724e1d5d8f56`。
+## 12. G2 stock-runtime workflow 二次审计与修正（2026-11-27）
+
+复核上一版新 workflow 后，发现它存在确定的配置依赖缺失，不能直接 dispatch：
+
+1. `RTC_DRV_RK808` 位于 `if RTC_CLASS` Kconfig 条件块中；只设置 `RTC_DRV_RK808=y` 而未显式设置 `RTC_CLASS=y`，不能保证 RTC driver 被纳入最终配置/编译。
+2. `INPUT_RK805_PWRKEY` 位于 `if INPUT` 与 `if INPUT_MISC` 层级下；仅设置 PWRKEY 子项不保证 `INPUT`、`INPUT_MISC` 已启用。
+3. 即使 MFD/RTC/PWRKEY 对象编译成功，也不足以证明 PMIC 可被 I2C 和 IRQ 路径实际发现。G2 必须同时核验 RK3x I2C controller、Rockchip GPIO、pinctrl、IRQ domain，以及 RTC class interface 的 built-in 依赖闭包。
+4. `RTC_CLASS=y` 会使 `RTC_HCTOSYS` 和 `RTC_SYSTOHC` 默认开启；前者可能在启动时用 PMIC RTC 改写系统时钟，后者在时间同步条件满足时可能写回 PMIC RTC。为隔离 G2 probe 行为，候选明确关闭二者，并在 build/package 两侧都做否定断言。
+5. 原工作流失败时仍可能上传不完整的正式候选 artifact，且 cache save 的条件早于对象/产物完整性审查。现改为只有完整 build 与依赖审计通过才上传正式候选；失败时仅上传诊断日志；cache 仅在 Image build 成功后保存。
+6. 原始候选打包工作流不能直接复用：它固定指向旧 G2-B artifact（RK809 DT node disabled），并有跨 step shell 变量作用域问题。新建独立 `package-panther-x2-g2-stock-runtime.yml`，输入新的 G2 build run ID，重新验证 artifact 内部 SHA256、最终 Kconfig、PMIC 节点状态和依赖对象，并通过 `$GITHUB_ENV` 将动态 Image/config/DTB hash 传递到后续 step。
+
+修正后的 G2 fragment 明确包含 `I2C=y`、`MFD_RK8XX_I2C=y`、`RTC_CLASS=y`、`RTC_DRV_RK808=y`、`INPUT=y`、`INPUT_MISC=y`、`INPUT_EVDEV=y`、`INPUT_RK805_PWRKEY=y`；`RTC_HCTOSYS`、`RTC_SYSTOHC`、`REGULATOR_RK808` 保持关闭。
+
+新增对象检查覆盖 `i2c-rk3x.o`、`gpio-rockchip.o`、`pinctrl-rockchip.o`、RK8xx MFD core/I2C、RTC 和 PWRKEY，并要求关键 probe 符号出现在对象及最终 vmlinux 中。对象哈希清单命名为 `G2-PMIC-DEPENDENCY-OBJECTS-SHA256.txt`。运行时 init 脚本增加 `/sys/class/rtc`、`/sys/class/input`、I2C devices 的只读观察。
+
+当前状态：workflow 与 package workflow 已修订并完成静态复核；**尚未 dispatch、尚无新构建 artifact、尚未写 TF/eMMC、尚未启动 Panther X2、尚未执行 PMIC probe**。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
