@@ -104,7 +104,7 @@
 - [G0-P4 黄金 DTB 证据复核（2026-11-27）](./PANTHER-X2-G0-P4-GOLDEN-DTB-EVIDENCE-RECONCILIATION-20261127.md)：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB GMAC 核心解析已归档，仅 PMIC/IO-domain 子树二进制复核仍缺。
 - [G0 总体复核与 G2 受控激活预案（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：G0 CONDITIONAL PASS（仅计划层面）；G2 只拟验证 RK809 MFD/regmap，probe 需要单独授权，不启用 regulator/GMAC。
 
-- [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 完成，下一步仅 build-only，不 probe。
+- [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 与 G2-B build-only 已完成，stock RK809 probe 仍 HOLD。
 
 - [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
 
@@ -115,3 +115,6 @@
 - [四层技术知识库与风险模型](./PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md)：将 Linux 公共网络栈、通用 MAC/IP 驱动、Rockchip SoC 适配、Panther X2 板级适配拆分为 K1–K4；定义风险优先级、证据标签、黄金基线复用规则及跨层接口审计重点。该分类不改变 G0–G10 阶段顺序。
 
 - [G2-B RK8xx MFD build-only workflow](../../../.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml)：以成功 R1 artifact（run `45611898629`）为输入，只增加 RK8xx MFD I2C transport/core built-in；RK809、regulator、PWRKEY child 和 GMAC/MDIO/PHY 保持隔离。run `45924949130` 已全部通过；artifact `15167050233` 已下载并验证内部 SHA256SUMS。G2-B BUILD PASS（仅 build/link 与隔离验证，非实机 PMIC probe）。下一步准备 Project-A 6.18.63 minimal runtime；G2-PROBE 仍 HOLD。
+
+- [Project-A G2 minimal runtime packaging preparation（2026-11-27）](./PANTHER-X2-PROJECT-A-G2-MINIMAL-RUNTIME-PACKAGING-20261127.md)：固定 G2 Image/DTB 与 B1 BusyBox/JP-TvBox U-Boot proper，新增 RAM initramfs/boot script 和 PREPARE-ONLY 打包 workflow；等待手动运行，未写卡、未启动实机。
+- [Project-A G2 runtime packaging workflow](../../../.github/workflows/package-panther-x2-g2-runtime.yml)：从冻结的 G2-B 与 B1 artifacts 组装 2GiB PREPARE-ONLY TF image，验证输入哈希、DTB 隔离、BusyBox/initramfs、GPT/ext4、U-Boot LBA 与完整 SHA256；不执行硬件 probe 或物理介质写入。
