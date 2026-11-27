@@ -159,3 +159,12 @@ ABCD 设计继续保留，不因 PMIC 研究而延迟其准备：
 提取并解析已归档 6.1.65 与 6.1.116 原始 Panther DTB，与 6.18.63 R1 实际 DTB 比较以下范围：RK809 IRQ/system-power-controller 属性、完整 regulator 子树约束、IO-domain supplies、GMAC1 phy-supply 和相关 phandle。无需重新提取完整镜像，不访问 SN64G，不写 eMMC/TF，不启动设备。三份 DTB 关键属性一致则关闭 DTS 变量；有差异则只追踪具体差异。
 
 G0-P1 配置恢复、G0-P2 黄金 PMIC 驱动行为、G0-P3 6.18 对照均已完成或已有报告覆盖；不得重复这些审计。G0-P4 最终准入决策待 DTB binary diff 后再做。
+
+
+## 10. 2026-11-27 DTB 证据状态修订（以本节为准）
+
+上一节曾将 6.1.116 DTB 也列为待提取，现修正：6.1.116 磁盘 Panther DTB 与 6.18.63 完整 Panther DTB 的 SHA-256 均为 `5d2e5ff87df7a4e4e0d199efa8db24fbf8ef5143b5ba39f7b15cc50e1352df82`，已证明字节级相同，不再提取或重复 diff。6.1.65 原始 DTB 身份及 GMAC1 核心属性解析已有归档；其 RK809/regulator/IO-domain 子树的原始二进制重新解析仍 BLOCKED，但候选 DTS 对照已完成。
+
+新增报告 `PANTHER-X2-G0-P4-GOLDEN-DTB-EVIDENCE-RECONCILIATION-20261127.md` 已明确证据等级。G0-P4 记为 CONDITIONAL PASS，不将缺失的 6.1.65 原始子树字节伪称 PASS，也不要求重新提取 851 MiB 镜像。此项保留为证据限制，不阻塞 G2 计划编制。
+
+新增 `PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md` 对 G0 做了总体复核：G0 CONDITIONAL PASS，仅允许提交 G2 受控实施计划评审，不构成 MFD probe 或设备操作授权。G2 stock MFD probe 会执行黄金版本同样的 RK809 pre-init 写入，因此仍须用户对该次 6.18 probe 单独授权。
