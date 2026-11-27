@@ -13,7 +13,8 @@
 - [G0.2 RK809 MFD/Regulator 副作用审计（2026-11-26）](./PANTHER-X2-G0-2-RK809-MFD-REGULATOR-SIDE-EFFECTS-20261126.md)：已识别 6.18 probe 写入路径；最终决策为 HOLD，等待黄金实现对照，不再沿用“stock NO-GO”作为最终结论。
 - [G0.3 IO-domain Supplier / GMAC1 VCCIO5 映射审计（2026-11-26）](./PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-AND-GMAC1-VCCIO5-MAPPING-20261126.md)：静态拓扑和 GRF 写入路径完成；GMAC1 M0→VCCIO5，且与 PHY 共用 vcc_3v3/SWITCH_REG1；最终 deferred-probe 状态仍 UNKNOWN。
 - [G0.4 GMAC1 Clock/Reset/PHY 125MHz 来源审计（2026-11-26）](./PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md)：CRU clock/reset、PHY reset、RGMII mode/delay 静态链完成；RTL8211F CLKOUT pin35 仅为候选，实际物理波形未验证。
-- [G0.5 ABCD-TX Sender 与观测夹具审查（2026-11-26）](./PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md)：独立 sender 规格、A/B/C/D 观测链、同帧关联和对端 pcap 规范已固定；未构建新 sender、未发送目标帧。下一项为 G0 总体准入复核。
+- [G0.5 ABCD-TX Sender 与观测夹具设计（2026-11-26）](./PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md)：冻结独立 sender 帧格式、A/B/C/D 观测链、同帧关联和对端 pcap 规范；原设计报告不代表运行时或物理 TX 验证。
+- [Project-A ABCD sender 与 pcap verifier 实现/构建验收（2026-11-27）](./PANTHER-X2-PROJECT-A-ABCD-SENDER-AND-PCAP-VERIFIER-20261127.md)：独立静态 AArch64 sender、classic-pcap 离线校验器及 build-only CI 已通过；Actions run `45941220581` / artifact `15172507107`，内部 SHA256 与 ELF 架构/静态链接已独立核验。没有实机运行或发送物理帧。
 
 - [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
 - [B2-1 R3 RK809/I2C/regulator 专项审计](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计 COMPLETE（CONDITIONAL）；含 RK809 实机只读身份/状态寄存器证据、6.1.65/6.18.63 黄金对照、MFD/regulator 副作用及 PHY supply consumer 调用链。运行时 MFD/regulator 激活仍未授权。
