@@ -92,6 +92,27 @@ for node in \
 done
 
 echo
+echo "--- RK809 child-device observations ---"
+echo "RTC class:"
+if [ -d /sys/class/rtc ]; then
+    ls -l /sys/class/rtc
+else
+    echo "RTC class unavailable"
+fi
+echo "Input class:"
+if [ -d /sys/class/input ]; then
+    ls -l /sys/class/input
+else
+    echo "Input class unavailable"
+fi
+echo "I2C devices:"
+if [ -d /sys/bus/i2c/devices ]; then
+    ls -l /sys/bus/i2c/devices
+else
+    echo "I2C device bus unavailable"
+fi
+
+echo
 echo "--- Mounts (RAM-only expected) ---"
 mount
 
