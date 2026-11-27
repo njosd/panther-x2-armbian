@@ -288,9 +288,9 @@ jobs:
             echo "CONFIG_REGMAP_MMIO=y"
             echo "rk809_regulator_provider=built-in"
             echo "io_domain_status=okay"
-            echo "io_domain_supplies=none_all_nine_properties_deleted
+            echo "io_domain_supplies=none_all_nine_properties_deleted"
             echo "selector_register_transactions=none_expected_by_source_audit"
-            echo "pmugrf_syscon_regmap=acquired_during_probe_mapping_only_no_selector_read_write""
+            echo "pmugrf_syscon_regmap=acquired_during_probe_mapping_only_no_selector_read_write"
             echo "gmac1_mdio_phy=disabled"
             echo "emmc_sdhci=disabled"
             echo "tf_sdmmc0=disabled"
