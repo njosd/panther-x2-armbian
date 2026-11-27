@@ -45,6 +45,17 @@ RK809/RK817 共用以下顺序：
 5. 创建 MFD child devices。
 6. Panther DTB 含 `rockchip,system-power-controller` 属性；启用 RK809 节点后，6.18 会注册 power-off/restart sys-off handler。注册本身不立即关机或重启。
 
+## 2.1 重要身份字段更正：0xEE 低 nibble 是 reserved，不是版本号
+
+此前项目报告将 `0xEE=0x94` 的低 nibble 记录为“版本字段 4/含义未知”。查阅 RK809 Datasheet Rev 2.5 后需精确更正：
+- `PMIC_CHIP_NAME (0xED)` 全 8 位为 CHIP_NAME，默认 `0x80`；
+- `PMIC_CHIP_VER (0xEE)` 的 bit[7:4] 是 CHIP_NAME code[3:0]，默认 `0x9`；bit[3:0] 明确标为 RESV，reset default `0x2`。
+- Panther X2 已有只读值 `0xED=0x80`、`0xEE=0x94`：高 nibble `0x9` 与 RK809 的 CHIP_NAME code 一致；低 nibble `0x4` 与公开 datasheet 的 reserved reset default `0x2` 不同。
+
+因此 `0x94` 不是可解释为 silicon revision 4 的字段。该 reserved nibble 的非默认值是一个需要 Rockchip 正式说明的证据差异；不得通过扩大 I2C 读取白名单或试写寄存器自行探查。
+
+数据手册定位：RK809 Rev 2.5 §5.1 p.55 / §5.2 p.119，`PMIC_CHIP_NAME` 与 `PMIC_CHIP_VER`。参见 [RK809 Datasheet Rev 2.5](https://datasheet.lcsc.com/datasheet/pdf/dc4249f899d1f7640dc738c73aecc6ea.pdf?productCode=C54771187)。
+
 ## 3. IRQ mask/status/ACK：数据手册差异仍未闭合
 
 RK817 IRQ 表定义 24 个逻辑 IRQ，按 3 组、每组 8 位映射到 status/mask registers。对应配置为：
@@ -147,7 +158,7 @@ RK809 Rev 2.4/2.5 对 0x0E 的 bit7:2 定义为 W1C：POWER_UP、ALARM、EVENT_1
 
 解除 HOLD 前至少需要：
 
-1. 取得对 RK809 实际芯片版本（当前只读 ID 记录为 0xED=0x80、0xEE=0x94）的正式 register-map/errata 说明，解释 0xFA/0xFC reserved/RC 位与 RK817 24-bit mapping 的关系；不能通过额外读取 0xFC 来代替，因为读取本身可能清状态。
+1. 取得对当前实测身份字节（0xED=0x80、0xEE=0x94）的正式 register-map/errata 说明。RK809 Rev 2.5 将 0xEE[7:4] 定义为 CHIP_NAME=0x9，将 [3:0] 明确标为 RESV、reset default=0x2；本机读到低 nibble=0x4，不能把 0x94 称为硅片版本号，也不能自行解释该 reserved 值。需由 Rockchip 确认该差异及其与 RK817 24-bit IRQ mapping 的适用关系。不能通过额外读取 0xFC 来代替，因为读取本身可能清状态。
 2. 明确 G2-PROBE 是否纳入 `RTC_DRV_RK808`；若纳入，审查并授权 0x0D、0x0E 与 RTC alarm IRQ unmask/ACK 的附加写入；若不纳入，必须另行设计并审查 RTC_STOP 的恢复方法。
 3. 完成 probe 中途失败、部分寄存器写入后的处理和安全退出/回退方案。
 4. 冻结专用 PMIC-enabled DTB、最终 config、Image、initramfs、boot script、全部哈希和精确写入清单；独立取得 G2-PROBE 操作授权。
