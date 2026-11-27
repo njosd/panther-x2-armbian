@@ -158,3 +158,11 @@ G5-A1/G5-A2 若不具备发送条件，ABCD 明确记录 NOT EXECUTABLE 与缺�
 强制要求：G5-A 恢复 GMAC 前完成 golden source/config/object/DTB diff、provider/consumer readiness、clock/reset/pinctrl readiness 和可观测/回退准备；差异未解释则 HOLD。G5-A1 只 probe/bind/netdev 注册，不 open；G5-A2 单独 MDIO/RTL8211F attach；G6-A 单独 open/DMA init；一旦具备 AF_PACKET+open+DMA 条件立即做同帧 ABCD 单帧 TX；G7 由对端 pcap E6 收到正确帧才判 TX PASS。
 
 不得以黄金系统正常推断 6.18 自动兼容；不得先启用再看、绕过 provider、手工强制时钟/寄存器、伪造 link 或改 DMA 算法；不把 3.3V 测量/PCB 测点设为默认前置条件，优先黄金软件反向对照。
+
+## 2026-11-27 四层知识库分类补充
+
+四层知识库与证据标签的权威定义见 `PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md`。本计划执行时按以下层次归档：K1 Linux 公共网络栈；K2 通用 MAC/IP 驱动；K3 Rockchip SoC 适配；K4 Panther X2 板级适配。
+
+K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风险判断相对较低，但不得以社区使用广泛替代 6.18.63 的源码、最终配置、构建对象和实际功能证据。两条黄金基线只降低同板硬件固有缺陷的初始怀疑，不代表新版本板级适配已经通过。
+
+本分类不改变 G0–G10 顺序，不授权提前 probe 或启用 GMAC。当前仍先执行 G2-B build-only；PMIC probe、regulator/IO-domain 激活和 GMAC 恢复分别保留原有准入门。不得因此增加默认电压测量或 PCB 测点任务。
