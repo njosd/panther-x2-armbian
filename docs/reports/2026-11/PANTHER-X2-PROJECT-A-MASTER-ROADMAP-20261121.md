@@ -900,4 +900,4 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 
 **阶段边界：G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch 暂不实施。** 本轮没有读取 PMU GRF VSEL0/1/2，没有确认 IO-domain consumer 最终 bind/selector 状态；没有启停 regulator、挂载 debugfs、访问原始 PMIC/GRF/MMIO 或写入 TF/eMMC。sysfs 软件电压/状态不代表物理 rail 测量，也不构成 IO-domain consumer probe 授权。
 
-下一项只读工作：识别当前已注册 syscon 的设备树节点（特别区分 PMU GRF 与普通 GRF），只读取设备树描述属性；不读 MMIO，不使用 devmem，不触发 regmap 访问。若不存在安全、已开放的只读 VSEL 入口，则保留 UNKNOWN，不绕过框架读取寄存器。
+2026-11-27 syscon 身份核对已完成：七个 syscon 设备树节点的 compatible 已读取。fdc20000 为 `rockchip,rk3568-pmugrf`，name=syscon，且有 `io-domains` 子节点；fdc50000 为 `rockchip,rk3566-pipe-grf`；fdc60000 为 `rockchip,rk3568-grf`；fdc80000/fdc90000 为 `rockchip,rk3568-pipe-phy-grf`；fdca0000/fdca8000 为 `rockchip,rk3568-usb2phy-grf`。`fdc20000.syscon/waiting_for_supplier=0`，但七个 platform-device 目录均未见 `driver` symlink；因此尚无证据证明 syscon 已绑定或 regmap 已注册。仍未读取 PMU GRF VSEL0/1/2，也未触发 IO-domain consumer probe。当前没有证据证明存在无需改变运行环境的安全 VSEL 只读入口；不绕过框架直接访问 MMIO。G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch deferred。详见 G4-P-R 报告。
