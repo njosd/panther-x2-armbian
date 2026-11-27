@@ -115,7 +115,7 @@
 
 - [四层技术知识库与风险模型](./PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md)：将 Linux 公共网络栈、通用 MAC/IP 驱动、Rockchip SoC 适配、Panther X2 板级适配拆分为 K1–K4；定义风险优先级、证据标签、黄金基线复用规则及跨层接口审计重点。该分类不改变 G0–G10 阶段顺序。
 
-- [G2-B RK8xx MFD build-only workflow](../../../.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml)：以成功 R1 artifact（run `45611898629`）为输入，只增加 RK8xx MFD I2C transport/core built-in；RK809、regulator、PWRKEY child 和 GMAC/MDIO/PHY 保持隔离。run `45924949130` 已全部通过；artifact `15167050233` 已下载并验证内部 SHA256SUMS。G2-B BUILD PASS（仅 build/link 与隔离验证，非实机 PMIC probe）。下一步准备 Project-A 6.18.63 minimal runtime；G2-PROBE 仍 HOLD。
+- [G2-B RK8xx MFD build-only workflow](../../../.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml)：run `45924949130` 全部通过，artifact `15167050233` 的 SHA256SUMS 已验证；只证明 MFD core/I2C transport 编译链接，不证明 PMIC runtime。G2 runtime PREPARE-ONLY 另由 run `45935908005` 打包并独立核验。G2-PROBE 现因 RTC child 生命周期、IRQ reserved/RC 位语义和失败回滚问题继续 HOLD。
 
 - [Project-A G2 minimal runtime packaging preparation（2026-11-27）](./PANTHER-X2-PROJECT-A-G2-MINIMAL-RUNTIME-PACKAGING-20261127.md)：G2 runtime PREPARE-ONLY 打包已由 run `45935908005` 全部通过，artifact `15170487170` 已上传；独立下载后核验内部 SHA256、Zstandard、2GiB raw image、主/备 GPT CRC 与 ext4 superblock 均通过。未写实体介质、未启动实机；G2-PROBE 仍 HOLD。报告同时记录 B1 当前源码与冻结 artifact 漂移。
 - [Project-A G2 runtime packaging workflow](../../../.github/workflows/package-panther-x2-g2-runtime.yml)：从冻结的 G2-B 与 B1 artifacts 组装 2GiB PREPARE-ONLY TF image；run `45935908005` 全部通过并完成独立镜像完整性核验；不执行硬件 probe 或物理介质写入。
