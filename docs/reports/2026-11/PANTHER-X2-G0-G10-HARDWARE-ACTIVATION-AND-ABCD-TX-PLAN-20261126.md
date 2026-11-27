@@ -149,3 +149,12 @@ G5-A1/G5-A2 若不具备发送条件，ABCD 明确记录 NOT EXECUTABLE 与缺�
 - 不把 PMIC 3.3V rail 测量或 PCB 测点搜索设为默认前置条件；优先反向核对黄金版本如何配置和使用同一 provider/consumer。只有发现具体且无法由软件证据解释的物理异常假设时，才提出有针对性的补证。
 
 **准入总原则：先解释黄金到 6.18 的差异，再按资源依赖逐层启用；每一步都留有可观测证据、单变量边界和回退点。第一轮成功标准仍是对端收到正确 TX 帧，不是 GMAC probe 成功。**
+
+
+## 2026-11-27 GMAC 高风险准入原则
+
+用户明确强调：项目 A 第一轮目标仍是 Panther X2 实机运行最小网络组件的 Linux 6.18，逐层打通真实 Ethernet TX；GMAC 是黄金版本之后变化较大、也是主要堵点，必须作为最高风险阶段审慎处理。完整准入清单、分段启用和禁止捷径见 `PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md` 的“GMAC 高风险准入原则”章节。
+
+强制要求：G5-A 恢复 GMAC 前完成 golden source/config/object/DTB diff、provider/consumer readiness、clock/reset/pinctrl readiness 和可观测/回退准备；差异未解释则 HOLD。G5-A1 只 probe/bind/netdev 注册，不 open；G5-A2 单独 MDIO/RTL8211F attach；G6-A 单独 open/DMA init；一旦具备 AF_PACKET+open+DMA 条件立即做同帧 ABCD 单帧 TX；G7 由对端 pcap E6 收到正确帧才判 TX PASS。
+
+不得以黄金系统正常推断 6.18 自动兼容；不得先启用再看、绕过 provider、手工强制时钟/寄存器、伪造 link 或改 DMA 算法；不把 3.3V 测量/PCB 测点设为默认前置条件，优先黄金软件反向对照。
