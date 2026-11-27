@@ -409,3 +409,48 @@ DTB 只允许以下目标节点变更：
 - 禁止表述为“无 MMIO 映射”；当前设计仅保证无 PMUGRF selector register transaction。
 
 下一阶段入口：先实现/审计一个独立 G4-P0 PREPARE-ONLY build workflow，继承 G3 冻结资产并只修改上述 Kconfig/DTB 十项；build 后离线验证全部约束。构建 workflow 与 artifact 审计通过后，再单独请求是否授权硬件启动，不得自动进入实体测试。
+
+
+## 16. G4-P0 binding-only PREPARE-ONLY build workflow design (2026-11-28)
+
+本节记录 G4-P0 从静态设计审计进入独立 build-only workflow 准备的状态。G4-P0 的设计边界不变：**只验证 IO-domain child 枚举、driver bind 和 PMUGRF syscon regmap acquisition；删除全部九路 supply 属性，不触发 regulator voltage read/notifier/selector write 路径。**
+
+### 16.1 与旧 G4-B workflow 的区别
+
+仓库旧 workflow `.github/workflows/build-panther-x2-g4-iodomain.yml` 属于 G4-B 旧候选：启用 IO-domain child，但保留九个 supply 属性（`io_domain_supplies=9_declared`）。它不是 G4-P0，不能直接复用运行。旧候选在 G4-P 静态审计中已识别出 index 1 selector 写入后，index 2 SWITCH_REG1 电压读取失败的 partial-write 风险。
+
+本轮没有修改旧 G4 workflow，也没有覆盖旧分支。新建独立分支 `g4-p0-binding-only-build`，以当前 `main` 为基线，单独建立 G4-P0 文件，避免混淆旧 G4-B/G4-P 候选。
+
+### 16.2 新增文件
+
+- `scripts/panther-x2-g4-p0/g4-p0-binding-only.fragment`
+  - `CONFIG_MFD_SYSCON=y`
+  - `CONFIG_REGMAP=y`
+  - `CONFIG_REGMAP_MMIO=y`
+  - `CONFIG_ROCKCHIP_IODOMAIN=y`
+  - 以 G3 冻结的最终 `kernel.config` 为基线，只增加本门所需的 syscon/regmap/IO-domain 构建能力；构建后仍须以最终 .config 检查为准。
+- `.github/workflows/build-panther-x2-g4-p0-binding-only.yml`
+  - 独立 PREPARE-ONLY build-only workflow；不含任何 Panther 实机连接或设备写入步骤。
+  - 输入固定为 G3 build-only run `45984035650` / artifact `15192123549`，并校验 G3 artifact 内部 SHA256、冻结 Image/DTB 哈希和 Panther X2 compatible/model。
+  - 固定 Linux 6.18.63 源码 commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`，复用 G3 的 kernel object cache restore prefix，减少重复编译。
+  - 在 G3 DTB 副本中，仅将 `/syscon@fdc20000/io-domains/status` 设为 `okay`，删除 `pmuio1-supply`、`pmuio2-supply`、`vccio1-supply` 至 `vccio7-supply` 全部九个属性；逐一检查属性确实不存在。
+  - 保持 G3 其他隔离不变：RK809 节点启用；eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1、MDIO、RTL8211F 均 disabled。
+  - 检查 `CONFIG_OF`、`CONFIG_MFD_SYSCON`、`CONFIG_REGMAP`、`CONFIG_REGMAP_MMIO`、`CONFIG_ROCKCHIP_IODOMAIN` 和 G3 regulator provider 相关配置；检查 IO-domain/syscon 对象及 vmlinux symbols；反编译并输出 G3→G4-P0 DTB diff；生成 manifest 与 SHA256SUMS。
+  - 输出 artifact 名称：`panther-x2-g4-p0-binding-only-build-only`。失败诊断独立上传。
+
+### 16.3 静态预期与边界
+
+按已完成的 Linux 6.18.63 源码审计，九路 supply 属性全部缺失时，optional regulator lookup 应逐项返回 -ENODEV 并被 driver 跳过；IO-domain driver 不进入 regulator voltage read、notifier 或 `iodomain_write()`，RK3568 PMU soc_data 无额外 init callback。因此预期没有 selector register transaction。
+
+但 probe 仍会先通过 `syscon_node_to_regmap()` 获取 PMUGRF regmap；它可能建立 MMIO 映射。故 manifest 明确区分“regmap mapping acquired”与“selector register transaction absent”，不能表述为完全不发生 MMIO 映射或完全不接触 PMUGRF。
+
+### 16.4 当前状态
+
+- G4-P0 静态设计审计：**PASS**。
+- 独立 workflow / Kconfig fragment：**已创建并提交到分支** `g4-p0-binding-only-build`。
+- Git commits（按先后）：`df2affd7219b27b0c64ceb8dd632b3433bc164c3`（fragment）、`0b58a932a413c5284964a0bbcd619928c20cea09`（workflow 初版）、`1698a76a82de45ce477643cf1b8cd630af5f9448` 与 `5468a9390c461355b747a8bdb5abda1438969133`（workflow 审计门修订）。
+- 截至本次检查，分支没有 G4-P0 Actions run；workflow 尚未构建，artifact 尚不存在。
+- 没有启动 Panther X2，没有触发 IO-domain probe，没有访问 PMIC/PMU GRF 寄存器，没有写入 SU08G、SN64G 或 eMMC。
+- G4-P0 build-only 通过后也只代表 build/config/DTB/object audit PASS；不代表 runtime bind PASS，更不代表任何 rail/selector 或物理电压已验证。实机启动必须另行评估并取得明确授权。
+
+**下一步：** 先完成 workflow 的离线审查和 YAML/脚本校验，再手动触发 G4-P0 build-only；检查 artifact 与所有 SHA256 后，才讨论是否提出单独的 SU08G RAM-only 实机验证申请。RAM initramfs 仍是 runtime root；云端 runner 构建不改变运行环境，不代表切换到持久化 rootfs。
