@@ -109,3 +109,7 @@
 - [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
 
 - GMAC 高风险准入与 TX 分段计划：见 [G0–G10 硬件准入与 ABCD-TX 分层验证计划](./PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md) 的“GMAC 高风险准入原则”章节。
+
+## 项目 A：四层技术知识库与风险模型（2026-11-27）
+
+- [四层技术知识库与风险模型](./PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md)：将 Linux 公共网络栈、通用 MAC/IP 驱动、Rockchip SoC 适配、Panther X2 板级适配拆分为 K1–K4；定义风险优先级、证据标签、黄金基线复用规则及跨层接口审计重点。该分类不改变 G0–G10 阶段顺序。
