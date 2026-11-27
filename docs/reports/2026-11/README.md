@@ -107,3 +107,5 @@
 - [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 完成，下一步仅 build-only，不 probe。
 
 - [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
+
+- GMAC 高风险准入与 TX 分段计划：见 [G0–G10 硬件准入与 ABCD-TX 分层验证计划](./PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md) 的“GMAC 高风险准入原则”章节。
