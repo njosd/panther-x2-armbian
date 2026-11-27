@@ -123,8 +123,8 @@ G0.3 已静态确认：
 
 ### 7.2 当前 platform-device 状态
 
-- 七个 syscon platform-device 目录均未显示 `driver` symlink；当前没有证据证明这些 syscon platform device 已绑定相应驱动。
-- `/sys/bus/platform/devices/fdc20000.syscon/waiting_for_supplier` 的实机读取值为 `0`。这只说明该属性当前报告为 0，不等价于 driver 已绑定，也不证明 regmap 已注册或可供安全读取。
+- 七个 syscon platform-device 目录均未显示 `driver` symlink；这不能用于判断 regmap 是否存在，因为通用 syscon 的 regmap 可由 consumer 通过 `syscon_node_to_regmap()` 懒创建，并不依赖 syscon platform driver bind。
+- `/sys/bus/platform/devices/fdc20000.syscon/waiting_for_supplier` 的实机读取值为 `0`。这只说明该父 platform device 的该属性当前报告为 0，不等价于 IO-domain child 已绑定，也不证明 PMUGRF regmap 当前可用。
 - 设备树节点存在、platform device 已枚举、supplier-wait 状态为 0，均不能代替驱动绑定和寄存器访问能力的验证。
 
 ### 7.3 本轮结论与边界
@@ -155,3 +155,53 @@ G0.3 已静态确认：
 - 没有读取设备树 `reg` 二进制属性，没有进行 MMIO/GRF/regmap 读取。
 - 没有挂载 debugfs，没有执行 devmem，没有触发 syscon/IO-domain consumer probe。
 - 没有写入 TF/eMMC；SN64G 与 eMMC 未触碰。
+
+
+## 10. 6.18.63 syscon / IO-domain 源码路径复核（2026-11-27）
+
+固定源码：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9`。本节为仓库源码只读审计，不涉及设备操作。
+
+### 10.1 为什么 syscon platform device 没有 driver symlink
+
+`arch/arm64/boot/dts/rockchip/rk356x-base.dtsi` 定义：
+
+- `pmugrf: syscon@fdc20000`
+- compatible：`rockchip,rk3568-pmugrf`, `syscon`, `simple-mfd`
+- 子节点 `io-domains` compatible：`rockchip,rk3568-pmu-io-voltage-domain`
+
+`drivers/mfd/syscon.c` 中：
+- `syscon_node_to_regmap(np)` 调用 `device_node_get_regmap()`；
+- 如果 syscon list 中尚无该节点，且节点含通用 compatible `syscon`，会调用 `of_syscon_register()`；
+- `of_syscon_register()` 通过 `of_iomap()` 建立 MMIO 映射，再通过 `regmap_init_mmio()` 创建 regmap 并登记到内部 syscon list。
+
+因此 syscon regmap 是由 consumer API 按需取得/创建的机制；syscon 节点没有 platform driver symlink 并不异常，也不能作为 regmap 不存在的证据。创建 regmap/MMIO mapping 本身不等于已经读取 VSEL 寄存器。
+
+### 10.2 R2 pinctrl 证据边界纠正
+
+`drivers/pinctrl/pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()`：
+- 对 `rockchip,grf` phandle 调用 `syscon_node_to_regmap()`，并检查错误；R2 pinctrl 成功绑定证明 main-GRF lookup 成功。
+- 对 `rockchip,pmu` phandle 调用 `syscon_regmap_lookup_by_phandle_optional()`，但 probe 没有紧接着检查该返回值是否为错误指针。
+
+所以此前把 R2 pinctrl bind 概括成“GRF/PMU 两路 syscon consumer 均成功”是不严谨的。已在 R2 报告中纠正：**main-GRF lookup PASS；PMUGRF lookup 仍未独立验证**。虽然 RK3568 pinctrl 的 GPIO0 IOMUX/pull/drive/schmitt 路径会使用 PMUGRF regmap，但 R2 没有执行这些 PMUGRF 读写。
+
+### 10.3 IO-domain child 的真实 probe 顺序与副作用
+
+`drivers/soc/rockchip/io-domain.c` 的 RK3568 匹配数据包含九路 supply；probe 首先从父节点获取 PMUGRF regmap，然后逐路执行：
+1. `devm_regulator_get_optional()`；
+2. 对成功取得的 regulator 调用 `regulator_get_voltage()`；
+3. 设置 supply index / notifier；
+4. 调用 `iod->write(supply, uV)`；
+5. 注册 regulator notifier。
+
+RK3568 VCCIO5（index 6）会走 `rk3568_iodomain_write()`，向 PMU GRF VSEL0/VSEL1 写入 high-word-mask selector 值。因此不能为了“看看 probe 是否成功”而触发该 consumer；它不是纯读取探测。
+
+父节点 `fdc20000.syscon/waiting_for_supplier=0` 不能替代 IO-domain child 的 driver/bind 状态。当前 G3 provider runtime 尚未取得 IO-domain child 的 sysfs bind 证据。
+
+### 10.4 当前修正结论
+
+- **已验证：** PMUGRF DT node 身份、generic `syscon` compatible、simple-mfd 子节点关系。
+- **已由源码验证：** syscon regmap 懒创建机制；无 platform driver symlink 不等于 regmap 不存在。
+- **已验证：** R2 main-GRF lookup 成功。
+- **未验证：** 当前 G3 runtime 中 PMUGRF regmap 是否已成功创建；R2 optional PMUGRF lookup 是否成功。
+- **未验证：** IO-domain child 当前是否 bind；没有读 VSEL0/1/2。
+- **安全边界：** 不触发 IO-domain probe、不挂载 debugfs、不使用 devmem、不直接访问 MMIO。G4-P 继续 NO-GO，G4-P-SAFE patch deferred。
