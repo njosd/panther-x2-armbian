@@ -12,7 +12,8 @@ echo "Linux network core and AF_PACKET are built in; no physical NIC is enabled.
 echo "RK809 MFD code is built in, but the RK809 DT node is disabled: no PMIC probe."
 echo "GMAC1/MDIO/RTL8211F are disabled: no physical Ethernet activation."
 echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted or written by /init."
-echo "B1 storage/USB support is intentionally retained; eMMC/TF/SD and USB host may enumerate."
+echo "Linux MMC/eMMC/TF/SDIO and USB host/PHY remain disabled per frozen B1/R1 baseline."
+echo "U-Boot reads the TF boot partition before Linux starts; /init does not mount or write persistent storage."
 echo "USB network adapters, GMAC1, MDIO and RTL8211F remain disabled."
 
 mkdir -p /proc /sys /dev /run
