@@ -183,3 +183,10 @@ G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASS
 新增对象检查覆盖 `i2c-rk3x.o`、`gpio-rockchip.o`、`pinctrl-rockchip.o`、RK8xx MFD core/I2C、RTC 和 PWRKEY，并要求关键 probe 符号出现在对象及最终 vmlinux 中。对象哈希清单命名为 `G2-PMIC-DEPENDENCY-OBJECTS-SHA256.txt`。运行时 init 脚本增加 `/sys/class/rtc`、`/sys/class/input`、I2C devices 的只读观察。
 
 当前状态：workflow 与 package workflow 已修订并完成静态复核；**尚未 dispatch、尚无新构建 artifact、尚未写 TF/eMMC、尚未启动 Panther X2、尚未执行 PMIC probe**。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
+### 12.1 最终依赖闭包补充
+
+从实际 R1 artifact `b2-1-r1-network-core`（run `45611898629`，artifact `15023630465`）直接读取 `output/kernel.config`，确认原始 R1 baseline 中 `I2C_RK3X=y`、`IRQ_DOMAIN=y`、`GPIOLIB=y`、`GPIO_ROCKCHIP=y`、`PINCTRL_ROCKCHIP=y`、`INPUT=y`、`INPUT_MISC=y`、`INPUT_EVDEV=y`、`RTC_CLASS=y`、RTC sysfs/proc/dev interfaces 均已启用；但 `MFD_CORE=m`，因此 G2 必须依靠 `MFD_RK8XX_I2C=y` 的 Kconfig select 将其提升为 built-in，最终 gate 已要求 `MFD_CORE=y`。
+
+build workflow 和 package workflow 现统一要求 I2C_RK3X、IRQ_DOMAIN、GPIO_ROCKCHIP、PINCTRL_ROCKCHIP、INPUT/INPUT_MISC/INPUT_EVDEV、RTC_CLASS、RTC_INTF_SYSFS/PROC/DEV 与 RK809 MFD/RTC/PWRKEY 全部为 y。build workflow 同时检查 `i2c-rk3x.o`、`gpio-rockchip.o`、`pinctrl-rockchip.o`、RK8xx MFD core/I2C、RTC、PWRKEY 七个 built-in object，并核对七个 probe symbol 已进入 vmlinux；package workflow 对 manifest 中完整 symbol 集合做精确匹配。
+
+RTC auto-sync 两项在 G2 fragment 中显式 not-set，并在 build 与 package 两侧验证，避免 RTC_CLASS 默认打开后发生系统时间自动校正或 NTP 同步回写 RTC。
