@@ -130,3 +130,29 @@ header 中两版 enum 均定义 FALL=0、RISE=1。按 pwrkey driver 的 index �
 5. 若 build-only 通过，再单独提交 G2-PROBE 计划：恢复 RK809 DT 节点后 stock probe 会执行第 8.3 节的黄金同款写入和 IRQ 初始化。该步骤必须由用户针对这组确切副作用另行授权；未授权不得替换 SU08G 当前 uInitrd/Image 或启动。
 
 G2-B 阶段 ABCD = NOT EXECUTABLE：RK809/GMAC 节点 disabled，无 netdev/open/DMA。每阶段仍记录检查；一旦后续首次具备目标 netdev/open/DMA，立即执行同一帧 A→B→C→D 并由对端 pcap 验收，不等待 IP 层。
+
+
+## 2026-11-27 环境切换原则修订：B1 RAM 基线不是最终运行环境
+
+用户确认项目 A 第一轮总目标不变：在 Panther X2 实机上运行最小网络组件的 Linux 6.18，通过分层验证最终打通板载 GMAC1 的真实 TX 数据流。后续所有阶段不得把 B1 纯净 RAM 系统当成项目 A 的最终网络运行环境。
+
+### 三种环境必须区分
+
+1. **B1-clean（已完成启动基线）**：6.18.63 + Panther X2 DTB + 纯净 RAM initramfs；网络协议栈、GMAC、MDIO、PHY 均隔离。只用于确认启动链、内核、DTB、initramfs 和基础 shell，不再承担后续网络功能验收。
+2. **G2-B build-only（构建隔离环境）**：仅验证新增 MFD 配置、依赖闭包、编译链接与产物；RK809 节点保持 disabled，不作为硬件运行环境，不以 QEMU 结果代替 Panther X2 实测。
+3. **Project-A 6.18 minimal runtime（项目 A 正式实验运行环境）**：G2-B 通过后，在首次 G2-PROBE 前建立。固定 6.18.63 kernel、匹配 Panther X2 DTB、最小 RAM initramfs/BusyBox 用户空间、固定 JP-TvBox U-Boot proper；之后按门逐项引入所需驱动和用户态工具。此环境运行于 Panther X2 实机，是真实硬件验证环境。首轮不要求 eMMC 持久化 rootfs，也不提前引入完整 Armbian/systemd/NetworkManager/DHCP/DNS。
+
+### 切换时点与执行要求
+
+- B1-clean 通过后不再将 B1 作为后续网络测试镜像；B1 仅保留为可回退的纯净启动基线。
+- G2-B build-only 完成后、G2-PROBE 之前，冻结 Project-A 6.18 minimal runtime 的资产清单、最终 `.config`、Image、DTB、initramfs、BusyBox、bootargs、源码 commit、工具链和 SHA-256；准备独立实验介质/镜像，保留 B1 回退资产。
+- 从 G2-PROBE 开始，所有需要硬件功能证据的阶段都在 Panther X2 实机的 Project-A 6.18 minimal runtime 中进行；不得用 QEMU 或 B1-clean 的结果代替。
+- G2/G3/G4 是 provider/PMIC/IO-domain 等前置组件激活门；GMAC/MDIO/PHY 恢复后才具备真实 TX 的硬件前提。**第一轮真实 TX 测试在 R7/G6 对应门完成后立即进行**，采用预先冻结的 AF_PACKET 专用发送程序和独立对端抓包；不等到 ARP/IP/TCP/UDP。
+- 若某个硬件阶段必须重启，继续使用同一套 Project-A runtime 资产，仅修改本阶段允许的唯一配置变量；每轮记录实际启动的 Image/DTB/initramfs 哈希，避免“以为启动的是新镜像”。
+- 只有 TX-PASS 后才扩展 RX、ARP、IPv4、ICMP、TCP/UDP；首轮 TX-PASS 前不为方便而引入完整发行版用户空间。
+
+### 存储与安全边界
+
+Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/TF 存储驱动、持久化挂载和文件系统行为混入 TX 验证变量。启动资产可由已固定的 U-Boot 从专用 SU08G TF 读取；不得写 eMMC，不触碰冻结的 64GB 对照卡。任何 TF 写入/实机启动仍按逐次授权规则执行。RAM 根文件系统不等于 B1-clean：两者内核版本可相同，但网络配置、驱动集合、用户空间和阶段用途不同。
+
+**核心判断：项目 A 的“真实运行环境”指真实 Panther X2 上运行的项目 A 专用 6.18.63 最小系统，不等于必须先安装完整发行版或持久化 rootfs。**
