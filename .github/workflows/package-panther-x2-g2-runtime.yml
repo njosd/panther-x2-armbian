@@ -95,16 +95,17 @@ jobs:
             CONFIG_SERIAL_8250_DW CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON \
             CONFIG_BINFMT_ELF CONFIG_BINFMT_SCRIPT CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 \
             CONFIG_PINCTRL_ROCKCHIP CONFIG_GPIOLIB CONFIG_RESET_CONTROLLER CONFIG_ROCKCHIP_GRF \
-            CONFIG_BLOCK CONFIG_MMC CONFIG_MMC_BLOCK CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP \
-            CONFIG_USB CONFIG_USB_DWC2 CONFIG_USB_DWC3 CONFIG_USB_EHCI_HCD CONFIG_USB_OHCI_HCD \
-            CONFIG_USB_XHCI_HCD CONFIG_USB_STORAGE CONFIG_NET CONFIG_PACKET CONFIG_NETDEVICES \
-            CONFIG_ETHERNET CONFIG_I2C CONFIG_REGMAP_I2C CONFIG_REGMAP_IRQ CONFIG_MFD_CORE \
+            CONFIG_NET CONFIG_PACKET CONFIG_NETDEVICES CONFIG_ETHERNET \
+            CONFIG_I2C CONFIG_REGMAP_I2C CONFIG_REGMAP_IRQ CONFIG_MFD_CORE \
             CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C CONFIG_MODULES; do
             grep -qx "$key=y" "$CONFIG" || { echo "::error::Required Kconfig option missing: $key"; exit 1; }
           done
 
           for key in \
-            CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM \
+            CONFIG_BLOCK CONFIG_MMC CONFIG_MMC_BLOCK CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP \
+            CONFIG_USB CONFIG_USB_DWC2 CONFIG_USB_DWC3 CONFIG_USB_EHCI_HCD CONFIG_USB_OHCI_HCD \
+            CONFIG_USB_XHCI_HCD CONFIG_USB_STORAGE CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER \
+            CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM \
             CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO CONFIG_MDIO_DEVICE CONFIG_MDIO_BUS CONFIG_MDIO_DEVRES \
             CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_FIXED_PHY CONFIG_NET_DSA \
             CONFIG_NET_DSA_REALTEK CONFIG_NET_DSA_REALTEK_MDIO CONFIG_NET_FAILOVER CONFIG_NETCONSOLE \
@@ -146,11 +147,13 @@ jobs:
               exit 1
             }
           }
-          assert_status /mmc@fe2c0000 disabled
-          assert_status /mmc@fe310000 okay
-          assert_status /mmc@fe2b0000 okay
-          for node in /usb@fcc00000 /usb@fd800000 /usb@fd840000 /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port; do
-            assert_status "$node" okay
+          # Frozen B1/R1 boundary: Linux does not enumerate MMC or USB.
+          for node in /mmc@fe2c0000 /mmc@fe310000 /mmc@fe2b0000 \
+            /usb@fcc00000 /usb@fd000000 /usb@fd800000 /usb@fd840000 \
+            /usb@fd880000 /usb@fd8c0000 /usb2phy@fe8a0000 \
+            /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port \
+            /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
+            assert_status "$node" disabled
           done
           assert_status /serial@fe650000 okay
           assert_status /serial@fe660000 okay
@@ -345,7 +348,7 @@ jobs:
             echo "rk809_mfd_builtin=yes; rk809_dtb_status=disabled; pmic_probe=not_performed"
             echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
             echo "network_core=enabled; AF_PACKET=enabled; no physical netdev expected"
-            echo "storage_usb=BLOCK/MMC/USB support retained per B1 baseline; DTB node statuses audited; /init does not mount or write persistent storage"
+            echo "storage_usb=Linux BLOCK/MMC/USB disabled per frozen B1/R1 baseline; U-Boot reads TF before Linux; /init does not mount or write persistent storage"
             echo "usb_network_adapters=disabled; USB external NICs excluded"
             echo "rootfs=RAM initramfs; no persistent rootfs"
             echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
