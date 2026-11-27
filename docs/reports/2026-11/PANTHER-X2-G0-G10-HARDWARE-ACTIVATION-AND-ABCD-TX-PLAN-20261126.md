@@ -98,11 +98,11 @@ G0 现记为 **CONDITIONAL PASS（planning only）**。完整审查见 `PANTHER-
 G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB 的 GMAC1 核心属性复用既有解析结果；仅 6.1.65 原始 PMIC/IO-domain 子树 binary diff 未完成。此项不要求重新提取完整镜像，不作为 G2 计划编制阻塞。
 
 
-## 2026-11-27 G2-S 完成与 G2-B 下一步
+## 2026-11-27 G2-S/G2-B 完成与 G2-PROBE HOLD
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
 
-下一步 G2-B 仅做 build-only：启用 MFD_RK8XX_I2C，不启用 INPUT_RK805_PWRKEY 或 REGULATOR_RK808；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。检查最终 config、built-in 对象、Image/DTB 和 manifest。通用 QEMU virt 不模拟 RK3566/Panther X2，不安排无代表性的 kernel system boot。G2-B 不访问 PMIC、不触发 probe、不改写设备。G2-PROBE 仍须另行提交明确的 PMIC 写入清单并取得用户授权。
+G2-B build-only 已由 run `45924949130` 完成并通过：Image、MFD built-in 对象/链接符号、最终配置、DTB 隔离和 artifact SHA256 均通过。该结果只证明 build/link，不证明 PMIC 实机行为。当前下一步是准备 Project-A 6.18.63 minimal runtime：复用 G2 Image/DTB 与 B1 静态 BusyBox/JP-TvBox U-Boot proper，构建新的 RAM initramfs 和 boot script；安全基线仍保持 RK809、GMAC1、MDIO、PHY disabled。新 workflow `.github/workflows/package-panther-x2-g2-runtime.yml` 已提交，等待手动运行并审查 PREPARE-ONLY artifact。通用 QEMU virt 不模拟 RK3566/Panther X2，不执行无代表性的 system boot。该流程不访问设备、不写 TF/eMMC、不触发 PMIC probe。G2-PROBE 仍 HOLD，必须先完成独立副作用审查并取得明确授权。
 
 
 ## 2026-11-27 GMAC 高风险准入原则（强制）
@@ -176,5 +176,6 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 - [x] 已修复 workflow：`CONFIG_MODULES=y` 改为 required，仍只构建 Image、不构建 modules（commit `3833277a469932c16bf02f83a53f1e57e4658ce4`）。
 - [x] G2-B run `45924949130` 全部步骤 PASS：R1 输入锁定、6.18.63 源码/补丁、Kconfig merge、Image 编译、MFD built-in object 与 vmlinux linked symbol、DTB 隔离、artifact 上传均通过。
 - [x] artifact `15167050233` 已下载并检查；内部 `SHA256SUMS` 全部校验通过。G2-B BUILD PASS，仅代表 build/link 与 DTB 隔离，不代表 RK809 实机 probe 或 PMIC 功能。
-- [ ] 下一步按既定路线准备 Project-A 6.18.63 minimal runtime 资产；G2-PROBE 仍需独立副作用审查和明确授权。
-- [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe。
+- [x] Project-A G2 minimal runtime init/boot scripts 与 PREPARE-ONLY packaging workflow 已提交；init 脚本通过本地 `dash -n` 语法检查。
+- [ ] G2 runtime packaging workflow 尚待手动运行；需审查完整构建日志、initramfs、boot script、2GiB image、分区、输入身份和 SHA256。
+- [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe；TF 写入与实机启动也未授权。
