@@ -163,6 +163,8 @@ jobs:
             echo "g2_artifact_sha256=db4edb124497821158225d0a2d16b2f3f4f98ccbeabd5e3a95e09cdd1d46e346"
             echo "b1_run_id=$B1_RUN_ID"
             echo "b1_artifact_id=$B1_ARTIFACT_ID"
+            echo "g2_artifact_sha256=db4edb124497821158225d0a2d16b2f3f4f98ccbeabd5e3a95e09cdd1d46e346"
+            echo "b1_artifact_sha256=9274e557ea5b62b6c2fc086d5aa3fd9a502215ff0070870ae36a9d6dfcfd4b9c"
             echo "b1_artifact_sha256=9274e557ea5b62b6c2fc086d5aa3fd9a502215ff0070870ae36a9d6dfcfd4b9c"
             sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/initramfs/busybox work/output/JP-TvBox-u-boot.itb work/output/kernel.config
           } | tee work/output/FROZEN-INPUTS.txt
@@ -303,6 +305,10 @@ jobs:
             echo "dtb_sha256=$G2_DTB_SHA256"
             echo "busybox_version=1.37.0 (reused frozen B1 static binary)"
             echo "busybox_sha256=$B1_BUSYBOX_SHA256"
+            echo "busybox_config_sha256=$(sha256sum work/output/busybox.config | cut -c1-64)"
+            echo "initramfs_cpio_sha256=$(sha256sum work/output/initramfs.cpio.gz | cut -c1-64)"
+            echo "uinitrd_sha256=$(sha256sum work/boot/uInitrd | cut -c1-64)"
+            echo "bootscr_sha256=$(sha256sum work/boot/boot.scr | cut -c1-64)"
             echo "u_boot_proper_sha256=$JP_UBOOT_SHA256"
             echo "rk809_mfd_builtin=yes; rk809_dtb_status=disabled; pmic_probe=not_performed"
             echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
