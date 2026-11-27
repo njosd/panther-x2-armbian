@@ -190,12 +190,18 @@ jobs:
         run: |
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
-          for obj in drivers/mfd/rk8xx-core.o drivers/mfd/rk8xx-i2c.o drivers/rtc/rtc-rk808.o drivers/input/misc/rk805-pwrkey.o; do
+          for obj in drivers/i2c/busses/i2c-rk3x.o drivers/gpio/gpio-rockchip.o drivers/pinctrl/pinctrl-rockchip.o drivers/mfd/rk8xx-core.o drivers/mfd/rk8xx-i2c.o drivers/rtc/rtc-rk808.o drivers/input/misc/rk805-pwrkey.o; do
             test -s "$OUT/$obj" || {
               echo "::error::Expected built-in object missing: $obj"
               exit 1
             }
           done
+          nm -a "$OUT/drivers/i2c/busses/i2c-rk3x.o" > work/logs/i2c-rk3x-symbols.txt
+          nm -a "$OUT/drivers/gpio/gpio-rockchip.o" > work/logs/gpio-rockchip-symbols.txt
+          nm -a "$OUT/drivers/pinctrl/pinctrl-rockchip.o" > work/logs/pinctrl-rockchip-symbols.txt
+          grep -q 'rk3x_i2c_probe' work/logs/i2c-rk3x-symbols.txt
+          grep -q 'rockchip_gpio_probe' work/logs/gpio-rockchip-symbols.txt
+          grep -q 'rockchip_pinctrl_probe' work/logs/pinctrl-rockchip-symbols.txt
           nm -a "$OUT/drivers/mfd/rk8xx-core.o" > work/logs/rk8xx-core-symbols.txt
           nm -a "$OUT/drivers/mfd/rk8xx-i2c.o" > work/logs/rk8xx-i2c-symbols.txt
           grep -q 'rk8xx_probe' work/logs/rk8xx-core-symbols.txt
@@ -204,7 +210,10 @@ jobs:
           nm -a "$OUT/drivers/input/misc/rk805-pwrkey.o" > work/logs/rk805-pwrkey-symbols.txt
           grep -q 'rk808_rtc_probe' work/logs/rk808-rtc-symbols.txt
           grep -q 'rk805_pwrkey_probe' work/logs/rk805-pwrkey-symbols.txt
-          nm -a work/output/vmlinux | awk '$NF == "rk8xx_probe" || $NF == "rk8xx_i2c_probe" { print }' > work/logs/g2-mfd-linked-symbols.txt
+          nm -a work/output/vmlinux | awk '$NF == "rk3x_i2c_probe" || $NF == "rockchip_gpio_probe" || $NF == "rockchip_pinctrl_probe" || $NF == "rk8xx_probe" || $NF == "rk8xx_i2c_probe" { print }' > work/logs/g2-mfd-linked-symbols.txt
+          grep -q 'rk3x_i2c_probe' work/logs/g2-mfd-linked-symbols.txt
+          grep -q 'rockchip_gpio_probe' work/logs/g2-mfd-linked-symbols.txt
+          grep -q 'rockchip_pinctrl_probe' work/logs/g2-mfd-linked-symbols.txt
           grep -q 'rk8xx_probe' work/logs/g2-mfd-linked-symbols.txt
           grep -q 'rk8xx_i2c_probe' work/logs/g2-mfd-linked-symbols.txt
           nm -a work/output/vmlinux | grep 'rk808_rtc_probe' > work/logs/g2-rtc-linked-symbol.txt
@@ -232,7 +241,8 @@ jobs:
           grep -qx 'mdio_status=disabled' work/output/G2-DTB-ISOLATION.txt
           grep -qx 'phy_status=disabled' work/output/G2-DTB-ISOLATION.txt
 
-          sha256sum "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \
+          sha256sum "$OUT/drivers/i2c/busses/i2c-rk3x.o" "$OUT/drivers/gpio/gpio-rockchip.o" \
+            "$OUT/drivers/pinctrl/pinctrl-rockchip.o" "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \
             "$OUT/drivers/rtc/rtc-rk808.o" "$OUT/drivers/input/misc/rk805-pwrkey.o" \
             | tee work/output/G2-MFD-OBJECTS-SHA256.txt
           {
@@ -240,11 +250,14 @@ jobs:
             echo "Image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
             echo "vmlinux_sha256=$(sha256sum work/output/vmlinux | awk '{print $1}')"
             echo "dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
+            echo "i2c_rk3x_object_sha256=$(sha256sum "$OUT/drivers/i2c/busses/i2c-rk3x.o" | awk '{print $1}')"
+            echo "gpio_rockchip_object_sha256=$(sha256sum "$OUT/drivers/gpio/gpio-rockchip.o" | awk '{print $1}')"
+            echo "pinctrl_rockchip_object_sha256=$(sha256sum "$OUT/drivers/pinctrl/pinctrl-rockchip.o" | awk '{print $1}')"
             echo "rk8xx_core_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-core.o" | awk '{print $1}')"
             echo "rk8xx_i2c_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-i2c.o" | awk '{print $1}')"
             echo "rtc_rk808_object_sha256=$(sha256sum "$OUT/drivers/rtc/rtc-rk808.o" | awk '{print $1}')"
             echo "rk805_pwrkey_object_sha256=$(sha256sum "$OUT/drivers/input/misc/rk805-pwrkey.o" | awk '{print $1}')"
-            echo "built_in_symbols=rk8xx_probe,rk8xx_i2c_probe,rk808_rtc_probe,rk805_pwrkey_probe"
+            echo "built_in_symbols=rk3x_i2c_probe,rockchip_gpio_probe,rockchip_pinctrl_probe,rk8xx_probe,rk8xx_i2c_probe,rk808_rtc_probe,rk805_pwrkey_probe"
             echo "rk809_node=okay"
             echo "rtc_drv_rk808=built-in"
             echo "input_rk805_pwrkey=built-in"
