@@ -125,3 +125,5 @@
 - [G2 stock-runtime candidate build workflow](../../../.github/workflows/build-panther-x2-g2-stock-runtime.yml)：新增独立 build-only 候选，启用 RK809 MFD、RTC、PWRKEY，保留 regulator 与 GMAC/MDIO/PHY disabled；工作流尚未执行，未产生新 artifact，不得用于实机启动。
 - [G2 stock-runtime workflow 二次审计与修正（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：补齐 RTC_CLASS、INPUT/INPUT_MISC、RK3x I2C、GPIO/pinctrl/IRQ 等真实依赖；关闭 RTC 自动校时/回写；修复失败 artifact 上传、缓存保存条件和打包 workflow 跨 step hash 变量作用域。新增 G2 stock PMIC runtime 独立 PREPARE-ONLY packaging workflow。所有 workflow 仍未执行，未产生新候选 artifact。
 - [G4-B IO-domain build-only 结果报告（2026-11-27）](./PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md)：Actions run 45997129528 PASS；含 artifact SHA-256/内部清单核验、对象符号、DTB 隔离和后续 TF-rootfs DTB 门说明。
+
+- [G4-P IO-domain 运行时写入与回退准备审查（2026-11-27）](./PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md)：展开 9 supplies / 14 次 PMU GRF hiword-mask write 矩阵；确认 stock driver 写入错误检查与部分失败回滚缺口、debugfs 默认只读；G4-P 当前 NO-GO / HOLD / NOT AUTHORIZED。
