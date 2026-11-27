@@ -118,12 +118,29 @@ The packaging step had already copied BusyBox to `work/initramfs/bin/busybox` an
 
 No TF image generation, loop-device partitioning, PREPARE-ONLY image artifact upload, physical media write, or hardware access occurred in this run. The next manual run should reuse the same immutable G2/B1 inputs and validate the remaining packaging stages.
 
+## 7.3 Successful PREPARE-ONLY package and independent artifact audit (2026-11-27)
+
+Run `45935908005`, job `140298952552`, completed all 10 workflow steps successfully. Artifact `15170487170`, named `panther-x2-project-a-g2-runtime-PREPARE-ONLY`, was uploaded (223,981,886 bytes; GitHub artifact ZIP digest `sha256:112faa35d052b7ff750108327a8d132f316e9844b2b70c8cb10b97c8502a2aef`; retention through 2026-12-27). The uploaded ZIP was downloaded and independently inspected.
+
+Independent checks performed on the downloaded artifact:
+- All 28 entries listed in `output/SHA256SUMS` validated successfully.
+- Zstandard frame integrity passed; decompressed image size is exactly 2,147,483,648 bytes (2 GiB).
+- Decompressed raw image SHA256 matches the manifest: `9c15acef6a399d51b161b72f5d86a80277ef08c47d23927a2e5939ba5faa9a78`.
+- Compressed image SHA256 matches the manifest: `2e7a3b8c68874372f12144bdceb133797df8c92502d5e10bb0a02468d8106aec`.
+- Primary and backup GPT headers and partition-entry arrays both have valid CRCs. Protective MBR signature is `55aa`; one `PANTHER_BOOT` partition starts at LBA 32768 (16 MiB) and ends at LBA 4192255, exactly as planned.
+- The partition's ext4 superblock magic `53ef` is present at the expected offset.
+- U-Boot script header identifies an ARM Linux script; uInitrd header identifies an AArch64 gzip RAMDisk. The manifest records Image/uInitrd/DTB load addresses, the frozen U-Boot proper location (raw LBA 16384 / 8 MiB), and the existing eMMC SPL → TF U-Boot proper → TF kernel/initrd/DTB boot chain.
+
+The workflow log explicitly records `hardware_access=none`, `physical_media_writes=none`, and `boot_authorization=not_granted`. The runtime manifest also records RK809 DTB disabled / PMIC probe not performed and GMAC1/MDIO/RTL8211F disabled / physical TX not performed.
+
+**Conclusion:** G2 runtime packaging is PASS; the uploaded artifact and its image integrity have been independently verified offline. This is not a Panther X2 boot test, does not validate runtime peripheral behavior, and does not authorize writing SU08G, touching SN64G/eMMC, or booting the board. G2-PROBE remains separately held pending its side-effect review and explicit authorization.
+
 ## 8. Status
 
 - G2-B build-only: **PASS**.
 - B1 BusyBox/U-Boot support artifact identity: **verified**.
 - New G2 runtime init/boot scripts: **committed**.
-- G2 runtime packaging workflow: **run `45935456629` passed frozen-input, Kconfig, DTB, Image, BusyBox and initramfs-generation checks; failed only because the post-build BusyBox comparison referenced a removed staging path. The path was corrected to compare against the preserved frozen-input copy; awaiting the next manual Actions run.**
-- Runtime image build and offline artifact audit: **PENDING; run `45935456629` did not reach TF image generation or artifact upload.**
+- G2 runtime packaging workflow: **PASS — run `45935908005`, job `140298952552`; all 10 steps succeeded and artifact `15170487170` uploaded.**
+- Runtime image build and offline artifact audit: **PASS — downloaded artifact SHA256 inventory, Zstandard stream, 2 GiB raw image hash, primary/backup GPT CRCs and ext4 superblock independently verified. No hardware/media access occurred; boot and G2-PROBE remain unauthorized.**
 - G2-PROBE: **HOLD / NOT AUTHORIZED**.
 - Physical media write / Panther X2 boot: **NOT AUTHORIZED**.
