@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "scripts/panther-abcd-tx/panther-abcd-tx.c"
+      - "scripts/panther-abcd-tx/verify-pcap.py"
       - ".github/workflows/build-panther-abcd-tx.yml"
   workflow_dispatch:
 
@@ -44,6 +45,10 @@ jobs:
           fi
           qemu-aarch64-static work/output/panther-abcd-tx-aarch64 --self-test | tee work/output/self-test.txt
           grep -qx 'self_test=PASS' work/output/self-test.txt
+          python3 -m py_compile scripts/panther-abcd-tx/verify-pcap.py
+          python3 scripts/panther-abcd-tx/verify-pcap.py --self-test | tee work/output/pcap-self-test.txt
+          grep -qx 'self_test=PASS' work/output/pcap-self-test.txt
+          cp scripts/panther-abcd-tx/verify-pcap.py work/output/
           cp "$SRC" work/output/
           {
             echo "tool=panther-abcd-tx"
@@ -59,7 +64,7 @@ jobs:
             echo "hardware_access=none"
             echo "physical_media_writes=none"
           } > work/output/manifest.txt
-          sha256sum work/output/panther-abcd-tx-aarch64 work/output/panther-abcd-tx.c > work/output/SHA256SUMS
+          sha256sum work/output/panther-abcd-tx-aarch64 work/output/panther-abcd-tx.c work/output/verify-pcap.py > work/output/SHA256SUMS
           stat -c 'sender_size_bytes=%s' work/output/panther-abcd-tx-aarch64 | tee work/output/size.txt
 
       - name: Publish sender and build evidence
