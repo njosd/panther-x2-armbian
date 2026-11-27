@@ -1020,3 +1020,14 @@ G4-S 静态/黄金对照已 PASS，详细报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN
 B1/G3/G4 RAM-only 已验证资产继续保留为回退基线。只有当 TF 系统完成可重复启动、硬件与网络功能、存储识别/挂载、服务行为、升级回退及恢复验收，并形成最终报告后，才进入 eMMC 部署方案评审。即使满足全部条件，也必须另行审阅目标区域、备份校验、写入步骤、回退方案并取得具体 eMMC 写入授权；不得自动开始写入。
 
 权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。本决策覆盖此前把 eMMC pre-Linux 写入安全门设为 TF 实验写入/启动前置条件，以及把 RAM initramfs 描述为后续唯一正式实验运行环境的冲突表述。
+
+
+## 2026-11-27 G4-B build-only PASS：构建审计结项
+
+G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` 全部必需步骤通过，artifact `15196608755`（211,500,487 bytes）已上传。artifact ZIP SHA-256：`f374a900c20a9090e74d7ac668721d8cb6a9317fe15c0f998c32aaecd77361fa`。独立下载后复算 ZIP 摘要与 Actions 一致；包内 `SHA256SUMS` 全部通过。Linux 6.18.63 固定源码 `aee4e352a15d636cbc484f56819c6e59474dfd9f)，G4 配置相对 G3 仅增加 `CONFIG_ROCKCHIP_IODOMAIN=y`；构建日志无编译/链接错误，IO-domain 对象与目标符号存在。
+
+结果报告：`PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。
+
+**重要限制：** G4-B DTB 中 IO-domain 为 okay，但 eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1/MDIO/PHY 均 disabled。它是 G4-P 的 RAM-only 隔离候选，不是 TF rootfs 启动 DTB。未来切换到 SU08G 完整用户空间前，须在 G4-P 完成后单独构建 TF-rootfs DTB：只恢复 TF SDMMC0，继续禁用 eMMC，并完成 config/DTB/hash 审计。U-Boot 从 TF 读取内核/initramfs，不等于 Linux handoff 后能够从 TF 挂载 rootfs。
+
+**当前阶段状态：G4-S PASS；G4-B PASS；G4-P HOLD / NOT AUTHORIZED；TF 完整用户空间尚未构建；G5 未开始。** 本次仅 CI 构建及 artifact 离线核验，无实机 probe、无 PMIC/GRF 访问、无物理介质写入。项目 A 仍严格 TF-only；G4-B PASS 不改变 eMMC 冻结边界，也不授予 G4-P 操作权限。
