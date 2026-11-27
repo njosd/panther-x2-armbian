@@ -53,9 +53,9 @@
 - 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
 - Ophub 6.18.64 预编译包只作历史对照；实际 config 含网络栈和 built-in GMAC/MDIO/PHY 驱动，明确不合格，不得作为 B1 输入。
 - B1 不使用任何 Ophub 预编译 Image/DTB。首轮源码候选锁定为 ophub/linux-6.18.y commit aee4e352a15d636cbc484f56819c6e59474dfd9f（Makefile 确认为 6.18.63）。
-- CI 必须从该精确 commit 自建 Kernel；以独立 allnoconfig + 最小 fragment 生成最终 .config，并证明网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block、模块和持久化文件系统均未启用。
+- CI 从该精确 commit 自建 Kernel；以冻结的 RK35xx 基础配置 + B1 网络隔离 fragment 生成最终 `.config`。冻结 B1 artifact 实际包含 BLOCK/MMC/USB host/USB storage 与 MODULES 支持（均为 y），但不启用网络栈/网卡、无线/蓝牙；最终 rootfs 使用 RAM initramfs，`/init` 不挂载/写入持久化文件系统。
 - 该 6.18.63 源码在 CONFIG_NET=n 下暴露 kobject_uevent stub 对网络 skb 释放函数的链接依赖；B1 使用 scripts/panther-x2-b1/patches/0001-kobject-uevent-config-net-n.patch，将无网络 stub 改为拒绝非空 skb、对空指针直接返回。alloc_uevent_skb 本身仅在 CONFIG_NET 下存在，因此无网络构建不应接收有效 skb。补丁不启用网络栈，不修改任何网卡驱动；必须纳入构建输入哈希和审计。
-- clean-test DTB 从同一 commit 的 Panther X2 DTS 派生；保留原始 DTS，不覆盖上游文件。必须核验 Panther X2/RK3566 model/compatible、UART2 stdout-path，以及 GMAC/MDIO、MMC/SDIO、USB、Bluetooth UART 的禁用状态和 Wi-Fi/BT 节点移除情况。
+- clean-test DTB 从同一 commit 的 Panther X2 DTS 派生；保留原始 DTS，不覆盖上游文件。必须核验 Panther X2/RK3566 model/compatible、UART2 stdout-path、GMAC/MDIO/PHY 与 SDIO/Wi-Fi 的禁用状态；保留 TF/eMMC、USB host/PHY0、UART1/UART2，移除 Bluetooth 子节点及 Wi-Fi/BT 板级节点。
 - 有线千兆 Ethernet Kconfig 依赖审查只为 B2 服务：网络基础协议、MAC/GMAC、MDIO/PHY/PCS 及共享总线/中断/DMA/时钟/复位依赖。B1 中全部隔离。
 - Wi-Fi/无线网络、蓝牙及其控制器/驱动/固件/协议/用户空间组件永久排除，不开展 Kconfig 依赖研究、不构建、不测试、不作为后续引入项；USB/PCIe 外接网络适配器同样排除。
 - 该 commit 仅为首轮可复现构建候选；CI 配置、编译、DTB 与 artifact 审查通过前，不视为已锁定可用内核。
@@ -85,7 +85,7 @@
 
 ### B1.1 组件清单
 
-B1 只构建一个纯 RAM 的最小启动底座。网络、存储和 USB 组件均不预置；后续只在 B2 为板载有线千兆 Ethernet 按单变量计划重新构建并引入。
+B1 构建一个以 RAM initramfs 为 root 的最小启动底座。网络栈/网卡、Wi-Fi/蓝牙隔离；冻结 artifact 保留 RK35xx 基础配置中的 BLOCK/MMC/USB host/USB storage 驱动，以及 Panther X2 的 TF/eMMC、USB host/PHY0 节点。存储支持存在不等于挂载持久化文件系统；`/init` 不挂载/写入持久化存储。
 
 必须包含：
 - 固定版本 ARM64 Kernel；
@@ -95,15 +95,15 @@ B1 只构建一个纯 RAM 的最小启动底座。网络、存储和 USB 组件�
 - 简洁、可审计的 `/init`；
 - UART console/earlycon；
 - 必要 procfs、sysfs、devtmpfs、tmpfs；
-- Linux B1 不启用 MMC/eMMC/SD/SDIO、块设备、USB 或模块；TF 仅由启动前的 JP U-Boot proper 读取 Image、uInitrd 和 DTB，Linux 启动后不再访问任何存储设备。
+- Linux B1 最终 `.config` 包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`；DTB 保留 TF/eMMC 与 USB host/PHY0，禁用 SDIO。U-Boot 启动前从 TF 读取 Image/uInitrd/DTB；Linux 启动后可以枚举已启用的 MMC/USB 设备，但 root 仍是 RAM initramfs，`/init` 不挂载/写入持久化文件系统。
 - Kernel 从源码以独立 allnoconfig + 最小 fragment 构建；网络栈及 Ethernet MAC/GMAC、MDIO、PHY/PCS 驱动必须未编入内核，而不只是模块未加载。
-- B1 clean-test DTB 必须禁用 GMAC/MDIO/PHY、MMC/eMMC/SDIO、USB host/PHY 和蓝牙 UART 节点；删除 Wi-Fi/蓝牙相关板级节点与 GPIO/power-sequence 描述，保留 UART2 console、必要 SoC 时钟与 pinctrl。
+- B1 clean-test DTB 必须禁用 GMAC/MDIO/PHY 与 SDIO/Wi-Fi；保留 TF/eMMC、USB host/PHY0、UART1/UART2 和必要 SoC 时钟/pinctrl；删除 Wi-Fi/蓝牙相关板级节点与 GPIO/power-sequence 描述，并移除 UART1 下 Bluetooth 子节点。
 - 网络工具（ip、ARP/ICMP、TCP/UDP）仅在网络子系统及对应设备驱动按序通过验证后逐项加入，不得为了减少重建次数预置到第一份干净基线。
 
 不包含：
 - 任何网络用户空间工具、DHCP/DNS/SSH；
 - Wi-Fi/无线网络、蓝牙及其驱动/固件/协议；
-- USB、MMC/eMMC/SD、块设备驱动、文件系统驱动和模块；
+- USB 外接网卡驱动、Wi-Fi/蓝牙驱动/固件/协议；不把 USB host、MMC/eMMC/SD、块设备支持列为禁用项，它们属于冻结 B1 基线。
 - ethtool、NetworkManager、systemd、udev；
 - Docker、存储管理、NPU/RKNN、Immich、包管理器和无关服务。
 
