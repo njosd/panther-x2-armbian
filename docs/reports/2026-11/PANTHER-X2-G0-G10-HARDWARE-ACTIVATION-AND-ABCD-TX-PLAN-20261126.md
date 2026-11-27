@@ -85,6 +85,14 @@ G0 放行条件：完成黄金基线真实配置/对象/DTB/启动行为恢复�
 - [x] G0-P1：6.1.65 最终 config/built-in 已归档；6.1.116 真实 config 7,677 项已提取且与官方模板零差异；实机启动/IRQ/GMAC/PHY 日志已归档。黄金 DTB binary 仍待补齐。
 - [x] G0-P2：6.1.65/6.1.116 RK809 MFD、regulator、IO-domain、GMAC glue 源码共性已逐文件核验；关键文件完全相同，详见 G0 Golden Source Commonality 报告。
 - [x] G0-P3：黄金与 6.18.63 的 RK809 IRQ/pre-init/SWITCH_REG1 descriptor、regulator late cleanup、PHY-supply consumer 路径已在 R3 §21–§26 对照；保留已知差异及证据边界。
-- [ ] G0-P4：提取 6.1.65/6.1.116 原始 DTB，与 6.18.63 R1 DTB 做 RK809/regulator/IO-domain/GMAC supply 子树结构化 diff；不重提大镜像。
-- [ ] G0 总体准入评审；不以 3.3V rail 测量或 PCB testpoint 资料作为前置条件。
-- G0 未完成前不启动下一硬件门。
+- [x] G0-P4：CONDITIONAL PASS。6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB 身份及 GMAC1 核心解析已归档；仅 6.1.65 PMIC/IO-domain 原始子树 binary diff 仍缺，不重提大镜像。
+- [x] G0 总体复核：CONDITIONAL PASS，仅允许形成 G2 受控实施/授权计划，不构成硬件操作授权。
+- [ ] G2：stock RK809 MFD/regmap 受控实施；必须先完成独立计划评审并取得该次 PMIC pre-init 写入的明确授权。
+- G0 CONDITIONAL PASS 不等于硬件激活放行；在 G2 独立授权前不启动、不写 PMIC、不恢复 GMAC。
+
+
+## 2026-11-27 G0 总体复核结果
+
+G0 现记为 **CONDITIONAL PASS（planning only）**。完整审查见 `PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md`。这只允许进入 G2 实施计划评审；不授权 stock RK809 MFD probe。G2 probe 的 `rk817_pre_init_reg[]` 写入与黄金版本继承行为相符，但该次 6.18 probe 仍需单独授权。
+
+G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB 的 GMAC1 核心属性复用既有解析结果；仅 6.1.65 原始 PMIC/IO-domain 子树 binary diff 未完成。此项不要求重新提取完整镜像，不作为 G2 计划编制阻塞。
