@@ -244,7 +244,7 @@ jobs:
           sha256sum "$OUT/drivers/i2c/busses/i2c-rk3x.o" "$OUT/drivers/gpio/gpio-rockchip.o" \
             "$OUT/drivers/pinctrl/pinctrl-rockchip.o" "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \
             "$OUT/drivers/rtc/rtc-rk808.o" "$OUT/drivers/input/misc/rk805-pwrkey.o" \
-            | tee work/output/G2-MFD-OBJECTS-SHA256.txt
+            | tee work/output/G2-PMIC-DEPENDENCY-OBJECTS-SHA256.txt
           {
             echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
             echo "Image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
