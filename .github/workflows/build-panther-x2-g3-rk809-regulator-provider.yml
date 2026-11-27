@@ -1,0 +1,336 @@
+name: Panther X2 Project A G3 RK809 regulator provider build-only
+
+on:
+  workflow_dispatch:
+    inputs:
+      r1_run_id:
+        description: "Successful R1 network-core run containing the frozen R1 config and Panther DTB"
+        required: true
+        type: string
+        default: "45611898629"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g3-provider-build-only
+  cancel-in-progress: false
+
+env:
+  KERNEL_VERSION: "6.18.63"
+  KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+  KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+  R1_RUN_ID: ${{ inputs.r1_run_id }}
+
+jobs:
+  g3-provider-build-only:
+    name: Build and audit isolated RK809 regulator provider; no hardware access
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install isolated build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential curl device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git libelf-dev \
+            libncurses-dev libssl-dev make perl python3 \
+            binutils kmod zstd
+
+      - name: Restore frozen R1 configuration and Panther DTB
+        uses: actions/download-artifact@v6
+        with:
+          name: b2-1-r1-network-core
+          path: work/r1-reference
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.r1_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify and freeze R1 input identity
+        id: freeze_r1_inputs
+        run: |
+          set -euo pipefail
+          R1_CONFIG=work/r1-reference/output/kernel.config
+          R1_DTB=work/r1-reference/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test -s "$R1_CONFIG"
+          test -s "$R1_DTB"
+          test "$(sha256sum "$R1_DTB" | awk '{print $1}')" = "7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d"
+          test "$(fdtget -t s "$R1_DTB" / model)" = "Panther X2"
+          fdtget -t s "$R1_DTB" / compatible | grep -q 'panther,x2'
+          fdtget -t s "$R1_DTB" / compatible | grep -q 'rockchip,rk3566'
+          grep -qx 'CONFIG_NET=y' "$R1_CONFIG"
+          grep -qx 'CONFIG_PACKET=y' "$R1_CONFIG"
+          for key in CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB; do
+            if grep -Eq "^$key=[ym]$" "$R1_CONFIG"; then
+              echo "::error::R1 baseline unexpectedly enables $key"
+              exit 1
+            fi
+          done
+          mkdir -p work/reference
+          cp "$R1_CONFIG" work/reference/r1-kernel.config
+          cp "$R1_DTB" work/reference/r1-panther-x2.dtb
+          {
+            echo "r1_run_id=${R1_RUN_ID}"
+            echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')"
+            echo "r1_dtb_sha256=$(sha256sum work/reference/r1-panther-x2.dtb | awk '{print $1}')"
+            echo "r1_input=artifact:b2-1-r1-network-core"
+          } | tee work/r1-reference-lock.txt
+          echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned Linux source and apply audited R1 compatibility patch
+        run: |
+          set -euo pipefail
+          mkdir -p work/logs work/output work/kernel-out
+          git init work/linux
+          git -C work/linux remote add origin "${KERNEL_SOURCE_REPO}"
+          git -C work/linux fetch --depth=1 origin "${KERNEL_SOURCE_COMMIT}"
+          git -C work/linux checkout --detach FETCH_HEAD
+          test "$(git -C work/linux rev-parse HEAD)" = "${KERNEL_SOURCE_COMMIT}"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          PATCH="$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          test -s "$PATCH"
+          git -C work/linux apply --check "$PATCH"
+          git -C work/linux apply "$PATCH"
+          git -C work/linux diff --check
+          {
+            echo "kernel_source=${KERNEL_SOURCE_REPO}"
+            echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "r1_compat_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
+            echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')"
+            echo "g2_fragment_sha256=$(sha256sum scripts/panther-x2-g2/g2-stock-runtime.fragment | awk '{print $1}')"
+            echo "g3_fragment_sha256=$(sha256sum scripts/panther-x2-g3/g3-rk809-regulator-provider.fragment | awk '{print $1}')"
+          } | tee work/source-lock.txt
+
+      - name: Restore incremental G3 kernel object cache
+        uses: actions/cache/restore@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g3-provider-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_r1_inputs.outputs.r1_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g2/g2-stock-runtime.fragment', 'scripts/panther-x2-g3/g3-rk809-regulator-provider.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g3-rk809-regulator-provider.yml') }}
+
+      - name: Merge G2 baseline and G3 regulator-provider delta
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          BASE="$GITHUB_WORKSPACE/work/reference/r1-kernel.config"
+          G2="$GITHUB_WORKSPACE/scripts/panther-x2-g2/g2-stock-runtime.fragment"
+          G3="$GITHUB_WORKSPACE/scripts/panther-x2-g3/g3-rk809-regulator-provider.fragment"
+          mkdir -p "$OUT"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$BASE" "$G2" "$G3" \
+            2>&1 | tee work/logs/g3-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/output/kernel.config
+          diff -u "$BASE" work/output/kernel.config > work/logs/g3-config-diff.txt || test "$?" -eq 1
+
+          require_y() {
+            grep -qx "$1=y" work/output/kernel.config || {
+              echo "::error::Expected $1=y"
+              exit 1
+            }
+          }
+          require_off() {
+            if grep -Eq "^$1=[ym]$" work/output/kernel.config; then
+              echo "::error::Forbidden $1 enabled"
+              grep -E "^$1=" work/output/kernel.config
+              exit 1
+            fi
+          }
+          for key in CONFIG_NET CONFIG_PACKET CONFIG_OF CONFIG_I2C CONFIG_I2C_RK3X CONFIG_REGMAP_I2C \
+                     CONFIG_REGMAP_IRQ CONFIG_IRQ_DOMAIN CONFIG_MFD_CORE CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C \
+                     CONFIG_MODULES CONFIG_GPIOLIB CONFIG_GPIO_ROCKCHIP CONFIG_PINCTRL_ROCKCHIP \
+                     CONFIG_INPUT CONFIG_INPUT_MISC CONFIG_INPUT_EVDEV CONFIG_RTC_CLASS \
+                     CONFIG_RTC_INTF_SYSFS CONFIG_RTC_INTF_PROC CONFIG_RTC_INTF_DEV \
+                     CONFIG_RTC_DRV_RK808 CONFIG_INPUT_RK805_PWRKEY \
+                     CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE CONFIG_REGULATOR_RK808; do
+            require_y "$key"
+          done
+          for key in CONFIG_RTC_HCTOSYS CONFIG_RTC_SYSTOHC CONFIG_ROCKCHIP_IODOMAIN \
+                     CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY \
+                     CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do
+            require_off "$key"
+          done
+          cp "$G2" work/output/g2-stock-runtime.fragment
+          cp "$G3" work/output/g3-rk809-regulator-provider.fragment
+          echo "G3 Kconfig dependency and isolation gates: PASS" | tee work/logs/g3-config-gates.txt
+
+      - name: Build configured Linux Image
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
+            2>&1 | tee work/logs/g3-kernel-build.log
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          install -m 0644 "$OUT/System.map" work/output/System.map
+          install -m 0644 "$OUT/vmlinux" work/output/vmlinux
+          file work/output/Image | tee work/output/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \\n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+
+      - name: Save incremental G3 kernel object cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g3-provider-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_r1_inputs.outputs.r1_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g2/g2-stock-runtime.fragment', 'scripts/panther-x2-g3/g3-rk809-regulator-provider.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g3-rk809-regulator-provider.yml') }}
+
+      - name: Audit regulator provider objects, symbols and isolated DTB
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          for obj in \
+            drivers/regulator/core.o drivers/regulator/of_regulator.o \
+            drivers/regulator/fixed.o drivers/regulator/rk808-regulator.o \
+            drivers/i2c/busses/i2c-rk3x.o drivers/gpio/gpio-rockchip.o \
+            drivers/pinctrl/pinctrl-rockchip.o drivers/mfd/rk8xx-core.o \
+            drivers/mfd/rk8xx-i2c.o drivers/rtc/rtc-rk808.o \
+            drivers/input/misc/rk805-pwrkey.o; do
+            test -s "$OUT/$obj" || { echo "::error::Missing built-in object: $obj"; exit 1; }
+          done
+
+          nm -a "$OUT/drivers/regulator/rk808-regulator.o" > work/logs/rk808-regulator-symbols.txt
+          grep -q 'rk808_regulator_probe' work/logs/rk808-regulator-symbols.txt
+          nm -a "$OUT/drivers/regulator/fixed.o" > work/logs/fixed-regulator-symbols.txt
+          grep -q 'regulator_fixed_voltage_probe' work/logs/fixed-regulator-symbols.txt
+          nm -a "$OUT/drivers/regulator/core.o" > work/logs/regulator-core-symbols.txt
+          grep -q 'regulator_register' work/logs/regulator-core-symbols.txt
+          nm -a "$OUT/drivers/regulator/of_regulator.o" > work/logs/of-regulator-symbols.txt
+          grep -q 'of_get_regulator' work/logs/of-regulator-symbols.txt
+          nm -a work/output/vmlinux > work/logs/g3-vmlinux-symbols.txt
+          for sym in rk808_regulator_probe regulator_fixed_voltage_probe regulator_register rk8xx_probe rk8xx_i2c_probe rk808_rtc_probe rk805_pwrkey_probe; do
+            grep -q "$sym" work/logs/g3-vmlinux-symbols.txt
+          done
+          if grep -q 'rockchip_iodomain_probe' work/logs/g3-vmlinux-symbols.txt; then
+            echo "::error::IO-domain probe unexpectedly linked into G3"
+            exit 1
+          fi
+
+          mkdir -p work/output/dtb/rockchip
+          cp work/reference/r1-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          DTB=work/output/dtb/rockchip/rk3566-panther-x2.dtb
+
+          # Explicitly enable RK809 MFD; all other G3 consumers are isolated.
+          fdtput -t s "$DTB" /i2c@fdd40000/pmic@20 status okay
+          fdtput -t s "$DTB" /syscon@fdc20000/io-domains status disabled
+          fdtput -t s "$DTB" /mmc@fe310000 status disabled
+          fdtput -t s "$DTB" /mmc@fe2b0000 status disabled
+          fdtput -t s "$DTB" /mmc@fe2c0000 status disabled
+          fdtput -t s "$DTB" /gpu@fde60000 status disabled
+          fdtput -t s "$DTB" /saradc@fe720000 status disabled
+          fdtput -t s "$DTB" /ethernet@fe010000 status disabled
+          fdtput -t s "$DTB" /ethernet@fe010000/mdio status disabled
+          fdtput -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status disabled
+
+          assert_status() {
+            local node="$1" expected="$2" actual
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            test "$actual" = "$expected" || {
+              echo "::error::DTB status mismatch: $node expected=$expected actual=$actual"
+              exit 1
+            }
+          }
+          assert_status /i2c@fdd40000/pmic@20 okay
+          assert_status /syscon@fdc20000/io-domains disabled
+          assert_status /mmc@fe310000 disabled
+          assert_status /mmc@fe2b0000 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /gpu@fde60000 disabled
+          assert_status /saradc@fe720000 disabled
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+          test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
+
+          {
+            echo "model=$(fdtget -t s "$DTB" / model)"
+            echo "rk809_status=$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)"
+            echo "io_domains_status=$(fdtget -t s "$DTB" /syscon@fdc20000/io-domains status)"
+            echo "emmc_sdhci_status=$(fdtget -t s "$DTB" /mmc@fe310000 status)"
+            echo "tf_sdmmc0_status=$(fdtget -t s "$DTB" /mmc@fe2b0000 status)"
+            echo "sdio_sdmmc1_status=$(fdtget -t s "$DTB" /mmc@fe2c0000 status)"
+            echo "gpu_status=$(fdtget -t s "$DTB" /gpu@fde60000 status)"
+            echo "saradc_status=$(fdtget -t s "$DTB" /saradc@fe720000 status)"
+            echo "gmac1_status=$(fdtget -t s "$DTB" /ethernet@fe010000 status)"
+            echo "mdio_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)"
+            echo "phy_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)"
+            sha256sum "$DTB"
+          } | tee work/output/G3-DTB-ISOLATION.txt
+
+          sha256sum "$OUT/drivers/regulator/core.o" "$OUT/drivers/regulator/of_regulator.o" \
+            "$OUT/drivers/regulator/fixed.o" "$OUT/drivers/regulator/rk808-regulator.o" \
+            "$OUT/drivers/i2c/busses/i2c-rk3x.o" "$OUT/drivers/gpio/gpio-rockchip.o" \
+            "$OUT/drivers/pinctrl/pinctrl-rockchip.o" "$OUT/drivers/mfd/rk8xx-core.o" \
+            "$OUT/drivers/mfd/rk8xx-i2c.o" "$OUT/drivers/rtc/rtc-rk808.o" \
+            "$OUT/drivers/input/misc/rk805-pwrkey.o" | tee work/output/G3-DEPENDENCY-OBJECTS-SHA256.txt
+
+          {
+            echo "purpose=G3 RK809 regulator-provider build-only candidate"
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "kernel_commit=${KERNEL_SOURCE_COMMIT}"
+            echo "r1_run_id=${R1_RUN_ID}"
+            echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')"
+            echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "Image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
+            echo "dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
+            echo "rk809_regulator_provider=built-in"
+            echo "fixed_regulator_provider=built-in"
+            echo "rockchip_iodomain=not-built"
+            echo "gmac1_mdio_phy=disabled"
+            echo "emmc_sdhci=disabled"
+            echo "tf_sdmmc0=disabled"
+            echo "sdio_sdmmc1=disabled"
+            echo "gpu=disabled"
+            echo "saradc=disabled"
+            echo "rk809_mfd_rtc_pwrkey=retained_from_G2"
+            echo "regulator_ignore_unused=required_in_future_G3_runtime_bootargs_only"
+            echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init regulator_ignore_unused"
+            echo "hardware_access=none"
+            echo "pmic_register_access=none"
+            echo "physical_media_writes=none"
+            echo "boot_authorization=not_granted"
+          } | tee work/output/G3-BUILD-MANIFEST.txt
+
+          cp work/source-lock.txt work/output/G3-source-lock.txt
+          cp work/r1-reference-lock.txt work/output/G3-R1-reference-lock.txt
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Upload G3 provider build-only artifact
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g3-rk809-regulator-provider-build-only
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/r1-reference-lock.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload failed G3 diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g3-rk809-regulator-provider-failed-diagnostics
+          path: |
+            work/logs/
+            work/source-lock.txt
+            work/r1-reference-lock.txt
+            work/output/kernel.config
+          if-no-files-found: warn
+          retention-days: 14
