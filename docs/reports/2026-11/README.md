@@ -14,6 +14,7 @@
 - [G0.3 IO-domain Supplier / GMAC1 VCCIO5 映射审计（2026-11-26）](./PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-AND-GMAC1-VCCIO5-MAPPING-20261126.md)：静态拓扑和 GRF 写入路径完成；GMAC1 M0→VCCIO5，且与 PHY 共用 vcc_3v3/SWITCH_REG1；最终 deferred-probe 状态仍 UNKNOWN。
 - [G0.4 GMAC1 Clock/Reset/PHY 125MHz 来源审计（2026-11-26）](./PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md)：CRU clock/reset、PHY reset、RGMII mode/delay 静态链完成；RTL8211F CLKOUT pin35 仅为候选，实际物理波形未验证。
 - [G0.5 ABCD-TX Sender 与观测夹具设计（2026-11-26）](./PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md)：冻结独立 sender 帧格式、A/B/C/D 观测链、同帧关联和对端 pcap 规范；原设计报告不代表运行时或物理 TX 验证。
+- [Project-A iMac ABCD 对端抓包夹具准备（2026-11-27）](./PANTHER-X2-PROJECT-A-IMAC-ABCD-CAPTURE-FIXTURE-20261127.md)：新增 macOS tcpdump 只读抓包脚本及已知正常设备预检流程；尚未在 iMac 执行，未捕获帧，不能作为 E6 或 Panther TX 证据。
 - [Project-A ABCD sender 与 pcap verifier 实现/构建验收（2026-11-27）](./PANTHER-X2-PROJECT-A-ABCD-SENDER-AND-PCAP-VERIFIER-20261127.md)：独立静态 AArch64 sender、classic-pcap 离线校验器及 build-only CI 已通过；Actions run `45941220581` / artifact `15172507107`，内部 SHA256 与 ELF 架构/静态链接已独立核验。没有实机运行或发送物理帧。
 
 - [项目 A 全阶段黄金基线与默认配置验收规则（2026-11-26）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：总路线图新增强制门；每个 R 阶段均先对照 6.1.65/6.1.116，再审计 6.18 默认配置并验证功能，默认实现通过即保留，未验证不得放行。
