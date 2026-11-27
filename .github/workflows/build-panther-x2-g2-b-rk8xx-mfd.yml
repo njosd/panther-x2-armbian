@@ -187,8 +187,7 @@ jobs:
           nm -a "$OUT/drivers/mfd/rk8xx-i2c.o" > work/logs/rk8xx-i2c-symbols.txt
           grep -q 'rk8xx_probe' work/logs/rk8xx-core-symbols.txt
           grep -q 'rk8xx_i2c_probe' work/logs/rk8xx-i2c-symbols.txt
-          nm -a work/output/vmlinux | grep -E ' rk8xx_probe$| rk8xx_i2c_probe
-
+          nm -a work/output/vmlinux | awk '$NF == "rk8xx_probe" || $NF == "rk8xx_i2c_probe" { print }' > work/logs/g2-mfd-linked-symbols.txt
           mkdir -p work/output/dtb/rockchip
           cp work/reference/r1-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
           DTB=work/output/dtb/rockchip/rk3566-panther-x2.dtb
