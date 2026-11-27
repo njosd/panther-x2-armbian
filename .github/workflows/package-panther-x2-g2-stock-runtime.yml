@@ -280,8 +280,21 @@ jobs:
 
           IMAGE=work/output/panther-x2-project-a-g2-stock-runtime-PREPARE-ONLY.img
           IMAGE_ZST="$IMAGE.zst"
-          truncate -s 2G "$IMAGE"
-          sgdisk --clear --new=1:32768:4192255 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+
+          # Exact previously measured SU08G geometry: 7,948,206,080 bytes.
+          # Do not round this to 8 GiB; the card is a nominal 8 GB device.
+          TF_TARGET=SU08G
+          TF_IMAGE_BYTES=7948206080
+          TF_SECTOR_SIZE=512
+          TF_TOTAL_SECTORS=15523840
+          TF_FIRST_PARTITION_SECTOR=32768
+          TF_LAST_USABLE_SECTOR=$((TF_TOTAL_SECTORS - 34))
+          test "$((TF_TOTAL_SECTORS * TF_SECTOR_SIZE))" -eq "$TF_IMAGE_BYTES"
+          test "$TF_LAST_USABLE_SECTOR" -eq 15523806
+
+          truncate -s "$TF_IMAGE_BYTES" "$IMAGE"
+          test "$(stat -c %s "$IMAGE")" -eq "$TF_IMAGE_BYTES"
+          sgdisk --clear --new=1:32768:15523806 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
 
           LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
           cleanup() {
@@ -311,6 +324,8 @@ jobs:
             "Frozen B1/R1 retains BLOCK/MMC/USB host/USB storage support; TF/eMMC and USB host may enumerate." \
             "U-Boot loads Image/uInitrd/DTB from TF before Linux; Linux root is RAM initramfs and /init does not mount persistent filesystems." \
             "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
+            "Target geometry: SU08G nominal 8 GB TF; exact measured capacity 7,948,206,080 bytes (15,523,840 x 512-byte sectors)." \
+            "GPT PANTHER_BOOT partition spans LBA 32768 through 15523806; backup GPT is at the final image sector." \
             "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
             | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
           sync
@@ -393,7 +408,12 @@ jobs:
             echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
             echo "load_addresses=Image:0x00280000;uInitrd:0x0a200000;DTB:0x0a100000"
             echo "uboot_proper_location=raw LBA 16384 (8 MiB)"
-            echo "partition=GPT PANTHER_BOOT ext4; start LBA 32768; end LBA 4192255"
+            echo "target_media=SU08G nominal 8 GB TF"
+            echo "target_capacity_bytes=7948206080"
+            echo "target_sector_size_bytes=512"
+            echo "target_total_sectors=15523840"
+            echo "partition=GPT PANTHER_BOOT ext4; start LBA 32768; end LBA 15523806"
+            echo "gpt_backup_header=final image sector 15523839"
             echo "boot_chain=existing eMMC SPL -> TF JP-TvBox U-Boot proper -> TF Image/uInitrd/DTB -> RAM initramfs"
             echo "hardware_access=none"
             echo "physical_media_writes=none"
