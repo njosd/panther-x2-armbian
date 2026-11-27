@@ -429,3 +429,10 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 只有当 SU08G 系统完成可重复启动、目标硬件与网络功能、存储识别/挂载、基础服务、升级回退、备份恢复和数据完整性验收，并形成最终报告后，才可进入 eMMC 部署方案评审。方案必须明确目标设备/区域、备份与校验、具体步骤、影响范围和回退路径，并由用户对具体 eMMC 写入另行授权。全部验收通过不等于自动获得写入授权。
 
 权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。
+
+
+## 2026-11-27 G4-B build-only 验收状态更新
+
+G4-B Actions run `45997129528` PASS；完整构建与 artifact 独立校验结果见 `PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。该产物 DTB 禁用了 Linux TF SDMMC0 和 eMMC 控制器，只能作为 RAM-only G4-P 隔离候选，不可直接用于 TF rootfs。G4-P 仍 HOLD / NOT AUTHORIZED。
+
+G4-P 经独立授权并验证后，下一构建门必须单独恢复 TF SDMMC0、保持 eMMC disabled，产出 TF-rootfs 专用 DTB 并做 build-only 审计；随后才在 SU08G 上建立完整用户空间。G5 及后续硬件/网络测试继续留在 SU08G。eMMC 不写入、不挂载、不安装、不修改，直到 TF 系统完整验收后另行评审和单独授权。
