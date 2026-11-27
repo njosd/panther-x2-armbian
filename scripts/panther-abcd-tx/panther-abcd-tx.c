@@ -10,6 +10,7 @@
  * - send success proves only the userspace A boundary, never wire delivery.
  */
 #define _GNU_SOURCE
+#include <arpa/inet.h>
 #include <errno.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
