@@ -66,12 +66,17 @@ for node in \
     /proc/device-tree/mmc@fe2c0000/status \
     /proc/device-tree/mmc@fe310000/status \
     /proc/device-tree/mmc@fe2b0000/status \
+    /proc/device-tree/mmc@fe000000/status \
     /proc/device-tree/usb@fcc00000/status \
+    /proc/device-tree/usb@fd000000/status \
     /proc/device-tree/usb@fd800000/status \
     /proc/device-tree/usb@fd840000/status \
+    /proc/device-tree/usb@fd880000/status \
+    /proc/device-tree/usb@fd8c0000/status \
     /proc/device-tree/usb2phy@fe8a0000/status \
     /proc/device-tree/usb2phy@fe8a0000/host-port/status \
-    /proc/device-tree/usb2phy@fe8a0000/otg-port/status; do
+    /proc/device-tree/usb2phy@fe8a0000/otg-port/status \
+    /proc/device-tree/usb2phy@fe8b0000/status; do
     parent=${node%/status}
     if [ -d "$parent" ]; then
         echo "$node:"
