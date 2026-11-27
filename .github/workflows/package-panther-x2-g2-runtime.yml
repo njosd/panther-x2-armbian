@@ -278,8 +278,8 @@ jobs:
             "RK809 MFD code is built-in but the RK809 DT node is disabled; no PMIC probe." \
             "GMAC1/MDIO/RTL8211F remain disabled; no physical Ethernet activation or TX." \
             "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \
-            "Linux BLOCK/MMC/eMMC/TF/SDIO and USB host/PHY remain disabled per frozen B1/R1 baseline." \
-            "U-Boot reads TF boot files before Linux starts; Linux root is RAM initramfs only." \
+            "Frozen B1/R1 retains BLOCK/MMC/USB host/USB storage support; TF/eMMC and USB host may enumerate." \
+            "U-Boot loads Image/uInitrd/DTB from TF before Linux; Linux root is RAM initramfs and /init does not mount persistent filesystems." \
             "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
             "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
             | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
@@ -356,7 +356,7 @@ jobs:
             echo "rk809_mfd_builtin=yes; rk809_dtb_status=disabled; pmic_probe=not_performed"
             echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
             echo "network_core=enabled; AF_PACKET=enabled; no physical netdev expected"
-            echo "storage_usb=Linux BLOCK/MMC/USB disabled per frozen B1/R1 baseline; U-Boot reads TF before Linux; /init does not mount or write persistent storage"
+            echo "storage_usb=CONFIG_BLOCK/MMC/USB=y per frozen B1/R1; TF/eMMC and USB host enabled in DTB; /init leaves persistent filesystems unmounted"
             echo "usb_network_adapters=disabled; USB external NICs excluded"
             echo "rootfs=RAM initramfs; no persistent rootfs"
             echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
