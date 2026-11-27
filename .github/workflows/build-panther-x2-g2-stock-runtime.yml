@@ -186,7 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
-          for obj in drivers/mfd/rk8xx-core.o drivers/mfd/rk8xx-i2c.o; do
+          for obj in drivers/mfd/rk8xx-core.o drivers/mfd/rk8xx-i2c.o drivers/rtc/rtc-rk808.o drivers/input/misc/rk805-pwrkey.o; do
             test -s "$OUT/$obj" || {
               echo "::error::Expected built-in object missing: $obj"
               exit 1
@@ -196,9 +196,15 @@ jobs:
           nm -a "$OUT/drivers/mfd/rk8xx-i2c.o" > work/logs/rk8xx-i2c-symbols.txt
           grep -q 'rk8xx_probe' work/logs/rk8xx-core-symbols.txt
           grep -q 'rk8xx_i2c_probe' work/logs/rk8xx-i2c-symbols.txt
+          nm -a "$OUT/drivers/rtc/rtc-rk808.o" > work/logs/rk808-rtc-symbols.txt
+          nm -a "$OUT/drivers/input/misc/rk805-pwrkey.o" > work/logs/rk805-pwrkey-symbols.txt
+          grep -q 'rk808_rtc_probe' work/logs/rk808-rtc-symbols.txt
+          grep -q 'rk805_pwrkey_probe' work/logs/rk805-pwrkey-symbols.txt
           nm -a work/output/vmlinux | awk '$NF == "rk8xx_probe" || $NF == "rk8xx_i2c_probe" { print }' > work/logs/g2-mfd-linked-symbols.txt
           grep -q 'rk8xx_probe' work/logs/g2-mfd-linked-symbols.txt
           grep -q 'rk8xx_i2c_probe' work/logs/g2-mfd-linked-symbols.txt
+          nm -a work/output/vmlinux | grep 'rk808_rtc_probe' > work/logs/g2-rtc-linked-symbol.txt
+          nm -a work/output/vmlinux | grep 'rk805_pwrkey_probe' > work/logs/g2-pwrkey-linked-symbol.txt
 
           mkdir -p work/output/dtb/rockchip
           cp work/reference/r1-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
@@ -222,7 +228,8 @@ jobs:
           grep -qx 'mdio_status=disabled' work/output/G2-DTB-ISOLATION.txt
           grep -qx 'phy_status=disabled' work/output/G2-DTB-ISOLATION.txt
 
-          sha256sum "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \
+          sha256sum "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \\
+            "$OUT/drivers/rtc/rtc-rk808.o" "$OUT/drivers/input/misc/rk805-pwrkey.o" \\
             | tee work/output/G2-MFD-OBJECTS-SHA256.txt
           {
             echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
@@ -231,8 +238,12 @@ jobs:
             echo "dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
             echo "rk8xx_core_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-core.o" | awk '{print $1}')"
             echo "rk8xx_i2c_object_sha256=$(sha256sum "$OUT/drivers/mfd/rk8xx-i2c.o" | awk '{print $1}')"
+            echo "rtc_rk808_object_sha256=$(sha256sum "$OUT/drivers/rtc/rtc-rk808.o" | awk '{print $1}')"
+            echo "rk805_pwrkey_object_sha256=$(sha256sum "$OUT/drivers/input/misc/rk805-pwrkey.o" | awk '{print $1}')"
             echo "built_in_symbols=rk8xx_probe,rk8xx_i2c_probe"
             echo "rk809_node=okay"
+            echo "rtc_drv_rk808=built-in"
+            echo "input_rk805_pwrkey=built-in"
             echo "gmac1_mdio_phy=disabled"
             echo "regulator_rk808=not-set"
             echo "module_support=enabled in R1 baseline; G2 builds Image only; RK8xx MFD objects must be built-in"
