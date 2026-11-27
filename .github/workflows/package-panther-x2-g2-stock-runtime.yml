@@ -1,0 +1,407 @@
+name: Panther X2 Project-A G2 stock PMIC runtime (PREPARE ONLY)
+
+on:
+  workflow_dispatch:
+    inputs:
+      g2_run_id:
+        description: "Successful G2 stock-runtime candidate build run ID"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g2-stock-runtime-package
+  cancel-in-progress: false
+
+env:
+  G2_RUN_ID: ${{ inputs.g2_run_id }}
+  B1_RUN_ID: "45328201244"
+  B1_ARTIFACT_ID: "14890817693"
+  B1_BUSYBOX_SHA256: "2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15"
+  JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+
+jobs:
+  package-g2-runtime:
+    name: Assemble and audit stock RK809 G2 RAM runtime (no hardware access)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install packaging and verification tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils cpio device-tree-compiler e2fsprogs file gdisk gzip qemu-user-static u-boot-tools zstd
+
+      - name: Download frozen G2-B kernel and B1 boot-support artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-g2-stock-runtime-candidate-build-only
+          path: work/g2
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G2_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Download frozen B1 BusyBox and JP U-Boot proper
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.B1_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify immutable inputs, configuration and DTB boundaries
+        run: |
+          set -euo pipefail
+
+          for f in \
+            work/g2/output/Image \
+            work/g2/output/kernel.config \
+            work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb \
+            work/g2/output/G2-DTB-ISOLATION.txt \
+            work/g2/output/BUILD-MANIFEST.txt \
+            work/g2/output/System.map \
+            work/g2/output/vmlinux \
+            work/g2/source-lock.txt \
+            work/g2/r1-reference-lock.txt \
+            work/b1/source-lock.txt \
+            work/b1/output/busybox \
+            work/b1/output/busybox.config \
+            work/b1/output/busybox-applets.txt \
+            work/b1/output/JP-TvBox-u-boot.itb \
+            work/b1/output/SHA256SUMS; do
+            test -s "$f" || { echo "::error::Missing G2/B1 input: $f"; exit 1; }
+          done
+
+          (cd work/g2/output && sha256sum --check SHA256SUMS)
+          (cd work/b1/output && sha256sum --check SHA256SUMS)
+
+          test "$(sha256sum work/b1/output/busybox | cut -c1-64)" = "$B1_BUSYBOX_SHA256"
+          test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | cut -c1-64)" = "$JP_UBOOT_SHA256"
+
+          G2_IMAGE_SHA256="$(sha256sum work/g2/output/Image | cut -c1-64)"
+          G2_CONFIG_SHA256="$(sha256sum work/g2/output/kernel.config | cut -c1-64)"
+          G2_DTB_SHA256="$(sha256sum work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb | cut -c1-64)"
+          CONFIG=work/g2/output/kernel.config
+          for key in \
+            CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_OF CONFIG_OF_FLATTREE \
+            CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT \
+            CONFIG_PROC_FS CONFIG_SYSFS CONFIG_TTY CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE \
+            CONFIG_SERIAL_8250_DW CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON \
+            CONFIG_BINFMT_ELF CONFIG_BINFMT_SCRIPT CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 \
+            CONFIG_PINCTRL_ROCKCHIP CONFIG_GPIOLIB CONFIG_RESET_CONTROLLER CONFIG_ROCKCHIP_GRF \
+            CONFIG_NET CONFIG_NET_CORE CONFIG_PACKET CONFIG_NETDEVICES CONFIG_ETHERNET \
+            CONFIG_I2C CONFIG_REGMAP_I2C CONFIG_REGMAP_IRQ CONFIG_MFD_CORE \
+            CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C CONFIG_MODULES \
+            CONFIG_INPUT CONFIG_INPUT_MISC CONFIG_RTC_CLASS \
+            CONFIG_RTC_DRV_RK808 CONFIG_INPUT_RK805_PWRKEY; do
+            grep -qx "$key=y" "$CONFIG" || { echo "::error::Required Kconfig option missing: $key"; exit 1; }
+          done
+
+          for key in \
+            CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER \
+            CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM \
+            CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO CONFIG_MDIO_DEVICE CONFIG_MDIO_BUS CONFIG_MDIO_DEVRES \
+            CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_FIXED_PHY CONFIG_NET_DSA \
+            CONFIG_NET_DSA_REALTEK CONFIG_NET_DSA_REALTEK_MDIO CONFIG_NET_FAILOVER CONFIG_NETCONSOLE \
+            CONFIG_NETPOLL CONFIG_NET_POLL_CONTROLLER CONFIG_DNET CONFIG_ETHOC CONFIG_OA_TC6 \
+            CONFIG_USB_USBNET CONFIG_USB_CATC CONFIG_USB_KAWETH CONFIG_USB_PEGASUS \
+            CONFIG_USB_RTL8150 CONFIG_USB_RTL8152 CONFIG_USB_LAN78XX CONFIG_USB_IPHETH \
+            CONFIG_USB_NET_AX8817X CONFIG_USB_NET_AX88179_178A CONFIG_USB_NET_CDCETHER \
+            CONFIG_USB_NET_CDC_EEM CONFIG_USB_NET_CDC_NCM CONFIG_USB_NET_HUAWEI_CDC_NCM \
+            CONFIG_USB_NET_CDC_MBIM CONFIG_USB_NET_DM9601 CONFIG_USB_NET_SR9700 \
+            CONFIG_USB_NET_SR9800 CONFIG_USB_NET_SMSC75XX CONFIG_USB_NET_SMSC95XX \
+            CONFIG_USB_NET_GL620A CONFIG_USB_NET_NET1080 CONFIG_USB_NET_PLUSB \
+            CONFIG_USB_NET_MCS7830 CONFIG_USB_NET_RNDIS_HOST CONFIG_USB_NET_CDC_SUBSET_ENABLE \
+            CONFIG_USB_NET_CDC_SUBSET CONFIG_USB_ALI_M5632 CONFIG_USB_AN2720 CONFIG_USB_BELKIN \
+            CONFIG_USB_ARMLINUX CONFIG_USB_EPSON2888 CONFIG_USB_KC2190 CONFIG_USB_NET_ZAURUS \
+            CONFIG_USB_NET_CX82310_ETH CONFIG_USB_NET_KALMIA CONFIG_USB_NET_QMI_WWAN \
+            CONFIG_USB_HSO CONFIG_USB_NET_INT51X1 CONFIG_USB_CDC_PHONET CONFIG_USB_SIERRA_NET \
+            CONFIG_USB_VL600 CONFIG_USB_NET_CH9200 CONFIG_USB_NET_AQC111 CONFIG_USB_RTL8153_ECM \
+            CONFIG_REGULATOR_RK808 CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN \
+            CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do
+            if grep -Eq "^$key=[ym]$" "$CONFIG"; then
+              echo "::error::Forbidden runtime Kconfig option enabled: $key"
+              exit 1
+            fi
+          done
+
+          DTB=work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
+          fdtget -t s "$DTB" / compatible | grep -q 'panther,x2'
+          fdtget -t s "$DTB" / compatible | grep -q 'rockchip,rk3566'
+          test "$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)" = "okay"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000 status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)" = "disabled"
+
+          # Match the B1 DTB gate: omitted status means enabled by default.
+          assert_status() {
+            local node="$1" expected="$2" actual
+            if ! fdtget -l "$DTB" "$node" >/dev/null 2>&1; then
+              echo "::error::DTB node missing: $node"
+              exit 1
+            fi
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            if [ "$expected" = "okay" ] && [ "$actual" = "okay (implicit default)" ]; then
+              echo "DTB status: $node = okay (implicit default)"
+              return 0
+            fi
+            test "$actual" = "$expected" || {
+              echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"
+              exit 1
+            }
+          }
+          # Frozen B1/R1/G2 boundary: TF/eMMC and USB host remain enabled;
+          # SDIO (wireless) and the unused second USB controller/PHY remain disabled.
+          assert_status /mmc@fe310000 okay
+          assert_status /mmc@fe2b0000 okay
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /mmc@fe000000 disabled
+          assert_status /usb@fcc00000 okay
+          assert_status /usb@fd000000 disabled
+          assert_status /usb@fd800000 okay
+          assert_status /usb@fd840000 okay
+          assert_status /usb@fd880000 disabled
+          assert_status /usb@fd8c0000 disabled
+          assert_status /usb2phy@fe8a0000 okay
+          assert_status /usb2phy@fe8a0000/host-port okay
+          assert_status /usb2phy@fe8a0000/otg-port okay
+          assert_status /usb2phy@fe8b0000 disabled
+          assert_status /usb2phy@fe8b0000/host-port disabled
+          assert_status /usb2phy@fe8b0000/otg-port disabled
+          assert_status /serial@fe650000 okay
+          assert_status /serial@fe660000 okay
+          test "$(fdtget -t s "$DTB" /chosen stdout-path)" = "serial2:1500000n8"
+          test "$(fdtget -t s "$DTB" /aliases serial2)" = "/serial@fe660000"
+          if fdtget -l "$DTB" /serial@fe650000 | grep -qx bluetooth; then
+            echo "::error::Bluetooth child remains under UART1"
+            exit 1
+          fi
+
+          file work/g2/output/Image | tee work/logs-kernel-image.txt
+          MAGIC="$(od -An -tx1 -j56 -N4 work/g2/output/Image | tr -d ' \n')"
+          test "$MAGIC" = "41524d64"
+          readelf -h work/b1/output/busybox | grep -q AArch64
+          if readelf -l work/b1/output/busybox | grep -q INTERP; then
+            echo "::error::B1 BusyBox must remain statically linked"
+            exit 1
+          fi
+
+          mkdir -p work/output work/initramfs work/debug work/boot/dtb/rockchip
+          cp work/g2/output/Image work/boot/Image
+          cp work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          cp work/g2/output/kernel.config work/output/kernel.config
+          cp work/g2/output/System.map work/debug/System.map
+          cp work/g2/output/vmlinux work/debug/vmlinux
+          cp work/g2/output/G2-DTB-ISOLATION.txt work/output/G2-DTB-ISOLATION.txt
+          cp work/g2/output/BUILD-MANIFEST.txt work/output/G2-BUILD-MANIFEST.txt
+          cp work/g2/source-lock.txt work/output/G2-source-lock.txt
+          cp work/g2/r1-reference-lock.txt work/output/G2-R1-reference-lock.txt
+          cp work/b1/source-lock.txt work/output/B1-source-lock.txt
+          cp -a work/g2/logs work/output/G2-build-logs
+          cp work/b1/output/busybox work/initramfs/busybox
+          cp work/b1/output/busybox work/output/busybox
+          cp work/b1/output/busybox.config work/output/busybox.config
+          cp work/b1/output/busybox-applets.txt work/output/busybox-applets.txt
+          cp work/b1/output/JP-TvBox-u-boot.itb work/output/JP-TvBox-u-boot.itb
+
+          {
+            echo "g2_run_id=$G2_RUN_ID"
+            echo "g2_artifact_name=panther-x2-g2-stock-runtime-candidate-build-only"
+            echo "g2_artifact_sha256s_verified=yes"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "b1_artifact_id=$B1_ARTIFACT_ID"
+            echo "b1_artifact_sha256=9274e557ea5b62b6c2fc086d5aa3fd9a502215ff0070870ae36a9d6dfcfd4b9c"
+            sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/initramfs/busybox work/output/JP-TvBox-u-boot.itb work/output/kernel.config
+          } | tee work/output/FROZEN-INPUTS.txt
+
+      - name: Build minimal RAM initramfs with the frozen static BusyBox
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/etc" "$ROOT/sbin"
+          install -m 0755 "$ROOT/busybox" "$ROOT/bin/busybox"
+          rm "$ROOT/busybox"
+          for applet in ash sh mount mkdir cat uname printf dmesg tail echo ls test; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-g2-stock-runtime/init "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          cp scripts/panther-x2-g2-stock-runtime/init work/output/init
+          cp scripts/panther-x2-g2-stock-runtime/boot.cmd work/output/boot.cmd
+
+          (
+            cd "$ROOT"
+            find . -print0 | sort -z | cpio --null -o --format=newc
+          ) | gzip -n -9 > work/output/initramfs.cpio.gz
+
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 Project-A G2 minimal RAM runtime" -d work/output/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/output/uinitrd-header.txt
+          grep -qi AArch64 work/output/uinitrd-header.txt
+
+          mkdir -p work/initramfs-check
+          gzip -dc work/output/initramfs.cpio.gz | (cd work/initramfs-check && cpio -idm --quiet)
+          cmp scripts/panther-x2-g2-runtime/init work/initramfs-check/init
+          cmp work/output/busybox work/initramfs-check/bin/busybox
+          test -x work/initramfs-check/init
+          test -x work/initramfs-check/bin/busybox
+          sha256sum work/output/initramfs.cpio.gz work/boot/uInitrd | tee work/output/initramfs-sha256.txt
+
+      - name: Generate U-Boot script and PREPARE-ONLY TF image (runner only)
+        run: |
+          set -euo pipefail
+          mkimage -A arm -O linux -T script -C none -n "Panther X2 Project-A G2 minimal runtime" -d work/output/boot.cmd work/boot/boot.scr
+          mkimage -l work/boot/boot.scr | tee work/output/bootscr-header.txt
+
+          IMAGE=work/output/panther-x2-project-a-g2-stock-runtime-PREPARE-ONLY.img
+          IMAGE_ZST="$IMAGE.zst"
+          truncate -s 2G "$IMAGE"
+          sgdisk --clear --new=1:32768:4192255 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          mkdir -p work/tf-mnt
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo install -m 0644 work/boot/Image work/tf-mnt/Image
+          sudo install -m 0644 work/boot/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/boot/boot.scr work/tf-mnt/boot.scr
+          sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo install -m 0644 work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
+          printf '%s\n' \
+            "Panther X2 Project-A G2 minimal runtime; PREPARE-ONLY." \
+            "Kernel: Linux 6.18.63; Image and DTB are SHA256-pinned." \
+            "RK809 MFD, RTC and PWRKEY are built-in and RK809 DT node is enabled; booting this candidate WILL probe and write PMIC registers." \
+            "GMAC1/MDIO/RTL8211F remain disabled; no physical Ethernet activation or TX." \
+            "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \
+            "Frozen B1/R1 retains BLOCK/MMC/USB host/USB storage support; TF/eMMC and USB host may enumerate." \
+            "U-Boot loads Image/uInitrd/DTB from TF before Linux; Linux root is RAM initramfs and /init does not mount persistent filesystems." \
+            "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
+            "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
+            | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+          UBOOT_SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
+          UBOOT_READBACK="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$UBOOT_SIZE" status=none | sha256sum | cut -c1-64)"
+          test "$UBOOT_READBACK" = "$JP_UBOOT_SHA256"
+
+          LOOP="$(sudo losetup --find --show --partscan --read-only "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          sudo mount -o ro "$PART" work/tf-mnt
+          for item in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do
+            test -s "work/tf-mnt/$item"
+          done
+          test "$(sha256sum work/tf-mnt/Image | cut -c1-64)" = "$G2_IMAGE_SHA256"
+          test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | cut -c1-64)" = "$G2_DTB_SHA256"
+          test "$(sha256sum work/tf-mnt/uInitrd | cut -c1-64)" = "$(sha256sum work/boot/uInitrd | cut -c1-64)"
+          (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          sha256sum "$IMAGE" | tee work/output/tf-image-sha256.txt
+          zstd -T0 -10 "$IMAGE" -o "$IMAGE_ZST"
+          zstd -t "$IMAGE_ZST"
+          sha256sum "$IMAGE_ZST" >> work/output/tf-image-sha256.txt
+          rm -f "$IMAGE"
+
+      - name: Create runtime manifest and final SHA256 inventory
+        run: |
+          set -euo pipefail
+          {
+            echo "status=PASS_PREPARE_ONLY"
+            echo "purpose=Project-A G2 stock PMIC minimal RAM runtime; packaging and offline verification only"
+            echo "g2_run_id=$G2_RUN_ID"
+            echo "g2_artifact_name=panther-x2-g2-stock-runtime-candidate-build-only"
+            echo "g2_artifact_sha256s_verified=yes"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "b1_artifact_id=$B1_ARTIFACT_ID"
+            echo "b1_artifact_sha256=9274e557ea5b62b6c2fc086d5aa3fd9a502215ff0070870ae36a9d6dfcfd4b9c"
+            echo "kernel_version=6.18.63"
+            echo "kernel_source=https://github.com/ophub/linux-6.18.y.git"
+            echo "kernel_commit=aee4e352a15d636cbc484f56819c6e59474dfd9f"
+            echo "kernel_build_runner=ubuntu-24.04"
+            echo "kernel_cross_compiler_package=gcc-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1"
+            echo "kernel_cross_compiler_wrapper_package=gcc-aarch64-linux-gnu 4:13.2.0-7ubuntu1"
+            echo "kernel_toolchain_provenance=G2 build run $G2_RUN_ID; see source-lock and build logs"
+            echo "kernel_config_sha256=$G2_CONFIG_SHA256"
+            echo "kernel_image_sha256=$G2_IMAGE_SHA256"
+            echo "dtb_sha256=$G2_DTB_SHA256"
+            echo "busybox_version=1.37.0 (reused frozen B1 static binary)"
+            echo "busybox_sha256=$B1_BUSYBOX_SHA256"
+            echo "busybox_config_sha256=$(sha256sum work/output/busybox.config | cut -c1-64)"
+            echo "initramfs_cpio_sha256=$(sha256sum work/output/initramfs.cpio.gz | cut -c1-64)"
+            echo "uinitrd_sha256=$(sha256sum work/boot/uInitrd | cut -c1-64)"
+            echo "bootscr_sha256=$(sha256sum work/boot/boot.scr | cut -c1-64)"
+            echo "u_boot_proper_sha256=$JP_UBOOT_SHA256"
+            echo "rk809_mfd_builtin=yes; rtc_builtin=yes; pwrkey_builtin=yes; rk809_dtb_status=okay; pmic_probe=will_execute_if_booted"
+            echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
+            echo "network_core=enabled; AF_PACKET=enabled; no physical netdev expected"
+            echo "storage_usb=CONFIG_BLOCK/MMC/USB=y per frozen B1/R1; TF/eMMC and USB host enabled in DTB; /init leaves persistent filesystems unmounted"
+            echo "usb_network_adapters=disabled; USB external NICs excluded"
+            echo "rootfs=RAM initramfs; no persistent rootfs"
+            echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
+            echo "load_addresses=Image:0x00280000;uInitrd:0x0a200000;DTB:0x0a100000"
+            echo "uboot_proper_location=raw LBA 16384 (8 MiB)"
+            echo "partition=GPT PANTHER_BOOT ext4; start LBA 32768; end LBA 4192255"
+            echo "boot_chain=existing eMMC SPL -> TF JP-TvBox U-Boot proper -> TF Image/uInitrd/DTB -> RAM initramfs"
+            echo "hardware_access=none"
+            echo "physical_media_writes=none"
+            echo "boot_authorization=not_granted; PMIC probe authorization is separate and not granted"
+            echo "g2_build_manifest_sha256=$(sha256sum work/output/G2-BUILD-MANIFEST.txt | cut -c1-64)"
+            echo "g2_dtb_isolation_sha256=$(sha256sum work/output/G2-DTB-ISOLATION.txt | cut -c1-64)"
+            echo "init_sha256=$(sha256sum work/output/init | cut -c1-64)"
+            echo "boot_cmd_sha256=$(sha256sum work/output/boot.cmd | cut -c1-64)"
+            cat work/output/tf-image-sha256.txt
+          } | tee work/output/RUNTIME-MANIFEST.txt
+
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          (cd work/output && sha256sum --check SHA256SUMS)
+
+      - name: Upload Project-A G2 runtime (PREPARE-ONLY)
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-project-a-g2-stock-runtime-PREPARE-ONLY
+          path: |
+            work/output/
+            work/boot/
+            work/debug/
+            work/logs-kernel-image.txt
+          if-no-files-found: error
+          retention-days: 30
