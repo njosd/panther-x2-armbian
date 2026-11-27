@@ -1,10 +1,10 @@
 # Panther X2 Project-A G2 stock PMIC runtime.
 # Existing eMMC SPL -> JP-TvBox U-Boot proper from TF -> Linux Image/uInitrd/DTB from TF.
-# The Linux DTB keeps RK809, GMAC1, MDIO and RTL8211F disabled.
+# The Linux DTB enables RK809 MFD probe; GMAC1, MDIO and RTL8211F remain disabled.
 # No environment is saved. Any load/boot failure holds here; no reset or fallback.
 setenv bootargs 'console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init'
 
-echo "Panther X2 Project-A G2 minimal runtime (PREPARE-ONLY)"
+echo "Panther X2 Project-A G2 stock PMIC runtime (PREPARE-ONLY)"
 echo "Selecting verified TF device: mmc 1"
 if mmc dev 1; then
     if load mmc 1:1 0x00280000 /Image; then
