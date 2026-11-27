@@ -248,7 +248,7 @@ jobs:
           mkdir -p work/initramfs-check
           gzip -dc work/output/initramfs.cpio.gz | (cd work/initramfs-check && cpio -idm --quiet)
           cmp scripts/panther-x2-g2-runtime/init work/initramfs-check/init
-          cmp work/initramfs/busybox work/initramfs-check/bin/busybox
+          cmp work/output/busybox work/initramfs-check/bin/busybox
           test -x work/initramfs-check/init
           test -x work/initramfs-check/bin/busybox
           sha256sum work/output/initramfs.cpio.gz work/boot/uInitrd | tee work/output/initramfs-sha256.txt
