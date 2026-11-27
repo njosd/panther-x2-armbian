@@ -101,16 +101,42 @@ G0.3 已静态确认：
 - 未验证：任何 rail 的物理输出、纹波或负载。
 - G4-S PASS、G4-B PASS、G4-P NO-GO 为当前阶段既定状态；本报告只归档 provider 侧只读观察，**不将 G4-P 改判为 PASS，也不构成 G4-P-SAFE patch 或 IO-domain consumer probe 授权**。
 
-## 7. 下一步只读工作
+## 7. Syscon / PMU GRF 设备树身份核对（2026-11-27）
 
-先识别当前 sysfs 中已注册 syscon 对应的设备树节点身份，重点区分 PMU GRF 与普通 GRF：
+本轮继续只读检查 `/sys/bus/platform/devices` 与 `/sys/firmware/devicetree/base`，没有访问 MMIO。
 
-- 对候选 syscon 的 `of_node` 目录只列出属性文件；
-- 读取 `name`、`compatible` 等设备树描述属性；
-- 必要时以只读方式解析 `reg` 属性地址范围；
-- 不读取 MMIO 寄存器，不使用 `devmem`，不挂载 debugfs，不主动触发 regmap 访问，不启用 IO-domain consumer。
+### 7.1 七个 syscon 节点身份
 
-完成 syscon 身份核对后，再判断是否存在已开放且不改变运行环境的只读 VSEL 观察入口。若不存在，则保留 UNKNOWN，不绕过框架直接访问寄存器。
+七个目录均存在，且对应 platform device 的 `of_node` 指向相应设备树节点。设备树目录均包含 `name`、`phandle`、`reg`、`compatible` 属性；其中 `fdc20000` 另有 `io-domains` 子目录。
+
+| 设备树节点 | compatible | name | 识别 |
+|---|---|---|---|
+| `syscon@fdc20000` | `rockchip,rk3568-pmugrf` | `syscon` | PMU GRF |
+| `syscon@fdc50000` | `rockchip,rk3566-pipe-grf` | `syscon` | PIPE GRF |
+| `syscon@fdc60000` | `rockchip,rk3568-grf` | `syscon` | 主 GRF |
+| `syscon@fdc80000` | `rockchip,rk3568-pipe-phy-grf` | `syscon` | PIPE PHY GRF |
+| `syscon@fdc90000` | `rockchip,rk3568-pipe-phy-grf` | `syscon` | PIPE PHY GRF |
+| `syscon@fdca0000` | `rockchip,rk3568-usb2phy-grf` | `syscon` | USB2 PHY GRF |
+| `syscon@fdca8000` | `rockchip,rk3568-usb2phy-grf` | `syscon` | USB2 PHY GRF |
+
+`fdc20000` 的 `compatible=rockchip,rk3568-pmugrf`，并具有 `io-domains` 子节点；与本项目此前静态审计的 PMU IO-domain / PMU GRF 关系吻合。该节点身份已由设备树属性直接确认，不再只是按地址推测。
+
+### 7.2 当前 platform-device 状态
+
+- 七个 syscon platform-device 目录均未显示 `driver` symlink；当前没有证据证明这些 syscon platform device 已绑定相应驱动。
+- `/sys/bus/platform/devices/fdc20000.syscon/waiting_for_supplier` 的实机读取值为 `0`。这只说明该属性当前报告为 0，不等价于 driver 已绑定，也不证明 regmap 已注册或可供安全读取。
+- 设备树节点存在、platform device 已枚举、supplier-wait 状态为 0，均不能代替驱动绑定和寄存器访问能力的验证。
+
+### 7.3 本轮结论与边界
+
+- **已验证：** PMU GRF 对应设备树节点为 `fdc20000`，compatible 为 `rockchip,rk3568-pmugrf`；其下存在 `io-domains` 子节点。
+- **已验证：** 其余六个 syscon 节点的 compatible 已读取并归类。
+- **已验证：** `fdc20000.syscon/waiting_for_supplier=0`。
+- **未验证：** syscon platform driver 是否可绑定、regmap 是否注册、是否存在无需改变运行环境的只读 VSEL 访问接口。
+- **未验证：** PMU GRF VSEL0/VSEL1/VSEL2 当前值；没有进行任何 MMIO 读取。
+- **未验证：** IO-domain consumer 当前 bind 状态及历史 selector 写入状态。
+
+因此，当前仍没有安全、已开放的 PMU GRF VSEL 只读入口证据。不得为取得读数而挂载 debugfs、调用 devmem、直接访问 MMIO、触发 IO-domain consumer probe 或引入会执行 selector 写入的路径。G4-P 继续 NO-GO；G4-P-SAFE patch 继续 deferred。
 
 ## 8. 操作记录
 
@@ -121,3 +147,11 @@ G0.3 已静态确认：
 - 没有启停 regulator、GPIO、clock、reset 或 IO-domain consumer。
 - 没有执行网络发送测试。
 - 没有写入 TF/eMMC；SN64G/eMMC 未触碰。
+
+
+## 9. 本轮补充操作记录
+
+- 只读取七个 syscon platform-device 目录及其设备树 `name`/`compatible` 属性，并读取 `fdc20000.syscon/waiting_for_supplier`。
+- 没有读取设备树 `reg` 二进制属性，没有进行 MMIO/GRF/regmap 读取。
+- 没有挂载 debugfs，没有执行 devmem，没有触发 syscon/IO-domain consumer probe。
+- 没有写入 TF/eMMC；SN64G 与 eMMC 未触碰。
