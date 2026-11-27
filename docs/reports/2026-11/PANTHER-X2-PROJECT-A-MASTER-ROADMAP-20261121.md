@@ -1056,3 +1056,16 @@ G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` �
 ## 2026-11-27 PMU GRF 只读 readback 静态可行性补充
 
 固定 Linux 6.18.63 syscon 使用通用 32-bit MMIO regmap，regmap debugfs 的 registers 文件默认只读；静态上可通过 PMU GRF syscon 的 regmap_read() 路径观察 VSEL0/1/2。Panther X2 运行时 debugfs/regmap 目录及 readable/access 状态尚未核验，因此只收窄源码机制疑点，不代表 readback 已实机通过。G4-P 仍 NO-GO / HOLD / NOT AUTHORIZED。细节见 G4-P-SAFE 设计审查与 G4-P runtime readiness 报告。
+
+
+## 2026-11-27 G4-P-SAFE 并发与失败路径深化审查
+
+新增报告：`PANTHER-X2-G4-P-SAFE-CONCURRENCY-AND-FAILURE-ANALYSIS-20261127.md`，位于独立分支 `g4-iodomain-safe-design`。
+
+本轮只读核对固定 6.18.63 `io-domain.c` 和 regulator notifier 调用路径，补充发现 stock probe 在 `regulator_get_voltage()`、初始 selector 写入与 notifier 注册之间存在采样/订阅窗口。generation-counter + IO-domain mutex 可作为进一步设计候选：先注册 notifier、在锁外采样、比较 generation 后再执行初始事务；但该候选尚未通过精确锁序、PRE/POST/ABORT 和并发测试验证。
+
+更关键的是，probe 部分写入失败后，notifier teardown 与旧 selector rollback 之间存在生命周期冲突：先注销 notifier 会失去后续 rail 变化跟踪；先恢复再注销又存在事件窗口；持锁注销可能死锁；probe 返回失败后 devm 生命周期也不支持随意保留 notifier。当前没有已证明安全的通用事务/回退架构。
+
+**本轮没有实现 G4-P-SAFE patch，也没有执行 KUnit/fake-regmap、build-only 或实机操作。** G4-P 继续 NO-GO / HOLD / NOT AUTHORIZED。下一步先把 read-only runtime readiness 作为独立方案审查（IO-domain node 保持 disabled、不触发 probe、不写 PMU GRF），同时继续在源码层解决失败生命周期；若无法证明安全，不执行 G4-P。
+
+项目 A 继续 TF-only：SU08G 是唯一实验介质，SN64G/eMMC 冻结。
