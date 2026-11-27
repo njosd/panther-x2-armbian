@@ -166,3 +166,11 @@ G5-A1/G5-A2 若不具备发送条件，ABCD 明确记录 NOT EXECUTABLE 与缺�
 K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风险判断相对较低，但不得以社区使用广泛替代 6.18.63 的源码、最终配置、构建对象和实际功能证据。两条黄金基线只降低同板硬件固有缺陷的初始怀疑，不代表新版本板级适配已经通过。
 
 本分类不改变 G0–G10 顺序，不授权提前 probe 或启用 GMAC。当前仍先执行 G2-B build-only；PMIC probe、regulator/IO-domain 激活和 GMAC 恢复分别保留原有准入门。不得因此增加默认电压测量或 PCB 测点任务。
+
+## 2026-11-27 G2-B workflow 准备状态
+
+- [x] 四层技术知识库与风险模型已归档；不改变 G0–G10 门序。
+- [x] G2-S 静态源码对照完成。
+- [x] G2-B 专用 build-only workflow 与最小配置片段已提交，复用 R1 artifact run `45611898629`。
+- [ ] G2-B Actions 实际运行与 artifact 审查尚未完成；当前状态 PREPARED / NOT RUN。
+- [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe。
