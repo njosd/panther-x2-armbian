@@ -102,7 +102,7 @@ regmap-irq 初始化会：
 
 ### 3.4 与 RK817 Rev 2.1 对照：Linux 24-line map 的来源与边界
 
-RK817 Rev 2.1 数据手册对同一组 0xFA/0xFB、0xFC/0xFD 寄存器定义了完整的 24 个 IRQ：0xFA 对应 charger/plug-in/out，0xFC 对应 BAT_HI、BAT_OVP、codec、TS_GPIO、GATE_GPIO。也就是说，Linux 的 24-line `rk817_irq_chip` 与 RK817 Rev 2.1 的寄存器定义吻合；但 RK809 Rev 2.5 对应寄存器只列出 14 个有效中断位，其余 10 位为 reserved/RC/W1C reserved。
+RK817 Rev 2.1 数据手册对同一组 0xFA/0xFB、0xFC/0xFD 寄存器定义了完整的 24 个 IRQ：0xFA[7:2] 是 charger/battery 事件，0xFA[1:0] 是 plug-in/out；0xFC[7:6] 是 BAT_HI/BAT_OVP，0xFC[5:2] 是 codec，0xFC[1:0] 是 TS_GPIO/GATE_GPIO。也就是说，Linux 的 24-line `rk817_irq_chip` 与 RK817 Rev 2.1 的寄存器定义吻合；但 RK809 Rev 2.5 对应寄存器只列出 14 个有效中断位，其余 10 位（0xFA[7:2]、0xFC[7:6]、0xFC[1:0]）为 reserved/RC/W1C reserved。RK809 Rev 2.5 的产品特性列出 battery fuel gauge，但没有 RK817 集成式 charger/power-path 功能；这些额外 IRQ 的适用性必须按具体 RK809 型号/硅片由 Rockchip 确认。
 
 6.18.63 `rk8xx_probe()` 对 `RK809_ID` 与 `RK817_ID` 使用同一个 `rk817_irq_chip`、`rk817_pre_init_reg[]` 和 `rk817s[]` MFD cell array（包括 `rk817-charger` child）。6.1.65 与 6.1.116 也使用相同的共享实现。因此这是一个**跨芯片型号共享驱动的适用性问题**，不是 6.18 新引入的差异；公开 RK809 与 RK817 数据手册对额外 IRQ 位的定义确有差异，但现有资料不足以判定这是 RK809 数据手册省略、RK809 silicon 兼容保留，还是 Linux 共用 mapping 过宽。
 
