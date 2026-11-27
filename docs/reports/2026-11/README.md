@@ -12,6 +12,7 @@
 - [G0.1 Provider/Consumer 依赖矩阵（2026-11-26）](./PANTHER-X2-G0-1-PROVIDER-CONSUMER-DEPENDENCY-MATRIX-20261126.md)：归并 R2–R6 现有证据，列出已通过、静态条件通过、阻塞及未验证资源。
 - [G0.2 RK809 MFD/Regulator 副作用审计（2026-11-26）](./PANTHER-X2-G0-2-RK809-MFD-REGULATOR-SIDE-EFFECTS-20261126.md)：已识别 6.18 probe 写入路径；最终决策为 HOLD，等待黄金实现对照，不再沿用“stock NO-GO”作为最终结论。
 - [G0.3 IO-domain Supplier / GMAC1 VCCIO5 映射审计（2026-11-26）](./PANTHER-X2-G0-3-IODOMAIN-SUPPLIER-AND-GMAC1-VCCIO5-MAPPING-20261126.md)：静态拓扑和 GRF 写入路径完成；GMAC1 M0→VCCIO5，且与 PHY 共用 vcc_3v3/SWITCH_REG1；最终 deferred-probe 状态仍 UNKNOWN。
+- [G4-P-R Provider / Regulator 只读运行时观察（2026-11-27）](./PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)：G3 provider runtime 已确认 RK809 provider bind、16 个 regulator 名称、九路 IO-domain supply→四对象映射；四对象均报告 enabled，三路软件电压回报正常；SWITCH_REG1 无 microvolts。未读 PMU GRF、未启动 IO-domain consumer；G4-P 仍 NO-GO。
 - [G0.4 GMAC1 Clock/Reset/PHY 125MHz 来源审计（2026-11-26）](./PANTHER-X2-G0-4-GMAC1-CLOCK-RESET-PHY-125MHZ-AUDIT-20261126.md)：CRU clock/reset、PHY reset、RGMII mode/delay 静态链完成；RTL8211F CLKOUT pin35 仅为候选，实际物理波形未验证。
 - [G0.5 ABCD-TX Sender 与观测夹具设计（2026-11-26）](./PANTHER-X2-G0-5-ABCD-TX-SENDER-AND-OBSERVABILITY-FIXTURE-20261126.md)：冻结独立 sender 帧格式、A/B/C/D 观测链、同帧关联和对端 pcap 规范；原设计报告不代表运行时或物理 TX 验证。
 - [Project-A iMac ABCD 对端抓包夹具准备（2026-11-27）](./PANTHER-X2-PROJECT-A-IMAC-ABCD-CAPTURE-FIXTURE-20261127.md)：新增 macOS tcpdump 只读抓包脚本及已知正常设备预检流程；尚未在 iMac 执行，未捕获帧，不能作为 E6 或 Panther TX 证据。
