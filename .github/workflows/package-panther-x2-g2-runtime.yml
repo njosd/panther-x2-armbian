@@ -102,9 +102,7 @@ jobs:
           done
 
           for key in \
-            CONFIG_BLOCK CONFIG_MMC CONFIG_MMC_BLOCK CONFIG_MMC_DW CONFIG_MMC_DW_ROCKCHIP \
-            CONFIG_USB CONFIG_USB_DWC2 CONFIG_USB_DWC3 CONFIG_USB_EHCI_HCD CONFIG_USB_OHCI_HCD \
-            CONFIG_USB_XHCI_HCD CONFIG_USB_STORAGE CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER \
+            CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER \
             CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM \
             CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO CONFIG_MDIO_DEVICE CONFIG_MDIO_BUS CONFIG_MDIO_DEVRES \
             CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_FIXED_PHY CONFIG_NET_DSA \
@@ -147,15 +145,24 @@ jobs:
               exit 1
             }
           }
-          # Frozen B1/R1 boundary: Linux does not enumerate MMC or USB.
-          for node in /mmc@fe2c0000 /mmc@fe310000 /mmc@fe2b0000 \
-            /usb@fcc00000 /usb@fd000000 /usb@fd800000 /usb@fd840000 \
-            /usb@fd880000 /usb@fd8c0000 /usb2phy@fe8a0000 \
-            /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port \
-            /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
-            assert_status "$node" disabled
-          done
-          assert_status /serial@fe650000 disabled
+          # Frozen B1/R1/G2 boundary: TF/eMMC and USB host remain enabled;
+          # SDIO (wireless) and the unused second USB controller/PHY remain disabled.
+          assert_status /mmc@fe310000 okay
+          assert_status /mmc@fe2b0000 okay
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /usb@fcc00000 okay
+          assert_status /usb@fd000000 disabled
+          assert_status /usb@fd800000 okay
+          assert_status /usb@fd840000 okay
+          assert_status /usb@fd880000 disabled
+          assert_status /usb@fd8c0000 disabled
+          assert_status /usb2phy@fe8a0000 okay
+          assert_status /usb2phy@fe8a0000/host-port okay
+          assert_status /usb2phy@fe8a0000/otg-port okay
+          assert_status /usb2phy@fe8b0000 disabled
+          assert_status /usb2phy@fe8b0000/host-port disabled
+          assert_status /usb2phy@fe8b0000/otg-port disabled
+          assert_status /serial@fe650000 okay
           assert_status /serial@fe660000 okay
           test "$(fdtget -t s "$DTB" /chosen stdout-path)" = "serial2:1500000n8"
           test "$(fdtget -t s "$DTB" /aliases serial2)" = "/serial@fe660000"
