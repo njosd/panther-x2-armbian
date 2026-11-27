@@ -974,3 +974,16 @@ G4-S 新增报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN-SOURCE-AND-WRITE-AUDIT-202611
 5. G4 恢复 IO-domain 节点会处理全部 9 个 supply，即使其他外围控制器仍 disabled；不能把它描述为单独 VCCIO5 测试。
 
 **状态：G4-S PASS（静态/黄金对照）；G4-P HOLD / NOT AUTHORIZED。** 下一步仅准备 G4-B build-only candidate：启用 `CONFIG_ROCKCHIP_IODOMAIN=y` 和 `pmu_io_domains` 节点，其他 GMAC/MDIO/PHY、存储、SDIO、GPU、SARADC 节点继续 disabled。Actions 只构建 PREPARE-ONLY artifact，不访问硬件。任何 G4-P consumer probe/GRF 写入必须另行提交完整副作用和 readback 方案并取得明确授权。ABCD 仍 NOT EXECUTABLE。
+
+
+## 2026-11-27 G4-B build-only candidate prepared（尚待 Actions 验证）
+
+G4-S 静态/黄金对照已 PASS，详细报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN-SOURCE-AND-WRITE-AUDIT-20261127.md`。
+
+在独立分支 `g4-iodomain-build-only` 新增：
+- `scripts/panther-x2-g4/g4-iodomain.fragment`：只增加 `CONFIG_ROCKCHIP_IODOMAIN=y`。
+- `.github/workflows/build-panther-x2-g4-iodomain.yml`：固定使用 G3-B run `45984035650` / artifact `15192123549` 作为输入，校验 G3 artifact 内部 SHA256、G3 Image/DTB 哈希和隔离状态；在固定 Linux 6.18.63 commit 上恢复 G3 config，增量合入 G4 唯一 Kconfig 变量并构建 Image；仅把 `/syscon@fdc20000/io-domains` 从 disabled 改为 okay，继续禁用 GMAC1/MDIO/PHY、eMMC、TF、SDIO、GPU、SARADC；核验 `io-domain.o`、probe/write symbols、config、DTB 和产物 manifest。
+
+该 workflow 是 build-only：Actions runner 不访问 Panther X2，不执行 driver probe，不读取/写入 PMIC 或 PMU GRF，不写物理介质，不生成可直接烧录的 TF 镜像。G4-B 仍为待 Actions 验证状态；PR review/Actions 通过前不标记 BUILD PASS。
+
+**G4-P 仍 HOLD / NOT AUTHORIZED。** G4-S 已证明 IO-domain probe 对当前 9 个 supply 的预期影响是多域 14 次 GRF write call，且 stock driver 不检查 regmap_write 返回值、不回滚部分失败。SWITCH_REG1 电压读回可能继承上游固定 3.3V，不能证明实体输出。任何 G4-P probe/GRF 写入必须另行提交读写范围、readback、失败停止和回退计划，并取得明确授权。
