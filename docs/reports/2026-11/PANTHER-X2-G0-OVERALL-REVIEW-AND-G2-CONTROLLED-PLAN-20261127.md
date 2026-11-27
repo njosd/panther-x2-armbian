@@ -116,3 +116,12 @@ ABCD 各边界必须关联同一 run_id/sequence/payload hash：
 ## 7. 当前结论
 
 G0 只允许进入 G2 实施计划评审，不允许自动启用驱动。G2 需要用户对 stock RK809 MFD probe 及其已知初始化写入单独授权后才可实施。本报告不构成授权，不修改任何设备或构建产物。
+
+
+## 8. 2026-11-27 G2 静态差异复核修订
+
+G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md` §8。6.1.116 与 6.18.63 的 RK817 IRQ chip 布局、24-bit mapping、pre-init 表、MFD cell 集合相同；没有发现 6.18 新增 RK809 pre-init 写入。黄金 6.1.116 IRQ 38/39 与 RTC 子 IRQ 的注册记录是正向运行证据，但中断计数为 0，不证明物理按键事件/所有 ACK 位状态。
+
+重要新差异：6.1.116 的 pwrkey resource 数组顺序为 RISE/FALL，6.18 为 FALL/RISE；共同 pwrkey consumer 驱动固定按 index0=FALL、index1=RISE 取 IRQ。6.18 顺序符合 consumer 约定；保留新顺序，不回退。6.18 I2C probe 通过 OF compatible 选择 RK809，不像旧驱动在 probe 中重新读取 0xED/0xEE；但 R1 已有独立只读 ID 实测可补充身份依据。
+
+因此，G2 stock probe 不再因“IRQ mapping 可能是 6.18 regression”而被否决；但 probe 会执行与黄金相同的 pre-init 写入及 regmap IRQ 初始化，仍属 PMIC 写操作，须单独授权。当前下一步先做 G2-B build-only：构建启用 MFD_RK8XX_I2C（可选 INPUT_RK805_PWRKEY）、不启用 REGULATOR_RK808，并保持 RK809 节点 disabled 的隔离 DTB。只验证配置闭包、编译链接和产物；不 probe、不访问硬件。完成后再提交独立 G2-PROBE 授权计划。
