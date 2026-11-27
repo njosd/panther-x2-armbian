@@ -133,3 +133,28 @@ G2-S 源码对照已完成，详细记录见 `PANTHER-X2-G2-RK809-MFD-GATE-REASS
 重要新差异：6.1.116 的 pwrkey resource 数组顺序为 RISE/FALL，6.18 为 FALL/RISE；共同 pwrkey consumer 驱动固定按 index0=FALL、index1=RISE 取 IRQ。6.18 顺序符合 consumer 约定；保留新顺序，不回退。6.18 I2C probe 通过 OF compatible 选择 RK809，不像旧驱动在 probe 中重新读取 0xED/0xEE；但 R1 已有独立只读 ID 实测可补充身份依据。
 
 因此，G2 stock probe 不再因“IRQ mapping 可能是 6.18 regression”而被否决；但 probe 会执行与黄金相同的 pre-init 写入及 regmap IRQ 初始化，仍属 PMIC 写操作，须单独授权。当前下一步先做 G2-B build-only：构建启用 MFD_RK8XX_I2C（可选 INPUT_RK805_PWRKEY）、不启用 REGULATOR_RK808，并保持 RK809 节点 disabled 的隔离 DTB。只验证配置闭包、编译链接和产物；不 probe、不访问硬件。完成后再提交独立 G2-PROBE 授权计划。
+
+## 10. 2026-11-27 G2 准入复核更新：IRQ 手册语义已收敛，转入 stock runtime 候选准备
+
+本节优先级高于本报告第 3、4、7、8、9 节中关于“必须等待 Rockchip 解释 0xFC RC/W1C 才能准备 G2”的旧表述。详细源码与寄存器访问证据见 `PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md` §10。
+
+### 10.1 已收敛的结论
+- RK809 Rev 2.5 明确将 0xFC bit[7:6] 定义为 RC、bit[5:2] 与 bit[1:0] 定义为 W1C；Linux regmap-irq 初始化读取 0xFC 后的 RC 清除行为是手册已定义语义，不再作为未知副作用或 G2 build 准入阻塞。
+- Linux 6.18.63 的 RK809/RK817 共用 24-line IRQ map、mask/status/ACK 初始化顺序与两条黄金版本相同。mask registers 的 reserved RW 位被整字节 mask=1 的共享实现规格边界继续记录，不修改 stock IRQ map，也不将其定性为已证实硬件故障。
+- 0xEE=0x94 解释为 CHIP_NAME 高 nibble=9、低 nibble reserved observed value=4；低 nibble 不是 silicon revision 4。该值不阻塞候选构建。
+- RTC child 必须纳入候选配置，以避免 MFD pre-init 设置 RTC_STOP 后没有标准 RTC child 清除；PWRKEY child 同样按黄金运行路径纳入。regulator provider 仍留给 G3。
+
+### 10.2 新的 G2 顺序
+1. 保留已通过的 G2-B build-only artifact，不重做、不覆盖。
+2. 以同一 Linux 6.18.63 commit 和 R1 frozen config 为基线，另建 G2 stock-runtime candidate build：启用 RK8xx MFD/I2C、RTC、PWRKEY；不启用 regulator provider；DTB 中启用 RK809，但 GMAC1/MDIO/RTL8211F 继续 disabled。
+3. 仅在 GitHub Actions runner 编译、链接、封装候选 Image/DTB/initramfs，核对最终 config、built-in 对象、DTB 状态和所有 SHA256。此举不接触 Panther X2。
+4. 生成独立 G2-PROBE 操作清单：列明 MFD pre-init、IRQ mask/status/ACK、RTC 0x0D/0x0E 与 alarm IRQ unmask、PWRKEY IRQ 请求、system-off handler 注册；明确失败退出与避免 shutdown/reboot/suspend 的约束。
+5. 候选资产冻结后，再单独申请实机 probe 授权。未授权前不得写 SU08G、启动候选镜像或访问 PMIC。
+
+### 10.3 不变的阶段边界
+- G2 只验证 RK809 MFD/regmap/IRQ/RTC/PWRKEY；不启用 regulator provider、不恢复 IO-domain consumer 链以外的 GMAC/MDIO/PHY，不执行 TX。
+- G3 才引入 RK809 regulator provider；G4 核对 IO-domain；G5 恢复 GMAC/PHY；G6/G7 完成 descriptor/DMA 与真实对端 pcap 验收。
+- 当前 ABCD = NOT EXECUTABLE；不因本次文档修订声称硬件通过。
+- 本轮只更新源码证据与准入文件，没有启动设备、没有访问 PMIC、没有写 TF/eMMC。
+
+状态更新：G2-S PASS；G2-B BUILD PASS（历史 artifact 保留）；G2 stock-runtime candidate = PREPARATION AUTHORIZED（build-only only）；G2-PROBE = HOLD / NOT AUTHORIZED。
