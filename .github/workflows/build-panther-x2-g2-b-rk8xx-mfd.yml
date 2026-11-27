@@ -167,7 +167,6 @@ jobs:
           install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
           install -m 0644 "$OUT/System.map" work/output/System.map
           install -m 0644 "$OUT/vmlinux" work/output/vmlinux
-          install -m 0644 "$OUT/modules.builtin" work/output/modules.builtin
           file work/output/Image | tee work/output/kernel-image-file.txt
           IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
           test "$IMAGE_MAGIC" = "41524d64"
