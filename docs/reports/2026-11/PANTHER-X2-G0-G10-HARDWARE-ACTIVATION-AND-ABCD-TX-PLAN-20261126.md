@@ -111,7 +111,9 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 
 同时，RK809 Rev 2.4/2.5 对 0xFA/0xFC 的 reserved W1C/RC 位定义与 Linux RK817 24-bit IRQ mapping 仍未闭合。parent IRQ 初始化可能对 0xF8/0xFA/0xFC 执行状态读取及条件 ACK；不得通过新增读取 0xFC 来“补证”，因为其部分位是 RC。pre-init/IRQ 发生部分失败时，devres 只释放 Linux 资源，不会恢复此前已写入的 PMIC 寄存器。sys-off/shutdown/suspend/resume 还存在 0xF4 系统状态写入路径。
 
-**准入结论维持 G2-PROBE HOLD / NOT AUTHORIZED**；当前 G2 runtime artifact 仅是 PREPARE-ONLY 安全基线，不可直接修改 RK809 status 后启动。下一步只允许补齐实际芯片版本 register-map/errata 证据、明确 RTC child 策略和精确副作用清单、建立部分失败及安全退出方案；在此之前不生成 PMIC-enabled 实机镜像、不写 SU08G、不启动设备。ABCD 仍 NOT EXECUTABLE。
+**准入结论维持 G2-PROBE HOLD / NOT AUTHORIZED**；当前 G2 runtime artifact 仅是 PREPARE-ONLY 安全基线，不可直接修改 RK809 status 后启动。下一步只允许补齐 `0xEE=0x94` 低 nibble reserved 非默认值的 Rockchip 说明、RK809 14 个 documented IRQ 与 Linux 共用 RK817 24-line map 的适用性、RTC child 策略和精确副作用清单，并建立部分失败及安全退出方案；在此之前不生成 PMIC-enabled 实机镜像、不写 SU08G、不启动设备。ABCD 仍 NOT EXECUTABLE。
+
+补充：RK809 Rev 2.5 文档列出 14 个有效 IRQ 位；RK817 Rev 2.1 文档定义完整 24 个 IRQ 位。Linux `rk8xx-core.c` 对 RK809_ID 与 RK817_ID 共用 `rk817_irq_chip`、`rk817_pre_init_reg[]` 和 `rk817s[]` cells。该共享实现从 6.1.65/6.1.116 延续至 6.18.63，不是新版本 regression；但额外 10 位在 RK809 文档中为 reserved/W1C/RC，不能自动套用 RK817 的完整 map，也不能仅凭文档自行改驱动。详细对照见 `PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md`。
 
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
