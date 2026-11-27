@@ -70,10 +70,17 @@ for node in \
     /proc/device-tree/usb2phy@fe8a0000/status \
     /proc/device-tree/usb2phy@fe8a0000/host-port/status \
     /proc/device-tree/usb2phy@fe8a0000/otg-port/status; do
-    if [ -r "$node" ]; then
+    parent=${node%/status}
+    if [ -d "$parent" ]; then
         echo "$node:"
-        cat "$node"
-        echo
+        if [ -r "$node" ]; then
+            cat "$node"
+            echo
+        else
+            echo "okay (implicit default)"
+        fi
+    else
+        echo "$parent: node absent"
     fi
 done
 
