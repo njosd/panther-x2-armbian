@@ -806,7 +806,7 @@ DTB 证据修订：6.1.116 磁盘 DTB 与 6.18.63 完整 DTB SHA-256 完全相�
 
 固定源码对照报告：`PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip 布局、24-bit mapping、pre-init 表和 MFD cells 一致；没有发现 6.18 新增 RK809 pre-init 写入。黄金实机日志显示 IRQ parent/PWRKEY/RTC child 注册，属于正向运行证据，但计数为 0，不证明物理边沿或所有 IRQ ACK 位状态。6.18 pwrkey IRQ resource 顺序与共同 consumer 驱动 index 约定相符，不应回退。
 
-下一阶段只做 G2-B build-only：MFD_RK8XX_I2C=y，可选 INPUT_RK805_PWRKEY=y，不启用 REGULATOR_RK808；构建使用 RK809 节点 disabled 的隔离 DTB，GMAC/MDIO/PHY 继续 disabled。只验证 Kconfig、built-in 对象、编译链接、artifact 和 QEMU 非硬件启动。不得把 build-only 说成 PMIC runtime PASS。后续 G2-PROBE 仍需独立副作用审查与明确授权。
+下一阶段只做 G2-B build-only：MFD_RK8XX_I2C=y，不启用 INPUT_RK805_PWRKEY 或 REGULATOR_RK808；构建使用 RK809 节点 disabled 的隔离 DTB，GMAC/MDIO/PHY 继续 disabled。只验证 Kconfig、built-in 对象、编译链接和 artifact。通用 QEMU virt 不模拟 RK3566/Panther X2，不安排无代表性的 kernel system boot；不得把 build-only 说成 PMIC runtime PASS。后续 G2-PROBE 仍需独立副作用审查与明确授权。
 
 
 ## 2026-11-27 环境切换原则修订：B1 RAM 基线不是最终运行环境
