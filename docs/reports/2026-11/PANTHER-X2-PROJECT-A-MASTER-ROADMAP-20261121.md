@@ -849,10 +849,29 @@ GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.1
 
 所有知识条目按 COMMON-VERIFIED、VERSION-DIFF、SOC-ADAPTATION、BOARD-VERIFIED、BOARD-UNVERIFIED、CROSS-LAYER-RISK 及 STATIC-ONLY/BUILD-ONLY/RUNTIME-OBSERVED/E2E-VERIFIED 标注证据范围。该分类只调整知识组织和风险权重，不增加测试阶段、不改变 G0–G10 门序。
 
-G2-B build-only 已通过（run `45924949130`，artifact `15167050233` 已校验）。当前下一步是按既定计划准备 Project-A 6.18.63 minimal runtime 资产；不因此自动授权 G2-PROBE。PMIC probe 仍须独立副作用审查与明确授权，不恢复 GMAC/MDIO/PHY。
+G2-B build-only 已通过（run `45924949130`，artifact `15167050233` 已校验）。Project-A 6.18.63 minimal runtime 的 PREPARE-ONLY init/boot scripts、输入锁定和 packaging workflow 已提交；当前下一步是手动运行该 workflow 并审查完整 artifact。该准备流程不授权 TF 写入或实机启动；G2-PROBE 仍须独立副作用审查与明确授权，不恢复 GMAC/MDIO/PHY。
 
 ## 2026-11-27 G2-B workflow 与构建结果
 
 G2-B 专用 workflow 已新增：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，配置片段为 `scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。它复用成功 R1 artifact（run `45611898629`）中的 R1 最终配置和 Panther DTB，固定 6.18.63 源码重建 built-in-only Image（保留 R1 的 `CONFIG_MODULES=y`，但本门只构建 Image，不构建 modules），显式增加 `I2C=y` 与 `MFD_RK8XX_I2C=y`；`REGULATOR_RK808`、`INPUT_RK805_PWRKEY` 关闭，构建用 DTB 中 RK809、GMAC1、MDIO、PHY 均 disabled。输出构建配置、对象/符号、Image、DTB、manifest 和哈希。
 
 该 workflow 首次运行 `45923164270` 时发现 R1 config 文本格式检查误判，已由 `fbb17c96` 修复。第二次运行 `45923873517` 通过输入、源码、补丁及 Kconfig merge/olddefconfig，但旧 gate 错误禁止 R1 原有 `CONFIG_MODULES=y`；已由 `3833277a` 修复。第三次运行 `45924949130`（workflow commit `f84609c49ca9ecfc116e0f8e86515ba26c82342c`）全部成功，G2-B **BUILD PASS**。Image 编译、RK8xx MFD built-in objects 与 vmlinux linked symbols、RK809/GMAC/MDIO/PHY DTB disabled 检查均通过；artifact `15167050233` 已下载，内部 `SHA256SUMS` 全部校验通过。G2-B 仅证明 build/link 与隔离状态，不证明 PMIC 实机 probe/I2C/IRQ/regulator 行为。下一步准备 Project-A 6.18.63 minimal runtime 资产；G2-PROBE 仍 HOLD / NOT AUTHORIZED，需独立副作用审查和明确授权。QEMU 通用 virt 不模拟 RK3566/Panther X2，不执行无代表性的 QEMU system boot。workflow 未访问设备、未写 TF/eMMC、未访问 PMIC、未触发 probe.
+
+
+## 2026-11-27 Project-A G2 minimal runtime packaging preparation
+
+G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
+- `scripts/panther-x2-g2-runtime/init`：RAM-only 诊断 init，打印 kernel/model/cmdline/memory/network interfaces/DTB node status/mounts/dmesg 后进入 shell；无网络配置、无发送、无存储写入。
+- `scripts/panther-x2-g2-runtime/boot.cmd`：沿用已验证的 U-Boot load addresses（Image `0x00280000`、uInitrd `0x0a200000`、DTB `0x0a100000`）和 bootargs；不 saveenv、不 reset，失败时阻止自动 fallback。
+- `.github/workflows/package-panther-x2-g2-runtime.yml`：从 G2-B artifact `15167050233` 与 B1 support artifact `14890817693` 固定复用 Image/DTB、静态 BusyBox、JP-TvBox U-Boot proper，构建新 initramfs/uInitrd/boot.scr 和 2GiB PREPARE-ONLY TF image；检查两份 artifact 的内部 SHA256、输入哈希、Kconfig/DTB隔离、BusyBox静态属性、initramfs round-trip、GPT/ext4、U-Boot LBA readback 和最终 SHA256 manifest。
+
+固定输入哈希：
+- Image `c8ad5e8c6d4f7b095374abd66e2fc44379e83954c3991b453c3d7c8da3b7edf7`
+- kernel.config `ffa99212686a1347145628fd50ecf3341437efe4a4f130002e4b27003c4f553b`
+- G2 DTB `f6d83d86231b50c903abdf158893b6caa1e8c2aab931c9bf2dbb1b6ca36576dc`
+- static BusyBox `2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15`
+- JP-TvBox U-Boot proper `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`
+
+安全基线保持 RK809、GMAC1、MDIO、RTL8211F disabled。内核含 MFD built-in 代码不等于发生 probe；DTB 节点禁用时不触发 RK809 probe。该 runtime 只作为后续分阶段实验的共同基础，不含 PMIC 激活或物理 TX 发送。
+
+**状态：** scripts/workflow 已提交；init 脚本本地 `dash -n` 检查 PASS；packaging workflow 尚未运行。下一步手动运行并检查产物。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
