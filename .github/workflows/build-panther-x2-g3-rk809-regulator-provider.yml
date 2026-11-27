@@ -207,7 +207,7 @@ jobs:
           nm -a "$OUT/drivers/regulator/rk808-regulator.o" > work/logs/rk808-regulator-symbols.txt
           grep -q 'rk808_regulator_probe' work/logs/rk808-regulator-symbols.txt
           nm -a "$OUT/drivers/regulator/fixed.o" > work/logs/fixed-regulator-symbols.txt
-          grep -q 'regulator_fixed_voltage_probe' work/logs/fixed-regulator-symbols.txt
+          grep -q 'reg_fixed_voltage_probe' work/logs/fixed-regulator-symbols.txt
           nm -a "$OUT/drivers/regulator/core.o" > work/logs/regulator-core-symbols.txt
           grep -q 'regulator_register' work/logs/regulator-core-symbols.txt
           nm -a "$OUT/drivers/regulator/of_regulator.o" > work/logs/of-regulator-symbols.txt
