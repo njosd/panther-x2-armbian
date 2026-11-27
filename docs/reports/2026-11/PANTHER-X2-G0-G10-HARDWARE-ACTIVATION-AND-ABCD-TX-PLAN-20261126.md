@@ -105,7 +105,7 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
 
-G2-B build-only 已由 run `45924949130` 完成并通过：Image、MFD built-in 对象/链接符号、最终配置、DTB 隔离和 artifact SHA256 均通过。该结果只证明 build/link，不证明 PMIC 实机行为。当前下一步是准备 Project-A 6.18.63 minimal runtime：复用 G2 Image/DTB 与 B1 静态 BusyBox/JP-TvBox U-Boot proper，构建新的 RAM initramfs 和 boot script；安全基线仍保持 RK809、GMAC1、MDIO、PHY disabled。新 workflow `.github/workflows/package-panther-x2-g2-runtime.yml` 已提交，等待手动运行并审查 PREPARE-ONLY artifact。通用 QEMU virt 不模拟 RK3566/Panther X2，不执行无代表性的 system boot。该流程不访问设备、不写 TF/eMMC、不触发 PMIC probe。G2-PROBE 仍 HOLD，必须先完成独立副作用审查并取得明确授权。
+G2-B build-only 已由 run `45924949130` 完成并通过：Image、MFD built-in 对象/链接符号、最终配置、DTB 隔离和 artifact SHA256 均通过。该结果只证明 build/link，不证明 PMIC 实机行为。后续 Project-A 6.18.63 minimal runtime 已由 run `45935908005` 完成 PREPARE-ONLY 打包，artifact `15170487170` 经独立下载审查，内部 SHA256 清单、Zstandard、2GiB raw image、主/备 GPT CRC、分区边界和 ext4 superblock 均通过。安全基线仍保持 RK809、GMAC1、MDIO、PHY disabled；未访问设备、未写 TF/eMMC、未触发 PMIC probe。通用 QEMU virt 不模拟 RK3566/Panther X2，不执行无代表性的 system boot。下一步不是直接启动，而是单独评审 G2-PROBE 的副作用、回退和观测方案，并取得明确授权；在此之前 G2-PROBE、SU08G 写入及实机启动均保持 HOLD。
 
 
 ## 2026-11-27 GMAC 高风险准入原则（强制）
