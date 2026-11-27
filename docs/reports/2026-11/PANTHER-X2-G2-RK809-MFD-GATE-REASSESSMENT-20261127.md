@@ -166,6 +166,7 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 - 新增配置片段：`scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。只启用 `CONFIG_MFD_RK8XX_I2C=y`，明确关闭 `CONFIG_REGULATOR_RK808` 与 `CONFIG_INPUT_RK805_PWRKEY`。
 - 新增 workflow：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，手动触发，默认读取上述 R1 run ID；从固定 Linux 6.18.63 commit 重建 Image/modules，并保留 R1 配置、源码补丁、DTB 输入的来源锁。
 - workflow 将在 R1 DTB 的独立副本上把 `/i2c@fdd40000/pmic@20` 设置为 disabled，并再次确认 GMAC1、MDIO1、RTL8211F 节点仍 disabled；不会改写 R1 原始 artifact。
+- workflow 增加以源码 commit、R1 config SHA、G2 fragment、兼容补丁和 workflow 文件哈希为键的 kernel object cache；首次运行因没有 G2 缓存仍需完整编译，后续同一输入的失败重跑可恢复部分 `work/kernel-out`，由 Kbuild 继续处理未完成对象。R1 artifact 本身没有保存完整 object tree，因此不能声称 G2 首次构建能直接复用 R1 的 .o 文件。
 - 构建验收包括最终 .config 依赖闭包、RK8xx core/I2C transport built-in object 与符号、Image 格式、modules、DTB 隔离状态、manifest 和 SHA256。
 - 输出 artifact 名称：`panther-x2-g2-b-rk8xx-mfd-build-only`。
 - R1 网络核心兼容补丁已从成功 R1 构建分支同步到 main：`scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch`，blob SHA `2018fb06ac0c8ac5e8bdad2f4529d00c97fff013`；G2 workflow 固定使用该补丁，并验证其可应用于锁定的 6.18.63 源码。
