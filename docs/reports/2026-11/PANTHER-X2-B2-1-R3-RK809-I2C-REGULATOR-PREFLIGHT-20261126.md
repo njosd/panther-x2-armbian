@@ -375,8 +375,8 @@ A successful ID read does not authorize loading RK8xx MFD/regulator drivers or a
 ### 14.3 解释与证据边界
 
 1. 两个 `I2C_RDWR` combined transfer 均完整返回 2 条消息，errno 均为 0；说明 I2C0 对目标地址及两个指定寄存器的读取事务成功。
-2. `0xED=0x80`，`0xEE=0x94`。原始值 `0x8094` 满足 Linux RK809 masked ID 判定：MSB 为 `0x80` 且版本寄存器高 nibble 为 `0x9`。
-3. 数据手册 Rev 2.4 列出的版本寄存器默认完整值为 `0x92`；实测 `0x94`，所以 exact-default-match 为 NO。不能把实测值改写为默认值，也不能将这个 NO 误判为身份失败；当前证据支持 RK809 身份匹配，低 nibble 记录为实测版本字段 `4`，不在缺少更具体 silicon revision 文档时推断其市场版本/批次含义。
+2. `0xED=0x80`，`0xEE=0x94`。原始值 `0x8094` 满足 Linux RK809 masked ID 判定：MSB 为 `0x80` 且 `PMIC_CHIP_VER` 高 nibble CHIP_NAME code 为 `0x9`；低 nibble `0x4` 是手册定义的 RESV，不是版本号。
+3. Datasheet Rev 2.4/2.5 的 `PMIC_CHIP_VER` 默认完整字节为 `0x92`；实测 `0x94`，所以 exact-default-match 为 NO。不能把实测值改写为默认值，也不能将这个 NO 误判为身份失败；当前证据支持 RK809 CHIP_NAME 匹配。低 nibble `4` 是 reserved 非默认值，不是 silicon revision；其含义待 Rockchip 说明。
 4. 该程序只执行对 `0xED`、`0xEE` 的两次寄存器索引+repeated-start 单字节读取；未扫描 I2C 总线、未写 PMIC 数据寄存器、未绑定/加载 RK8xx MFD、未调用 regulator API、未改变电源状态。
 5. `/dev/i2c-0` 在不存在时创建为临时字符设备 89:0，位于 RAM rootfs；新 initramfs 未挂载 TF/eMMC，节点随 RAM 环境结束而消失。
 6. 该结果证明 I2C0 与地址 `0x20` 的设备能完成指定身份寄存器读取，并支持 RK809 silicon identity；**不证明** RK8xx MFD probe 安全、regmap IRQ 正常、regulator provider 注册、各 rail 电压/时序正常、consumer 功能正常或 GMAC PHY supply 可用。
@@ -744,7 +744,7 @@ R3.1 实机启动日志归档已记录 MMC、SARADC、IO-domain 等设备等待 
 ### 20.6 下一步只读核查
 
 1. 追查 RK809/RK817 IRQ layout 的上游提交历史、Rockchip BSP 与当前 6.18 分支差异，确认 Linux 24 IRQ 定义适用的器件/版本范围。
-2. 对照 RK809 Rev 2.4、可取得的其他修订版和芯片 ID/版本寄存器字段；当前读到的 0xEE=0x94 保留为原始证据，不自行推断具体 silicon revision。
+2. 对照 RK809 Rev 2.4/2.5 和芯片身份字段；当前读到的 0xEE=0x94 保留为原始证据，明确高 nibble CHIP_NAME=0x9、低 nibble RESV=0x4，不自行推断 silicon revision。
 3. 核对 RK809 I2C regmap 的 volatile/cache 行为，确认 IRQ status/mask 读写是否会经 cache 或触发读副作用。
 4. 在完成上述核查前，不读取 0xF8–0xFD 实机寄存器，不做总线扫描，不进行任何 PMIC 写入；现有 R3.7 对 0xF0/0xF6 的授权不包含 IRQ register 访问。
 
@@ -804,7 +804,7 @@ RK809 regulator probe 的代码组织略有变化：6.1.65 从 parent drvdata �
 
 1. **PASS-COMPARISON（带源码身份限制）：** 6.1.65 候选源码与 6.18.63 的 RK809 24-bit IRQ layout、pre-init 表及 SWITCH_REG1 descriptor 一致。
 2. **历史兼容性疑点仍存在：** 两版源码都复用 RK817 IRQ layout，而 RK809 Rev 2.4 对部分位标为 reserved。由于 6.1.65 实机网络成功，该疑点不能单独解释为 6.18 网络回归；仍需确认数据手册/芯片修订及实际 IRQ 状态。
-3. **版本差异已确认：** 6.1.65 通过读取 0xED/0xEE 识别 silicon variant；6.18 依赖 OF compatible match data，不在 MFD probe 中重新读取 ID。当前实测 0x8094 与 RK809 compatible 相符，但 6.18 对 DT/芯片不匹配的运行时检测较少。
+3. **身份判定路径差异已确认：** 6.1.65 通过读取 0xED/0xEE 并按 masked ID 识别 RK809 variant；6.18 依赖 OF compatible match data，不在 MFD probe 中重新读取 ID。当前实测 0x8094 的高 nibble 与 RK809 CHIP_NAME code 相符；低 nibble 为 RESV 非默认值，另行保留为 UNKNOWN。
 4. **G1 仍不放行：** 黄金基线的正常网络行为不等于对 PMIC IRQ ACK 写入的风险豁免。必须完成 RK809 datasheet revision/芯片 revision 适用性核实、Golden DTB regulator constraints 对照、pre-init 寄存器属性核对与 MFD IRQ 初始状态影响评估。
 5. **网络目标关联：** 两版 SWITCH_REG1 descriptor 一致，为后续验证 `phy-supply` provider/consumer 关系提供了较强参照；但实际 PHY rail 电压和 PHY 工作电源链仍未验证。
 
@@ -900,7 +900,7 @@ regulator 子树中 DCDC_REG1–5、LDO_REG1–9、SWITCH_REG1/2 的名称、min
 
 ### 23.3 0xEE=0x94 的含义边界
 
-Rev 2.4 对 `PMIC_CHIP_VER` (0xEE) 定义 bit[7:4] 为 CHIP_NAME code low nibble，默认 0x9；bit[3:0] 标为 RO/RESV，reset value 0x2。实测 0x94 与高 nibble 0x9 一致，但低 nibble 0x4 与手册列出的 reset value 0x2 不同。手册将低 nibble 标为 reserved，并没有公开给出从 0x2 到 0x4 的 silicon revision 对照表。因此不能把 0x94 擅自解释为“revision 4”，也不能单凭该差异断言芯片异常。应向 Rockchip/BSP 资料寻找该字段的 silicon/OTP 说明；在取得说明前标记为 **RO reserved nibble differs from documented reset default; interpretation UNKNOWN**。
+RK809 Datasheet Rev 2.4 与 Rev 2.5 对 `PMIC_CHIP_VER` (0xEE) 的定义一致：bit[7:4] 是 CHIP_NAME code[3:0]，默认 0x9；bit[3:0] 明确标为 RO/RESV，reset value 0x2。实测 0x94 的高 nibble 0x9 与 RK809 CHIP_NAME code 一致，低 nibble 0x4 则是 reserved 非默认值。该寄存器名称虽为 CHIP_VER，但手册并未把低 nibble 定义为 silicon revision；不能把 0x94 擅自解释为“revision 4”，也不能单凭该差异断言芯片异常。应向 Rockchip/BSP 资料寻找该 reserved nibble 的 silicon/OTP 说明；在取得说明前标记为 **RO reserved nibble differs from documented reset default; interpretation UNKNOWN**。
 
 ### 23.4 DCDC_REG3 `.apply_reg/.apply_bit` 差异
 
@@ -918,7 +918,7 @@ Rev 2.4 对 `PMIC_CHIP_VER` (0xEE) 定义 bit[7:4] 为 CHIP_NAME code low nibble
 
 1. 6.1.65 / 6.18 pre-init 表逐字节一致；codec pre-init 中 0x16 是 summary listed but bitfield undocumented，0x19/0x2E 在 Rev 1.8 和 Rev 2.4 均未列入 register summary。
 2. 两个内核版本都执行相同的这些写入；这是历史兼容行为而非 6.18 regression，但不自动构成对当前 0x8094 器件 revision 的安全证明。
-3. 0xEE=0x94 的高 nibble 符合 RK809 code；低 nibble 0x4 是 reserved，且与 Rev 2.4 reset default 0x2 不同，含义 UNKNOWN。
+3. 0xEE=0x94 的高 nibble 符合 RK809 CHIP_NAME code；低 nibble 0x4 是 Rev 2.4/2.5 均标记为 RESV 的非默认值，不是 silicon revision，含义 UNKNOWN。
 4. DCDC_REG3 apply 字段是独立的 6.18 descriptor 差异；目前不影响 SWITCH_REG1 对照结论。
 5. G1 仍 HOLD。不要为了网络测试启用 codec/audio 功能；也不允许用整组 MFD probe 作为“只验证 I2C”的方法。
 
