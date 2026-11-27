@@ -11,7 +11,8 @@ echo "=== Panther X2 Project-A G2 minimal runtime ==="
 echo "Linux network core and AF_PACKET are built in; no physical NIC is enabled."
 echo "RK809 MFD code is built in, but the RK809 DT node is disabled: no PMIC probe."
 echo "GMAC1/MDIO/RTL8211F are disabled: no physical Ethernet activation."
-echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted."
+echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted or written by /init."
+echo "B1 storage/USB support is intentionally retained; eMMC/TF/SD and USB host may enumerate."
 
 mkdir -p /proc /sys /dev /run
 
@@ -59,7 +60,16 @@ for node in \
     /proc/device-tree/i2c@fdd40000/pmic@20/status \
     /proc/device-tree/ethernet@fe010000/status \
     /proc/device-tree/ethernet@fe010000/mdio/status \
-    /proc/device-tree/ethernet@fe010000/mdio/ethernet-phy@0/status; do
+    /proc/device-tree/ethernet@fe010000/mdio/ethernet-phy@0/status \\
+    /proc/device-tree/mmc@fe2c0000/status \\
+    /proc/device-tree/mmc@fe310000/status \\
+    /proc/device-tree/mmc@fe2b0000/status \\
+    /proc/device-tree/usb@fcc00000/status \\
+    /proc/device-tree/usb@fd800000/status \\
+    /proc/device-tree/usb@fd840000/status \\
+    /proc/device-tree/usb2phy@fe8a0000/status \\
+    /proc/device-tree/usb2phy@fe8a0000/host-port/status \\
+    /proc/device-tree/usb2phy@fe8a0000/otg-port/status; do
     if [ -r "$node" ]; then
         echo "$node:"
         cat "$node"
