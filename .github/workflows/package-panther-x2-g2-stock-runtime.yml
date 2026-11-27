@@ -294,7 +294,7 @@ jobs:
 
           truncate -s "$TF_IMAGE_BYTES" "$IMAGE"
           test "$(stat -c %s "$IMAGE")" -eq "$TF_IMAGE_BYTES"
-          sgdisk --clear --new=1:32768:15523806 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+          sgdisk --clear --new=1:${TF_FIRST_PARTITION_SECTOR}:${TF_LAST_USABLE_SECTOR} --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
 
           LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
           cleanup() {
