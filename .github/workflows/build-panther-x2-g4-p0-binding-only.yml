@@ -9,7 +9,7 @@ on:
       - ".github/workflows/build-panther-x2-g4-p0-binding-only.yml"
   pull_request:
     branches:
-      - g3-provider-runtime-package
+      - main
     paths:
       - "scripts/panther-x2-g4-p0/**"
       - ".github/workflows/build-panther-x2-g4-p0-binding-only.yml"
@@ -36,7 +36,7 @@ env:
   G3_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g3_run_id || '45984035650' }}
 
 jobs:
-  g4-p0-binding-only-build-only:
+  g4-p0-binding-only:
     name: Build and audit G4-P0 binding-only IO-domain; no hardware access
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -148,10 +148,10 @@ jobs:
           mkdir -p "$OUT"
           ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$BASE" "$G4" \
-            2>&1 | tee work/logs/g4-config-merge.log
+            2>&1 | tee work/logs/g4-p0-config-merge.log
           make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
           cp "$OUT/.config" work/output/kernel.config
-          diff -u "$BASE" work/output/kernel.config > work/logs/g4-config-diff.txt || test "$?" -eq 1
+          diff -u "$BASE" work/output/kernel.config > work/logs/g4-p0-config-diff.txt || test "$?" -eq 1
 
           require_y() {
             grep -qx "$1=y" work/output/kernel.config || {
@@ -166,8 +166,8 @@ jobs:
               exit 1
             fi
           }
-          for key in CONFIG_OF CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE \
-                     CONFIG_REGULATOR_RK808 CONFIG_MFD_RK8XX_I2C CONFIG_RTC_DRV_RK808 \
+          for key in CONFIG_OF CONFIG_MFD_SYSCON CONFIG_REGMAP CONFIG_REGMAP_MMIO \
+                     CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE CONFIG_REGULATOR_RK808 CONFIG_MFD_RK8XX_I2C CONFIG_RTC_DRV_RK808 \
                      CONFIG_INPUT_RK805_PWRKEY CONFIG_ROCKCHIP_IODOMAIN; do
             require_y "$key"
           done
@@ -177,7 +177,7 @@ jobs:
             require_off "$key"
           done
           cp "$G4" work/output/g4-p0-binding-only.fragment
-          echo "G4 Kconfig dependency and isolation gates: PASS" | tee work/logs/g4-config-gates.txt
+          echo "G4 Kconfig dependency and isolation gates: PASS" | tee work/logs/g4-p0-config-gates.txt
 
       - name: Build configured Linux Image
         run: |
@@ -186,7 +186,7 @@ jobs:
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
           make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
           make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
-            2>&1 | tee work/logs/g4-kernel-build.log
+            2>&1 | tee work/logs/g4-p0-kernel-build.log
           install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
           install -m 0644 "$OUT/System.map" work/output/System.map
           install -m 0644 "$OUT/vmlinux" work/output/vmlinux
@@ -199,12 +199,13 @@ jobs:
           set -euo pipefail
           OUT="$GITHUB_WORKSPACE/work/kernel-out"
           test -s "$OUT/drivers/soc/rockchip/io-domain.o"
-          nm -a "$OUT/drivers/soc/rockchip/io-domain.o" > work/logs/io-domain-object-symbols.txt
+          test -s "$OUT/drivers/mfd/syscon.o"
+          nm -a "$OUT/drivers/soc/rockchip/io-domain.o" > work/logs/g4-p0-io-domain-object-symbols.txt
           grep -q 'rockchip_iodomain_probe' work/logs/io-domain-object-symbols.txt
           grep -q 'rk3568_iodomain_write' work/logs/io-domain-object-symbols.txt
 
-          nm -a work/output/vmlinux > work/logs/g4-vmlinux-symbols.txt
-          for sym in rockchip_iodomain_probe rockchip_iodomain_write rk808_regulator_probe; do
+          nm -a work/output/vmlinux > work/logs/g4-p0-vmlinux-symbols.txt
+          for sym in rockchip_iodomain_probe rockchip_iodomain_write rk808_regulator_probe syscon_node_to_regmap; do
             grep -q "$sym" work/logs/g4-vmlinux-symbols.txt
           done
 
@@ -306,8 +307,8 @@ jobs:
             echo "ABCD=NOT_EXECUTABLE"
           } | tee work/output/G4-P0-BUILD-MANIFEST.txt
 
-          cp work/source-lock.txt work/output/G4-source-lock.txt
-          cp work/g3-reference-lock.txt work/output/G4-G3-reference-lock.txt
+          cp work/source-lock.txt work/output/G4-P0-source-lock.txt
+          cp work/g3-reference-lock.txt work/output/G4-P0-G3-reference-lock.txt
           (
             cd work/output
             find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
