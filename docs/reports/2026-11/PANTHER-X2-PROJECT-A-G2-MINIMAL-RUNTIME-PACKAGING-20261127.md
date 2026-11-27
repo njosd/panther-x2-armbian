@@ -38,6 +38,8 @@ The B1 bundle was downloaded and inspected locally during this preparation. Its 
 | TF partition | 2 GiB GPT image; `PANTHER_BOOT` ext4 partition 1, LBA 32768 through 4192255 |
 | Root filesystem | initramfs in RAM; no persistent rootfs or modules tree |
 
+**Important B1 baseline clarification:** the actual B1/R1 kernel config intentionally retains `CONFIG_BLOCK`, `CONFIG_MMC`, `CONFIG_MMC_DW`, `CONFIG_MMC_DW_ROCKCHIP`, `CONFIG_USB`, USB host/PHY and filesystem support. This is not an accidental G2 regression: the B1 DTB keeps the intended eMMC/TF/SD and USB host/PHY nodes according to the established board baseline. The G2 runtime preserves this. Linux may enumerate storage/USB devices, but `/init` does not mount or write persistent filesystems; the root remains initramfs in RAM. This distinction must not be misstated as “storage drivers disabled.” The same DTB statuses are now explicit packaging gates and are printed by `/init`.
+
 The new init script and boot script are stored at:
 - `scripts/panther-x2-g2-runtime/init`
 - `scripts/panther-x2-g2-runtime/boot.cmd`
