@@ -908,3 +908,10 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 继续只读核对 G3 provider runtime 后，读取实际运行设备树属性 `/sys/firmware/devicetree/base/syscon@fdc20000/io-domains/status`，值为 **`disabled`**。父设备 `fdc20000.syscon` 已枚举，但没有 IO-domain child platform device；`/sys/bus/platform/drivers/rockchip-iodomain` 目录不存在。结合 6.18.63 的 `simple-mfd` / OF platform populate 机制，disabled 子节点足以解释当前未创建 child device，因此当前没有 IO-domain consumer bind/probe，也没有由该 consumer 执行的 VSEL selector 写入。
 
 这修正此前“IO-domain consumer 当前 bind 状态未知”的表述：当前运行实例的 consumer 未枚举。仍未确认实际启动 DTB 为何保持 disabled、它与冻结 artifact DTB 是否存在差异，以及当前最终 `CONFIG_ROCKCHIP_IODOMAIN` 值。下一步只做只读 DTB/config 对齐，不启用节点、不触发 probe、不读取/写入 PMU GRF MMIO。G4-P 继续 NO-GO，G4-P-SAFE patch deferred。详见 `PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md` 第 11 节。
+
+
+### 2026-11-27 G4-P runtime FDT/config 只读核验能力边界
+
+G3 provider runtime 的 `/sys/firmware/fdt`（118,912 bytes）与 `/proc/config.gz`（47,255 bytes）均存在，但当前最小 BusyBox 仅有 `ash/cat/dmesg/echo/ls/mkdir/mount/printf/sh/tail/test/uname`，没有 gzip、sha256sum、grep、od、dtc、Python 等工具。因此本轮无法在设备端计算 FDT 哈希或解压核对 `CONFIG_ROCKCHIP_IODOMAIN`；不为此安装工具或改变 RAM 环境。
+
+仓库追溯未找到独立 G3 workflow。G2 runtime artifact（run `45935908005` / artifact `15170487170`）为 PREPARE-ONLY，G2 DTB 继承 B1/R1 DTB 并只修改 RK809 节点；它不能在缺少实际启动资产记录时被当作当前 G3 runtime 的确定来源。当前运行树的 IO-domain status=`disabled` 已验证，但运行 FDT hash、最终 `CONFIG_ROCKCHIP_IODOMAIN` 和 G3 runtime artifact 身份仍 UNKNOWN。G4-P 继续 NO-GO；下一步在主机侧追溯 G3 实际资产并离线核验 DTB/config，不改设备。
