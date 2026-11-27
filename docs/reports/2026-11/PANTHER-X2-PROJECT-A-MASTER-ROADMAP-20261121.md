@@ -1042,3 +1042,12 @@ G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` �
 新增关键限制：RK3568 stock write function 不检查底层 `regmap_write()` 返回值；probe 部分失败时不回滚此前已写 selector。固定内核 regmap debugfs `registers` 默认只读，当前未发现已验证的安全回写路径；masked-restore 仅是理论设计，专用受限 helper 尚未实现/验证。故当前不能形成完整可执行且可恢复的 G4-P 操作。
 
 **状态更新：G4-S PASS；G4-B PASS；G4-P 静态矩阵已展开，但 readback runtime path 未验证、rollback helper 未实现，G4-P = NO-GO / HOLD / NOT AUTHORIZED。** 不启动设备、不加载 G4-P DTB、不触发 probe、不写 PMU GRF。G5、TF-rootfs DTB 和完整用户空间准备暂不跨越 G4-P 决策门。SU08G TF-only 边界不变，eMMC/SN64G 均不触碰。
+
+
+## 2026-11-27 G4-P-SAFE 源码事务设计审查
+
+新增报告：`PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md`。
+
+只读审查固定 6.18.63 io-domain driver 与 regulator core 后，确认 stock driver 的 14 次潜在 GRF 写入缺少错误传播、probe 失败不恢复已写 selector；regulator notifier 在 regulator mutex 持有期间执行，因此不能在持有 IO-domain mutex 时调用 regulator core API。另确认普通 remove/unbind 时自动恢复快照不安全，除非证明 regulator rail 在 teardown/restore 全窗口冻结。
+
+**当前仍为设计审查，不是 patch 实现或运行时验证。** G4-P-SAFE patch、fake-regmap/KUnit 故障注入、build-only 均未完成；G4-P 继续 NO-GO / HOLD / NOT AUTHORIZED。下一步仍限定为独立代码候选与纯软件测试，不启动 Panther X2、不访问 PMIC/PMU GRF、不写任何介质。
