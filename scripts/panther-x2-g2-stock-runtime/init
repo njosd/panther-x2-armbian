@@ -1,9 +1,9 @@
 #!/bin/sh
 # Project-A 6.18.63 minimal runtime packaging baseline.
-# PMIC, GMAC1, MDIO and PHY are intentionally disabled in this PREPARE-ONLY image.
+# RK809 probe is enabled in this candidate; GMAC1, MDIO and PHY remain isolated.
 PATH=/bin:/sbin
 HOME=/
-PS1='(panther-x2-project-a-g2-runtime) # '
+PS1='(panther-x2-project-a-g2-stock-pmic) # '
 export PATH HOME PS1
 
 echo
@@ -100,5 +100,5 @@ echo "--- Last 120 kernel messages ---"
 dmesg | tail -n 120
 
 echo
-echo "Project-A G2 safe runtime ready. Interactive shell follows."
+echo "Project-A G2 stock PMIC runtime ready. Interactive shell follows."
 exec /bin/sh -i
