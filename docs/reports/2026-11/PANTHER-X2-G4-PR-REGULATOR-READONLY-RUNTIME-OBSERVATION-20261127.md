@@ -237,3 +237,46 @@ RK3568 VCCIO5（index 6）会走 `rk3568_iodomain_write()`，向 PMU GRF VSEL0/V
 ### 11.3 安全边界与下一项工作
 
 没有启用该节点、没有修改 DTB/Kconfig、没有触发 probe，也没有访问 PMU GRF MMIO。G4-P 继续 NO-GO；G4-P-SAFE patch 继续 deferred。下一步只做只读证据对齐：核对当前实际运行 DTB 与冻结 artifact DTB 中 `/syscon@fdc20000/io-domains/status` 的差异，并核对该 runtime 对应的最终 kernel.config 中 `CONFIG_ROCKCHIP_IODOMAIN` 值。未完成对齐前，不讨论启用节点或 probe。
+
+
+## 12. Runtime FDT / kernel.config 读取能力边界与 artifact 来源复核（2026-11-27）
+
+### 12.1 当前 G3 RAM 用户空间能力
+
+用户在同一 `panther-x2-g3-provider-runtime` shell 中检查了工具可用性。当前 BusyBox `--list` 仅列出：
+
+`ash cat dmesg echo ls mkdir mount printf sh tail test uname`
+
+以下工具/命令均不存在：
+
+`gzip sha256sum cksum hexdump od grep awk sed tr base64 python3 dtc`
+
+此外该 shell 不支持外部 `command` 命令。因此此前尝试读取 `/proc/config.gz` 和计算 `/sys/firmware/fdt` 哈希均未成功；不能将这些命令报错误判为配置缺失或文件损坏。
+
+已确认的可读文件属性仍为：
+- `/sys/firmware/fdt` 存在，大小 118,912 bytes；
+- `/proc/config.gz` 存在，大小 47,255 bytes；
+- `uname -a` 为 Linux 6.18.63+，build timestamp Fri Nov 27 11:12:32 UTC 2026；
+- `/proc/cmdline` 含 `regulator_ignore_unused`。
+
+当前工具集没有 gzip 解压、文本筛选或二进制解析能力。不得为补工具而修改此 RAM runtime；本轮没有安装软件、挂载新文件系统或改变运行配置。
+
+### 12.2 仓库 artifact 来源核对
+
+只读核对 main 分支后确认：
+- 当前 workflows 目录没有独立命名为 G3 的构建/打包 workflow；
+- G2 runtime packaging workflow `.github/workflows/package-panther-x2-g2-runtime.yml` 固定使用 G2-B artifact run `45924949130` / artifact `15167050233`，其中 DTB SHA256 为 `f6d83d86231b50c903abdf158893b6caa1e8c2aab931c9bf2dbb1b6ca36576dc`；
+- G2 packaging report 说明 G2 DTB 继承 B1/R1 DTB，仅改变 RK809 节点；G2 artifact 本身是 PREPARE-ONLY，报告记录未授权写入实体介质或启动实机；
+- 现有 G2 workflow 对 kernel.config 做了若干明确 Kconfig gate，但没有检查或记录 `CONFIG_ROCKCHIP_IODOMAIN` 的最终值；
+- 6.18.63 Panther X2 board DTS 对 `&pmu_io_domains` 显式设为 `okay`，而 rk356x-base.dtsi 的通用默认值为 `disabled`。冻结 G2 DTB 的 IO-domain 节点属性尚未通过本轮证据直接解码。
+
+因此，当前运行实例的 `io-domains/status=disabled` 已由设备端直接确认，但尚不能把它归因于某个特定冻结 artifact，也不能认定它与 G2 artifact 一致或不一致。当前没有可追溯到该 G3 provider runtime 的独立 manifest / workflow 记录；需要先明确其实际 Image、DTB、initramfs 对应的准备来源，不能以相同 kernel version 代替资产身份。
+
+### 12.3 状态更新
+
+- **已验证：** 当前运行 FDT 存在且大小 118,912 bytes；当前 `/proc/config.gz` 存在且大小 47,255 bytes；当前 BusyBox applet 集合如上；IO-domain 节点状态仍为 `disabled`。
+- **未验证：** 当前运行 FDT SHA256；当前最终 `CONFIG_ROCKCHIP_IODOMAIN` 值；当前 G3 runtime 的冻结 DTB / Image / initramfs artifact 身份；冻结 G2 DTB 中 IO-domain 节点的精确属性。
+- **不作推断：** `regulator_ignore_unused` 不等于启用 IO-domain consumer，也不能证明 IO-domain selector 已写入。
+- **安全边界：** 不在当前 RAM runtime 安装工具、不启用 IO-domain、不触发 probe、不读取或写入 PMU GRF/MMIO、不写 TF/eMMC。
+
+G4-P 继续 NO-GO，G4-P-SAFE patch deferred。下一步应在主机侧追溯 G3 provider runtime 实际使用的构建/打包来源，并用冻结 artifact 的离线 DTB/config 检查补齐证据；不要求当前设备增加工具。
