@@ -1,0 +1,406 @@
+name: Panther X2 Project-A G3 RK809 regulator-provider runtime (PREPARE ONLY)
+
+on:
+  pull_request:
+    branches:
+      - g3-provider-build-only
+    paths:
+      - "scripts/panther-x2-g3-runtime/**"
+      - ".github/workflows/package-panther-x2-g3-provider-runtime.yml"
+  workflow_dispatch:
+    inputs:
+      g3_run_id:
+        description: "Successful G3 RK809 regulator-provider build-only run ID"
+        required: true
+        type: string
+        default: "45984035650"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g3-provider-runtime-package
+  cancel-in-progress: false
+
+env:
+  G3_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g3_run_id || '45984035650' }}
+  B1_RUN_ID: "45328201244"
+  B1_ARTIFACT_ID: "14890817693"
+  B1_BUSYBOX_SHA256: "2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15"
+  JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+
+jobs:
+  package-g3-runtime:
+    name: Assemble and audit isolated G3 RK809 RAM runtime; no hardware access
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install packaging and verification tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils cpio device-tree-compiler e2fsprogs file gdisk gzip qemu-user-static u-boot-tools zstd
+
+      - name: Download frozen G3 kernel artifact and B1 boot support
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-g3-rk809-regulator-provider-build-only
+          path: work/g3
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G3_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Download frozen B1 BusyBox and JP U-Boot proper
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-b1-clean-ram-prepare-only
+          path: work/b1
+          repository: ${{ github.repository }}
+          run-id: ${{ env.B1_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify immutable inputs, G3 configuration and isolation boundary
+        run: |
+          set -euo pipefail
+
+          for f in \
+            work/g3/output/Image \
+            work/g3/output/kernel.config \
+            work/g3/output/dtb/rockchip/rk3566-panther-x2.dtb \
+            work/g3/output/G3-BUILD-MANIFEST.txt \
+            work/g3/output/G3-DTB-ISOLATION.txt \
+            work/g3/output/G3-DEPENDENCY-OBJECTS-SHA256.txt \
+            work/g3/output/System.map \
+            work/g3/output/vmlinux \
+            work/g3/output/SHA256SUMS \
+            work/b1/source-lock.txt \
+            work/b1/output/busybox \
+            work/b1/output/busybox.config \
+            work/b1/output/busybox-applets.txt \
+            work/b1/output/JP-TvBox-u-boot.itb \
+            work/b1/output/SHA256SUMS; do
+            test -s "$f" || { echo "::error::Missing G3/B1 input: $f"; exit 1; }
+          done
+
+          (cd work/g3/output && sha256sum --check SHA256SUMS)
+          (cd work/b1/output && sha256sum --check SHA256SUMS)
+          test "$(sha256sum work/b1/output/busybox | cut -c1-64)" = "$B1_BUSYBOX_SHA256"
+          test "$(sha256sum work/b1/output/JP-TvBox-u-boot.itb | cut -c1-64)" = "$JP_UBOOT_SHA256"
+
+          G3_IMAGE_SHA256="$(sha256sum work/g3/output/Image | cut -c1-64)"
+          G3_CONFIG_SHA256="$(sha256sum work/g3/output/kernel.config | cut -c1-64)"
+          G3_DTB_SHA256="$(sha256sum work/g3/output/dtb/rockchip/rk3566-panther-x2.dtb | cut -c1-64)"
+          {
+            echo "G3_IMAGE_SHA256=$G3_IMAGE_SHA256"
+            echo "G3_CONFIG_SHA256=$G3_CONFIG_SHA256"
+            echo "G3_DTB_SHA256=$G3_DTB_SHA256"
+          } >> "$GITHUB_ENV"
+
+          MANIFEST=work/g3/output/G3-BUILD-MANIFEST.txt
+          for line in \
+            "rk809_regulator_provider=built-in" \
+            "fixed_regulator_provider=built-in" \
+            "rockchip_iodomain=not-built" \
+            "gmac1_mdio_phy=disabled" \
+            "emmc_sdhci=disabled" \
+            "tf_sdmmc0=disabled" \
+            "sdio_sdmmc1=disabled" \
+            "gpu=disabled" \
+            "saradc=disabled" \
+            "regulator_ignore_unused=required_in_future_G3_runtime_bootargs_only" \
+            "hardware_access=none" \
+            "pmic_register_access=none" \
+            "physical_media_writes=none"; do
+            grep -Fqx "$line" "$MANIFEST" || { echo "::error::G3 manifest mismatch: $line"; exit 1; }
+          done
+
+          CONFIG=work/g3/output/kernel.config
+          for key in \
+            CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_OF CONFIG_OF_FLATTREE \
+            CONFIG_BLK_DEV_INITRD CONFIG_RD_GZIP CONFIG_DEVTMPFS CONFIG_DEVTMPFS_MOUNT \
+            CONFIG_PROC_FS CONFIG_SYSFS CONFIG_TTY CONFIG_SERIAL_8250 CONFIG_SERIAL_8250_CONSOLE \
+            CONFIG_SERIAL_8250_DW CONFIG_SERIAL_OF_PLATFORM CONFIG_SERIAL_EARLYCON \
+            CONFIG_BINFMT_ELF CONFIG_BINFMT_SCRIPT CONFIG_I2C CONFIG_I2C_RK3X \
+            CONFIG_REGMAP_I2C CONFIG_REGMAP_IRQ CONFIG_IRQ_DOMAIN CONFIG_MFD_CORE \
+            CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C CONFIG_MODULES \
+            CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE CONFIG_REGULATOR_RK808 \
+            CONFIG_DEBUG_FS CONFIG_DEBUG_FS_ALLOW_ALL CONFIG_RTC_DRV_RK808 CONFIG_INPUT_RK805_PWRKEY; do
+            grep -qx "$key=y" "$CONFIG" || { echo "::error::Required G3 Kconfig option missing: $key"; exit 1; }
+          done
+          for key in CONFIG_ROCKCHIP_IODOMAIN CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP \
+                     CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY \
+                     CONFIG_RTC_HCTOSYS CONFIG_RTC_SYSTOHC CONFIG_BT CONFIG_WIRELESS \
+                     CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do
+            if grep -Eq "^$key=[ym]$" "$CONFIG"; then
+              echo "::error::Forbidden G3 Kconfig option enabled: $key"
+              exit 1
+            fi
+          done
+
+          DTB=work/g3/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
+          fdtget -t s "$DTB" / compatible | grep -q 'panther,x2'
+          fdtget -t s "$DTB" / compatible | grep -q 'rockchip,rk3566'
+          assert_status() {
+            local node="$1" expected="$2" actual
+            fdtget -l "$DTB" "$node" >/dev/null 2>&1 || {
+              echo "::error::DTB node missing: $node"; exit 1;
+            }
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            if [ "$expected" = "okay" ] && [ "$actual" = "okay (implicit default)" ]; then return 0; fi
+            test "$actual" = "$expected" || {
+              echo "::error::DTB status mismatch: $node expected=$expected actual=$actual"; exit 1;
+            }
+          }
+          assert_status /i2c@fdd40000/pmic@20 okay
+          assert_status /syscon@fdc20000/io-domains disabled
+          assert_status /mmc@fe310000 disabled
+          assert_status /mmc@fe2b0000 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /gpu@fde60000 disabled
+          assert_status /saradc@fe720000 disabled
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+
+          file work/g3/output/Image | tee work/logs-kernel-image.txt
+          MAGIC="$(od -An -tx1 -j56 -N4 work/g3/output/Image | tr -d ' \\n')"
+          test "$MAGIC" = "41524d64"
+          readelf -h work/b1/output/busybox | grep -q AArch64
+          if readelf -l work/b1/output/busybox | grep -q INTERP; then
+            echo "::error::B1 BusyBox must remain statically linked"
+            exit 1
+          fi
+
+          mkdir -p work/output work/initramfs work/debug work/boot/dtb/rockchip
+          cp work/g3/output/Image work/boot/Image
+          cp "$DTB" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          cp work/g3/output/kernel.config work/output/kernel.config
+          cp work/g3/output/System.map work/debug/System.map
+          cp work/g3/output/vmlinux work/debug/vmlinux
+          cp work/g3/output/G3-BUILD-MANIFEST.txt work/output/G3-BUILD-MANIFEST.txt
+          cp work/g3/output/G3-DTB-ISOLATION.txt work/output/G3-DTB-ISOLATION.txt
+          cp work/g3/output/G3-DEPENDENCY-OBJECTS-SHA256.txt work/output/G3-DEPENDENCY-OBJECTS-SHA256.txt
+          cp work/g3/output/G3-source-lock.txt work/output/G3-source-lock.txt
+          cp work/g3/output/G3-R1-reference-lock.txt work/output/G3-R1-reference-lock.txt
+          cp work/b1/source-lock.txt work/output/B1-source-lock.txt
+          cp -a work/g3/logs work/output/G3-build-logs
+          cp work/b1/output/busybox work/initramfs/busybox
+          cp work/b1/output/busybox work/output/busybox
+          cp work/b1/output/busybox.config work/output/busybox.config
+          cp work/b1/output/busybox-applets.txt work/output/busybox-applets.txt
+          cp work/b1/output/JP-TvBox-u-boot.itb work/output/JP-TvBox-u-boot.itb
+
+          {
+            echo "g3_run_id=$G3_RUN_ID"
+            echo "g3_artifact_name=panther-x2-g3-rk809-regulator-provider-build-only"
+            echo "g3_artifact_internal_sha256s_verified=yes"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "b1_artifact_id=$B1_ARTIFACT_ID"
+            echo "b1_busybox_sha256=$B1_BUSYBOX_SHA256"
+            echo "jp_uboot_sha256=$JP_UBOOT_SHA256"
+            sha256sum work/boot/Image work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/initramfs/busybox work/output/kernel.config
+          } | tee work/output/FROZEN-INPUTS.txt
+
+      - name: Build and verify minimal RAM initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/etc" "$ROOT/sbin"
+          install -m 0755 "$ROOT/busybox" "$ROOT/bin/busybox"
+          rm "$ROOT/busybox"
+          for applet in ash sh mount mkdir cat uname printf dmesg tail echo ls test; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-g3-runtime/init "$ROOT/init"
+          install -m 0755 scripts/panther-x2-g3-runtime/capture-g3.sh "$ROOT/capture-g3.sh"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/capture-g3.sh"
+          cp scripts/panther-x2-g3-runtime/init work/output/init
+          cp scripts/panther-x2-g3-runtime/capture-g3.sh work/output/capture-g3.sh
+          cp scripts/panther-x2-g3-runtime/boot.cmd work/output/boot.cmd
+
+          (
+            cd "$ROOT"
+            find . -print0 | sort -z | cpio --null -o --format=newc
+          ) | gzip -n -9 > work/output/initramfs.cpio.gz
+
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 Project-A G3 RK809 provider RAM runtime" -d work/output/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/output/uinitrd-header.txt
+          grep -qi AArch64 work/output/uinitrd-header.txt
+
+          mkdir -p work/initramfs-check
+          gzip -dc work/output/initramfs.cpio.gz | (cd work/initramfs-check && cpio -idm --quiet)
+          cmp scripts/panther-x2-g3-runtime/init work/initramfs-check/init
+          cmp scripts/panther-x2-g3-runtime/capture-g3.sh work/initramfs-check/capture-g3.sh
+          cmp work/output/busybox work/initramfs-check/bin/busybox
+          test -x work/initramfs-check/init
+          test -x work/initramfs-check/capture-g3.sh
+          sha256sum work/output/initramfs.cpio.gz work/boot/uInitrd | tee work/output/initramfs-sha256.txt
+
+      - name: Generate U-Boot script and PREPARE-ONLY SU08G image (runner only)
+        run: |
+          set -euo pipefail
+          mkimage -A arm -O linux -T script -C none -n "Panther X2 Project-A G3 RK809 provider runtime" -d work/output/boot.cmd work/boot/boot.scr
+          mkimage -l work/boot/boot.scr | tee work/output/bootscr-header.txt
+
+          IMAGE=work/output/panther-x2-project-a-g3-provider-PREPARE-ONLY.img
+          IMAGE_ZST="$IMAGE.zst"
+          TF_IMAGE_BYTES=7948206080
+          TF_SECTOR_SIZE=512
+          TF_TOTAL_SECTORS=15523840
+          TF_FIRST_PARTITION_SECTOR=32768
+          TF_LAST_USABLE_SECTOR=$((TF_TOTAL_SECTORS - 34))
+          test "$((TF_TOTAL_SECTORS * TF_SECTOR_SIZE))" -eq "$TF_IMAGE_BYTES"
+          test "$TF_LAST_USABLE_SECTOR" -eq 15523806
+
+          truncate -s "$TF_IMAGE_BYTES" "$IMAGE"
+          test "$(stat -c %s "$IMAGE")" -eq "$TF_IMAGE_BYTES"
+          sgdisk --clear --new=1:${TF_FIRST_PARTITION_SECTOR}:${TF_LAST_USABLE_SECTOR} --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          mkdir -p work/tf-mnt
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo install -m 0644 work/boot/Image work/tf-mnt/Image
+          sudo install -m 0644 work/boot/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/boot/boot.scr work/tf-mnt/boot.scr
+          sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo install -m 0644 work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
+          sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null <<'EOF'
+          Panther X2 Project-A G3 RK809 regulator-provider runtime; PREPARE-ONLY.
+          Linux 6.18.63; Image, DTB, config and initramfs hashes are in RUNTIME-MANIFEST.txt.
+          RK809 regulator provider probe is enabled; expected PMIC initialization writes occur if booted.
+          regulator_ignore_unused is set; it does not suppress provider probe writes.
+          IO-domain, eMMC SDHCI, TF SDMMC0, SDIO, GPU, SARADC, GMAC1, MDIO and PHY are disabled.
+          RAM initramfs only; /init mounts procfs/sysfs/debugfs and does not mount persistent filesystems.
+          Capture output stays in RAM at /run/g3-provider; rerun /bin/sh /capture-g3.sh after 12 seconds.
+          Existing eMMC SPL is required; JP-TvBox U-Boot proper is stored at raw LBA 16384 on SU08G.
+          Target: SU08G nominal 8 GB TF, exact capacity 7,948,206,080 bytes.
+          No physical TF/eMMC has been written by this workflow; image is PREPARE-ONLY.
+          EOF
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+          UBOOT_SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
+          UBOOT_READBACK="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$UBOOT_SIZE" status=none | sha256sum | cut -c1-64)"
+          test "$UBOOT_READBACK" = "$JP_UBOOT_SHA256"
+
+          LOOP="$(sudo losetup --find --show --partscan --read-only "$IMAGE")"
+          cleanup() {
+            sudo umount work/tf-mnt 2>/dev/null || true
+            sudo losetup -d "$LOOP" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          sudo mount -o ro "$PART" work/tf-mnt
+          for item in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do
+            test -s "work/tf-mnt/$item"
+          done
+          test "$(sha256sum work/tf-mnt/Image | cut -c1-64)" = "$G3_IMAGE_SHA256"
+          test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | cut -c1-64)" = "$G3_DTB_SHA256"
+          test "$(sha256sum work/tf-mnt/uInitrd | cut -c1-64)" = "$(sha256sum work/boot/uInitrd | cut -c1-64)"
+          (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+
+          sha256sum "$IMAGE" | tee work/output/tf-image-sha256.txt
+          zstd -T0 -10 "$IMAGE" -o "$IMAGE_ZST"
+          zstd -t "$IMAGE_ZST"
+          sha256sum "$IMAGE_ZST" >> work/output/tf-image-sha256.txt
+          rm -f "$IMAGE"
+
+      - name: Create G3 runtime manifest and final SHA256 inventory
+        run: |
+          set -euo pipefail
+          {
+            echo "status=PASS_PREPARE_ONLY"
+            echo "purpose=Project-A G3 isolated RK809 regulator-provider RAM runtime; packaging and offline verification only"
+            echo "g3_run_id=$G3_RUN_ID"
+            echo "g3_artifact_name=panther-x2-g3-rk809-regulator-provider-build-only"
+            echo "g3_artifact_internal_sha256s_verified=yes"
+            echo "b1_run_id=$B1_RUN_ID"
+            echo "b1_artifact_id=$B1_ARTIFACT_ID"
+            echo "kernel_version=6.18.63"
+            echo "kernel_source=https://github.com/ophub/linux-6.18.y.git"
+            echo "kernel_commit=aee4e352a15d636cbc484f56819c6e59474dfd9f"
+            echo "kernel_image_sha256=$G3_IMAGE_SHA256"
+            echo "kernel_config_sha256=$G3_CONFIG_SHA256"
+            echo "dtb_sha256=$G3_DTB_SHA256"
+            echo "busybox_sha256=$B1_BUSYBOX_SHA256"
+            echo "jp_uboot_sha256=$JP_UBOOT_SHA256"
+            echo "debugfs=y; debugfs_allow_all=y; regulator_summary=available_if_mounted"
+            echo "deferred_probe_capture=devices_deferred; repeat_capture_after_12_seconds"
+            echo "rk809_regulator_provider=built-in; expected_probe_side_effects=PMIC register initialization writes"
+            echo "regulator_ignore_unused=enabled; suppresses_only_late_unused_regulator_cleanup"
+            echo "rockchip_iodomain=not-built; io_domains=disabled"
+            echo "emmc_sdhci=disabled; tf_sdmmc0=disabled; sdio_sdmmc1=disabled"
+            echo "gpu=disabled; saradc=disabled; gmac1_mdio_phy=disabled"
+            echo "rtc_hctosys=disabled; rtc_systohc=disabled"
+            echo "rootfs=RAM initramfs; no persistent filesystem mounted by /init"
+            echo "capture_output=/run/g3-provider (RAM only)"
+            echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init regulator_ignore_unused"
+            echo "load_addresses=Image:0x00280000;uInitrd:0x0a200000;DTB:0x0a100000"
+            echo "target_media=SU08G nominal 8 GB TF"
+            echo "target_capacity_bytes=7948206080"
+            echo "target_sector_size_bytes=512"
+            echo "target_total_sectors=15523840"
+            echo "partition=GPT PANTHER_BOOT ext4; start LBA 32768; end LBA 15523806"
+            echo "uboot_proper_location=raw LBA 16384 (8 MiB)"
+            echo "boot_chain=existing eMMC SPL -> TF JP-TvBox U-Boot proper -> TF Image/uInitrd/DTB -> RAM initramfs"
+            echo "hardware_access=none_during_build"
+            echo "physical_media_writes=none_during_build"
+            echo "boot_authorization=granted_for_one_SU08G_G3_P_RAM_only_session"
+            echo "init_sha256=$(sha256sum work/output/init | cut -c1-64)"
+            echo "capture_script_sha256=$(sha256sum work/output/capture-g3.sh | cut -c1-64)"
+            echo "boot_cmd_sha256=$(sha256sum work/output/boot.cmd | cut -c1-64)"
+            echo "initramfs_cpio_sha256=$(sha256sum work/output/initramfs.cpio.gz | cut -c1-64)"
+            echo "uinitrd_sha256=$(sha256sum work/boot/uInitrd | cut -c1-64)"
+            echo "bootscr_sha256=$(sha256sum work/boot/boot.scr | cut -c1-64)"
+            cat work/output/tf-image-sha256.txt
+          } | tee work/output/RUNTIME-MANIFEST.txt
+
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          (cd work/output && sha256sum --check SHA256SUMS)
+
+      - name: Upload G3 runtime package (PREPARE-ONLY; no device access)
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-project-a-g3-provider-runtime-PREPARE-ONLY
+          path: |
+            work/output/
+            work/boot/
+            work/debug/
+            work/logs-kernel-image.txt
+          if-no-files-found: error
+          retention-days: 30
