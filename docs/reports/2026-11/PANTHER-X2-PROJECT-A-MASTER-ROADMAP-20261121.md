@@ -90,12 +90,12 @@ NixOS 配方仅作为研究样本；其曾出现 ROCK 3C EVB control FDT/target 
 ### 4.1 最小化、分层启用与单变量试验
 
 - 先构建一个纯 RAM 的最小 Linux 启动底座，不构建完整 Ubuntu/Armbian rootfs。
-- B1 不预置任何 B2/B3 网络工具、网络协议、Ethernet 驱动、存储驱动、USB 驱动、模块或固件。
-- Linux B1 从 initramfs/RAM 运行；TF 只由启动前的 JP U-Boot proper 读取 Image、uInitrd 和 DTB。Linux 阶段不启用 MMC/eMMC/SD/SDIO、块设备、USB、网络协议栈或网络设备驱动。
-- B1 保留 ARM64、RK3566 SoC 启动支持、UART2 console、必要时钟/pinctrl、initramfs/gzip、devtmpfs/procfs/sysfs 和静态 BusyBox ash；不加载或 probe GMAC/STMMAC/DWMAC、MDIO/PHY/PCS。
+- B1 不预置 B2/B3 网络工具、网络协议或 Ethernet 驱动；冻结 B1 artifact 保留 RK35xx 基础配置中的 BLOCK/MMC/USB host/USB storage 驱动和 MODULES，Wi-Fi/蓝牙仍永久排除。
+- Linux B1 从 initramfs/RAM 运行；U-Boot 启动前从 TF 读取 Image/uInitrd/DTB。冻结 B1 `.config` 保留 BLOCK/MMC/USB host/USB storage 与 MODULES；DTB 保留 TF/eMMC、USB host/PHY0，禁用 SDIO/Wi-Fi。Linux 可枚举已启用设备，但 `/init` 不挂载/写入持久化文件系统；网络协议栈与网卡驱动仍隔离。
+- B1 保留 ARM64、RK3566 SoC 启动支持、UART2 console、必要时钟/pinctrl、initramfs/gzip、devtmpfs/procfs/sysfs、静态 BusyBox ash，以及冻结基线的 MMC/USB host 支持；不加载或 probe GMAC/STMMAC/DWMAC、MDIO/PHY/PCS。
 - 有线千兆网口链路的后续依赖审查范围仅限 Ethernet MAC/GMAC、MDIO、PHY、PCS 及相关 pinctrl/clock/reset/regulator/DMA/interrupt；共享于 UART/SoC 启动的基础设施不得盲目关闭，必须按设备节点/依赖关系精确处理。
 - Wi-Fi/无线网络、蓝牙及其控制器、驱动、固件、协议和用户空间组件永久排除，不进行依赖追踪或逐项引入；只在 clean-test DTB/镜像准入检查中确认相关节点、驱动、固件和用户空间内容未混入。
-- USB 与 USB/PCIe 外接网卡不属于项目 A；B1 禁用 USB host/PHY。干净基线通过后，只围绕板载有线千兆 Ethernet 按单变量实验逐项加入最小依赖闭包，完成构建审计和目标硬件验证后再继续。
+- USB 外接网卡与 USB/PCIe 网络适配器不属于项目 A；B1 保留板载 USB host/PHY0，但不启用 USB 网卡驱动。干净基线通过后，只围绕板载有线千兆 Ethernet 按单变量实验逐项加入最小依赖闭包，完成构建审计和目标硬件验证后再继续。
 - B2、B3 只在相应网络组件已逐项放行后，按层次验证接口/link、静态地址、ARP、ICMP、TCP/UDP；不把多项组件、配置或测试捆绑为一次试验。
 - 同一轮 B1—B3 尽量固定 Kernel、DTB、initramfs、BusyBox、工具版本和启动链。只有当前证据明确要求时才变更其中一项，并将变更作为独立试验。
 - 不因完整发行版通常包含某组件，就提前加入它；不为追求“最小体积”而删除后续阶段明确需要、且不会干扰当前阶段的工具。
@@ -114,7 +114,7 @@ NixOS 配方仅作为研究样本；其曾出现 ROCK 3C EVB control FDT/target 
 
 必须保留或验证：
 - UART2 串口控制台及跨启动阶段日志；
-- TF/SD 读取由启动前 U-Boot proper 完成；Linux B1 不启用 MMC/eMMC/SD/SDIO 控制器；
+- U-Boot proper 在启动前读取 TF 上的启动文件；Linux B1 的 MMC 控制器驱动与 TF/eMMC 节点保持冻结基线状态，SDIO 节点禁用，Linux root 仍为 RAM initramfs；
 - Panther X2 板载有线千兆以太网口（仅在 B1 干净基线通过后，按阶段引入并验证）；
 - 原有硬件复位功能，不凭外观猜测 GPIO 或改变按键语义；
 - RK809/PMIC 电源由启动固件完成必要初始化；B1 不为此引入非启动必需的 PMIC 用户空间或存储组件。
@@ -147,7 +147,7 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 
 - 必须使用 Panther X2 专用 `rk3566-panther-x2.dtb`，不得用 E23/E25/ROCK 3C DTB 替代。
 - Kernel、DTB、模块和必要固件必须来自匹配版本。
-- 干净基线内核必须具备 ARM64、RK3566 SoC、initramfs/initrd、gzip、devtmpfs、UART2 console、必要时钟和 pinctrl 支持；Linux B1 不启用 BLOCK/MMC/eMMC/SD/SDIO、USB、网络协议栈、Ethernet/GMAC、MDIO/PHY、无线/蓝牙或模块。TF 文件由 U-Boot 在 Linux 启动前读取。
+- 干净基线内核必须具备 ARM64、RK3566 SoC、initramfs/initrd、gzip、devtmpfs、UART2 console、必要时钟/pinctrl，并保留冻结 B1 artifact 中的 BLOCK/MMC/USB host/USB storage 与 MODULES；网络协议栈、Ethernet/GMAC、MDIO/PHY、无线/蓝牙仍不启用。TF 文件由 U-Boot 在 Linux 启动前读取，Linux root 为 RAM initramfs。
 - 有线千兆以太网相关 Kconfig 必须建立分类清单，区分启动必需、共享依赖和 Ethernet 专用项。干净基线不编入网络栈及 Ethernet 驱动；后续只对板载 Ethernet 所需依赖闭包逐项审查、引入并记录配置差异。
 - Wi-Fi/无线网络、蓝牙及其他非目标网络设备配置一律列入永久排除清单，不进入后续逐项引入计划。
 - 目标系列固定为 Linux 6.18.y，不以 6.12 或 6.1 作为项目 A 构建目标。
@@ -295,7 +295,7 @@ B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核
 ### 11.1 干净基线与网络组件隔离（强制前置门）
 
 - B1 第一阶段构建纯 RAM 启动基线：Kernel 网络栈、Ethernet/GMAC/MDIO/PHY 驱动、MMC/block、USB、无线/蓝牙和模块全部关闭；不预置网络用户空间工具、固件或服务。
-- Kernel 最终 .config 必须证明网络专用代码未编入；DTB 反编译与结构检查证明 GMAC/MDIO/PHY、MMC/SDIO、USB 和 Bluetooth UART 节点已禁用或从 clean-test DTB 移除；不得用仅禁用 DTB 节点冒充驱动代码已移除。
+- Kernel 最终 `.config` 必须证明网络协议栈与 Ethernet/PHY 专用代码未编入；DTB 反编译与结构检查证明 GMAC/MDIO/PHY、SDIO/Wi-Fi 节点禁用，TF/eMMC、USB host/PHY0 与 UART1/UART2 保持冻结状态，Bluetooth 子节点移除；不得用仅禁用 DTB 节点冒充驱动代码已移除。
 - Linux B1 只保留 UART2 console、SoC 时钟/pinctrl 和 initramfs 必需支持；不得为了隔离网络而误关闭 UART/SoC 启动依赖。TF 只由 U-Boot 在 Linux 启动前读取，Linux 不启用任何 MMC/block 设备。
 - 干净基线通过后，才按组件清单逐项引入网络子系统、设备驱动及最小依赖闭包、用户空间工具。每次只改变一个组件/最小依赖闭包，失败即停并回到最近已验证基线。
 - DHCP、DNS、SSH、NetworkManager、systemd、udev、Docker、NPU/RKNN、GPU、Immich、数据库和存储服务继续排除，除非后续有独立需求与批准。
