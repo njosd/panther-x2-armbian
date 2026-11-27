@@ -156,3 +156,21 @@ G2-B 阶段 ABCD = NOT EXECUTABLE：RK809/GMAC 节点 disabled，无 netdev/open
 Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/TF 存储驱动、持久化挂载和文件系统行为混入 TX 验证变量。启动资产可由已固定的 U-Boot 从专用 SU08G TF 读取；不得写 eMMC，不触碰冻结的 64GB 对照卡。任何 TF 写入/实机启动仍按逐次授权规则执行。RAM 根文件系统不等于 B1-clean：两者内核版本可相同，但网络配置、驱动集合、用户空间和阶段用途不同。
 
 **核心判断：项目 A 的“真实运行环境”指真实 Panther X2 上运行的项目 A 专用 6.18.63 最小系统，不等于必须先安装完整发行版或持久化 rootfs。**
+
+## 9. G2-B build-only workflow 已准备（2026-11-27，尚未执行）
+
+为避免从 B1 重新构建并扩大变量，G2-B 以成功的 R1 network-core artifact 作为配置和 DTB 输入：
+
+- R1 workflow run：`45611898629`；job `139197305317`，状态 `completed / success`。
+- 输入 artifact：`b2-1-r1-network-core`；artifact ID `15023630465`，截至本报告日期未过期。
+- 新增配置片段：`scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。只启用 `CONFIG_MFD_RK8XX_I2C=y`，明确关闭 `CONFIG_REGULATOR_RK808` 与 `CONFIG_INPUT_RK805_PWRKEY`。
+- 新增 workflow：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，手动触发，默认读取上述 R1 run ID；从固定 Linux 6.18.63 commit 重建 Image/modules，并保留 R1 配置、源码补丁、DTB 输入的来源锁。
+- workflow 将在 R1 DTB 的独立副本上把 `/i2c@fdd40000/pmic@20` 设置为 disabled，并再次确认 GMAC1、MDIO1、RTL8211F 节点仍 disabled；不会改写 R1 原始 artifact。
+- 构建验收包括最终 .config 依赖闭包、RK8xx core/I2C transport built-in object 与符号、Image 格式、modules、DTB 隔离状态、manifest 和 SHA256。
+- 输出 artifact 名称：`panther-x2-g2-b-rk8xx-mfd-build-only`。
+
+**执行边界：** workflow 只在 GitHub Actions runner 中构建；不连接 Panther X2、不写 TF/eMMC、不访问 PMIC、不运行 driver probe、不启用 regulator、不恢复 GMAC/MDIO/PHY。G2-B 只验证构建配置和产物，不是 PMIC runtime PASS。
+
+**QEMU 边界修订：** 当前 G2-B 目标是 RK3566/Panther X2 内核与 DTB。通用 QEMU `virt` 机器并不模拟 Panther X2/RK3566 板级平台，不能把其启动结果作为本门验收；本 workflow 不执行误导性的 QEMU system boot。若以后对静态 AArch64 用户态工具做 QEMU user-mode smoke test，应单独标注为用户态测试，不得称为 RK3566 kernel boot。
+
+本 workflow 已提交仓库，**尚未触发运行**。只有 Actions 实际成功并审查 artifact 后，才能把 G2-B 标记为 BUILD PASS。G2-PROBE 仍然 HOLD / NOT AUTHORIZED。
