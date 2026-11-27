@@ -345,3 +345,67 @@ G3 Kconfig 明确为 `# CONFIG_ROCKCHIP_IODOMAIN is not set`；G3 build workflow
 - G4-P full mapping：**NO-GO**；存在可预测的 partial-write 后失败路径。
 - G4-P0 no-supply binding-only：可进入下一轮静态设计审计，**尚未构建、尚未启动、未授权硬件试验**。
 - 当前 Panther X2 设备：保持原样；不安装工具、不改 DTB/Kconfig/驱动、不触发 probe、不访问 PMU GRF/MMIO、不写 TF/eMMC。
+
+
+## 15. G4-P0 binding-only 静态设计审计（2026-11-27）
+
+### 15.1 子设备枚举路径
+
+固定源码 Linux 6.18.63，commit `aee4e352a15d636cbc484f56819c6e59474dfd9`：
+
+- `drivers/of/platform.c` 的 `of_platform_default_populate_init()` 在 `arch_initcall_sync` 阶段调用 `of_platform_default_populate(NULL, NULL, NULL)`。
+- `of_platform_default_populate()` 将 `simple-mfd` 识别为递归总线节点；`of_platform_bus_create()` 为节点创建 platform device，并递归处理子节点。
+- 创建 platform device 前会检查 `of_device_is_available()`；因此 PMUGRF 下 `io-domains` child 只有在 DT status 为 `okay`（或省略 status）时才会被创建。G4-P0 必须明确设为 `okay`。
+- Panther X2 PMUGRF parent compatible 包含 `syscon` 与 `simple-mfd`；IO-domain child compatible 必须保持 `rockchip,rk3568-pmu-io-voltage-domain`。
+
+所以，在父节点保持原状、child status 改为 okay 的前提下，OF core 可创建 child platform device；这条路径不依赖父 syscon platform device 有 driver symlink。
+
+### 15.2 Probe 路径与无 selector 写入证明
+
+`rockchip_iodomain_probe()` 的顺序为：分配私有结构、匹配 SoC data、选择 write handler、取得 parent PMUGRF regmap、循环处理 16 个 supply slots，最后调用可选 SoC init。
+
+RK3568 PMU data（`soc_data_rk3568_pmu`）有九个 supply name（pmuio1、pmuio2、vccio1..vccio7），没有设置 `.init` callback。
+
+若 G4-P0 DTB 将九个 supply properties 全部删除：
+1. 驱动仍会按九个名称逐一调用 `devm_regulator_get_optional()`。
+2. 无对应 supply property/consumer mapping 时，optional get 返回 `-ENODEV`；driver 明确把 `-ENODEV` 视为“未配置 supply”，执行 `continue`。
+3. 因而不会调用 `regulator_get_voltage()`、不会设置 `supply->reg`、不会注册 regulator notifier，也不会调用 `iod->write()`。
+4. RK3568 PMU SoC data 没有 `.init` callback，循环结束后没有额外 PMUGRF selector 初始化写入。
+
+这证明 G4-P0 的 IO-domain driver probe 成功路径不执行本驱动的 VSEL selector write。该结论只适用于九个 supply properties 全部缺失的候选 DTB；只删除 SWITCH_REG1 对应的属性是不够的，因为 index 0/1 等其他 supply 仍可能先写 selector。
+
+### 15.3 PMUGRF syscon 是必要依赖，且要区分映射与寄存器事务
+
+- IO-domain probe 在处理 supply loop **之前**就调用 `syscon_node_to_regmap(parent->of_node)`。
+- `include/linux/mfd/syscon.h` 在 `CONFIG_MFD_SYSCON` 未启用时提供 stub，返回 `-ENOTSUPP`；因此仅打开 `CONFIG_ROCKCHIP_IODOMAIN` 不足以保证 probe 可通过。
+- `CONFIG_MFD_SYSCON=y` 是 G4-P0 必需配置；该 Kconfig 选项选择 `REGMAP_MMIO`。
+- parent node compatible 含 `syscon`，所以 `syscon_node_to_regmap()` 可在没有预先注册 regmap 时懒创建 regmap。其创建路径调用 `of_iomap()` 建立 PMUGRF 资源映射，并调用 `regmap_init_mmio()`。
+- 对无 supply 的 G4-P0 路径，IO-domain driver 本身不会调用 `regmap_read()` 或 `regmap_write()`；但 **PMUGRF MMIO 区域会被 ioremap 并建立 regmap 对象**。因此准确表述是“建立 PMUGRF 映射，不发起 selector 寄存器读写事务”，不能称为“完全不接触/不映射 PMUGRF MMIO”。
+
+### 15.4 G4-P0 最小配置与 DTB 构建约束
+
+PREPARE-ONLY 候选应满足：
+
+- `CONFIG_OF=y`
+- `CONFIG_MFD_SYSCON=y`
+- `CONFIG_REGMAP=y`
+- `CONFIG_REGMAP_MMIO=y`（由 MFD_SYSCON select，仍需在最终 config 中验证）
+- `CONFIG_ROCKCHIP_IODOMAIN=y`（建议 built-in，避免依赖 initramfs 中模块加载）
+- 保留 G3 已验证的 `CONFIG_REGULATOR`、RK809 MFD/regulator provider 及相关配置，不借此阶段改变 provider。
+
+DTB 只允许以下目标节点变更：
+- `/syscon@fdc20000/io-domains/status` -> `okay`；
+- 删除 `pmuio1-supply`、`pmuio2-supply`、`vccio1-supply`、`vccio2-supply`、`vccio3-supply`、`vccio4-supply`、`vccio5-supply`、`vccio6-supply`、`vccio7-supply` 九个属性。
+
+不得更改 PMUGRF parent、其他 regulator 节点、任何 regulator 电压约束、pinctrl/GPIO、GMAC/PHY、USB、TF/eMMC/SDIO、bootargs 或 initramfs。构建后必须离线验证：compatible 精确匹配、status=okay、九个 supply properties 全部不存在、Kconfig 全部符合要求，并对 DTB 做反编译差异审计，证明除上述十项外没有其他变更。Artifact 只允许 PREPARE-ONLY，不在本节授权写 TF 或启动。
+
+### 15.5 阶段判定
+
+- G4-P0 静态设计：**PASS（可进入 build-only workflow 设计）**。
+- G4-P0 artifact：尚未构建。
+- G4-P0 实机启动/probe：未执行、未授权。
+- 允许的 probe 副作用：创建 child platform device、绑定 driver、创建 PMUGRF ioremap/regmap 对象。
+- 在九路 supply 属性全缺失且 RK3568 `.init` 为空的前提下，IO-domain driver 不读取 rail 电压、不注册 regulator notifier、不调用 selector write。
+- 禁止表述为“无 MMIO 映射”；当前设计仅保证无 PMUGRF selector register transaction。
+
+下一阶段入口：先实现/审计一个独立 G4-P0 PREPARE-ONLY build workflow，继承 G3 冻结资产并只修改上述 Kconfig/DTB 十项；build 后离线验证全部约束。构建 workflow 与 artifact 审计通过后，再单独请求是否授权硬件启动，不得自动进入实体测试。
