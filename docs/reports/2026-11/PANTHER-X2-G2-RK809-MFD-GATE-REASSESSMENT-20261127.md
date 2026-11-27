@@ -126,7 +126,7 @@ header 中两版 enum 均定义 FALL=0、RISE=1。按 pwrkey driver 的 index �
 1. 以冻结的 6.18.63 commit 为输入，单独启用 `MFD_RK8XX_I2C=y`；其 Kconfig 自动 select `MFD_CORE`、`REGMAP_I2C`、`REGMAP_IRQ`、`MFD_RK8XX`。
 2. 如要验证 PWRKEY 子驱动，再加入 `INPUT_RK805_PWRKEY=y`（依赖 `MFD_RK8XX`）；不启用 `REGULATOR_RK808`，避免 G2 提前注册全部 regulator descriptors。
 3. 使用 R1 原 DTB 的独立副本，将 RK809 节点临时保持/设为 `status = "disabled"`，GMAC1/MDIO/PHY 继续 disabled。这样 built-in 驱动会进入 Image，但不会匹配并 probe RK809。
-4. 构建并检查 `.config`、`modules.builtin`、对象列表、Image/DTB 哈希。通用 QEMU `virt` 不模拟 RK3566/Panther X2，不执行无代表性的 QEMU system boot；如另做 QEMU user-mode 工具自检，单独标注为用户态测试。该步骤验证 Kconfig、编译、链接和产物封装，不验证 I2C、PMIC 或 MFD runtime。
+4. 构建并检查 `.config`、built-in 对象与链接符号、Image/DTB 哈希。通用 QEMU `virt` 不模拟 RK3566/Panther X2，不执行无代表性的 QEMU system boot；如另做 QEMU user-mode 工具自检，单独标注为用户态测试。该步骤验证 Kconfig、编译、链接和产物封装，不验证 I2C、PMIC 或 MFD runtime。
 5. 若 build-only 通过，再单独提交 G2-PROBE 计划：恢复 RK809 DT 节点后 stock probe 会执行第 8.3 节的黄金同款写入和 IRQ 初始化。该步骤必须由用户针对这组确切副作用另行授权；未授权不得替换 SU08G 当前 uInitrd/Image 或启动。
 
 G2-B 阶段 ABCD = NOT EXECUTABLE：RK809/GMAC 节点 disabled，无 netdev/open/DMA。每阶段仍记录检查；一旦后续首次具备目标 netdev/open/DMA，立即执行同一帧 A→B→C→D 并由对端 pcap 验收，不等待 IP 层。
@@ -175,4 +175,4 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 
 **QEMU 边界修订：** 当前 G2-B 目标是 RK3566/Panther X2 内核与 DTB。通用 QEMU `virt` 机器并不模拟 Panther X2/RK3566 板级平台，不能把其启动结果作为本门验收；本 workflow 不执行误导性的 QEMU system boot。若以后对静态 AArch64 用户态工具做 QEMU user-mode smoke test，应单独标注为用户态测试，不得称为 RK3566 kernel boot。
 
-工作流首次提交后发现 YAML 尾部重复残片、兼容补丁路径错误及无模块配置下的构建目标问题；已于 2026-11-27 修复，最终工作流版本 commit `7a730f6ee0a5d00b6718782d735b6fd4af11be71`，并将构建范围收敛为 built-in-only Image，避免调用 modules/modules_install；同时删除对 `modules.builtin` 文件存在的假设，因为该门不执行 modules 构建。G2 fragment 显式声明 `CONFIG_I2C=y`，workflow 检查 `CONFIG_OF=y` 和 I2C/MFD 依赖闭包；不启用 `I2C_RK3X` 控制器驱动，RK809 节点仍 disabled。修复后已回读检查文件尾部、补丁路径、构建目标、上传 artifact 名称及隔离检查。**尚未触发运行**。只有 Actions 实际成功并审查 artifact 后，才能把 G2-B 标记为 BUILD PASS。G2-PROBE 仍然 HOLD / NOT AUTHORIZED。
+工作流首次提交后发现 YAML 尾部重复残片、兼容补丁路径错误及无模块配置下的构建目标问题；随后已修复为 built-in-only Image 构建，显式声明 `CONFIG_I2C=y`，并检查 `CONFIG_OF` 与 I2C/MFD 依赖闭包；不启用 `I2C_RK3X` 控制器驱动，RK809 节点仍 disabled。首次实际运行 `45923164270` 已成功下载 R1 artifact，DTB SHA256 与预期值完全一致（`7aa4e8a15469bfdda828dcdaf4f4bfea546df378a0ebb040e0ef6df68585179d`），但在 R1 config gate 失败：旧检查错误地要求 `CONFIG_STMMAC_ETH`、`CONFIG_DWMAC_ROCKCHIP`、`CONFIG_MDIO_BUS`、`CONFIG_PHYLIB` 必须以 `# CONFIG_... is not set` 行存在；R1 config 中部分未启用符号没有对应行，故 `grep -qx` 失败。这是核验脚本过度约束，不是 DTB 哈希错误，也不是发现 GMAC 驱动启用。已将检查改为语义校验：只要这些符号不存在 `=y` 或 `=m` 即视为未启用，修复提交 `fbb17c96cb047136d113d2401f9abec3b4613c1c`。该次运行在源码获取和内核编译前终止，没有产出 G2 artifact；G2-B 仍为 **NOT PASS / NOT COMPLETE**。下一步需重新运行工作流，继续观察后续 Kconfig merge/build gates。G2-PROBE 仍然 HOLD / NOT AUTHORIZED。
