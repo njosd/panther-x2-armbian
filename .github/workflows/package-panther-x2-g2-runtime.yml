@@ -270,8 +270,8 @@ jobs:
             "RK809 MFD code is built-in but the RK809 DT node is disabled; no PMIC probe." \
             "GMAC1/MDIO/RTL8211F remain disabled; no physical Ethernet activation or TX." \
             "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \
-            "B1 storage/USB support is retained; MMC/eMMC/TF/SD and USB host/PHY may enumerate." \
-            "USB network adapters remain disabled; external USB NICs are out of scope." \
+            "Linux BLOCK/MMC/eMMC/TF/SDIO and USB host/PHY remain disabled per frozen B1/R1 baseline." \
+            "U-Boot reads TF boot files before Linux starts; Linux root is RAM initramfs only." \
             "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
             "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
             | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
