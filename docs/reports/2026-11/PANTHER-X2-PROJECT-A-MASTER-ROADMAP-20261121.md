@@ -840,3 +840,13 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.18 的 Rockchip glue 关键调用路径、STMMAC/DWMAC4 最终配置和 built-in 对象、相关 DTB 子树、provider/consumer、clock/reset/pinctrl、trace/回退条件对照。未解释的差异不允许进入 GMAC probe。
 
 启用按 G5-A1 probe-only → G5-A2 MDIO/PHY attach → G6-A interface open/DMA init → G6-B 单帧 ABCD → G7 对端 pcap E6 的次序。第一轮项目 A 的 PASS 标准始终是对端收到正确的同一 TX 帧，不是驱动 probe、netdev 注册、carrier 或计数器增长。详见 G0–G10 计划中的 GMAC 高风险准入章节。
+
+## 2026-11-27 四层知识库与风险模型
+
+新增架构基线：`PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md`。
+
+项目 A 的技术知识分为 K1 Linux 公共网络栈、K2 通用 MAC/IP 驱动、K3 Rockchip SoC 适配、K4 Panther X2 板级适配。当前排查优先级为 K4 与 K3/K4、K2/K3 等跨层边界优先；K1/K2 初始风险相对较低，但不因使用广泛而免除 6.18.63 版本/配置/实机验证。两条黄金基线降低同板硬件固有缺陷的初始怀疑，但不证明 6.18 适配必然正确。
+
+所有知识条目按 COMMON-VERIFIED、VERSION-DIFF、SOC-ADAPTATION、BOARD-VERIFIED、BOARD-UNVERIFIED、CROSS-LAYER-RISK 及 STATIC-ONLY/BUILD-ONLY/RUNTIME-OBSERVED/E2E-VERIFIED 标注证据范围。该分类只调整知识组织和风险权重，不增加测试阶段、不改变 G0–G10 门序。
+
+当前唯一执行下一步仍为 G2-B build-only；不访问 PMIC、不触发 probe、不恢复 GMAC/MDIO/PHY。G2-PROBE 仍须独立副作用审查与明确授权。
