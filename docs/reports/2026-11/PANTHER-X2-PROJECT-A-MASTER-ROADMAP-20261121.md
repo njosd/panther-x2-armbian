@@ -833,3 +833,10 @@ DTB 证据修订：6.1.116 磁盘 DTB 与 6.18.63 完整 DTB SHA-256 完全相�
 Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/TF 存储驱动、持久化挂载和文件系统行为混入 TX 验证变量。启动资产可由已固定的 U-Boot 从专用 SU08G TF 读取；不得写 eMMC，不触碰冻结的 64GB 对照卡。任何 TF 写入/实机启动仍按逐次授权规则执行。RAM 根文件系统不等于 B1-clean：两者内核版本可相同，但网络配置、驱动集合、用户空间和阶段用途不同。
 
 **核心判断：项目 A 的“真实运行环境”指真实 Panther X2 上运行的项目 A 专用 6.18.63 最小系统，不等于必须先安装完整发行版或持久化 rootfs。**
+
+
+## 2026-11-27 GMAC 风险控制修订
+
+GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.18 的 Rockchip glue 关键调用路径、STMMAC/DWMAC4 最终配置和 built-in 对象、相关 DTB 子树、provider/consumer、clock/reset/pinctrl、trace/回退条件对照。未解释的差异不允许进入 GMAC probe。
+
+启用按 G5-A1 probe-only → G5-A2 MDIO/PHY attach → G6-A interface open/DMA init → G6-B 单帧 ABCD → G7 对端 pcap E6 的次序。第一轮项目 A 的 PASS 标准始终是对端收到正确的同一 TX 帧，不是驱动 probe、netdev 注册、carrier 或计数器增长。详见 G0–G10 计划中的 GMAC 高风险准入章节。
