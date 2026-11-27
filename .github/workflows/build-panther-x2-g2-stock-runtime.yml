@@ -148,7 +148,8 @@ jobs:
           }
           for key in CONFIG_NET CONFIG_PACKET CONFIG_OF CONFIG_I2C CONFIG_REGMAP_I2C \
                      CONFIG_REGMAP_IRQ CONFIG_MFD_CORE CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C \
-                     CONFIG_MODULES CONFIG_RTC_DRV_RK808 CONFIG_INPUT_RK805_PWRKEY; do
+                     CONFIG_MODULES CONFIG_INPUT CONFIG_INPUT_MISC CONFIG_RTC_CLASS \
+                     CONFIG_RTC_DRV_RK808 CONFIG_INPUT_RK805_PWRKEY; do
             require_y "$key"
           done
           for key in CONFIG_REGULATOR_RK808 CONFIG_STMMAC_ETH \
@@ -161,6 +162,7 @@ jobs:
           echo "G2 Kconfig dependency and isolation gates: PASS" | tee work/logs/g2-config-gates.txt
 
       - name: Build the configured kernel Image
+        id: build_kernel
         run: |
           set -euo pipefail
           SRC="$GITHUB_WORKSPACE/work/linux"
@@ -176,7 +178,7 @@ jobs:
           test "$IMAGE_MAGIC" = "41524d64"
 
       - name: Save incremental G2 kernel object cache for retry
-        if: always() && steps.merge_g2_config.outcome == 'success'
+        if: steps.build_kernel.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: work/kernel-out
@@ -254,8 +256,8 @@ jobs:
             find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           )
 
-      - name: Upload G2-B build-only evidence
-        if: always()
+      - name: Upload successful G2 stock-runtime candidate
+        if: success()
         uses: actions/upload-artifact@v6
         with:
           name: panther-x2-g2-stock-runtime-candidate-build-only
@@ -264,5 +266,18 @@ jobs:
             work/logs/
             work/source-lock.txt
             work/r1-reference-lock.txt
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+      - name: Upload failed build diagnostics only
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g2-stock-runtime-candidate-failed-diagnostics
+          path: |
+            work/logs/
+            work/source-lock.txt
+            work/r1-reference-lock.txt
+            work/output/kernel.config
+          if-no-files-found: warn
+          retention-days: 14
