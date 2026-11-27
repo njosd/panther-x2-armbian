@@ -47,7 +47,7 @@ G0 放行条件：完成黄金基线真实配置/对象/DTB/启动行为恢复�
 | G1 I2C/RK809 只读边界 | 复用已完成 I2C0 bind、RK809 ID 0x8094、0xF0/0xF6 只读证据；除非出现明确缺口，不重复读取；不启用 MFD | 不具备 MAC/netdev，记 NOT EXECUTABLE |
 | G2 RK809 MFD/regmap | 先按黄金基线审计结果评估 6.18 默认驱动；确认初始化写入与黄金行为的关系后，再形成单独授权方案。当前 HOLD，不预先否决 stock driver | 不发帧；目标 MAC 未激活 |
 | G3 regulator provider | 以黄金版本实际 regulator descriptors/constraints/调用顺序为参照，审查 6.18 provider 差异及自动写入；不要求先做全 rail 物理测量 | NOT EXECUTABLE；检查目标网口仍隔离 |
-| G4 IO-domain 与共享硬件资源 | 在 provider 安全放行后，核验 IO-domain supplier/deferred-probe/GRF 写入；再逐项确认 GMAC 所需 clock/reset/pinctrl/GPIO/PHY supply，物理电压/波形另证 | 复核一次 netdev/open/DMA 的前置条件 |
+| G4 IO-domain 与共享硬件资源 | G4-S PASS、G4-B PASS；G4-P NO-GO，G4-P-SAFE patch 暂不实施。G3 provider runtime 已只读确认 RK809 provider bind、九路 supply→四对象映射、四对象均报告 enabled、三路软件电压回报；PMU GRF VSEL0/1/2 与 IO-domain consumer 最终 bind/selector 状态仍 UNKNOWN。不得据此放行 consumer probe | 复核一次 netdev/open/DMA 的前置条件 |
 | G5-A Rockchip glue/STMMAC probe | 单独恢复目标 MAC 节点和最小依赖；核验资源、probe、bind、netdev 注册；不把 probe 当作 open/link | netdev 未 open 时不执行真实 A–D |
 | G5-B MDIO/RTL8211F | 单独核验 MDIO bus、地址0 PHY ID、driver bind、link；不写 PHY 寄存器 | 若接口与 DMA 前置条件确已满足，另行批准后单帧 A→D；否则 BLOCKED |
 | G6 interface open/DMA | 单独 open；记录 DMA reset outcome、ring、queue、IRQ/NAPI、MAC/MTL 初始化。6.18 reset failure warning-and-continue 必须独立检查 | 低速单帧完整 A→B→C→D + descriptor/OWN/completion/reclaim |
@@ -195,3 +195,10 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 - [x] Project-A G2 minimal runtime init/boot scripts 与 PREPARE-ONLY packaging workflow 已提交；init 脚本通过本地 `dash -n` 语法检查。
 - [x] G2 runtime packaging PREPARE-ONLY run `45935908005` 全部 10 步 PASS，artifact `15170487170` 已上传；独立下载审查内部 SHA256 清单、Zstandard 流、2GiB raw image SHA256、主/备 GPT CRC、PANTHER_BOOT 分区边界及 ext4 superblock 均通过。详见 `PANTHER-X2-PROJECT-A-G2-MINIMAL-RUNTIME-PACKAGING-20261127.md`。
 - [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；runtime artifact 通过不代表 PMIC probe 获准。不得触发 PMIC pre-init 写入、regulator/IO-domain 激活或硬件 probe；SU08G 写入与实机启动仍须另行评审并取得明确授权。SN64G 与 eMMC 不得触碰。
+
+
+## 2026-11-27 G4-P-R 只读观察补充（不改变门状态）
+
+详见 [G4-P-R Provider / Regulator 只读运行时观察](./PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)。本轮仅在 G3 provider runtime 中读取现有 sysfs/procfs：RK809 provider 已绑定；16 个 regulator 名称已盘点；IO-domain 九路 supply 映射到四个 regulator 对象；四个对象 state 均报告 enabled，三个可读电压对象回报 3.3V、1.8V、3.3V；SWITCH_REG1/vcc_3v3 无 microvolts 属性。
+
+本轮没有读取 PMU GRF、没有触发 IO-domain consumer probe、没有写寄存器或挂载 debugfs。软件电压/状态不等于物理 rail 测量。**G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch 不实施。** 后续只读识别 syscon 的设备树身份，再评估是否存在安全且已开放的 VSEL 只读入口。
