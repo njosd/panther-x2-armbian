@@ -66,6 +66,7 @@ jobs:
             work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb \
             work/g2/output/G2-DTB-ISOLATION.txt \
             work/g2/output/BUILD-MANIFEST.txt \
+            work/g2/output/G2-MFD-OBJECTS-SHA256.txt \
             work/g2/output/System.map \
             work/g2/output/vmlinux \
             work/g2/source-lock.txt \
@@ -88,6 +89,16 @@ jobs:
           G2_IMAGE_SHA256="$(sha256sum work/g2/output/Image | cut -c1-64)"
           G2_CONFIG_SHA256="$(sha256sum work/g2/output/kernel.config | cut -c1-64)"
           G2_DTB_SHA256="$(sha256sum work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb | cut -c1-64)"
+          {
+            echo "G2_IMAGE_SHA256=$G2_IMAGE_SHA256"
+            echo "G2_CONFIG_SHA256=$G2_CONFIG_SHA256"
+            echo "G2_DTB_SHA256=$G2_DTB_SHA256"
+          } >> "$GITHUB_ENV"
+          grep -qx 'rk809_node=okay' work/g2/output/BUILD-MANIFEST.txt
+          grep -qx 'rtc_drv_rk808=built-in' work/g2/output/BUILD-MANIFEST.txt
+          grep -qx 'input_rk805_pwrkey=built-in' work/g2/output/BUILD-MANIFEST.txt
+          grep -qx 'gmac1_mdio_phy=disabled' work/g2/output/BUILD-MANIFEST.txt
+          grep -qx 'regulator_rk808=not-set' work/g2/output/BUILD-MANIFEST.txt
           CONFIG=work/g2/output/kernel.config
           for key in \
             CONFIG_ARM64 CONFIG_ARCH_ROCKCHIP CONFIG_OF CONFIG_OF_FLATTREE \
@@ -250,7 +261,7 @@ jobs:
 
           mkdir -p work/initramfs-check
           gzip -dc work/output/initramfs.cpio.gz | (cd work/initramfs-check && cpio -idm --quiet)
-          cmp scripts/panther-x2-g2-runtime/init work/initramfs-check/init
+          cmp scripts/panther-x2-g2-stock-runtime/init work/initramfs-check/init
           cmp work/output/busybox work/initramfs-check/bin/busybox
           test -x work/initramfs-check/init
           test -x work/initramfs-check/bin/busybox
@@ -367,7 +378,7 @@ jobs:
             echo "uinitrd_sha256=$(sha256sum work/boot/uInitrd | cut -c1-64)"
             echo "bootscr_sha256=$(sha256sum work/boot/boot.scr | cut -c1-64)"
             echo "u_boot_proper_sha256=$JP_UBOOT_SHA256"
-            echo "rk809_mfd_builtin=yes; rtc_builtin=yes; pwrkey_builtin=yes; rk809_dtb_status=okay; pmic_probe=will_execute_if_booted"
+            echo "rk809_mfd_builtin=yes; rtc_builtin=yes; pwrkey_builtin=yes; rk809_dtb_status=okay; pmic_probe=will_execute_if_booted; PMIC_write_side_effects=expected"
             echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
             echo "network_core=enabled; AF_PACKET=enabled; no physical netdev expected"
             echo "storage_usb=CONFIG_BLOCK/MMC/USB=y per frozen B1/R1; TF/eMMC and USB host enabled in DTB; /init leaves persistent filesystems unmounted"
