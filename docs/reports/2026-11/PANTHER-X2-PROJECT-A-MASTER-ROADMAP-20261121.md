@@ -874,6 +874,6 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 
 安全基线保持 RK809、GMAC1、MDIO、RTL8211F disabled。内核含 MFD built-in 代码不等于发生 probe；DTB 节点禁用时不触发 RK809 probe。该 runtime 只作为后续分阶段实验的共同基础，不含 PMIC 激活或物理 TX 发送。
 
-**纠错（2026-11-27）：** 复核冻结 B1/R1 实际源码与配置后确认：B1 `kernel.config.fragment` 关闭 `CONFIG_BLOCK/MMC/USB`，B1 clean DTB 关闭 eMMC/TF/SDIO 与 USB host/PHY；R1 继承冻结 B1 `.config`/DTB，G2 只调整 RK809 节点。因此 G2 runtime 必须继续保持 Linux 存储与 USB 驱动/DT 节点 disabled，TF 仅由 U-Boot 在 Linux 启动前读取。此前本路线图将 B1 描述为保留 Linux 存储/USB 支持的补充说明错误，现撤销。未来若需 Linux 存储能力，应单独立项审查，不能混入本轮网络 TX 最小 runtime。
+**纠错（2026-11-27，按冻结 artifact 回溯）：** B1/R1/G2 实际冻结配置包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`。DTB 保留 TF/eMMC、USB host/PHY0、UART1/UART2，禁用 SDIO/Wi-Fi、GMAC1/MDIO/PHY，移除 Bluetooth 子节点；G2 仅将 RK809 节点保持 disabled。RAM-only 指 Linux root 使用 initramfs，`/init` 不挂载/写入持久化文件系统，不等于关闭存储/USB 驱动。当前默认分支 B1 fragment、DTB 生成脚本和 B1 workflow 已与冻结 artifact 合约发生漂移，重新生成 B1 前必须单独审计并修复一致性。
 
 **状态：** scripts/workflow 已提交；init 脚本本地 `dash -n` 检查 PASS；packaging workflow 尚未运行。下一步手动运行并检查产物。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
