@@ -68,7 +68,7 @@ The packaging workflow must verify before assembling the image:
 
 1. G2 and B1 artifact internal SHA256 manifests.
 2. Exact G2 Image/config/DTB, B1 BusyBox and JP U-Boot proper hashes listed above.
-3. Required kernel configuration: ARM64, OF, initrd, proc/sysfs, TTY/UART, NET, PACKET, I2C, REGMAP_I2C, REGMAP_IRQ, MFD_CORE, MFD_RK8XX, MFD_RK8XX_I2C and MODULES.
+3. Required kernel configuration: ARM64, OF, initrd, proc/sysfs, TTY/UART, NET, NET_CORE, PACKET, I2C, REGMAP_I2C, REGMAP_IRQ, MFD_CORE, MFD_RK8XX, MFD_RK8XX_I2C and MODULES.
 4. Forbidden kernel configuration remains absent: IP protocols (INET/IPv6), STMMAC/Rockchip DWMAC, MDIO/PHYLIB/RTL8211F, USB network adapters, RK808 regulator, PWRKEY child, wireless and Bluetooth. BLOCK/MMC/USB host/USB storage are retained as in the frozen B1/R1 config; the USB NIC drivers remain disabled.
 5. DTB model/compatible are Panther X2/RK3566; RK809, GMAC1, MDIO, PHY and SDIO are disabled; TF/eMMC, USB host/PHY0, UART1/UART2 are enabled; Bluetooth child under UART1 is absent; unused SDHCI and second USB controller/PHY nodes are disabled.
 6. BusyBox is AArch64 and statically linked; required applets exist; the init script passes BusyBox ash syntax validation.
