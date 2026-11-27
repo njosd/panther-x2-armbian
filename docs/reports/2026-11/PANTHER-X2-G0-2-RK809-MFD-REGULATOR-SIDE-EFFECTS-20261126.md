@@ -9,7 +9,7 @@
 ## 1. 现有只读证据（不重复测试）
 
 - I2C0 controller 已绑定 rk3x-i2c，i2c-dev adapter 89:0 已注册。
-- RK809 地址 0x20 指定 ID 寄存器读取结果为 0xED=0x80、0xEE=0x94，Linux masked identity 判定为 RK809 ID 0x8094。
+- RK809 地址 0x20 指定身份寄存器读取结果为 0xED=0x80、0xEE=0x94，按 Linux masked identity 规则归入 RK809 ID 0x8094。Rev 2.5 将 0xEE[7:4]=0x9 定义为 CHIP_NAME code，低 nibble [3:0] 明确标为 RESV、reset default=0x2；实测低 nibble=0x4 是 reserved 非默认值，不能称为 silicon revision，具体含义待 Rockchip 说明。
 - 全位 RO 状态寄存器 0xF0=0xC2、0xF6=0x00 已各完成一次 I2C_RDWR 只读事务。
 - 这些读数不提供 SWITCH_REG1 输出电压遥测，不证明 rail 电压、纹波、负载能力或 PHY 供电。
 - 现有安全读取白名单仅确认上述 0xED、0xEE、0xF0、0xF6；本轮没有扩大硬件访问范围。
