@@ -205,3 +205,35 @@ RK3568 VCCIO5（index 6）会走 `rk3568_iodomain_write()`，向 PMU GRF VSEL0/V
 - **未验证：** 当前 G3 runtime 中 PMUGRF regmap 是否已成功创建；R2 optional PMUGRF lookup 是否成功。
 - **未验证：** IO-domain child 当前是否 bind；没有读 VSEL0/1/2。
 - **安全边界：** 不触发 IO-domain probe、不挂载 debugfs、不使用 devmem、不直接访问 MMIO。G4-P 继续 NO-GO，G4-P-SAFE patch deferred。
+
+
+## 11. IO-domain 节点实际运行状态确认（2026-11-27）
+
+本轮在同一 `panther-x2-g3-provider-runtime` 环境继续执行只读核对：
+
+- `/sys/firmware/devicetree/base/syscon@fdc20000/io-domains/status` 的实际内容为 **`disabled`**。
+- `/sys/bus/platform/devices/fdc20000.syscon/` 存在，父 syscon platform device 已枚举；其目录没有 `driver` symlink。
+- `/sys/bus/platform/drivers/rockchip-iodomain` 整个目录不存在。
+- 之前对 platform devices 的 IO-domain 名称通配查询无匹配项；当前没有对应 IO-domain platform child 的 sysfs 证据。
+
+### 11.1 结合 6.18.63 源码的解释
+
+固定源码 `ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9`：
+
+- `rk356x-base.dtsi` 中 PMU GRF 父节点使用 `simple-mfd`，其 `io-domains` 子节点基础定义为 `status = "disabled"`。
+- `of_platform_default_populate()` 通过匹配 `simple-mfd` 父节点创建其符合条件的子 platform device；disabled 子节点不会作为正常启用的 OF platform device 创建。
+- `ROCKCHIP_IODOMAIN` 的 Kconfig 控制 `drivers/soc/rockchip/io-domain.c` 是否编入/注册驱动；但在当前设备树状态下，尚无必要把“驱动未编入”作为首要解释，因为 disabled 节点本身已足以解释当前没有 child device。
+
+### 11.2 修正后的运行时结论
+
+- **已验证：** 当前实际运行设备树将 PMU IO-domain 子节点设为 `disabled`。
+- **已验证：** 当前 sysfs 中没有 IO-domain child platform device，也没有 `rockchip-iodomain` driver 目录。
+- **高置信度解释：** disabled 状态阻止子设备正常枚举，因而没有 consumer probe；这也意味着本次运行环境没有通过该驱动执行 VSEL selector 写入。
+- **仍未验证：** 实际启动 DTB 为什么保留 disabled；它与此前报告中记录的候选/冻结 DTB 节点启用状态是否存在镜像/DTB 版本偏差；`CONFIG_ROCKCHIP_IODOMAIN` 当前最终值。
+- **未验证：** PMUGRF regmap 是否已创建、VSEL0/VSEL1/VSEL2 当前值、历史启动阶段是否曾有其他代码写入这些寄存器。
+
+这纠正了第 5、7、10 节中“IO-domain consumer 当前 bind 状态未知”的部分：**就本次运行时设备树与 sysfs 状态而言，IO-domain consumer 没有被枚举，因而没有当前 bind。** 但不能据此推断 PMU GRF 寄存器从未被其他启动阶段或其他驱动写过。
+
+### 11.3 安全边界与下一项工作
+
+没有启用该节点、没有修改 DTB/Kconfig、没有触发 probe，也没有访问 PMU GRF MMIO。G4-P 继续 NO-GO；G4-P-SAFE patch 继续 deferred。下一步只做只读证据对齐：核对当前实际运行 DTB 与冻结 artifact DTB 中 `/syscon@fdc20000/io-domains/status` 的差异，并核对该 runtime 对应的最终 kernel.config 中 `CONFIG_ROCKCHIP_IODOMAIN` 值。未完成对齐前，不讨论启用节点或 probe。
