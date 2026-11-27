@@ -1,0 +1,9 @@
+# G4-P0 binding-only candidate derived from the frozen G3 provider configuration.
+# Enable OF platform population, PMUGRF syscon/regmap and the RK3568 IO-domain driver.
+# The matching DTB has all nine IO-domain *-supply properties removed.
+# Expected effect: child enumeration, driver bind and PMUGRF syscon regmap acquisition only.
+# No regulator voltage reads, notifier registration or selector register transactions.
+CONFIG_MFD_SYSCON=y
+CONFIG_REGMAP=y
+CONFIG_REGMAP_MMIO=y
+CONFIG_ROCKCHIP_IODOMAIN=y
