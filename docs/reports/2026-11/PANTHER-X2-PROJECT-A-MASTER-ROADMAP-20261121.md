@@ -1031,3 +1031,14 @@ G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` �
 **重要限制：** G4-B DTB 中 IO-domain 为 okay，但 eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1/MDIO/PHY 均 disabled。它是 G4-P 的 RAM-only 隔离候选，不是 TF rootfs 启动 DTB。未来切换到 SU08G 完整用户空间前，须在 G4-P 完成后单独构建 TF-rootfs DTB：只恢复 TF SDMMC0，继续禁用 eMMC，并完成 config/DTB/hash 审计。U-Boot 从 TF 读取内核/initramfs，不等于 Linux handoff 后能够从 TF 挂载 rootfs。
 
 **当前阶段状态：G4-S PASS；G4-B PASS；G4-P HOLD / NOT AUTHORIZED；TF 完整用户空间尚未构建；G5 未开始。** 本次仅 CI 构建及 artifact 离线核验，无实机 probe、无 PMIC/GRF 访问、无物理介质写入。项目 A 仍严格 TF-only；G4-B PASS 不改变 eMMC 冻结边界，也不授予 G4-P 操作权限。
+
+
+## 2026-11-27 G4-P preflight：写入矩阵完成，运行时 NO-GO
+
+新增报告：`PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md`。
+
+本轮只读复核固定 6.18.63 源码与 Panther DTS，展开 G4-P 完整写入矩阵：若 9 个 supply 全部成功 resolve，probe 初始路径执行 14 次 PMU GRF hiword-mask write，覆盖 `0xfdc20140` / `0xfdc20144` / `0xfdc20148`（VSEL0/1/2）。这不是只修改 VCCIO5 的单 rail 操作。报告列出 14 项 1.8V/3.3V 分类写参数，并记录 vccio3/LDO5 实际 selector 尚未验证。
+
+新增关键限制：RK3568 stock write function 不检查底层 `regmap_write()` 返回值；probe 部分失败时不回滚此前已写 selector。固定内核 regmap debugfs `registers` 默认只读，当前未发现已验证的安全回写路径；masked-restore 仅是理论设计，专用受限 helper 尚未实现/验证。故当前不能形成完整可执行且可恢复的 G4-P 操作。
+
+**状态更新：G4-S PASS；G4-B PASS；G4-P 静态矩阵已展开，但 readback runtime path 未验证、rollback helper 未实现，G4-P = NO-GO / HOLD / NOT AUTHORIZED。** 不启动设备、不加载 G4-P DTB、不触发 probe、不写 PMU GRF。G5、TF-rootfs DTB 和完整用户空间准备暂不跨越 G4-P 决策门。SU08G TF-only 边界不变，eMMC/SN64G 均不触碰。
