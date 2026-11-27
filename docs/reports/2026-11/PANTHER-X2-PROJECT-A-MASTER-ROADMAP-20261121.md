@@ -791,3 +791,12 @@ G0.2 原先“stock MFD/regulator NO-GO”修订为 **HOLD / awaiting golden com
 新增逐文件源码比较报告 `PANTHER-X2-G0-GOLDEN-65-116-PMIC-PHY-SOURCE-COMMONALITY-20261127.md`：6.1.65 高置信度候选与 6.1.116 锁定源码的 `drivers/mfd/rk808.c`、`drivers/regulator/rk808-regulator.c`、`drivers/soc/rockchip/io-domain.c`、`dwmac-rk.c` 和 Panther board DTS 完全相同；regulator core 的 `set_machine_constraints`、`regulator_late_cleanup`、late-cleanup work/init 函数也逐字节相同。两条黄金基准在这条软件链上可共享同一行为模型。
 
 因此，前一段“6.1.116 配置内容尚需从原始归档恢复”的表述已被修正为已完成；不再重复配置提取。当前只剩黄金 DTB binary 证据补齐：从已归档的 6.1.65/6.1.116 DTB 包提取原始 DTB，与 6.18.63 R1 DTB 对 PMIC/regulator/IO-domain/GMAC supply 子树做结构化 diff。无须重新提取完整镜像，不访问黄金介质，也不测量 3.3V。
+
+
+## 2026-11-27 G0 总体复核与下一门计划
+
+G0 复核结论为 **CONDITIONAL PASS（仅计划层面）**：黄金基线配置/对象、驱动行为、6.1.116↔6.18 DTB、ABCD 夹具已有足够证据编制 G2 受控计划。此状态不构成设备操作授权。
+
+详细报告：`PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md`。下一门 G2 仅拟验证 6.18 stock RK8xx I2C transport/core、regmap、MFD children 与 IRQ domain；probe 会执行与黄金版本相同的 RK809 pre-init 写入，必须先单独取得用户授权。G2 不启用 regulator consumer，不恢复 GMAC/MDIO/PHY，不发送测试帧。
+
+DTB 证据修订：6.1.116 磁盘 DTB 与 6.18.63 完整 DTB SHA-256 完全相同；6.1.65 原始 DTB 已有 GMAC1 核心属性解析，只有其 PMIC/IO-domain 原始子树 binary diff 仍缺。不得再把 6.1.116 DTB 列为待提取，也不得要求重新提取 851 MiB 镜像。
