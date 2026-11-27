@@ -99,17 +99,34 @@ jobs:
           test "$(fdtget -t s "$DTB" /ethernet@fe010000 status)" = "disabled"
           test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)" = "disabled"
           test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)" = "disabled"
-          # Preserve the established B1 board boundary: the Linux storage and USB
-          # stacks remain available, while the same MMC/USB DT nodes retain their
-          # audited per-node statuses. No persistent filesystem is mounted by /init.
-          test "$(fdtget -t s "$DTB" /mmc@fe2c0000 status)" = "disabled"
-          test "$(fdtget -t s "$DTB" /mmc@fe310000 status)" = "okay"
-          test "$(fdtget -t s "$DTB" /mmc@fe2b0000 status)" = "okay"
+          # Preserve the established B1 board boundary. An omitted DT status
+          # property means "okay" per the Devicetree specification, matching B1's
+          # original assert_status helper.
+          assert_status() {
+            local node="$1" expected="$2" actual
+            if ! fdtget -l "$DTB" "$node" >/dev/null 2>&1; then
+              echo "::error::DTB node missing: $node"
+              exit 1
+            fi
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            if [ "$expected" = "okay" ] && [ "$actual" = "okay (implicit default)" ]; then
+              echo "DTB status: $node = okay (implicit default)"
+              return 0
+            fi
+            test "$actual" = "$expected" || {
+              echo "::error::Unexpected DTB status: $node expected=$expected actual=$actual"
+              exit 1
+            }
+          }
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /mmc@fe310000 okay
+          assert_status /mmc@fe2b0000 okay
           for node in /usb@fcc00000 /usb@fd800000 /usb@fd840000 \
             /usb2phy@fe8a0000 /usb2phy@fe8a0000/host-port /usb2phy@fe8a0000/otg-port; do
-            test "$(fdtget -t s "$DTB" "$node" status)" = "okay"
+            assert_status "$node" okay
           done
-          test "$(fdtget -t s "$DTB" /serial@fe650000 status)" = "okay"
+          assert_status /serial@fe650000 okay
           if fdtget -l "$DTB" /serial@fe650000 | grep -qx bluetooth; then
             echo "::error::Bluetooth child remains under UART1"
             exit 1
