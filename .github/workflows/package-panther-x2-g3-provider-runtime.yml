@@ -283,7 +283,7 @@ jobs:
           sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
           sudo mkdir -p work/tf-mnt/dtb/rockchip
           sudo install -m 0644 work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
-          cat > work/tf-mnt/TEST-INFO.txt <<'EOF'
+          sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null <<'EOF'
           Panther X2 Project-A G3 RK809 regulator-provider runtime; PREPARE-ONLY.
           Linux 6.18.63; Image, DTB, config and initramfs hashes are in RUNTIME-MANIFEST.txt.
           RK809 regulator provider probe is enabled; expected PMIC initialization writes occur if booted.
