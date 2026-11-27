@@ -1,0 +1,33 @@
+# G3 isolated RK809 regulator-provider candidate.
+# Derived from the frozen R1 network-core config plus the already validated G2 MFD/RTC/PWRKEY delta.
+# Build-only preparation; no hardware access, PMIC probe, IO-domain probe, MMC host probe or GMAC probe.
+CONFIG_REGULATOR=y
+CONFIG_REGULATOR_FIXED_VOLTAGE=y
+CONFIG_REGULATOR_RK808=y
+
+# Keep the G2 MFD parent and previously validated children.
+CONFIG_I2C=y
+CONFIG_MFD_RK8XX_I2C=y
+CONFIG_RTC_CLASS=y
+# CONFIG_RTC_HCTOSYS is not set
+# CONFIG_RTC_SYSTOHC is not set
+CONFIG_RTC_DRV_RK808=y
+CONFIG_INPUT=y
+CONFIG_INPUT_MISC=y
+CONFIG_INPUT_RK805_PWRKEY=y
+
+# Explicitly prevent the IO-domain consumer from probing in G3.
+# CONFIG_ROCKCHIP_IODOMAIN is not set
+
+# No GMAC/MDIO/PHY, wireless, or Bluetooth in this stage.
+# CONFIG_STMMAC_ETH is not set
+# CONFIG_DWMAC_ROCKCHIP is not set
+# CONFIG_MDIO_BUS is not set
+# CONFIG_PHYLIB is not set
+# CONFIG_REALTEK_PHY is not set
+# CONFIG_BT is not set
+# CONFIG_WIRELESS is not set
+# CONFIG_WLAN is not set
+# CONFIG_CFG80211 is not set
+# CONFIG_MAC80211 is not set
+# CONFIG_RFKILL is not set
