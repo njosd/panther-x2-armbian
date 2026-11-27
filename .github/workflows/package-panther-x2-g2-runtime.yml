@@ -150,6 +150,7 @@ jobs:
           assert_status /mmc@fe310000 okay
           assert_status /mmc@fe2b0000 okay
           assert_status /mmc@fe2c0000 disabled
+          assert_status /mmc@fe000000 disabled
           assert_status /usb@fcc00000 okay
           assert_status /usb@fd000000 disabled
           assert_status /usb@fd800000 okay
