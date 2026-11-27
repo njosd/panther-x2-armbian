@@ -133,7 +133,7 @@ jobs:
           fi
 
           file work/g2/output/Image | tee work/logs-kernel-image.txt
-          MAGIC="$(od -An -tx1 -j56 -N4 work/g2/output/Image | tr -d ' \\n')"
+          MAGIC="$(od -An -tx1 -j56 -N4 work/g2/output/Image | tr -d ' \n')"
           test "$MAGIC" = "41524d64"
           readelf -h work/b1/output/busybox | grep -q AArch64
           if readelf -l work/b1/output/busybox | grep -q INTERP; then
@@ -233,7 +233,7 @@ jobs:
           sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
           sudo mkdir -p work/tf-mnt/dtb/rockchip
           sudo install -m 0644 work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
-          printf '%s\\n' \
+          printf '%s\n' \
             "Panther X2 Project-A G2 minimal runtime; PREPARE-ONLY." \
             "Kernel: Linux 6.18.63; Image and DTB are SHA256-pinned." \
             "RK809 MFD code is built-in but the RK809 DT node is disabled; no PMIC probe." \
