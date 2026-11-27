@@ -415,3 +415,5 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 
 本次只完成脚本与 workflow 的仓库准备，workflow 尚未运行，因此没有 runtime image 或新的 runtime artifact。下一步只运行该 PREPARE-ONLY workflow 并审查产物；不写 SU08G、不碰 SN64G/eMMC、不启动 Panther X2。G2-PROBE 仍须先完成独立副作用审查和明确授权。
 
+补充核对：G2-B 最终 `.config` 中 `CONFIG_BLOCK/MMC/MMC_DW/MMC_DW_ROCKCHIP/USB` 等为 y，这是既有 B1/R1 基线设计的一部分，不应误判为本轮新增或意外启用。B1 的 Linux 设备树本来就保留指定 eMMC/TF/SD 与 USB host/PHY 节点，项目约束是 RAM initramfs 不挂载/写入持久化文件系统，而不是完全关闭存储/USB驱动。G2 runtime 会原样保留此边界，并对 MMC/USB DT 节点状态增加显式核验与启动时状态输出。
+
