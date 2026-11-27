@@ -239,7 +239,7 @@ static int parse_sequence(const char *s, uint64_t *value)
     char *end = NULL;
     unsigned long long v;
 
-    if (s[0] == '-' || s[0] == '+' || s[0] == ' ' || s[0] == '\\t')
+    if (s[0] == '-' || s[0] == '+' || s[0] == ' ' || s[0] == 9)
         return -1;
     errno = 0;
     v = strtoull(s, &end, 0);
