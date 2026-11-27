@@ -3,7 +3,7 @@ name: Panther X2 Project A G4-P0 binding-only IO-domain build-only
 on:
   push:
     branches:
-      - g4-p0-binding-only-build-only
+      - g4-p0-binding-only-build
     paths:
       - "scripts/panther-x2-g4-p0/**"
       - ".github/workflows/build-panther-x2-g4-p0-binding-only.yml"
@@ -232,6 +232,29 @@ jobs:
           dtc -I dtb -O dts -o work/logs/g3-baseline.dts work/reference/g3-panther-x2.dtb
           dtc -I dtb -O dts -o work/logs/g4-p0-final.dts "$DTB"
           diff -u work/logs/g3-baseline.dts work/logs/g4-p0-final.dts > work/logs/g4-p0-dtb-diff.txt || test "$?" -eq 1
+          python3 - <<'PY'
+          import pathlib, re, sys
+          diff = pathlib.Path("work/logs/g4-p0-dtb-diff.txt").read_text()
+          changed = [
+              line[1:].strip()
+              for line in diff.splitlines()
+              if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+          ]
+          allowed_supply = re.compile(r"(?:pmuio1|pmuio2|vccio[1-7])-supply = <[^>]+>;")
+          for line in changed:
+              if line in ('status = "disabled";', 'status = "okay";'):
+                  continue
+              if line.startswith("-") and allowed_supply.fullmatch(line[1:].strip()):
+                  continue
+              raise SystemExit(f"Unexpected DTB delta outside G4-P0 allowlist: {line!r}")
+          deleted = [line[1:].strip().split(" = ")[0] for line in changed if line.startswith("-") and allowed_supply.fullmatch(line[1:].strip())]
+          expected = {f"vccio{i}-supply" for i in range(1, 8)} | {"pmuio1-supply", "pmuio2-supply"}
+          if set(deleted) != expected or len(deleted) != 9:
+              raise SystemExit(f"Expected exactly nine deleted supplies, got {deleted}")
+          if changed.count('status = "disabled";') != 1 or changed.count('status = "okay";') != 1:
+              raise SystemExit(f"Expected exactly one IO-domain status change, got {changed}")
+          print("G4-P0 DTB diff allowlist: PASS (one status change, nine supply deletions only)")
+          PY
 
           assert_status() {
             local node="$1" expected="$2" actual
