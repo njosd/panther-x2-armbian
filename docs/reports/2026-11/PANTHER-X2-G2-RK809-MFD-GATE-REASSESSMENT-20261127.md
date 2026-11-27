@@ -95,7 +95,7 @@ G3 regulator provider 与 G4 IO-domain 仍分别设门。首次 netdev/open/DMA 
 
 | 项目 | 6.1.116 黄金 | 6.18.63 | 影响 |
 |---|---|---|---|
-| 芯片 variant | 先读 0xED/0xEE，再按 masked ID 选 RK809/RK817 | 由 OF compatible 直接选择 RK809 variant，不在该 probe 中重读 ID | 6.18 缺少 driver 内身份复核；R1 已有独立 RO 实测 0xED=0x80、0xEE=0x94，能补充身份依据，不重复读取 |
+| 芯片 variant | 先读 0xED/0xEE，再按 masked ID 选 RK809/RK817 | 由 OF compatible 直接选择 RK809 variant，不在该 probe 中重读 ID | 6.18 缺少 driver 内身份复核；R1 已有 RO 实测 0xED=0x80、0xEE=0x94，高 nibble 0x9 与 RK809 CHIP_NAME code 相符；Rev 2.5 将低 nibble 标为 RESV（reset default=0x2），实测 0x4 的原因待 Rockchip 说明，不称为 silicon revision |
 | IRQ 初始化 API | `regmap_add_irq_chip()`，显式 remove 时 delete | `devm_regmap_add_irq_chip()` | 资源生命周期不同；IRQ chip 配置和初始化语义相同 |
 | pre-init | RK817 表 | 同一 RK817 表 | 无新增写入集合 |
 | MFD cells | clkout、regulator、pwrkey、RTC、codec、charger | 相同集合 | G2 不启用 regulator child driver 时不会注册 regulator provider；MFD cell 本身仍会被创建 |
