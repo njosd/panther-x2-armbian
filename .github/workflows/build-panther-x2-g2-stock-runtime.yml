@@ -248,6 +248,8 @@ jobs:
             echo "input_rk805_pwrkey=built-in"
             echo "gmac1_mdio_phy=disabled"
             echo "regulator_rk808=not-set"
+            echo "rtc_hctosys=not-set"
+            echo "rtc_systohc=not-set"
             echo "module_support=enabled in R1 baseline; G2 builds Image only; RK8xx MFD objects must be built-in"
             echo "purpose=G2 stock runtime candidate build-only; no hardware probe or PMIC access"
           } | tee work/output/BUILD-MANIFEST.txt
