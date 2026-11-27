@@ -142,3 +142,19 @@ probe 后再次读取完整寄存器值，比较目标 bit 是否符合当次实
 - G4-P runtime：**HOLD / NOT AUTHORIZED / NO-GO**。
 - 后续 TF-rootfs DTB 与完整用户空间：等待 G4-P 决策门，不提前启动。
 - eMMC：保持冻结；本报告不涉及 eMMC 操作。
+
+
+## 9. 下一阶段建议：只做代码级安全增强候选，不执行硬件
+
+当前 G4-P 的阻塞点不是构建能力，而是 stock driver 缺少可验证的事务性恢复。下一步优先准备一个**独立的 G4-P-SAFE build-only 代码候选**，不替换当前 G4-B frozen artifact，也不运行实机：
+
+1. 在 IO-domain probe 开始任何 selector 写入前，对 VSEL0/1/2 做 `regmap_read()`，保存原始值和目标位 mask；任一预读失败则零写入退出。
+2. 为 RK3568 每一次 hiword-mask `regmap_write()` 检查并传播错误；不再无条件返回 0。
+3. 任一写入、regulator notifier 注册或 post-write readback 失败时，先注销已注册 notifier，再按保存的原始 selector bits 做受限 masked restore；对恢复操作本身检查返回值并 readback 验证。
+4. probe 成功时保留原始快照；在 platform driver `remove()` / 显式 unbind 路径执行同一受限 restore 并验证，以便一次性验证后恢复启动前 selector bits。
+5. restore 任一项失败时必须明确报告状态未知并停止后续硬件阶段；不能把 rollback best-effort 当成成功。
+6. 增加纯软件测试（例如对写入顺序、mask/value 计算、各写点故障注入和 rollback 顺序的单元测试）；CI 只验证 patch 编译、符号、测试结果与 DTB 隔离。
+
+该候选有严格局限：软件无法保证在 CPU hang、kernel panic、突然断电或 GRF 总线不可访问时完成 rollback；remove/unbind 的可用性、regmap 锁与 notifier 生命周期还必须静态审计。即使 build-only 和软件测试通过，也不能代替 G4-P 运行时 readback，更不构成硬件操作授权。
+
+**当前执行建议：** 先做上述 driver patch 的源码级设计审查与 build-only 验证；在确认安全增强机制可实现、可测试且不会扩展到 PMIC 写入或其他外围设备后，再提交一份独立的 G4-P runtime 操作申请。未经明确授权，继续不启动设备、不 probe、不写 GRF。
