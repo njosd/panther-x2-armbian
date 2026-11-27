@@ -47,12 +47,13 @@ RK809/RK817 共用以下顺序：
 
 ## 2.1 重要身份字段更正：0xEE 低 nibble 是 reserved，不是版本号
 
-此前项目报告将 `0xEE=0x94` 的低 nibble 记录为“版本字段 4/含义未知”。查阅 RK809 Datasheet Rev 2.5 后需精确更正：
+此前项目报告将 `0xEE=0x94` 的低 nibble 记录为“版本字段 4/含义未知”。回看历史手册并核对 RK809 Datasheet Rev 2.5 后，准确边界是：
 - `PMIC_CHIP_NAME (0xED)` 全 8 位为 CHIP_NAME，默认 `0x80`；
-- `PMIC_CHIP_VER (0xEE)` 的 bit[7:4] 是 CHIP_NAME code[3:0]，默认 `0x9`；bit[3:0] 明确标为 RESV，reset default `0x2`。
-- Panther X2 已有只读值 `0xED=0x80`、`0xEE=0x94`：高 nibble `0x9` 与 RK809 的 CHIP_NAME code 一致；低 nibble `0x4` 与公开 datasheet 的 reserved reset default `0x2` 不同。
+- `PMIC_CHIP_VER (0xEE)` 的 bit[7:4] 是 CHIP_NAME code[3:0]，默认 `0x9`；
+- 早期 Rev 1.01 曾将 bit[3:0] 定义为 CHIP_VER code（reset default `0x2`）；Rev 1.7、1.8、2.4、2.5 的公开手册则将 bit[3:0] 改为 RESV，reset default 仍为 `0x2`。
+- Panther X2 已有只读值 `0xED=0x80`、`0xEE=0x94`：高 nibble `0x9` 与 RK809 CHIP_NAME code 一致；低 nibble `0x4` 在早期 Rev 1.01 语义下可对应 CHIP_VER code 4，但按 Rev 1.7 及以后定义则是 reserved 非默认值。
 
-因此 `0x94` 不是可解释为 silicon revision 4 的字段。该 reserved nibble 的非默认值是一个需要 Rockchip 正式说明的证据差异；不得通过扩大 I2C 读取白名单或试写寄存器自行探查。
+因此不能单凭 `0x94` 宣称当前芯片就是 silicon revision 4，也不能据此判定芯片异常。手册修订历史没有解释字段为何改为 RESV，也没有说明当前器件低 nibble=4 与 RK817 IRQ map 的适用关系。该差异需由 Rockchip 正式说明；不得通过扩大 I2C 读取白名单或试写寄存器自行探查。
 
 数据手册定位：RK809 Rev 2.5 §5.1 p.55 / §5.2 p.119，`PMIC_CHIP_NAME` 与 `PMIC_CHIP_VER`。参见 [RK809 Datasheet Rev 2.5](https://datasheet.lcsc.com/datasheet/pdf/dc4249f899d1f7640dc738c73aecc6ea.pdf?productCode=C54771187)。
 
