@@ -65,10 +65,13 @@ jobs:
           fdtget -t s "$R1_DTB" / compatible | grep -q 'rockchip,rk3566'
           grep -qx 'CONFIG_NET=y' "$R1_CONFIG"
           grep -qx 'CONFIG_PACKET=y' "$R1_CONFIG"
-          grep -qx '# CONFIG_STMMAC_ETH is not set' "$R1_CONFIG"
-          grep -qx '# CONFIG_DWMAC_ROCKCHIP is not set' "$R1_CONFIG"
-          grep -qx '# CONFIG_MDIO_BUS is not set' "$R1_CONFIG"
-          grep -qx '# CONFIG_PHYLIB is not set' "$R1_CONFIG"
+          for key in CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB; do
+            if grep -Eq "^$key=[ym]$" "$R1_CONFIG"; then
+              echo "::error::R1 baseline unexpectedly enables $key"
+              grep -E "^$key=" "$R1_CONFIG"
+              exit 1
+            fi
+          done
           mkdir -p work/reference
           cp "$R1_CONFIG" work/reference/r1-kernel.config
           cp "$R1_DTB" work/reference/r1-panther-x2.dtb
