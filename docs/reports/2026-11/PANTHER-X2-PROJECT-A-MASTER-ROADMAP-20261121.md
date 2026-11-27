@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-26）：R1 AF_PACKET 软件 API 实机验证通过；R2 PASS；R3 静态审计 COMPLETE（CONDITIONAL），RK809 ID `0x8094`、状态寄存器 `0xF0=0xC2`/`0xF6=0x00` 只读实测 PASS；MFD/regulator 实机激活仍 deferred，不代表 rail/PHY 已验证。R4 MDIO/PHY 静态审计 COMPLETE（CONDITIONAL）。R5 STMMAC/DWMAC4 静态审计 COMPLETE（CONDITIONAL），已对照 6.1.65 黄金基线。R6 静态审计 CONDITIONAL CLOSE：R6-1 Rockchip glue/DTS PASS；R6-2 GRF/CRU clock/reset PASS，官方 RK3568 TRM 确认 CON1 bit7 reset=0 且 0=RMII/RGMII、1=SGMII/QSGMII；R6-3 6.18.63 DTB 实物已核验，与 6.1.116 DTB SHA256 完全相同，GMAC1 核心属性与 6.1.65 已归档原始解析一致，但 6.1.65 全 DTB 自动 diff 仍 BLOCKED；R6-4 定义 R7-A Gate 0–4；R6-5 纠正 125MHz 时钟链：DTS fixed-clock 仅为 CCF 逻辑模型，RK809 CLKOUT 与 gmac1_clkin 无连接声明，RTL8211F CLKOUT pin35 是待验证物理来源候选。GMAC/MDIO/PHY 继续 disabled；R7-A 前仍需黄金 DTB 原始 PMIC 子树对照、供电/provider 风险审查、PHYCLKOUT 物理来源/波形方案及单独硬件授权。
+- 当前状态（2026-11-27）：G4-S PASS、G4-B PASS；G4-P NO-GO（尚未放行 IO-domain consumer probe/selector 写入），不实施 G4-P-SAFE patch。G3 provider runtime 只读观察已归档：RK809 regulator provider 已绑定；16 个 regulator 名称完成盘点，PMU IO-domain 九路 supply 对应四个对象；四个对象 state 均报告 enabled，其中三路 microvolts 软件回报为 3.3V/1.8V/3.3V，SWITCH_REG1/vcc_3v3 无 microvolts 属性。未读取 PMU GRF VSEL0/1/2，未确认 IO-domain consumer 最终 bind/selector 状态；上述软件回报不等于 rail 物理测量。详见 G4-P-R 只读运行时报告。此前 R1–R6 与 G0 证据边界保持不变。
 
 ## 0. 统一项目定义
 
@@ -889,3 +889,15 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 - 最终 Actions run `45941220581` 全部通过，artifact `15172507107`；最终 ELF SHA256 `e0f29848bd4bb8378e3925ac1214731dff987a0b3d5fc2d8fe1fe6fe657bc9f9`。最终下载 artifact 的内部 SHA256 清单及 ELF 架构/静态链接已独立核验。详细记录见 `PANTHER-X2-PROJECT-A-ABCD-SENDER-AND-PCAP-VERIFIER-20261127.md`。
 
 **证据边界：** 以上仅为 SOURCE/BUILD/OFFLINE SELF-TEST PASS；没有将 sender 放入 runtime/initramfs，没有在 Panther 实机执行，没有注册 tracing/kprobe，没有发送物理帧。R1 loopback 证据仍不等价于 Ethernet TX。G2-PROBE 仍 HOLD / NOT AUTHORIZED；G2→G3→G4→G5→G6 顺序和逐门授权不变。只有未来获准阶段在 interface open/DMA 条件满足后，才执行单帧 ABCD；最终 TX PASS 仍必须由独立对端 pcap E6 证明。
+
+
+### 2026-11-27 G4-P-R provider / regulator 只读运行时观察
+
+- [G4-P-R Provider / Regulator 只读运行时观察（2026-11-27）](./PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)：当前 G3 provider runtime 中 RK809 regulator provider 已绑定；16 个 regulator 名称已盘点，九路 IO-domain supply 映射到四个对象；四路均报告 enabled，三路软件电压回报 3.3V/1.8V/3.3V；SWITCH_REG1 无 microvolts 属性。未读取 PMU GRF，未启动 IO-domain consumer，不构成 G4-P 放行。
+
+
+本轮在 `panther-x2-g3-provider-runtime` 的 6.18.63+ 环境只读取既有 sysfs/procfs：debugfs 未挂载；RK809 regulator provider 已绑定；16 个 regulator 实例名称已盘点；PMU IO-domain 九路 supply 映射到 regulator.15/.19/.9/.14。四个对象的 framework state 均报告 enabled，num_users 分别为 1/0/1/1；regulator.15/.9/.14 的 microvolts 回报分别为 3300000/1800000/3300000，regulator.19（SWITCH_REG1）无 microvolts 属性。
+
+**阶段边界：G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch 暂不实施。** 本轮没有读取 PMU GRF VSEL0/1/2，没有确认 IO-domain consumer 最终 bind/selector 状态；没有启停 regulator、挂载 debugfs、访问原始 PMIC/GRF/MMIO 或写入 TF/eMMC。sysfs 软件电压/状态不代表物理 rail 测量，也不构成 IO-domain consumer probe 授权。
+
+下一项只读工作：识别当前已注册 syscon 的设备树节点（特别区分 PMU GRF 与普通 GRF），只读取设备树描述属性；不读 MMIO，不使用 devmem，不触发 regmap 访问。若不存在安全、已开放的只读 VSEL 入口，则保留 UNKNOWN，不绕过框架读取寄存器。
