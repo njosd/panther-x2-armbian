@@ -1,0 +1,36 @@
+diff --git a/include/linux/kobject.h b/include/linux/kobject.h
+--- a/include/linux/kobject.h
++++ b/include/linux/kobject.h
+@@ -222,8 +222,10 @@ __printf(2, 3)
+ int add_uevent_var(struct kobj_uevent_env *env, const char *format, ...);
+ 
+ u64 uevent_next_seqnum(void);
+ 
++#ifdef CONFIG_NET
+ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+ 		     gfp_t allocation);
++#endif
+ 
+ #endif /* _KOBJECT_H_ */
+diff --git a/lib/kobject_uevent.c b/lib/kobject_uevent.c
+--- a/lib/kobject_uevent.c
++++ b/lib/kobject_uevent.c
+@@ -723,17 +723,10 @@ int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+ 	mutex_unlock(&uevent_sock_mutex);
+ 
+ 	kfree_skb(skb);
+ 	return err;
+ }
+-#else
+-int broadcast_uevent(struct sk_buff *skb, __u32 pid, __u32 group,
+-		     gfp_t allocation)
+-{
+-	kfree_skb(skb);
+-	return 0;
+-}
+-#endif
+ EXPORT_SYMBOL_GPL(broadcast_uevent);
++#endif
+ 
+ #if defined(CONFIG_NET)
+ static int uevent_net_broadcast(struct sock *usk, struct sk_buff *skb,
