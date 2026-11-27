@@ -127,3 +127,5 @@
 - [G4-B IO-domain build-only 结果报告（2026-11-27）](./PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md)：Actions run 45997129528 PASS；含 artifact SHA-256/内部清单核验、对象符号、DTB 隔离和后续 TF-rootfs DTB 门说明。
 
 - [G4-P IO-domain 运行时写入与回退准备审查（2026-11-27）](./PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md)：展开 9 supplies / 14 次 PMU GRF hiword-mask write 矩阵；确认 stock driver 写入错误检查与部分失败回滚缺口、debugfs 默认只读；G4-P 当前 NO-GO / HOLD / NOT AUTHORIZED。
+
+- [G4-P-SAFE 驱动事务设计审查（2026-11-27）](./PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md)：固定 6.18.63 io-domain/regulator core 锁序、probe 失败回退、notifier 并发和 remove/unbind 安全边界审查。
