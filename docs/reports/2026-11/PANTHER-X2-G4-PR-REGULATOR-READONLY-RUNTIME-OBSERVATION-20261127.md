@@ -280,3 +280,68 @@ RK3568 VCCIO5（index 6）会走 `rk3568_iodomain_write()`，向 PMU GRF VSEL0/V
 - **安全边界：** 不在当前 RAM runtime 安装工具、不启用 IO-domain、不触发 probe、不读取或写入 PMU GRF/MMIO、不写 TF/eMMC。
 
 G4-P 继续 NO-GO，G4-P-SAFE patch deferred。下一步应在主机侧追溯 G3 provider runtime 实际使用的构建/打包来源，并用冻结 artifact 的离线 DTB/config 检查补齐证据；不要求当前设备增加工具。
+
+
+## 14. G3 artifact 身份确认及 G4-P partial-write 风险审计（2026-11-27）
+
+> 本节明确 supersede 第 12 节中“未找到 G3 workflow / artifact 来源”的阶段性结论。第 12 节记录的是当时尚未完成追溯的状态，不再代表当前结论。
+
+### 14.1 G3 实际运行资产追溯与离线校验
+
+已定位 G3 build-only 与 runtime packaging 两个 Actions run，并下载 runtime artifact 离线核对：
+
+- Build-only run：`45984035650`，branch `g3-provider-build-only`，workflow `.github/workflows/build-panther-x2-g3-rk809-regulator-provider.yml`，artifact ID `15192123549`。
+- Runtime packaging run：`45996817932`，branch `g3-provider-runtime-package`，workflow `.github/workflows/package-panther-x2-g3-provider-runtime.yml`，artifact ID `15196482298`。
+- ZIP 内 `output/SHA256SUMS` 的 **33 个文件逐一离线复算全部通过**，没有哈希不匹配。
+- G3 runtime 的冻结 Image 为 32,381,440 bytes，SHA256 `d1830f649e3bfa789fec3589c2ef16b1e46465846c6bb150e666f8df4c610a61`。
+- 冻结 DTB 为 116,294 bytes，SHA256 `9364c6d7aadddb8520388418e8db570e0b4020a38c5ceb8acbd2343165bb5209`。
+- 冻结 `kernel.config` 为 202,974 bytes，SHA256 `bfcadc0626f0a96b369e1475accf0efcedc9adaae8464ea85291c4afa12d9794`。
+- 冻结 BusyBox SHA256 `2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15`；artifact 内 applet 清单与设备端实测清单完全一致：`ash cat dmesg echo ls mkdir mount printf sh tail test uname`。
+- runtime manifest 的 bootargs 与设备端 `/proc/cmdline` 完全一致；设备端 kernel build timestamp 与 G3 build run 时间窗口一致；设备端 model 为 Panther X2；运行树 IO-domain status 为 disabled，与冻结 DTB isolation record 一致。
+
+设备端 `/sys/firmware/fdt` 为 118,912 bytes，而冻结 DTB 为 116,294 bytes。U-Boot 可能对传入 FDT 做 fixup；由于当前 RAM shell 没有 hash 工具，仍不声称设备端 FDT 与冻结 DTB 二进制逐字节一致。但 build/run manifest、bootargs、BusyBox applet、kernel build 时间、model 和 IO-domain status 形成多项一致性证据，足以确认本次运行就是 G3 provider runtime 资产链，而非 G2 artifact。
+
+G3 Kconfig 明确为 `# CONFIG_ROCKCHIP_IODOMAIN is not set`；G3 build workflow 有 `require_off CONFIG_ROCKCHIP_IODOMAIN` gate，G3 packaging workflow 再次检查该配置为 off，并用 `fdtget` gate 要求 `/syscon@fdc20000/io-domains` 为 disabled。因此 G3 isolation 是有意设计。G3 artifact provenance：**PASS / TRACEABLE**；运行 FDT binary hash：仍未验证。
+
+### 14.2 G4-P 关键发现：完整 supply 映射不是无副作用 probe
+
+固定源码：Linux 6.18.63，commit `aee4e352a15d636cbc484f56819c6e59474dfd9f`。
+
+1. RK3568 PMU IO-domain 的 supply index 顺序在 `drivers/soc/rockchip/io-domain.c` 的 `soc_data_rk3568_pmu` 中固定为：0 `pmuio1`、1 `pmuio2`、2 `vccio1`、3 `vccio2`、4 `vccio3`、5 `vccio4`、6 `vccio5`、7 `vccio6`、8 `vccio7`。probe 按 index 从 0 到 8 顺序处理。
+2. Panther X2 board DTS 为九路 supply 全部提供引用：
+   - 0、1：`vcc3v3_pmu`（RK809 LDO_REG6，固定约束 3.3V）；
+   - 2、6、7、8：`vcc_3v3`（RK809 `SWITCH_REG1`）；
+   - 3、5：`vcc_1v8`；
+   - 4：`vccio_sd`。
+3. RK809 的 `SWITCH_REG1` 在 `rk808-regulator.c` 使用 `rk817_switch_ops`；该 ops 只有 enable、disable、is_enabled，没有 get_voltage、get_voltage_sel 或 list_voltage。板级 DTS 对 `vcc_3v3: SWITCH_REG1` 也没有提供固定电压约束或 `vin-supply`。所以不能从该 regulator 的 enabled 状态或名称推断其输出电压；regulator core 的 `regulator_get_voltage_rdev()` 在没有电压操作、fixed_uV 或可用上游 supply 时会返回负错误。
+4. IO-domain probe 对每路 supply 先执行 `devm_regulator_get_optional()`，再调用 `regulator_get_voltage()`；只有电压读取成功后才执行该路 `iod->write()`。若电压小于 0，probe 立即走错误清理并返回。
+5. 对 index 1（`pmuio2`），当前 G3 运行时已经验证其 provider `vcc3v3_pmu` 可读为 3,300,000 uV。RK3568 write handler 对 index 1 会向 PMU GRF IO_VSEL2（offset `0x0148`）执行两次 hiword-mask write：3.3V 输入对应写值 `0x00020000` 和 `0x00200020`。index 0（`pmuio1`）不写寄存器。
+6. 随后 index 2（`vccio1`）引用 `vcc_3v3 / SWITCH_REG1`。该 regulator 没有可读电压操作，预计 `regulator_get_voltage()` 返回负值，IO-domain probe 在此处退出。于是按当前 provider 与 DTS，存在**先完成 index 1 的 VSEL2 写，再在 index 2 失败**的 partial-write 路径。该执行路径由源码和现有 regulator 属性支持，但尚未在设备上触发验证；绝不能为了验证而直接启用完整 consumer。
+7. 额外风险：`rk3568_iodomain_write()` 对 VSEL2 的两次 `regmap_write()` 不检查返回值，函数最终仍返回 0；因此即使未来 probe 返回成功，也不能单凭 driver bind / probe success 证明 selector 写入成功。
+
+关键源码定位：
+- [io-domain.c: rk3568_iodomain_write / probe / supply 顺序](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/drivers/soc/rockchip/io-domain.c#L86-L120)；[probe supply loop](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/drivers/soc/rockchip/io-domain.c#L659-L710)
+- [rk808-regulator.c: rk817_switch_ops / RK809 SWITCH_REG1](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/drivers/regulator/rk808-regulator.c#L1166-L1172)；[RK809 SWITCH_REG1 descriptor](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/drivers/regulator/rk808-regulator.c#L1710-L1718)
+- [regulator core voltage read fallback](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/drivers/regulator/core.c#L4579-L4618)
+- [Panther X2 board DTS SWITCH_REG1](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts#L380-L389)；[nine IO-domain supply mappings](https://github.com/ophub/linux-6.18.y/blob/aee4e352a15d636cbc484f56819c6e59474dfd9/arch/arm64/boot/dts/rockchip/rk3566-panther-x2.dts#L462-L473)
+
+### 14.3 G4-P-SAFE 的新边界（仅设计，不执行）
+
+当前完整九路 supply mapping 的 IO-domain consumer **NO-GO**。禁止把 G3 DTB 的 IO-domain status 改为 okay 后直接启动，也禁止以完整 mapping 做一次“看看能否 probe”的试验。
+
+可先评估一个严格无 selector write 的 G4-P0 binding-only 候选：
+- 单独构建 `CONFIG_ROCKCHIP_IODOMAIN=y`；
+- 仅在实验 DTB 中将 IO-domain child 设为 okay；
+- 删除该 child 的全部九个 `*-supply` 属性（不伪造 rail voltage）；
+- 其余 G3 isolation、RAM initramfs、SU08G-only、eMMC/TF/SDIO/GMAC 等隔离维持不变；
+- 源码显示无 supply property 时 `devm_regulator_get_optional()` 返回 `-ENODEV`，driver 将该路跳过，不调用 `regulator_get_voltage()` 或 `iod->write()`；
+- 该候选最多验证 child enumeration、driver bind、PMUGRF syscon regmap acquisition 路径，不验证任何 rail 电压或 selector 设置。
+
+即便 G4-P0 也只能先生成 PREPARE-ONLY artifact 并完成离线审计；实体启动必须另行授权。若要测试真实 supply/selector 路径，必须先通过板级原理图或独立电气测量确认各 bank 实际电压，并解决 `SWITCH_REG1` 缺少可读 voltage 的问题，随后逐路制定有边界的实验，不能恢复完整九路 mapping 一次性探测。
+
+### 14.4 当前判定
+
+- G3 provider runtime：身份已追溯，artifact 内 33 项哈希全 PASS；IO-domain 禁用符合设计。
+- G4-P full mapping：**NO-GO**；存在可预测的 partial-write 后失败路径。
+- G4-P0 no-supply binding-only：可进入下一轮静态设计审计，**尚未构建、尚未启动、未授权硬件试验**。
+- 当前 Panther X2 设备：保持原样；不安装工具、不改 DTB/Kconfig/驱动、不触发 probe、不访问 PMU GRF/MMIO、不写 TF/eMMC。
