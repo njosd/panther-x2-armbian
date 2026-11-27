@@ -1,0 +1,33 @@
+#!/bin/sh
+# G3 RK809 regulator-provider runtime: RAM-only; no persistent storage mounts.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-g3-provider-runtime) # '
+export PATH HOME PS1
+
+echo
+echo "=== Panther X2 Project-A G3 RK809 regulator-provider runtime ==="
+echo "RK809 regulator provider probe is enabled; expected PMIC initialization writes are authorized for this SU08G RAM-only test."
+echo "IO-domain, TF/eMMC/SDIO controllers, GPU, SARADC, GMAC1/MDIO/PHY are disabled in the G3 DTB."
+echo "regulator_ignore_unused is set; this only suppresses late unused-regulator cleanup."
+echo "No suspend, manual I2C/PMIC writes, persistent mounts, or system configuration changes are performed."
+
+mkdir -p /proc /sys /dev /run
+if ! mount -t proc proc /proc; then
+    echo "WARNING: procfs mount failed"
+fi
+if ! mount -t sysfs sysfs /sys; then
+    echo "WARNING: sysfs mount failed"
+fi
+
+echo
+echo "Initial capture follows. It may run before the deferred-probe timeout expires."
+/bin/sh /capture-g3.sh
+
+echo
+echo "Runtime shell ready."
+echo "IMPORTANT: wait at least 12 seconds after this prompt, then run:"
+echo "  /bin/sh /capture-g3.sh"
+echo "The second capture records the settled deferred-probe list after the kernel's default 10-second timeout."
+echo "All capture files remain in RAM under /run/g3-provider."
+exec /bin/sh -i
