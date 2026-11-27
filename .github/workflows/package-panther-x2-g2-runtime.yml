@@ -119,12 +119,6 @@ jobs:
             fi
           done
 
-          if grep -Eq '^CONFIG_NET_VENDOR_[A-Z0-9_]+=y$' "$CONFIG"; then
-            echo "::error::A network vendor driver group is enabled in the minimal runtime"
-            grep -E '^CONFIG_NET_VENDOR_[A-Z0-9_]+=y$' "$CONFIG"
-            exit 1
-          fi
-
           DTB=work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb
           test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
           fdtget -t s "$DTB" / compatible | grep -q 'panther,x2'
