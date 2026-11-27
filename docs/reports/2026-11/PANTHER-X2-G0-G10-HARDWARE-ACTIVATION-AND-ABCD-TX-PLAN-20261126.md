@@ -98,6 +98,9 @@ G0 现记为 **CONDITIONAL PASS（planning only）**。完整审查见 `PANTHER-
 G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB 的 GMAC1 核心属性复用既有解析结果；仅 6.1.65 原始 PMIC/IO-domain 子树 binary diff 未完成。此项不要求重新提取完整镜像，不作为 G2 计划编制阻塞。
 
 
+
+
+**G2 runtime 基线纠错（2026-11-27）：** 复核冻结 B1/R1 artifact 的实际配置与 DTB 后确认，Linux BLOCK/MMC/eMMC/TF/SDIO、USB host/PHY 均 disabled；UART1（Bluetooth）disabled，UART2 console enabled。G2 继承 R1 的 B1-clean DTB，只调整 RK809 节点，不能误把原始 Panther DTS 的默认设备状态当成 G2 实际 DTB。此前 runtime workflow 曾误将 MMC/USB/UART1 状态要求为 enabled，现已修正为冻结基线的 disabled 状态，并把配置符号与全部相关 DTB 节点纳入门控。G2 runtime 仍是最小 RAM 系统；TF 由 U-Boot 在 Linux 启动前读取。
 ## 2026-11-27 G2-S/G2-B 完成与 G2-PROBE HOLD
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
