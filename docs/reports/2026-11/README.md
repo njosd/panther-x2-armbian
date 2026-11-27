@@ -103,3 +103,5 @@
 
 - [G0-P4 黄金 DTB 证据复核（2026-11-27）](./PANTHER-X2-G0-P4-GOLDEN-DTB-EVIDENCE-RECONCILIATION-20261127.md)：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB GMAC 核心解析已归档，仅 PMIC/IO-domain 子树二进制复核仍缺。
 - [G0 总体复核与 G2 受控激活预案（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：G0 CONDITIONAL PASS（仅计划层面）；G2 只拟验证 RK809 MFD/regmap，probe 需要单独授权，不启用 regulator/GMAC。
+
+- [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 完成，下一步仅 build-only，不 probe。
