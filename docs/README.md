@@ -10,6 +10,7 @@
 - [项目 A 干净基线与网络组件隔离决策（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：项目 A 总目标修订、B1 网络变量隔离门和逐项引入规则。
 - [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、CI workflow 和当前未验证项。
 - [2026-11 报告索引](reports/2026-11/README.md)：项目 A 文件及独立历史专题索引。
+- [G4-P-R Provider / Regulator 只读运行时观察（2026-11-27）](reports/2026-11/PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)：RK809 provider 与九路 IO-domain supply 的只读运行时映射及状态记录；不构成 IO-domain consumer 放行。
 
 新对话、新任务和仓库更新必须先回读项目 A 总路线图及实施计划。历史路线文件如与其冲突，以项目 A 文档为准。
 
