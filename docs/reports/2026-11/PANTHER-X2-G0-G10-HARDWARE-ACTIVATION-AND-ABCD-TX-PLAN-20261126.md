@@ -96,3 +96,10 @@ G0 放行条件：完成黄金基线真实配置/对象/DTB/启动行为恢复�
 G0 现记为 **CONDITIONAL PASS（planning only）**。完整审查见 `PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md`。这只允许进入 G2 实施计划评审；不授权 stock RK809 MFD probe。G2 probe 的 `rk817_pre_init_reg[]` 写入与黄金版本继承行为相符，但该次 6.18 probe 仍需单独授权。
 
 G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB 的 GMAC1 核心属性复用既有解析结果；仅 6.1.65 原始 PMIC/IO-domain 子树 binary diff 未完成。此项不要求重新提取完整镜像，不作为 G2 计划编制阻塞。
+
+
+## 2026-11-27 G2-S 完成与 G2-B 下一步
+
+G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
+
+下一步 G2-B 仅做 build-only：启用 MFD_RK8XX_I2C（可选 INPUT_RK805_PWRKEY），不启用 REGULATOR_RK808；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。检查最终 config、built-in 对象、Image/DTB 与 QEMU 非硬件自检。G2-B 不访问 PMIC、不触发 probe、不改写设备。G2-PROBE 仍须另行提交明确的 PMIC 写入清单并取得用户授权。
