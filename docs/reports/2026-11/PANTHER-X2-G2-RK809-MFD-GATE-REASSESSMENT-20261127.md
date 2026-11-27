@@ -126,7 +126,7 @@ header 中两版 enum 均定义 FALL=0、RISE=1。按 pwrkey driver 的 index �
 1. 以冻结的 6.18.63 commit 为输入，单独启用 `MFD_RK8XX_I2C=y`；其 Kconfig 自动 select `MFD_CORE`、`REGMAP_I2C`、`REGMAP_IRQ`、`MFD_RK8XX`。
 2. 如要验证 PWRKEY 子驱动，再加入 `INPUT_RK805_PWRKEY=y`（依赖 `MFD_RK8XX`）；不启用 `REGULATOR_RK808`，避免 G2 提前注册全部 regulator descriptors。
 3. 使用 R1 原 DTB 的独立副本，将 RK809 节点临时保持/设为 `status = "disabled"`，GMAC1/MDIO/PHY 继续 disabled。这样 built-in 驱动会进入 Image，但不会匹配并 probe RK809。
-4. 构建并检查 `.config`、`modules.builtin`、对象列表、Image/DTB 哈希；只做 QEMU 非硬件启动/自检。该步骤验证 Kconfig、编译、链接和产物封装，不验证 I2C、PMIC 或 MFD runtime。
+4. 构建并检查 `.config`、`modules.builtin`、对象列表、Image/DTB 哈希。通用 QEMU `virt` 不模拟 RK3566/Panther X2，不执行无代表性的 QEMU system boot；如另做 QEMU user-mode 工具自检，单独标注为用户态测试。该步骤验证 Kconfig、编译、链接和产物封装，不验证 I2C、PMIC 或 MFD runtime。
 5. 若 build-only 通过，再单独提交 G2-PROBE 计划：恢复 RK809 DT 节点后 stock probe 会执行第 8.3 节的黄金同款写入和 IRQ 初始化。该步骤必须由用户针对这组确切副作用另行授权；未授权不得替换 SU08G 当前 uInitrd/Image 或启动。
 
 G2-B 阶段 ABCD = NOT EXECUTABLE：RK809/GMAC 节点 disabled，无 netdev/open/DMA。每阶段仍记录检查；一旦后续首次具备目标 netdev/open/DMA，立即执行同一帧 A→B→C→D 并由对端 pcap 验收，不等待 IP 层。
