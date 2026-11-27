@@ -66,7 +66,7 @@ jobs:
             work/g2/output/dtb/rockchip/rk3566-panther-x2.dtb \
             work/g2/output/G2-DTB-ISOLATION.txt \
             work/g2/output/BUILD-MANIFEST.txt \
-            work/g2/output/G2-MFD-OBJECTS-SHA256.txt \
+            work/g2/output/G2-PMIC-DEPENDENCY-OBJECTS-SHA256.txt \
             work/g2/output/System.map \
             work/g2/output/vmlinux \
             work/g2/source-lock.txt \
