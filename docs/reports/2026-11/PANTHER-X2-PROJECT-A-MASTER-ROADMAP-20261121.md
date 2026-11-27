@@ -915,3 +915,14 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 G3 provider runtime 的 `/sys/firmware/fdt`（118,912 bytes）与 `/proc/config.gz`（47,255 bytes）均存在，但当前最小 BusyBox 仅有 `ash/cat/dmesg/echo/ls/mkdir/mount/printf/sh/tail/test/uname`，没有 gzip、sha256sum、grep、od、dtc、Python 等工具。因此本轮无法在设备端计算 FDT 哈希或解压核对 `CONFIG_ROCKCHIP_IODOMAIN`；不为此安装工具或改变 RAM 环境。
 
 仓库追溯未找到独立 G3 workflow。G2 runtime artifact（run `45935908005` / artifact `15170487170`）为 PREPARE-ONLY，G2 DTB 继承 B1/R1 DTB 并只修改 RK809 节点；它不能在缺少实际启动资产记录时被当作当前 G3 runtime 的确定来源。当前运行树的 IO-domain status=`disabled` 已验证，但运行 FDT hash、最终 `CONFIG_ROCKCHIP_IODOMAIN` 和 G3 runtime artifact 身份仍 UNKNOWN。G4-P 继续 NO-GO；下一步在主机侧追溯 G3 实际资产并离线核验 DTB/config，不改设备。
+
+
+### 2026-11-27 G3 provenance resolved; G4-P full-supply probe blocked by partial-write risk
+
+G3 runtime provenance 已确认：build-only run `45984035650` / artifact `15192123549`；runtime packaging run `45996817932` / artifact `15196482298`。离线复算 ZIP manifest 的 33 个文件哈希全部通过。冻结 Image/DTB/kernel.config SHA256 分别为 `d1830f649e3bfa789fec3589c2ef16b1e46465846c6bb150e666f8df4c610a61`、`9364c6d7aadddb8520388418e8db570e0b4020a38c5ceb8acbd2343165bb5209`、`bfcadc0626f0a96b369e1475accf0efcedc9adaae8464ea85291c4afa12d9794`。BusyBox applet 清单、bootargs、kernel build timestamp、model 和运行 IO-domain status 与 G3 artifact 相符。G3 明确 `CONFIG_ROCKCHIP_IODOMAIN is not set` 且 DTB child disabled，属于有意隔离。
+
+**新增 G4-P blocker：** Linux 6.18.63 `io-domain.c` 按 supply index 0..8 顺序处理。Panther DTS index0/1 均引用 3.3V `vcc3v3_pmu`；index1 的 RK3568 write handler 会向 PMU GRF IO_VSEL2 offset 0x0148 写 `0x00020000` 和 `0x00200020`。随后 index2 `vccio1` 引用 RK809 `vcc_3v3 / SWITCH_REG1`，但该 regulator 的 `rk817_switch_ops` 没有任何 voltage getter/list operation，DTS 也没有 fixed voltage 或 vin-supply。IO-domain probe 必须调用 `regulator_get_voltage()`，负值即退出。因此当前完整 supply mapping 存在“先写 PMU GRF VSEL2，再在 vccio1 电压读取处失败”的可预测 partial-write 风险；该路径尚未在硬件上触发，严禁通过启用完整 consumer 来验证。另 `rk3568_iodomain_write()` 不检查 VSEL2 两次 `regmap_write()` 返回值，probe 成功不能单独证明写入成功。
+
+下一步只允许设计 G4-P0 binding-only PREPARE-ONLY 候选：CONFIG_ROCKCHIP_IODOMAIN=y、IO-domain child okay、删除全部九路 supply 属性，其余 G3 隔离不变。源码显示无 supply 属性时 optional regulator get 返回 -ENODEV 并跳过，不会调用 voltage read / iodomain write；它只验证 child enumeration、driver bind 和 PMUGRF syscon regmap acquisition，不验证 rail/selector。尚未构建、未启动、未授权硬件试验。真实 supply 路径须先有原理图或独立电气测量，并解决 SWITCH_REG1 缺少 voltage read 的问题。
+
+判定：G3 PASS/TRACEABLE；G4-P full mapping NO-GO；G4-P0 静态设计审计可继续。设备不变更、不触发 probe、不访问 PMU GRF/MMIO、不写 TF/eMMC。详见 G4-P 报告第 14 节。
