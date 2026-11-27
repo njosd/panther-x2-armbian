@@ -901,3 +901,10 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 **阶段边界：G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch 暂不实施。** 本轮没有读取 PMU GRF VSEL0/1/2，没有确认 IO-domain consumer 最终 bind/selector 状态；没有启停 regulator、挂载 debugfs、访问原始 PMIC/GRF/MMIO 或写入 TF/eMMC。sysfs 软件电压/状态不代表物理 rail 测量，也不构成 IO-domain consumer probe 授权。
 
 2026-11-27 syscon 身份核对已完成：七个 syscon 设备树节点的 compatible 已读取。fdc20000 为 `rockchip,rk3568-pmugrf`，name=syscon，且有 `io-domains` 子节点；fdc50000 为 `rockchip,rk3566-pipe-grf`；fdc60000 为 `rockchip,rk3568-grf`；fdc80000/fdc90000 为 `rockchip,rk3568-pipe-phy-grf`；fdca0000/fdca8000 为 `rockchip,rk3568-usb2phy-grf`。`fdc20000.syscon/waiting_for_supplier=0`；七个 platform-device 目录均未见 `driver` symlink，但源码确认通用 syscon regmap 可由 consumer 的 `syscon_node_to_regmap()` 懒创建，不依赖 syscon platform driver bind，因此该 symlink 缺失不能证明 regmap 未注册。R2 pinctrl 只证明 main-GRF lookup 成功，PMUGRF optional lookup 仍未独立验证。IO-domain child 的 bind 状态仍 UNKNOWN。仍未读取 PMU GRF VSEL0/1/2，也未触发 IO-domain consumer probe。当前没有证据证明存在无需改变运行环境的安全 VSEL 只读入口；不绕过框架直接访问 MMIO。G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch deferred。详见 G4-P-R 报告。
+
+
+## 2026-11-27 G4-P runtime IO-domain 节点状态纠正
+
+继续只读核对 G3 provider runtime 后，读取实际运行设备树属性 `/sys/firmware/devicetree/base/syscon@fdc20000/io-domains/status`，值为 **`disabled`**。父设备 `fdc20000.syscon` 已枚举，但没有 IO-domain child platform device；`/sys/bus/platform/drivers/rockchip-iodomain` 目录不存在。结合 6.18.63 的 `simple-mfd` / OF platform populate 机制，disabled 子节点足以解释当前未创建 child device，因此当前没有 IO-domain consumer bind/probe，也没有由该 consumer 执行的 VSEL selector 写入。
+
+这修正此前“IO-domain consumer 当前 bind 状态未知”的表述：当前运行实例的 consumer 未枚举。仍未确认实际启动 DTB 为何保持 disabled、它与冻结 artifact DTB 是否存在差异，以及当前最终 `CONFIG_ROCKCHIP_IODOMAIN` 值。下一步只做只读 DTB/config 对齐，不启用节点、不触发 probe、不读取/写入 PMU GRF MMIO。G4-P 继续 NO-GO，G4-P-SAFE patch deferred。详见 `PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md` 第 11 节。
