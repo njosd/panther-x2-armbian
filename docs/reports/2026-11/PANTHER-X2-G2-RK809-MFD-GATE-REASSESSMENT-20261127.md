@@ -168,6 +168,7 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 - workflow 将在 R1 DTB 的独立副本上把 `/i2c@fdd40000/pmic@20` 设置为 disabled，并再次确认 GMAC1、MDIO1、RTL8211F 节点仍 disabled；不会改写 R1 原始 artifact。
 - 构建验收包括最终 .config 依赖闭包、RK8xx core/I2C transport built-in object 与符号、Image 格式、modules、DTB 隔离状态、manifest 和 SHA256。
 - 输出 artifact 名称：`panther-x2-g2-b-rk8xx-mfd-build-only`。
+- R1 网络核心兼容补丁已从成功 R1 构建分支同步到 main：`scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch`，blob SHA `2018fb06ac0c8ac5e8bdad2f4529d00c97fff013`；G2 workflow 固定使用该补丁，并验证其可应用于锁定的 6.18.63 源码。
 
 **执行边界：** workflow 只在 GitHub Actions runner 中构建；不连接 Panther X2、不写 TF/eMMC、不访问 PMIC、不运行 driver probe、不启用 regulator、不恢复 GMAC/MDIO/PHY。G2-B 只验证构建配置和产物，不是 PMIC runtime PASS。
 
