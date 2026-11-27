@@ -114,4 +114,4 @@
 
 - [四层技术知识库与风险模型](./PANTHER-X2-PROJECT-A-FOUR-LAYER-KNOWLEDGE-BASE-AND-RISK-MODEL-20261127.md)：将 Linux 公共网络栈、通用 MAC/IP 驱动、Rockchip SoC 适配、Panther X2 板级适配拆分为 K1–K4；定义风险优先级、证据标签、黄金基线复用规则及跨层接口审计重点。该分类不改变 G0–G10 阶段顺序。
 
-- [G2-B RK8xx MFD build-only workflow](../../.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml)：以成功 R1 artifact（run `45611898629`）为输入，只增加 RK8xx MFD I2C transport/core built-in；RK809、regulator、PWRKEY child 和 GMAC/MDIO/PHY 保持隔离。workflow 已提交但尚未触发，不能视为 build PASS。
+- [G2-B RK8xx MFD build-only workflow](../../../.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml)：以成功 R1 artifact（run `45611898629`）为输入，只增加 RK8xx MFD I2C transport/core built-in；RK809、regulator、PWRKEY child 和 GMAC/MDIO/PHY 保持隔离。workflow 已提交但尚未触发，不能视为 build PASS。
