@@ -874,4 +874,6 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 
 安全基线保持 RK809、GMAC1、MDIO、RTL8211F disabled。内核含 MFD built-in 代码不等于发生 probe；DTB 节点禁用时不触发 RK809 probe。该 runtime 只作为后续分阶段实验的共同基础，不含 PMIC 激活或物理 TX 发送。
 
+**B1 存储/USB边界核实：** G2 最终 `.config` 中 `CONFIG_BLOCK/MMC/MMC_DW/MMC_DW_ROCKCHIP/USB` 等选项为 y，符合 B1/R1 已有设计；B1 并非关闭所有存储/USB内核支持，而是保留指定 eMMC/TF/SD 与 USB host/PHY 功能。G2 runtime 原样保留该边界。其安全目标是 RAM initramfs 为根，不由 `/init` 挂载或写入持久化文件系统；不能把它描述成“Linux 不枚举存储”或“存储驱动全部关闭”。新增 workflow 对 MMC/USB DT 节点状态作显式校验，init 会打印这些节点状态。
+
 **状态：** scripts/workflow 已提交；init 脚本本地 `dash -n` 检查 PASS；packaging workflow 尚未运行。下一步手动运行并检查产物。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
