@@ -62,16 +62,13 @@
 
 验收：固定源码 commit、交叉工具链、最终 .config、Kernel Image、从同一源码构建的 clean-test DTB、initramfs 和 BusyBox 的哈希；记录 DTB model/compatible、禁用节点和未验证边界。
 
-### B0.4 eMMC pre-Linux 写入安全审计
-- 确认当前实际 eMMC IDB/SPL 身份，不用 JP IDB 哈希替代。
-- 尽可能追溯实际 SPL/proper 源码 commit、defconfig、最终 .config。
-- 审查 SPL A/B、MMC fallback、Vendor Storage、环境保存、升级/recovery 等自动写路径。
-- 核对 GPT、misc、Vendor Storage LBA 7168–7679、boot0/boot1/RPMB 等可能写入目标。
-- 回读已完成 EXT_CSD/WP 查询记录；信息不完整时只设计只读补查。
-- 芯片级 power-on write protect 必须先证明支持能力、WP group、覆盖范围和复位保持语义；设置本身是硬件配置写操作，须另行授权，严禁永久写保护。
-- 不得清除 eMMC IDB、改写 boot area、短接或拆焊试错。
+### B0.4 eMMC 不写入边界的必要只读核查（不再作为全面 WP/Rescue 专题）
+- 当前项目 A 只允许使用既有启动链；eMMC 前级 SPL 是已知启动依赖，但项目 A 不修改 SPL、IDB、boot area、EXT_CSD、Vendor Storage、分区、文件系统或原系统。
+- 只读核对本轮启动与测试步骤，不得包含 eMMC 写入、环境保存、升级、recovery 或自动修复命令。
+- 不执行芯片级 power-on write protect 设置，不做 eMMC 写入试验，不为 TF 实验扩大为完整 eMMC WP/Rescue 研究。
+- 若证据显示启动链/脚本会自动写 eMMC，停止实机操作，先审查并消除该路径风险；不得靠写保护配置绕过。
 
-验收：形成正常启动、TF 读取失败、proper/FIT 校验失败、MMC 初始化失败/回退等路径的写入目标矩阵。无法证明 eMMC 不写入且没有可靠隔离保护时，安全门不通过。
+验收：能明确说明本轮操作仅从既有启动链读取启动所需内容，所有项目 A 可写实验状态位于 RAM/SU08G，且没有主动 eMMC 写入步骤。该只读核查不是 eMMC 部署准入，也不要求完成 eMMC 全区域写入矩阵。
 
 ### B0.5 实验介质确认
 - 8GB SU08G：CID `035344535530384780b16ad9b700c15f`，sectors 15,523,840；每次写入前重新核对身份。
@@ -79,7 +76,7 @@
 - eMMC DF4032：冻结，不写入。
 - 每次写卡前重新确认 CID、型号、容量、设备节点、分区及挂载状态，不依赖历史 mmcblk 编号。
 
-验收：目标介质唯一且卸载；B0.4 通过；用户明确授权本次具体写入。
+验收：目标介质唯一且卸载；确认本轮启动/测试无主动 eMMC 写入路径；用户明确授权本次 SU08G TF 具体写入。
 
 ## B1 — 最小 RAM Linux 启动
 
