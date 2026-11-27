@@ -157,7 +157,7 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 
 **核心判断：项目 A 的“真实运行环境”指真实 Panther X2 上运行的项目 A 专用 6.18.63 最小系统，不等于必须先安装完整发行版或持久化 rootfs。**
 
-## 9. G2-B build-only workflow 已准备（2026-11-27，尚未执行）
+## 9. G2-B build-only workflow 与实际运行记录（2026-11-27）
 
 为避免从 B1 重新构建并扩大变量，G2-B 以成功的 R1 network-core artifact 作为配置和 DTB 输入：
 
