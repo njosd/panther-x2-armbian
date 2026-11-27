@@ -100,6 +100,18 @@ regmap-irq 初始化会：
 
 因此，启用 RTC child 虽可恢复黄金系统的 RTC 生命周期，却也会触发更明确的 ACK 写入路径；不能只把它当作“加一个无副作用 RTC 驱动”。这进一步要求先解决 RK809 datasheet reserved/RC 位与 Linux RK817 mapping 的证据差异。
 
+### 3.4 与 RK817 Rev 2.1 对照：Linux 24-line map 的来源与边界
+
+RK817 Rev 2.1 数据手册对同一组 0xFA/0xFB、0xFC/0xFD 寄存器定义了完整的 24 个 IRQ：0xFA 对应 charger/plug-in/out，0xFC 对应 BAT_HI、BAT_OVP、codec、TS_GPIO、GATE_GPIO。也就是说，Linux 的 24-line `rk817_irq_chip` 与 RK817 Rev 2.1 的寄存器定义吻合；但 RK809 Rev 2.5 对应寄存器只列出 14 个有效中断位，其余 10 位为 reserved/RC/W1C reserved。
+
+6.18.63 `rk8xx_probe()` 对 `RK809_ID` 与 `RK817_ID` 使用同一个 `rk817_irq_chip`、`rk817_pre_init_reg[]` 和 `rk817s[]` MFD cell array（包括 `rk817-charger` child）。6.1.65 与 6.1.116 也使用相同的共享实现。因此这是一个**跨芯片型号共享驱动的适用性问题**，不是 6.18 新引入的差异；公开 RK809 与 RK817 数据手册对额外 IRQ 位的定义确有差异，但现有资料不足以判定这是 RK809 数据手册省略、RK809 silicon 兼容保留，还是 Linux 共用 mapping 过宽。
+
+准入影响：不能把 RK817 datasheet 的 24 个 IRQ 定义自动套用到 Panther 的 RK809；也不能仅因 RK809 datasheet 标为 reserved 就擅自修改 Linux map。需要 Rockchip 明确 RK809 实际 silicon 对 0xFA[7:2]、0xFC[7:6]、0xFC[1:0] 的行为及共用 24-line IRQ map 的适用条件。
+
+资料：
+- [RK809 Datasheet Rev 2.5](https://datasheet.lcsc.com/datasheet/pdf/dc4249f899d1f7640dc738c73aecc6ea.pdf?productCode=C54771187)，§5.2 pp.125–126。
+- [RK817 Datasheet Rev 2.1](https://atta.szlcsc.com/upload/public/pdf/source/20240126/1D84E9BEA212072F9DD3BF1F36FC3510.pdf)，§5.2 pp.136–138。
+
 ## 4. pre-init 写入集合的精确规模与语义
 
 `rk817_pre_init_reg[]` 在锁定的 6.18.63 源码中有：
@@ -156,7 +168,7 @@ RK809 Rev 2.4/2.5 对 0x0E 的 bit7:2 定义为 W1C：POWER_UP、ALARM、EVENT_1
 
 ## 8. G2-PROBE 当前准入决定
 
-**HOLD / NOT AUTHORIZED。** 本轮没有发现 6.18 相比黄金源码新增一套 pre-init 表，但也发现当前 G2-B 配置与黄金运行时的 RTC child 生命周期不一致，且 IRQ reserved/RC 位语义仍未闭合。
+**HOLD / NOT AUTHORIZED。** 本轮没有发现 6.18 相比黄金源码新增一套 pre-init 表，但也发现当前 G2-B 配置与黄金运行时的 RTC child 生命周期不一致，且 RK809 Rev 2.5 的 14 个 documented IRQ 与 Linux 共用 RK817 24-line map 的适用性仍未闭合。
 
 解除 HOLD 前至少需要：
 
