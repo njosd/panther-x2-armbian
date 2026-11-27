@@ -23,6 +23,8 @@ The runtime package is a safe base for subsequent stage-specific work. It is not
 
 The B1 bundle was downloaded and inspected locally during this preparation. Its internal `output/SHA256SUMS` validated, including the BusyBox, DTB, U-Boot proper, boot script and existing B1 initramfs. The G2 workflow artifact's internal `output/SHA256SUMS` is independently verified again by the new packaging workflow.
 
+The G2 build toolchain was recovered from the successful run's apt installation log (job `140263994034`): runner `ubuntu-24.04`, package `gcc-13-aarch64-linux-gnu` version `13.3.0-6ubuntu2~24.04.1cross1`, wrapper package `gcc-aarch64-linux-gnu` version `4:13.2.0-7ubuntu1`. The new runtime manifest records these exact package versions and their provenance. This avoids marking the compiler as unknown merely because the earlier G2 artifact manifest omitted it.
+
 ## 3. Runtime composition
 
 | Component | Source / treatment |
