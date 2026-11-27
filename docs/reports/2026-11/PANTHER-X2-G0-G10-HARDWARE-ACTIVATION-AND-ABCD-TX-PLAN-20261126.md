@@ -180,5 +180,5 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 - [x] G2-B run `45924949130` 全部步骤 PASS：R1 输入锁定、6.18.63 源码/补丁、Kconfig merge、Image 编译、MFD built-in object 与 vmlinux linked symbol、DTB 隔离、artifact 上传均通过。
 - [x] artifact `15167050233` 已下载并检查；内部 `SHA256SUMS` 全部校验通过。G2-B BUILD PASS，仅代表 build/link 与 DTB 隔离，不代表 RK809 实机 probe 或 PMIC 功能。
 - [x] Project-A G2 minimal runtime init/boot scripts 与 PREPARE-ONLY packaging workflow 已提交；init 脚本通过本地 `dash -n` 语法检查。
-- [ ] G2 runtime packaging workflow 尚待手动运行；需审查完整构建日志、initramfs、boot script、2GiB image、分区、输入身份和 SHA256。
-- [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；不触发 PMIC 写入，不启动硬件 probe；TF 写入与实机启动也未授权。
+- [x] G2 runtime packaging PREPARE-ONLY run `45935908005` 全部 10 步 PASS，artifact `15170487170` 已上传；独立下载审查内部 SHA256 清单、Zstandard 流、2GiB raw image SHA256、主/备 GPT CRC、PANTHER_BOOT 分区边界及 ext4 superblock 均通过。详见 `PANTHER-X2-PROJECT-A-G2-MINIMAL-RUNTIME-PACKAGING-20261127.md`。
+- [ ] G2-PROBE 仍 HOLD / NOT AUTHORIZED；runtime artifact 通过不代表 PMIC probe 获准。不得触发 PMIC pre-init 写入、regulator/IO-domain 激活或硬件 probe；SU08G 写入与实机启动仍须另行评审并取得明确授权。SN64G 与 eMMC 不得触碰。
