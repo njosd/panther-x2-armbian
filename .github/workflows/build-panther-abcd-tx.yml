@@ -1,0 +1,71 @@
+name: Panther X2 Project-A ABCD sender (build only)
+
+on:
+  push:
+    paths:
+      - "scripts/panther-abcd-tx/panther-abcd-tx.c"
+      - ".github/workflows/build-panther-abcd-tx.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panther-x2-project-a-abcd-sender
+  cancel-in-progress: false
+
+jobs:
+  build-sender:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install isolated AArch64 static toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu qemu-user-static file
+
+      - name: Build and validate static AArch64 sender
+        run: |
+          set -euo pipefail
+          mkdir -p work/output
+          SRC=scripts/panther-abcd-tx/panther-abcd-tx.c
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=2 "$SRC" -o work/output/panther-abcd-tx-aarch64
+          file work/output/panther-abcd-tx-aarch64 | tee work/output/file.txt
+          aarch64-linux-gnu-readelf -h work/output/panther-abcd-tx-aarch64 > work/output/elf-header.txt
+          aarch64-linux-gnu-readelf -l work/output/panther-abcd-tx-aarch64 > work/output/elf-program-headers.txt
+          grep -q 'AArch64' work/output/elf-header.txt
+          if grep -q 'INTERP' work/output/elf-program-headers.txt; then
+            echo "::error::Sender must be statically linked without PT_INTERP"
+            exit 1
+          fi
+          qemu-aarch64-static work/output/panther-abcd-tx-aarch64 --self-test | tee work/output/self-test.txt
+          grep -qx 'self_test=PASS' work/output/self-test.txt
+          cp "$SRC" work/output/
+          {
+            echo "tool=panther-abcd-tx"
+            echo "scope=single AF_PACKET SOCK_RAW Ethernet-II frame only"
+            echo "ethertype=0x88b5"
+            echo "frame_length=64"
+            echo "payload_length=50"
+            echo "run_id_length=4"
+            echo "sequence_length=8"
+            echo "sha256_input=magic||run_id||sequence||payload_len"
+            echo "interface_policy=explicit; must already be UP; loopback rejected"
+            echo "network_configuration=none"
+            echo "hardware_access=none"
+            echo "physical_media_writes=none"
+          } > work/output/manifest.txt
+          sha256sum work/output/panther-abcd-tx-aarch64 work/output/panther-abcd-tx.c > work/output/SHA256SUMS
+          stat -c 'sender_size_bytes=%s' work/output/panther-abcd-tx-aarch64 | tee work/output/size.txt
+
+      - name: Publish sender and build evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-project-a-abcd-tx-sender-static-aarch64
+          path: work/output/
+          if-no-files-found: error
+          retention-days: 30
