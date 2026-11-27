@@ -52,6 +52,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Verify and freeze R1 input identity
+        id: freeze_r1_inputs
         run: |
           set -euo pipefail
           test -s work/r1-reference/kernel.config || test -s work/r1-reference/output/kernel.config
@@ -82,6 +83,8 @@ jobs:
             echo "r1_dtb_sha256=$(sha256sum work/reference/r1-panther-x2.dtb | awk '{print $1}')"
             echo "r1_input=artifact:b2-1-r1-network-core"
           } | tee work/r1-reference-lock.txt
+          echo "r1_config_sha256=$(sha256sum work/reference/r1-kernel.config | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "r1_dtb_sha256=$(sha256sum work/reference/r1-panther-x2.dtb | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Fetch the exact Linux source and apply the already-audited R1 compatibility patch
         run: |
@@ -111,7 +114,14 @@ jobs:
             echo "g2_fragment_sha256=$(sha256sum scripts/panther-x2-g2/g2-rk8xx-mfd.fragment | awk '{print $1}')"
           } | tee work/source-lock.txt
 
+      - name: Restore incremental G2 kernel object cache for retries
+        uses: actions/cache/restore@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g2-b-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_r1_inputs.outputs.r1_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g2/g2-rk8xx-mfd.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml') }}
+
       - name: Merge only the G2 MFD delta into the frozen R1 configuration
+        id: merge_g2_config
         run: |
           set -euo pipefail
           SRC="$GITHUB_WORKSPACE/work/linux"
@@ -172,6 +182,13 @@ jobs:
           IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \n')"
           test "$IMAGE_MAGIC" = "41524d64"
           tar -C "$MODULES_ROOT" -cf - lib/modules | zstd -T0 -10 -o work/output/modules.tar.zst
+
+      - name: Save incremental G2 kernel object cache for retry
+        if: always() && steps.merge_g2_config.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g2-b-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_r1_inputs.outputs.r1_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g2/g2-rk8xx-mfd.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml') }}
 
       - name: Verify MFD built-in objects and isolate the PMIC in the DTB
         run: |
