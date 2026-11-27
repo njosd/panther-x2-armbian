@@ -12,8 +12,8 @@ echo "Linux network core and AF_PACKET are built in; no physical NIC is enabled.
 echo "RK809 MFD code is built in, but the RK809 DT node is disabled: no PMIC probe."
 echo "GMAC1/MDIO/RTL8211F are disabled: no physical Ethernet activation."
 echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted or written by /init."
-echo "Linux MMC/eMMC/TF/SDIO and USB host/PHY remain disabled per frozen B1/R1 baseline."
-echo "U-Boot reads the TF boot partition before Linux starts; /init does not mount or write persistent storage."
+echo "Frozen B1/R1/G2 baseline keeps eMMC, TF/SD and USB host/PHY available; SDIO/Wi-Fi remains disabled."
+echo "U-Boot loads Image/uInitrd/DTB from TF; Linux root is initramfs in RAM, and /init does not mount or write persistent filesystems."
 echo "USB network adapters, GMAC1, MDIO and RTL8211F remain disabled."
 
 mkdir -p /proc /sys /dev /run
