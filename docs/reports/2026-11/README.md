@@ -121,3 +121,5 @@
 
 - [Project-A G2 minimal runtime packaging preparation（2026-11-27）](./PANTHER-X2-PROJECT-A-G2-MINIMAL-RUNTIME-PACKAGING-20261127.md)：G2 runtime PREPARE-ONLY 打包已由 run `45935908005` 全部通过，artifact `15170487170` 已上传；独立下载后核验内部 SHA256、Zstandard、2GiB raw image、主/备 GPT CRC 与 ext4 superblock 均通过。未写实体介质、未启动实机；G2-PROBE 仍 HOLD。报告同时记录 B1 当前源码与冻结 artifact 漂移。
 - [Project-A G2 runtime packaging workflow](../../../.github/workflows/package-panther-x2-g2-runtime.yml)：从冻结的 G2-B 与 B1 artifacts 组装 2GiB PREPARE-ONLY TF image；run `45935908005` 全部通过并完成独立镜像完整性核验；不执行硬件 probe 或物理介质写入。
+- [G2 RK809 IRQ 语义与 stock runtime 准入修订（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：追加 §10，按 RK809 Rev 2.5 与 Linux regmap-irq 源码厘清 0xFC RC/W1C 初始化语义；不再将其作为 build 候选阻塞，也不修改 stock IRQ map。G2-PROBE 仍需独立授权。
+- [G2 stock-runtime candidate build workflow](../../../.github/workflows/build-panther-x2-g2-stock-runtime.yml)：新增独立 build-only 候选，启用 RK809 MFD、RTC、PWRKEY，保留 regulator 与 GMAC/MDIO/PHY disabled；工作流尚未执行，未产生新 artifact，不得用于实机启动。
