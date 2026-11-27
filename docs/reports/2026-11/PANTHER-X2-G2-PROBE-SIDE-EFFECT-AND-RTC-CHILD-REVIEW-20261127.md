@@ -192,6 +192,8 @@ RK809 Rev 2.4/2.5 对 0x0E 的 bit7:2 定义为 W1C：POWER_UP、ALARM、EVENT_1
 - 6.18.63 `regmap-irq.c`：默认 mask 初始化、`init_ack_masked`、status read/ACK、unmask/sync-unlock。
 - 6.18.63 `rtc-rk808.c`：`rk808_rtc_probe()` 的 RTC_CTRL 与 RTC_STATUS 操作。
 - RK809 Datasheet Rev 2.4：RTC_CTRL/RTC_STATUS（§5.2，页 57–58）；PMIC_INT_STS1/2、PMIC_INT_MSK1/2、GPIO_INT_CONFIG（页 124–125）。
-- RK809 Datasheet Rev 2.5：相同寄存器的后续版本复核（页 125–126）。
+- RK809 Datasheet Rev 2.5：相同寄存器的后续版本复核（页 125–126），并确认 0xEE 低 nibble 为 RESV、reset default=0x2；[在线副本](https://datasheet.lcsc.com/datasheet/pdf/dc4249f899d1f7640dc738c73aecc6ea.pdf?productCode=C54771187)。
+- RK809 Datasheet Rev 1.01：历史上曾将 0xEE[3:0] 定义为 CHIP_VER code 1–15；[在线副本](https://rockchip.fr/RK809%20datasheet%20V1.01.pdf)。Rev 1.7 起改标 RESV，见 R3 专项报告的历史修订对照。
+- RK817 Datasheet Rev 2.1：0xFA/0xFC 完整 24 IRQ 定义（页 136–138）；[在线副本](https://atta.szlcsc.com/upload/public/pdf/source/20240126/1D84E9BEA212072F9DD3BF1F36FC3510.pdf)。
 
 本报告仅为静态审计和计划约束，不构成任何设备操作授权。
