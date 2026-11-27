@@ -144,6 +144,10 @@ probe 后再次读取完整寄存器值，比较目标 bit 是否符合当次实
 - eMMC：保持冻结；本报告不涉及 eMMC 操作。
 
 
+
+
+补充设计审查：`PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md` 进一步确认 regulator notifier 在 regulator mutex 持有期间执行；IO-domain 内部锁不得跨 regulator core API。普通 remove/unbind 自动恢复目前不安全，除非证明 teardown 全窗口 rail 冻结。G4-P-SAFE 第一版应把成功 probe 后保持绑定作为默认策略，不将 unbind 当作回退手段。
+
 ## 9. 下一阶段建议：只做代码级安全增强候选，不执行硬件
 
 当前 G4-P 的阻塞点不是构建能力，而是 stock driver 缺少可验证的事务性恢复。下一步优先准备一个**独立的 G4-P-SAFE build-only 代码候选**，不替换当前 G4-B frozen artifact，也不运行实机：
