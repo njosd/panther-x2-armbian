@@ -147,13 +147,14 @@ jobs:
             fi
           }
           for key in CONFIG_NET CONFIG_PACKET CONFIG_OF CONFIG_I2C CONFIG_REGMAP_I2C \
-                     CONFIG_REGMAP_IRQ CONFIG_MFD_CORE CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C; do
+                     CONFIG_REGMAP_IRQ CONFIG_MFD_CORE CONFIG_MFD_RK8XX CONFIG_MFD_RK8XX_I2C \
+                     CONFIG_MODULES; do
             require_y "$key"
           done
           for key in CONFIG_REGULATOR_RK808 CONFIG_INPUT_RK805_PWRKEY CONFIG_STMMAC_ETH \
                      CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_REALTEK_PHY \
                      CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 \
-                     CONFIG_RFKILL CONFIG_MODULES; do
+                     CONFIG_RFKILL; do
             require_off "$key"
           done
           cp "$FRAGMENT" work/output/g2-rk8xx-mfd.fragment
@@ -234,7 +235,7 @@ jobs:
             echo "rk809_node=disabled"
             echo "gmac1_mdio_phy=disabled"
             echo "regulator_rk808=not-set"
-            echo "modules=disabled; MFD objects must be built-in"
+            echo "module_support=enabled in R1 baseline; G2 builds Image only; RK8xx MFD objects must be built-in"
             echo "purpose=G2-B build-only; no hardware probe or PMIC access"
           } | tee work/output/BUILD-MANIFEST.txt
           (
