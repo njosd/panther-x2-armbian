@@ -289,6 +289,16 @@ static int self_test(void)
     uint8_t got[32], run_id[4] = { 0, 1, 2, 3 };
     uint8_t src[6] = { 2, 0, 0, 0, 0, 1 };
     uint8_t frame[FRAME_LEN];
+    uint64_t parsed_sequence;
+
+    if (parse_sequence("-1", &parsed_sequence) == 0 ||
+        parse_sequence("+1", &parsed_sequence) == 0 ||
+        parse_sequence(" 1", &parsed_sequence) == 0 ||
+        parse_sequence("0x2a", &parsed_sequence) != 0 ||
+        parsed_sequence != 42u) {
+        puts("argument_test=FAIL");
+        return 1;
+    }
 
     sha256((const uint8_t *)"abc", 3, got);
     if (memcmp(got, expected, sizeof(expected)) != 0) {
@@ -302,6 +312,7 @@ static int self_test(void)
         puts("frame_test=FAIL");
         return 1;
     }
+    puts("argument_test=PASS");
     puts("sha256_test=PASS");
     puts("frame_test=PASS");
     puts("frame_len=64");
