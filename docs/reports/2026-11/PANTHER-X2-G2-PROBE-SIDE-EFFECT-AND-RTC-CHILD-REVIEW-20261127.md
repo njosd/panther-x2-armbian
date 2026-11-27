@@ -197,3 +197,52 @@ RK809 Rev 2.4/2.5 对 0x0E 的 bit7:2 定义为 W1C：POWER_UP、ALARM、EVENT_1
 - RK817 Datasheet Rev 2.1：0xFA/0xFC 完整 24 IRQ 定义（页 136–138）；[在线副本](https://atta.szlcsc.com/upload/public/pdf/source/20240126/1D84E9BEA212072F9DD3BF1F36FC3510.pdf)。
 
 本报告仅为静态审计和计划约束，不构成任何设备操作授权。
+
+## 10. 2026-11-27 Datasheet Rev 2.5 与 regmap-irq 初始化语义复核（追加修订）
+
+本节补充并修正第 3、8 节对 IRQ 状态寄存器访问的风险描述。依据 Rockchip《RK809 Datasheet Rev 2.5》（2025-04-07）以及锁定的 Linux 6.18.63 drivers/base/regmap/regmap-irq.c。
+
+### 10.1 0xFC 的 RC/W1C 行为是手册已定义语义，不是未知寄存器行为
+
+Rev 2.5 对 PMIC_INT_STS2 (0xFC) 的定义：
+- bit[7:6]：RC，reserved；
+- bit[5:2]：W1C，codec status；
+- bit[1:0]：W1C，reserved。
+
+因此读取 0xFC 会按 RC 定义清除 bit[7:6]；对 W1C 位的清除由后续写 1 完成。不能把“读取会清除 RC 位”描述为未知副作用，但也不能把 RC 位当作普通 RO 状态位重复读取。
+
+### 10.2 Linux 6.18 regmap-irq 的初始化访问顺序已由源码精确确认
+
+对 rk817_irq_chip：
+- num_irqs=24、num_regs=3、irq_reg_stride=2；
+- 24 个 REGMAP_IRQ_REG_LINE(id, 8) 使三组 mask_buf_def 均为 0xFF；
+- 初始化先将 mask buffer 写入 0xF9、0xFB、0xFD；
+- init_ack_masked=true 时，逐组读取 0xF8、0xFA、0xFC；
+- 若某组 status 非零，向对应 ACK/status 地址写入 status & mask_buf；
+- 然后建立 IRQ domain 并请求 parent threaded IRQ。
+
+这意味着 0xFC 的 RC 位会在初始化读取时按芯片定义被清除；其 W1C 位则按 regmap-irq 的初始化 ACK 机制处理。该路径是 Linux regmap-irq 通用机制，且 6.1.65、6.1.116 与 6.18.63 使用相同 RK817 IRQ chip 参数，不是 6.18 新增的访问模式。
+
+仍需如实保留一项手册差异：Linux 的 24-bit map 会把 mask registers 的整字节纳入 mask buffer，因此初始化会对 0xFB[7:2]、0xFD[7:6] 与 0xFD[1:0] 这些 Rev 2.5 标为 reserved RW 的位写入 mask=1。它属于跨版本共用驱动实现；黄金版本已有相同软件路径和 MFD/IRQ child 注册运行证据，但没有寄存器总线轨迹证明这些保留位写入的具体硅片响应。该项记录为“共享实现的规格边界”，不再描述成未知的 0xFC 读取行为，也不单独要求为 6.18 定制 IRQ map。
+
+### 10.3 0xEE=0x94 的身份字段重新分类
+
+Rev 2.5 §5.1 p.55 / §5.2 p.119 定义：
+- 0xED PMIC_CHIP_NAME：reset default 0x80；
+- 0xEE PMIC_CHIP_VER：bit[7:4] 为 CHIP_NAME code[3:0]，reset default 0x9；bit[3:0] 为 RESV，reset default 0x2。
+
+因此 Panther 已有只读记录 0xED=0x80, 0xEE=0x94 应表述为：chip-name code 与 RK809 相符，chip-version 高 nibble 为 9，低 nibble 是 reserved observed value 0x4。低 nibble 不能称为 silicon revision 4。该 reserved 值与 reset default 不同仍保留为器件资料差异，但 6.18 I2C driver 通过 OF compatible 选择 RK809 variant，不在 probe 中用 0xEE 低 nibble 决定 IRQ map；该值不构成当前 G2 构建或候选准备的单独阻塞条件。
+
+### 10.4 对 G2 的准入影响（取代第 8 节中“必须先由 Rockchip 解释 IRQ reserved/RC 位”的表述）
+
+- G2-S：PASS。标准 RK809/RK817 共用 IRQ map 与黄金软件路径一致；Rev 2.5 对 0xFC RC/W1C 行为已有明确定义。
+- G2 candidate preparation：允许继续准备 stock 6.18.63 runtime 候选，包含与黄金运行路径一致的 RTC/PWRKEY child 配置；regulator provider 仍留在 G3。
+- 规格边界：保留 mask registers reserved RW 位被共用驱动写 mask=1 的记录，不擅自修改驱动，也不将其夸大为已证实的硬件故障。
+- G2-PROBE：仍为 HOLD / NOT AUTHORIZED。原因不是 0xFC 的 RC 语义未知，而是 stock probe 确实包含 PMIC pre-init、IRQ mask/status/ACK、RTC child 初始化及 system-off handler 注册；必须先冻结完整 Image/DTB/initramfs/写入清单、审查安全退出/部分失败处理，并取得本次实机操作的明确授权。
+- 本轮不读取额外 PMIC 寄存器、不启动设备、不写 TF/eMMC、不执行 probe。
+
+本节 supersedes 本报告第 3.2 节和第 8 节中“0xFC 读取语义尚未解释、必须先取得 Rockchip 对 RC 行为说明才可准备 G2”的表述；不取消 G2-PROBE 的独立操作授权要求。
+
+资料：
+- Rockchip RK809 Datasheet Rev 2.5, §5.1 p.55、§5.2 pp.125–126: https://www.armdesigner.com/download/Rockchip_RK809_Datasheet_V2.5-20250407.pdf
+- Linux 6.18.63, drivers/base/regmap/regmap-irq.c, drivers/mfd/rk8xx-core.c, commit aee4e352a15d636cbc484f56819c6e59474dfd9f.
