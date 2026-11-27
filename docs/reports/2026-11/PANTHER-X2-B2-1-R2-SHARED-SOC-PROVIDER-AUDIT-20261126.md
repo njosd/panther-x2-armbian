@@ -120,12 +120,12 @@ RK809 PHY supply 链（I2C、I2C_RK3X、MFD_RK8XX、MFD_RK8XX_I2C、REGULATOR、
 | syscon 与 GPIO 实现符号 | PASS | 同构建 System.map |
 | provider 构建 | PASS | R1 Actions build job success |
 | GMAC1/MDIO1/PHY 仍隔离 | PASS | R1-VERIFICATION.txt |
-| Panther 实机 pinctrl probe / SYSCON consumer | PASS | R1 最终镜像 `/sys/bus/platform/devices/pinctrl/uevent` 显示 `DRIVER=rockchip-pinctrl`；DTS 含 `rockchip,grf`/`rockchip,pmu` phandle，6.18.63 probe 成功返回 |
+| Panther 实机 pinctrl probe / main-GRF SYSCON consumer | PASS | R1 最终镜像 `/sys/bus/platform/devices/pinctrl/uevent` 显示 `DRIVER=rockchip-pinctrl`；6.18.63 probe 对 `rockchip,grf` 执行必需的 `syscon_node_to_regmap()` 并检查错误，成功返回证明 main-GRF lookup 成功；PMUGRF 是另一个 optional lookup，不能由该 PASS 自动推定 |
 | 五个 GPIO bank 的 platform driver 绑定 | PASS | R1 最终镜像下 gpio0–gpio4 均出现在 `/sys/bus/platform/drivers/rockchip-gpio/`，各自 `uevent` 显示 `DRIVER=rockchip-gpio` |
 | 五个 gpiochip 注册 | PASS | `/sys/class/gpio/` 与 `/sys/bus/gpio/devices/` 均列出 gpio0–gpio4；每个 `ngpio=32`，base 分别为 512/544/576/608/640 |
 | 物理 Ethernet TX/RX | NOT TESTED | 仅 R7 进行真实线侧测试 |
 
-**阶段判定：R2 PASS / 可评估放行 R3。** 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验、6.1.65 黄金基线配置对照，以及 R1 最终 AF_PACKET probe 镜像上的只读运行时验证。实机证据确认 `rockchip-pinctrl` 成功绑定，pinctrl probe 所需的 GRF syscon regmap 获取路径成功，GPIO0–GPIO4 五个 bank 全部绑定 `rockchip-gpio` 并注册为五个 32-line gpiochip。未写 GPIO、未操作 reset/电源，GMAC1/MDIO1/PHY 仍保持禁用。6.1.65 精确源码构建来源仍未达到二进制级绑定，此历史来源限制如实保留，不将候选源码当作确定来源。
+**阶段判定：R2 PASS / 可评估放行 R3。** 已完成 6.18.63 精确 Kconfig/Makefile 依赖核验、B1/R1 最终配置及 built-in 对象/符号/构建核验、6.1.65 黄金基线配置对照，以及 R1 最终 AF_PACKET probe 镜像上的只读运行时验证。实机证据确认 `rockchip-pinctrl` 成功绑定，且其必需的 main-GRF syscon regmap 获取路径成功；GPIO0–GPIO4 五个 bank 全部绑定 `rockchip-gpio` 并注册为五个 32-line gpiochip。PMUGRF lookup 在该 probe 中属于 optional lookup，返回值未被立即检查，故本项不把 R2 结果解释为 PMUGRF regmap 已成功创建或被实际读写。未写 GPIO、未操作 reset/电源，GMAC1/MDIO1/PHY 仍保持禁用。6.1.65 精确源码构建来源仍未达到二进制级绑定，此历史来源限制如实保留，不将候选源码当作确定来源。
 
 ## 7. 安全边界与下一阶段
 
@@ -203,7 +203,7 @@ R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset 
 
 **pinctrl：** `/sys/bus/platform/drivers/rockchip-pinctrl/pinctrl/uevent` 与 `/sys/bus/platform/devices/pinctrl/uevent` 均显示 `DRIVER=rockchip-pinctrl`、`OF_COMPATIBLE_0=rockchip,rk3568-pinctrl`、`OF_FULLNAME=/pinctrl`，确认驱动已绑定。
 
-**SYSCON consumer：** 精确 6.18.63 源码 `drivers/pinctrl/pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 对 `rockchip,grf` phandle 调用 `syscon_node_to_regmap()`，若返回错误会直接使 probe 失败；对 `rockchip,pmu` 调用 optional syscon regmap lookup。实际 Panther X2 RK356x DTS 的 pinctrl 节点同时声明 `rockchip,grf = <&grf>` 和 `rockchip,pmu = <&pmugrf>`。当前 pinctrl 驱动成功绑定，且其 `of_platform_populate()` 创建的五个 GPIO bank 均成功绑定并注册，构成该现存 consumer 的运行时成功证据。此项验证的是 pinctrl 对 GRF/PMU syscon 的路径，不代表 GMAC consumer 已测试。
+**SYSCON consumer：** 精确 6.18.63 源码 `drivers/pinctrl/pinctrl-rockchip.c` 的 `rockchip_pinctrl_probe()` 对 `rockchip,grf` phandle 调用 `syscon_node_to_regmap()`，并对返回值执行 `IS_ERR()` 检查；因此 pinctrl 成功绑定证明必需的 main-GRF lookup 成功。对 `rockchip,pmu` 则调用 `syscon_regmap_lookup_by_phandle_optional()`，但该赋值结果在 probe 中没有紧接着做 `IS_ERR()` 检查；成功绑定本身不能证明 PMUGRF lookup 成功。Panther X2 RK356x DTS 的 pinctrl 节点确实同时声明 `rockchip,grf = <&grf>` 和 `rockchip,pmu = <&pmugrf>`，但 R2 没有直接验证 PMUGRF regmap 的可用性，也没有对 PMUGRF 执行读写。五个 GPIO bank 绑定和 gpiochip 注册仍是有效证据，但不补足该缺口。此项不代表 GMAC consumer 已测试。
 
 **GPIO bank：** `/sys/bus/platform/drivers/rockchip-gpio/` 实际列出 `fdd60000.gpio`、`fe740000.gpio`、`fe750000.gpio`、`fe760000.gpio`、`fe770000.gpio`；五个 `uevent` 均显示 `DRIVER=rockchip-gpio`、`OF_COMPATIBLE_0=rockchip,gpio-bank`，alias 分别为 gpio0–gpio4。
 
@@ -212,3 +212,15 @@ R1 中 GMAC/MDIO/PHY 节点保持 disabled，因此 GMAC consumer 对 GRF/reset 
 **功能证据边界：** 本次证明 pinctrl/SYSCON consumer probe、GPIO bank driver bind 和 gpiochip 注册成功；没有执行 GPIO line 读写/中断测试，没有验证 GMAC reset GPIO consumer，也没有验证 GMAC/MDIO/PHY。上述后续功能仍留在其原定阶段，不得把本次 R2 PASS 扩大解释。
 
 **操作边界：** 检查为只读 sysfs 查询；没有写 GPIO、MMIO、reset 或电源，没有启用 GMAC/MDIO/PHY，没有重建或重刷。
+
+### 8.7 2026-11-27 源码复核：PMUGRF 证据边界纠正
+
+对固定源码 `ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9` 重新逐函数核对后，修正 §6 与 §8.6 中可能过宽的解释：
+
+- `drivers/pinctrl/pinctrl-rockchip.c`：`rockchip_pinctrl_probe()` 对 `rockchip,grf` 调用 `syscon_node_to_regmap()`，并在返回 `ERR_PTR` 时直接失败；对 `rockchip,pmu` 调用 `syscon_regmap_lookup_by_phandle_optional()`，但该返回值没有在 probe 中立即进行 `IS_ERR()` 检查。
+- 因此，R2 的 pinctrl 成功绑定确证 main-GRF lookup 成功；不能单凭 pinctrl bind 推定 PMUGRF lookup 成功。RK3568 GPIO0 的后续 IOMUX/pull/drive/schmitt 操作会使用 `info->regmap_pmu`，但 R2 没有执行这些 PMUGRF 功能读写。
+- `arch/arm64/boot/dts/rockchip/rk356x-base.dtsi` 定义 `pmugrf: syscon@fdc20000`，compatible 为 `rockchip,rk3568-pmugrf`, `syscon`, `simple-mfd`；子节点 `io-domains` compatible 为 `rockchip,rk3568-pmu-io-voltage-domain`。Panther X2 DTS 将该子节点 status 设为 okay。
+- `drivers/mfd/syscon.c` 中 `syscon_node_to_regmap()` 会检查 syscon 节点是否带通用 compatible `syscon`；若 syscon list 中尚无该节点且允许创建，则调用 `of_syscon_register()`，通过 `of_iomap()` 建立映射并调用 `regmap_init_mmio()`，把 regmap 存入内部 list。该机制不要求存在一个名为 `syscon` 的 platform driver。因此 platform-device 目录没有 `driver` symlink，不能用于判断 regmap 是否注册。
+- `drivers/soc/rockchip/io-domain.c` 的 RK3568 IO-domain probe 先对父节点调用 `syscon_node_to_regmap(parent->of_node)`；之后逐项获取 regulator、读取软件电压，并对成功获取的供电调用 `iod->write()`。RK3568 的 VCCIO5/index 6 会写 PMU GRF VSEL0/VSEL1。因此 IO-domain child 是否 bind 是关键状态，不能从父 syscon device 的 `waiting_for_supplier=0` 推断。
+
+**纠正后的证据等级：** PMUGRF 设备树身份已验证；syscon API 的懒创建机制已由源码确认；R2 main-GRF syscon consumer PASS；PMUGRF lookup 是否成功、当前 PMUGRF regmap 是否已建立、IO-domain child 是否 bind，均仍 UNKNOWN。G4-P 保持 NO-GO，不授权 probe 或 selector 写入。
