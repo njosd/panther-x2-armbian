@@ -1,6 +1,12 @@
 name: Panther X2 Project A G4 IO-domain build-only
 
 on:
+  push:
+    branches:
+      - g4-iodomain-build-only
+    paths:
+      - "scripts/panther-x2-g4/**"
+      - ".github/workflows/build-panther-x2-g4-iodomain.yml"
   pull_request:
     branches:
       - g3-provider-runtime-package
