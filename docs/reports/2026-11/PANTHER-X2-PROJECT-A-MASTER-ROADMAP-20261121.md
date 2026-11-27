@@ -926,3 +926,12 @@ G3 runtime provenance 已确认：build-only run `45984035650` / artifact `15192
 下一步只允许设计 G4-P0 binding-only PREPARE-ONLY 候选：CONFIG_ROCKCHIP_IODOMAIN=y、IO-domain child okay、删除全部九路 supply 属性，其余 G3 隔离不变。源码显示无 supply 属性时 optional regulator get 返回 -ENODEV 并跳过，不会调用 voltage read / iodomain write；它只验证 child enumeration、driver bind 和 PMUGRF syscon regmap acquisition，不验证 rail/selector。尚未构建、未启动、未授权硬件试验。真实 supply 路径须先有原理图或独立电气测量，并解决 SWITCH_REG1 缺少 voltage read 的问题。
 
 判定：G3 PASS/TRACEABLE；G4-P full mapping NO-GO；G4-P0 静态设计审计可继续。设备不变更、不触发 probe、不访问 PMU GRF/MMIO、不写 TF/eMMC。详见 G4-P 报告第 14 节。
+
+
+### 2026-11-27 G4-P0 binding-only static design audit — PASS to build-only design
+
+G4-P0 静态设计审计完成（尚未构建/启动）。Linux 6.18.63 OF default populate 在 arch_initcall_sync 递归处理 simple-mfd 节点；child status okay 时创建 IO-domain platform device。RK3568 IO-domain probe 先取得 parent PMUGRF syscon regmap，再处理 supplies。九个 `*-supply` 属性全部删除后，九次 `devm_regulator_get_optional()` 按驱动逻辑以 -ENODEV 跳过，不进入 voltage read、notifier 或 iodomain_write；RK3568 PMU soc_data 没有 init callback。因此该路径不执行 selector register writes。
+
+必要配置除 `CONFIG_OF=y`、`CONFIG_ROCKCHIP_IODOMAIN=y` 外，还必须 `CONFIG_MFD_SYSCON=y`：若未启用，syscon.h stub 返回 -ENOTSUPP；MFD_SYSCON selects REGMAP_MMIO。建议 built-in IODOMAIN=y。注意 probe 会通过 syscon_node_to_regmap -> of_iomap 建立 PMUGRF MMIO 映射和 regmap 对象，但在无 supply 路径中 IO-domain driver 不调用 regmap_read/write；准确边界是“无 selector 寄存器事务”，不是“完全无 MMIO 映射”。
+
+DTB 只允许 io-domains status=okay 并删除九个 supply properties；其余 G3 资产/硬件隔离保持不变。build 后必须核验 config、compatible、status、九个属性全部缺失，并反编译审计 DTB diff。G4-P0 静态设计 PASS，可进入独立 PREPARE-ONLY build workflow 设计；artifact 尚未构建，实体启动/probe 未执行且未授权。详见 G4-P 报告第 15 节。
