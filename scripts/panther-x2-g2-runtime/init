@@ -13,6 +13,7 @@ echo "RK809 MFD code is built in, but the RK809 DT node is disabled: no PMIC pro
 echo "GMAC1/MDIO/RTL8211F are disabled: no physical Ethernet activation."
 echo "Root filesystem is initramfs in RAM; no persistent filesystem is mounted or written by /init."
 echo "B1 storage/USB support is intentionally retained; eMMC/TF/SD and USB host may enumerate."
+echo "USB network adapters, GMAC1, MDIO and RTL8211F remain disabled."
 
 mkdir -p /proc /sys /dev /run
 
