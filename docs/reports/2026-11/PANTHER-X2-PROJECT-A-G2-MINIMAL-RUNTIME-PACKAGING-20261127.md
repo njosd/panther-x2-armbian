@@ -123,13 +123,13 @@ No TF image generation, loop-device partitioning, PREPARE-ONLY image artifact up
 Run `45935908005`, job `140298952552`, completed all 10 workflow steps successfully. Artifact `15170487170`, named `panther-x2-project-a-g2-runtime-PREPARE-ONLY`, was uploaded (223,981,886 bytes; GitHub artifact ZIP digest `sha256:112faa35d052b7ff750108327a8d132f316e9844b2b70c8cb10b97c8502a2aef`; retention through 2026-12-27). The uploaded ZIP was downloaded and independently inspected.
 
 Independent checks performed on the downloaded artifact:
-- All 28 entries listed in `output/SHA256SUMS` validated successfully.
+- All 29 entries listed in `output/SHA256SUMS` validated successfully.
 - Zstandard frame integrity passed; decompressed image size is exactly 2,147,483,648 bytes (2 GiB).
 - Decompressed raw image SHA256 matches the manifest: `9c15acef6a399d51b161b72f5d86a80277ef08c47d23927a2e5939ba5faa9a78`.
 - Compressed image SHA256 matches the manifest: `2e7a3b8c68874372f12144bdceb133797df8c92502d5e10bb0a02468d8106aec`.
 - Primary and backup GPT headers and partition-entry arrays both have valid CRCs. Protective MBR signature is `55aa`; one `PANTHER_BOOT` partition starts at LBA 32768 (16 MiB) and ends at LBA 4192255, exactly as planned.
 - The partition's ext4 superblock magic `53ef` is present at the expected offset.
-- U-Boot script header identifies an ARM Linux script; uInitrd header identifies an AArch64 gzip RAMDisk. The manifest records Image/uInitrd/DTB load addresses, the frozen U-Boot proper location (raw LBA 16384 / 8 MiB), and the existing eMMC SPL → TF U-Boot proper → TF kernel/initrd/DTB boot chain.
+- U-Boot script header identifies an ARM Linux script; uInitrd header identifies an AArch64 gzip RAMDisk. The exact 1,464,832-byte JP-TvBox U-Boot proper payload embedded at raw LBA 16384 was independently extracted from the raw image and byte-compared with the frozen input; both SHA256 values are `a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`. The manifest records Image/uInitrd/DTB load addresses, the frozen U-Boot proper location (raw LBA 16384 / 8 MiB), and the existing eMMC SPL → TF U-Boot proper → TF kernel/initrd/DTB boot chain.
 
 The workflow log explicitly records `hardware_access=none`, `physical_media_writes=none`, and `boot_authorization=not_granted`. The runtime manifest also records RK809 DTB disabled / PMIC probe not performed and GMAC1/MDIO/RTL8211F disabled / physical TX not performed.
 
