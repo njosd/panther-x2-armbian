@@ -1,6 +1,12 @@
 name: Panther X2 Project-A G3 RK809 regulator-provider runtime (PREPARE ONLY)
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/panther-x2-g3-runtime/**"
+      - ".github/workflows/package-panther-x2-g3-provider-runtime.yml"
   workflow_dispatch:
     inputs:
       g3_run_id:
@@ -18,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  G3_RUN_ID: ${{ inputs.g3_run_id }}
+  G3_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g3_run_id || '45984035650' }}
   B1_RUN_ID: "45328201244"
   B1_ARTIFACT_ID: "14890817693"
   B1_BUSYBOX_SHA256: "2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15"
