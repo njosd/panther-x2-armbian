@@ -116,3 +116,19 @@ G4-P-SAFE 必须先作为独立 patch/build-only 候选，不覆盖 G4-B frozen 
 **结论：继续保持 G4-P NO-GO / HOLD / NOT AUTHORIZED。** 下一步只允许在独立分支完成 patch 设计与 fake-regmap 测试实现，再进行 CI build-only 审计。任何代码通过、构建通过或单元测试通过，都不自动授权实机 probe/GRF 写入。
 
 项目 A 继续 TF-only：SU08G 是唯一实验介质；SN64G 与 eMMC 冻结。本文没有执行硬件、PMIC、PMU GRF、存储介质或网络操作。
+
+
+## 7. 重要修正：remove/unbind 自动恢复不能作为默认方案
+
+进一步对 regulator core 锁和 notifier 生命周期进行交叉审查后，不能把“注销 notifier 后无条件恢复 probe 前快照”视为普遍安全的 remove 策略：
+
+- notifier 注销后，regulator consumer 仍可能继续改变 rail；如果 IO-domain notifier 已撤销，后续电压变化将不再同步更新 selector。
+- 若在 unregister 前恢复，正在进行或随后到来的 PRE/POST/ABORT 回调可能再次改变 selector；若在 unregister 后恢复，则必须证明恢复窗口内 regulator voltage 不会变化。
+- 因此，仅凭“历史上未观察到 voltage-change event”不足以证明 remove 时可安全恢复；还必须证明 regulator 在 teardown/restore 整个窗口内被外部约束为不变，且该约束本身可验证。
+- 目前项目没有这项约束证据，也没有验证过 regulator notifier unregister 与运行时 rail 调整之间的全生命周期协调。
+
+**设计修订：G4-P-SAFE 第一版不应承诺普通 driver unbind/remove 自动恢复初始 selector。** 更安全的候选边界是：probe 成功后保持 driver 绑定；任何正常 remove/unbind 默认拒绝或被测试流程禁止，除非后续实现并证明“先冻结 regulator 变化、再停止/同步 notifier、最后恢复和读回”的完整协议。Linux platform_driver.remove 返回 void，也使 remove 失败无法向 driver core 阻止解绑，因此不能依靠 remove callback 报错来拒绝 unbind。
+
+probe 中途失败的恢复仍可设计为：标记 quiescing → 在不持有 IO-domain mutex 时注销/同步 notifier → 确认 rail 未发生实际变化且快照有效 → 执行受限 masked restore → readback；任何条件不满足则 STATE UNKNOWN / STOP。对于已成功 probe 的运行态，不把 driver unbind 当作实验回退按钮。
+
+这项修订不改变当前 NO-GO / HOLD / NOT AUTHORIZED 结论。CPU hang、kernel panic、断电、总线失联等仍无法保证自动回退。
