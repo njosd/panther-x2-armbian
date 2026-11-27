@@ -802,11 +802,11 @@ G0 复核结论为 **CONDITIONAL PASS（仅计划层面）**：黄金基线配�
 DTB 证据修订：6.1.116 磁盘 DTB 与 6.18.63 完整 DTB SHA-256 完全相同；6.1.65 原始 DTB 已有 GMAC1 核心属性解析，只有其 PMIC/IO-domain 原始子树 binary diff 仍缺。不得再把 6.1.116 DTB 列为待提取，也不得要求重新提取 851 MiB 镜像。
 
 
-## 2026-11-27 G2-S 静态比较完成，转入 G2-B build-only
+## 2026-11-27 G2-S/G2-B/G2 runtime 完成；G2-PROBE 追加审计 HOLD
 
 固定源码对照报告：`PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip 布局、24-bit mapping、pre-init 表和 MFD cells 一致；没有发现 6.18 新增 RK809 pre-init 写入。黄金实机日志显示 IRQ parent/PWRKEY/RTC child 注册，属于正向运行证据，但计数为 0，不证明物理边沿或所有 IRQ ACK 位状态。6.18 pwrkey IRQ resource 顺序与共同 consumer 驱动 index 约定相符，不应回退。
 
-下一阶段只做 G2-B build-only：MFD_RK8XX_I2C=y，不启用 INPUT_RK805_PWRKEY 或 REGULATOR_RK808；构建使用 RK809 节点 disabled 的隔离 DTB，GMAC/MDIO/PHY 继续 disabled。只验证 Kconfig、built-in 对象、编译链接和 artifact。通用 QEMU virt 不模拟 RK3566/Panther X2，不安排无代表性的 kernel system boot；不得把 build-only 说成 PMIC runtime PASS。后续 G2-PROBE 仍需独立副作用审查与明确授权。
+G2-B build-only 已由 run `45924949130` 完成，Project-A 6.18.63 minimal runtime PREPARE-ONLY 已由 run `45935908005` 完成并独立审计。新增 G2-PROBE 只读审查发现当前 G2-B config 未启用 RTC_DRV_RK808，而 RK809 MFD pre-init 会置 RTC_STOP；仅启用 RK809 节点会使 RTC child 不恢复运行，若启用 RTC child 又会触发 RTC_STATUS W1C 与 RTC alarm IRQ unmask/ACK 写入。此外 RK809 Rev 2.4/2.5 对 0xFA/0xFC reserved W1C/RC 位定义与 Linux RK817 24-bit mapping 未闭合，部分 probe 写入失败无 PMIC register rollback。故 G2-PROBE 继续 HOLD / NOT AUTHORIZED；不得直接启用 runtime DTB 中 RK809 节点。详见 `PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md`。
 
 
 ## 2026-11-27 环境切换原则修订：B1 RAM 基线不是最终运行环境
@@ -849,7 +849,7 @@ GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.1
 
 所有知识条目按 COMMON-VERIFIED、VERSION-DIFF、SOC-ADAPTATION、BOARD-VERIFIED、BOARD-UNVERIFIED、CROSS-LAYER-RISK 及 STATIC-ONLY/BUILD-ONLY/RUNTIME-OBSERVED/E2E-VERIFIED 标注证据范围。该分类只调整知识组织和风险权重，不增加测试阶段、不改变 G0–G10 门序。
 
-G2-B build-only 已通过（run `45924949130`，artifact `15167050233` 已校验）。Project-A 6.18.63 minimal runtime 的 PREPARE-ONLY init/boot scripts、输入锁定和 packaging workflow 已提交；当前下一步是手动运行该 workflow 并审查完整 artifact。该准备流程不授权 TF 写入或实机启动；G2-PROBE 仍须独立副作用审查与明确授权，不恢复 GMAC/MDIO/PHY。
+G2-B build-only 已通过（run `45924949130`，artifact `15167050233` 已校验）。Project-A 6.18.63 minimal runtime PREPARE-ONLY packaging run `45935908005` 已全部通过，artifact `15170487170` 经独立离线审计；raw image SHA256、Zstandard、GPT 主/备 CRC、ext4 fsck/只读文件校验及 U-Boot proper readback 均通过。未写实体介质、未启动实机。G2-PROBE 因 RTC child 生命周期、IRQ reserved/RC 位语义及失败回滚问题继续 HOLD / NOT AUTHORIZED，不恢复 GMAC/MDIO/PHY。
 
 ## 2026-11-27 G2-B workflow 与构建结果
 
@@ -876,4 +876,4 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 
 **纠错（2026-11-27，按冻结 artifact 回溯）：** B1/R1/G2 实际冻结配置包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`。DTB 保留 TF/eMMC、USB host/PHY0、UART1/UART2，禁用 SDIO/Wi-Fi、GMAC1/MDIO/PHY，移除 Bluetooth 子节点；G2 仅将 RK809 节点保持 disabled。RAM-only 指 Linux root 使用 initramfs，`/init` 不挂载/写入持久化文件系统，不等于关闭存储/USB 驱动。当前默认分支 B1 fragment、DTB 生成脚本和 B1 workflow 已与冻结 artifact 合约发生漂移，重新生成 B1 前必须单独审计并修复一致性。
 
-**状态：** scripts/workflow 已提交；init 脚本本地 `dash -n` 检查 PASS；packaging workflow 尚未运行。下一步手动运行并检查产物。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED。
+**状态：** PREPARE-ONLY packaging run `45935908005` 全部通过，artifact `15170487170` 已下载并独立审计；raw image SHA256 `9c15acef6a399d51b161b72f5d86a80277ef08c47d23927a2e5939ba5faa9a78`。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED；G2 runtime artifact 不得未经新配置审查及授权直接写卡/启动。
