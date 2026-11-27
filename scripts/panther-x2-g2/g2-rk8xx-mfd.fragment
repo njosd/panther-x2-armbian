@@ -1,5 +1,7 @@
 # G2-B: build-only inclusion of the stock RK8xx I2C MFD transport/core.
-# No regulator consumer and no PWRKEY child driver in this gate.
+# The I2C core is the MFD transport dependency; no RK3x controller is activated here.
+CONFIG_I2C=y
 CONFIG_MFD_RK8XX_I2C=y
+# No regulator consumer and no PWRKEY child driver in this gate.
 # CONFIG_REGULATOR_RK808 is not set
 # CONFIG_INPUT_RK805_PWRKEY is not set
