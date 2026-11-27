@@ -40,7 +40,7 @@ The G2 build toolchain was recovered from the successful run's apt installation 
 | TF partition | 2 GiB GPT image; `PANTHER_BOOT` ext4 partition 1, LBA 32768 through 4192255 |
 | Root filesystem | initramfs in RAM; no persistent rootfs or modules tree |
 
-**Important B1 baseline clarification:** the actual B1/R1 kernel config intentionally retains `CONFIG_BLOCK`, `CONFIG_MMC`, `CONFIG_MMC_DW`, `CONFIG_MMC_DW_ROCKCHIP`, `CONFIG_USB`, USB host/PHY and filesystem support. This is not an accidental G2 regression: the B1 DTB keeps the intended eMMC/TF/SD and USB host/PHY nodes according to the established board baseline. The G2 runtime preserves this. Linux may enumerate storage/USB devices, but `/init` does not mount or write persistent filesystems; the root remains initramfs in RAM. This distinction must not be misstated as “storage drivers disabled.” The same DTB statuses are now explicit packaging gates and are printed by `/init`. USB network adapter support remains excluded (`CONFIG_USB_USBNET` and the relevant USB NIC drivers are not enabled); retaining USB host/PHY support does not add USB Ethernet to project scope.
+**Correction — frozen B1/R1 storage and USB boundary:** re-reading the actual B1 source and R1 build workflow shows that the current frozen baseline does *not* retain Linux storage or USB support. `scripts/panther-x2-b1/kernel.config.fragment` explicitly leaves `CONFIG_BLOCK`, `CONFIG_MMC` and `CONFIG_USB` unset; `prepare-clean-dtb.py` disables eMMC/TF/SDIO, USB host and USB2 PHY nodes; R1 reuses the frozen B1 final `.config` and DTB, and G2 only changes the RK809 node while preserving that boundary. Earlier wording in this report and roadmap claiming that B1 retained storage/USB was incorrect. The G2 runtime must therefore keep Linux MMC/eMMC/TF/SDIO and USB host/PHY disabled. U-Boot reads the TF boot partition and loads Image/uInitrd/DTB before Linux starts; the Linux root remains initramfs in RAM and `/init` does not mount or write persistent storage. This is the lowest-variable network investigation baseline. If Linux storage or USB support is needed later, it must be introduced as a separately reviewed configuration/DTB phase, not silently folded into this runtime.
 
 The new init script and boot script are stored at:
 - `scripts/panther-x2-g2-runtime/init`
@@ -70,13 +70,13 @@ The packaging workflow must verify before assembling the image:
 2. Exact G2 Image/config/DTB, B1 BusyBox and JP U-Boot proper hashes listed above.
 3. Required kernel configuration: ARM64, OF, initrd, proc/sysfs, TTY/UART, NET, PACKET, I2C, REGMAP_I2C, REGMAP_IRQ, MFD_CORE, MFD_RK8XX, MFD_RK8XX_I2C and MODULES.
 4. Forbidden kernel configuration remains absent: STMMAC, Rockchip DWMAC, MDIO, PHYLIB, RTL8211F, RK808 regulator, PWRKEY child, wireless and Bluetooth.
-5. DTB model/compatible are Panther X2/RK3566 and RK809, GMAC1, MDIO and PHY nodes remain disabled.
+5. DTB model/compatible are Panther X2/RK3566; RK809, GMAC1, MDIO, PHY, all MMC/eMMC/TF/SDIO, USB host and USB2 PHY nodes remain disabled.
 6. BusyBox is AArch64 and statically linked; required applets exist; the init script passes BusyBox ash syntax validation.
 7. Initramfs round-trip extraction preserves the exact init and BusyBox.
 8. GPT/ext4 layout, embedded JP U-Boot proper readback, read-only remount and payload hashes.
 9. Final artifact SHA256 manifest validates.
 
-No PMIC probe is triggered merely because MFD code is built-in: the RK809 DT node remains disabled. No physical network interface is available: GMAC1/MDIO/PHY remain disabled. Network core and AF_PACKET are built in, but the runtime does not configure addresses/routes or send packets.
+No PMIC probe is triggered merely because MFD code is built-in: the RK809 DT node remains disabled. No physical network interface is available: GMAC1/MDIO/PHY remain disabled. Linux storage and USB host are also disabled in the frozen B1/R1 baseline; the TF is used only by U-Boot before Linux starts. Network core and AF_PACKET are built in, but the runtime does not configure addresses/routes or send packets.
 
 ## 6. New workflow
 
