@@ -69,14 +69,14 @@ The packaging workflow must verify before assembling the image:
 1. G2 and B1 artifact internal SHA256 manifests.
 2. Exact G2 Image/config/DTB, B1 BusyBox and JP U-Boot proper hashes listed above.
 3. Required kernel configuration: ARM64, OF, initrd, proc/sysfs, TTY/UART, NET, PACKET, I2C, REGMAP_I2C, REGMAP_IRQ, MFD_CORE, MFD_RK8XX, MFD_RK8XX_I2C and MODULES.
-4. Forbidden kernel configuration remains absent: BLOCK/MMC/eMMC/TF/SDIO, USB host/PHY/storage, STMMAC, Rockchip DWMAC, MDIO, PHYLIB, RTL8211F, RK808 regulator, PWRKEY child, wireless and Bluetooth.
-5. DTB model/compatible are Panther X2/RK3566; RK809, GMAC1, MDIO, PHY, all MMC/eMMC/TF/SDIO, USB host and USB2 PHY nodes remain disabled.
+4. Forbidden kernel configuration remains absent: IP protocols (INET/IPv6), STMMAC/Rockchip DWMAC, MDIO/PHYLIB/RTL8211F, USB network adapters, RK808 regulator, PWRKEY child, wireless and Bluetooth. BLOCK/MMC/USB host/USB storage are retained as in the frozen B1/R1 config; the USB NIC drivers remain disabled.
+5. DTB model/compatible are Panther X2/RK3566; RK809, GMAC1, MDIO, PHY and SDIO are disabled; TF/eMMC, USB host/PHY0, UART1/UART2 are enabled; Bluetooth child under UART1 is absent; unused SDHCI and second USB controller/PHY nodes are disabled.
 6. BusyBox is AArch64 and statically linked; required applets exist; the init script passes BusyBox ash syntax validation.
 7. Initramfs round-trip extraction preserves the exact init and BusyBox.
 8. GPT/ext4 layout, embedded JP U-Boot proper readback, read-only remount and payload hashes.
 9. Final artifact SHA256 manifest validates.
 
-No PMIC probe is triggered merely because MFD code is built-in: the RK809 DT node remains disabled. No physical network interface is available: GMAC1/MDIO/PHY remain disabled. Linux storage and USB host are also disabled in the frozen B1/R1 baseline; the TF is used only by U-Boot before Linux starts. Network core and AF_PACKET are built in, but the runtime does not configure addresses/routes or send packets.
+No PMIC probe is triggered merely because MFD code is built-in: the RK809 DT node remains disabled. No physical network interface is available: GMAC1/MDIO/PHY remain disabled. The frozen B1/R1 baseline retains MMC/eMMC/TF and USB host/PHY support, but `/init` leaves persistent filesystems unmounted and the root remains initramfs in RAM. Network core and AF_PACKET are built in, but the runtime does not configure addresses/routes or send packets.
 
 ## 6. New workflow
 
