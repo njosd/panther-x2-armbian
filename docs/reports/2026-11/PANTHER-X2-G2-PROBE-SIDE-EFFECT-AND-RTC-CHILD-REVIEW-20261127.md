@@ -78,7 +78,7 @@ regmap-irq 初始化会：
 
 ### 3.2 与 RK809 Rev 2.4/2.5 的明确差异
 
-两份公开数据手册对相关位域给出的描述一致：
+两份公开数据手册对相关位域给出的描述一致。按 Rev 2.5 可列出的有效中断位为：0xF8 全 8 位（8 项）、0xFA bit[1:0]（2 项 plug-in/out）、0xFC bit[5:2]（4 项 codec），合计 14 项；而 Linux RK817 IRQ chip 对 RK809 也无差别地建立 24 个通用 IRQ line。**因此 24-bit Linux map 中有 10 位并非 RK809 Rev 2.5 文档定义的有效中断源**：0xFA bit[7:2] 六位，以及 0xFC bit[7:6]、bit[1:0] 四位。
 
 | 寄存器 | 数据手册定义 | Linux 24-bit IRQ map 的影响 |
 |---|---|---|
@@ -87,7 +87,7 @@ regmap-irq 初始化会：
 | 0xFA PMIC_INT_STS1 | bit7:2 reserved W1C | Linux 将这些位也映射为 IRQ status/ACK 位 |
 | 0xFC PMIC_INT_STS2 | bit7:6 reserved RC；bit1:0 reserved W1C | Linux 将这些位也映射为 IRQ status/ACK 位 |
 
-这不是 6.18 新引入的版本差异：黄金 6.1.65 候选和 6.1.116 源码使用相同的 RK817 24-bit mapping。但黄金 IRQ 38/39 和 RTC child IRQ 注册记录只证明部分子 IRQ 能注册/运行，不能证明 0xFA/0xFC 保留位的当前 silicon 语义，也没有提供启动时这些状态位的读回值。
+这不是 6.18 新引入的版本差异：黄金 6.1.65 候选和 6.1.116 源码使用相同的 RK817 24-bit mapping。但黄金 IRQ 38/39 和 RTC child IRQ 注册记录只证明部分子 IRQ 能注册/运行，不能证明额外 10 个未被 Rev 2.5 定义为有效 IRQ 的位在当前器件上的语义，也没有提供启动时这些状态位的读回值。
 
 特别注意：0xFC 的部分位在数据手册中标为 RC。不能为了“补一个状态证据”而随意增加对 0xFC 的只读读取；读取本身可能清除状态。现有只读白名单仍仅限 0xED、0xEE、0xF0、0xF6，不扩大到 0xF8–0xFD。
 
