@@ -877,3 +877,15 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 **纠错（2026-11-27，按冻结 artifact 回溯）：** B1/R1/G2 实际冻结配置包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`。DTB 保留 TF/eMMC、USB host/PHY0、UART1/UART2，禁用 SDIO/Wi-Fi、GMAC1/MDIO/PHY，移除 Bluetooth 子节点；G2 仅将 RK809 节点保持 disabled。RAM-only 指 Linux root 使用 initramfs，`/init` 不挂载/写入持久化文件系统，不等于关闭存储/USB 驱动。当前默认分支 B1 fragment、DTB 生成脚本和 B1 workflow 已与冻结 artifact 合约发生漂移，重新生成 B1 前必须单独审计并修复一致性。
 
 **状态：** PREPARE-ONLY packaging run `45935908005` 全部通过，artifact `15170487170` 已下载并独立审计；raw image SHA256 `9c15acef6a399d51b161b72f5d86a80277ef08c47d23927a2e5939ba5faa9a78`。没有写入任何物理介质，没有 Panther X2 实机启动。G2-PROBE 仍 HOLD / NOT AUTHORIZED；G2 runtime artifact 不得未经新配置审查及授权直接写卡/启动。
+
+
+## 2026-11-27 G0.5 ABCD sender / pcap verifier 实现状态更新
+
+在不访问 Panther X2、不写入任何 TF/eMMC、不启用 PMIC/GMAC/MDIO/PHY 的前提下，G0.5 已从静态设计推进到独立工具的 SOURCE/BUILD/OFFLINE SELF-TEST PASS：
+
+- 新增 `scripts/panther-abcd-tx/panther-abcd-tx.c`：静态 AArch64 AF_PACKET/SOCK_RAW sender，显式指定接口，仅读接口元数据；拒绝 DOWN/loopback；不修改 link/address/route；只发送一帧 64-byte Ethernet II broadcast，EtherType 0x88B5，包含 ABCD/run_id/sequence/payload_len/SHA-256。sendto 成功仅代表 A 用户态提交，不代表物理 TX。
+- 新增 `scripts/panther-abcd-tx/verify-pcap.py`：离线 classic-pcap Ethernet 校验器，验证唯一 0x88B5 帧、MAC、run_id、sequence、payload 长度与 digest。
+- 新增 `.github/workflows/build-panther-abcd-tx.yml`：静态交叉编译、AArch64/no-PT_INTERP 检查、QEMU user-mode 纯 self-test、pcap synthetic self-test、SHA256 manifest。
+- 最终 Actions run `45941220581` 全部通过，artifact `15172507107`；最终 ELF SHA256 `e0f29848bd4bb8378e3925ac1214731dff987a0b3d5fc2d8fe1fe6fe657bc9f9`。最终下载 artifact 的内部 SHA256 清单及 ELF 架构/静态链接已独立核验。详细记录见 `PANTHER-X2-PROJECT-A-ABCD-SENDER-AND-PCAP-VERIFIER-20261127.md`。
+
+**证据边界：** 以上仅为 SOURCE/BUILD/OFFLINE SELF-TEST PASS；没有将 sender 放入 runtime/initramfs，没有在 Panther 实机执行，没有注册 tracing/kprobe，没有发送物理帧。R1 loopback 证据仍不等价于 Ethernet TX。G2-PROBE 仍 HOLD / NOT AUTHORIZED；G2→G3→G4→G5→G6 顺序和逐门授权不变。只有未来获准阶段在 interface open/DMA 条件满足后，才执行单帧 ABCD；最终 TX PASS 仍必须由独立对端 pcap E6 证明。
