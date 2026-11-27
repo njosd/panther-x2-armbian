@@ -3,7 +3,6 @@
 # The Linux DTB keeps RK809, GMAC1, MDIO and RTL8211F disabled.
 # No environment is saved. Any load/boot failure holds here; no reset or fallback.
 setenv bootargs 'console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init'
-setenv boot_targets 'mmc1'
 
 echo "Panther X2 Project-A G2 minimal runtime (PREPARE-ONLY)"
 echo "Selecting verified TF device: mmc 1"
