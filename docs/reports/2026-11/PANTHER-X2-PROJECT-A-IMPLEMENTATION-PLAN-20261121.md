@@ -436,3 +436,12 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 G4-B Actions run `45997129528` PASS；完整构建与 artifact 独立校验结果见 `PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。该产物 DTB 禁用了 Linux TF SDMMC0 和 eMMC 控制器，只能作为 RAM-only G4-P 隔离候选，不可直接用于 TF rootfs。G4-P 仍 HOLD / NOT AUTHORIZED。
 
 G4-P 经独立授权并验证后，下一构建门必须单独恢复 TF SDMMC0、保持 eMMC disabled，产出 TF-rootfs 专用 DTB 并做 build-only 审计；随后才在 SU08G 上建立完整用户空间。G5 及后续硬件/网络测试继续留在 SU08G。eMMC 不写入、不挂载、不安装、不修改，直到 TF 系统完整验收后另行评审和单独授权。
+
+
+## 2026-11-27 G4-P preflight 结果与停止条件
+
+只读完成 G4-P 14 项 PMU GRF write 参数矩阵；完整细节见 `PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md`。确认固定 stock driver 不检查 RK3568 `regmap_write()` 返回值，部分 probe 失败不回滚已写 selector；当前 regmap debugfs registers 为只读，安全受限 rollback helper 尚未实现/验证。
+
+因此 G4-P 当前 **NO-GO / HOLD / NOT AUTHORIZED**。不得启动 G4-P runtime，不得加载会触发 IO-domain probe 的 DTB，不得执行 PMU GRF 写入。后续必须先解决只读 readback 接口核验与可验证 rollback 机制，再提交完整风险方案并取得单独明确授权。不得为了赶进度直接沿用 stock probe。
+
+SU08G 是唯一实验介质；eMMC/SN64G 冻结。TF-rootfs 专用 DTB、完整用户空间和 G5 均不越过 G4-P 门提前启动。
