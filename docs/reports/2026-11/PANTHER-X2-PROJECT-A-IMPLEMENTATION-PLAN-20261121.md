@@ -127,7 +127,7 @@ B1 只构建一个纯 RAM 的最小启动底座。网络、存储和 USB 组件�
 
 ### B1.4 静态验收
 - Kernel 为 ARM64 Linux Image；最终 .config 中网络栈、Ethernet 驱动、无线/蓝牙、USB、MMC/block 和 MODULES 均未启用，且无 `.ko`。
-- DTB 的 model/compatible 对应 Panther X2/RK3566；GMAC/MDIO/PHY、MMC/eMMC/SDIO、USB 和 Bluetooth UART 节点全部禁用，Wi-Fi/蓝牙板级节点不存在。
+- DTB 的 model/compatible 对应 Panther X2/RK3566；GMAC/MDIO/PHY 与 SDIO/Wi-Fi 节点禁用；TF/eMMC、USB host/PHY0、UART1/UART2 保持冻结 B1 基线状态，Bluetooth 子节点移除，UART2 为 console。Linux root 为 RAM initramfs；`/init` 不挂载/写入持久化文件系统。
 - `/init` 存在且可执行。
 - BusyBox 为 ARM64 静态 ELF；`/init` 所需 `ash/sh/cat/dmesg/mkdir/mount/tail/uname` 全部存在；网络 applet 不存在，实际 applet 清单不超过最小白名单范围。
 - initramfs 可解包，目录/权限正确，压缩格式与启动脚本兼容。
