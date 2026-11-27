@@ -228,8 +228,8 @@ jobs:
           grep -qx 'mdio_status=disabled' work/output/G2-DTB-ISOLATION.txt
           grep -qx 'phy_status=disabled' work/output/G2-DTB-ISOLATION.txt
 
-          sha256sum "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \\
-            "$OUT/drivers/rtc/rtc-rk808.o" "$OUT/drivers/input/misc/rk805-pwrkey.o" \\
+          sha256sum "$OUT/drivers/mfd/rk8xx-core.o" "$OUT/drivers/mfd/rk8xx-i2c.o" \
+            "$OUT/drivers/rtc/rtc-rk808.o" "$OUT/drivers/input/misc/rk805-pwrkey.o" \
             | tee work/output/G2-MFD-OBJECTS-SHA256.txt
           {
             echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
