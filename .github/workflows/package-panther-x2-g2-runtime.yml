@@ -64,6 +64,9 @@ jobs:
           test -s work/g2/output/BUILD-MANIFEST.txt
           test -s work/g2/output/System.map
           test -s work/g2/output/vmlinux
+          test -s work/g2/source-lock.txt
+          test -s work/g2/r1-reference-lock.txt
+          test -s work/b1/source-lock.txt
           test -s work/b1/output/busybox
           test -s work/b1/output/JP-TvBox-u-boot.itb
           test -s work/b1/output/SHA256SUMS
@@ -114,6 +117,10 @@ jobs:
           cp work/g2/output/vmlinux work/debug/vmlinux
           cp work/g2/output/G2-DTB-ISOLATION.txt work/output/G2-DTB-ISOLATION.txt
           cp work/g2/output/BUILD-MANIFEST.txt work/output/G2-BUILD-MANIFEST.txt
+          cp work/g2/source-lock.txt work/output/G2-source-lock.txt
+          cp work/g2/r1-reference-lock.txt work/output/G2-R1-reference-lock.txt
+          cp work/b1/source-lock.txt work/output/B1-source-lock.txt
+          cp -a work/g2/logs work/output/G2-build-logs
           cp work/b1/output/busybox work/initramfs/busybox
           cp work/b1/output/busybox work/output/busybox
           cp work/b1/output/busybox.config work/output/busybox.config
