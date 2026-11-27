@@ -103,6 +103,17 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 **G2 runtime 基线纠错（2026-11-27，按冻结 artifact 回溯）：** B1/R1/G2 最终 `.config` 包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`；TF/eMMC、USB host/PHY0、UART1/UART2 在 DTB 中保持 enabled，SDIO/Wi-Fi、第二 USB host/PHY、GMAC1/MDIO/PHY disabled，Bluetooth 子节点移除。G2 继承 R1 的 DTB，仅将 RK809 节点保持 disabled。RAM-only 指 Linux root 为 initramfs、`/init` 不挂载/写入持久化文件系统。此次 runtime workflow 的失败源于错误地把 `CONFIG_BLOCK=y` 列入禁止项；后续门控改为核验冻结 artifact 的实际 Kconfig 和 DTB 节点状态。
 ## 2026-11-27 G2-S/G2-B 完成与 G2-PROBE HOLD
 
+### 2026-11-27 G2-PROBE 追加准入审计：RTC child 与 IRQ 保留位
+
+新增静态报告：`PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md`。
+
+关键补充：当前 G2-B/runtime artifact 的 `RTC_DRV_RK808` 未启用；而 RK809 MFD 的 `rk817_pre_init_reg[]` 会先将 RTC_CTRL 0x0D 的 RTC_STOP 置位。若只启用 RK809 DT 节点，RTC child 不会绑定 RTC driver 来清除 STOP 位，因而不等价于黄金系统的完整 RTC 生命周期。若启用 RTC child，又会清除 RTC_STOP、设置 RTC_READSEL、向 RTC_STATUS 0x0E 写 0xFE，并请求 RTC alarm IRQ；该 unmask/sync 路径还会触发额外 IRQ mask/ACK 写入。
+
+同时，RK809 Rev 2.4/2.5 对 0xFA/0xFC 的 reserved W1C/RC 位定义与 Linux RK817 24-bit IRQ mapping 仍未闭合。parent IRQ 初始化可能对 0xF8/0xFA/0xFC 执行状态读取及条件 ACK；不得通过新增读取 0xFC 来“补证”，因为其部分位是 RC。pre-init/IRQ 发生部分失败时，devres 只释放 Linux 资源，不会恢复此前已写入的 PMIC 寄存器。sys-off/shutdown/suspend/resume 还存在 0xF4 系统状态写入路径。
+
+**准入结论维持 G2-PROBE HOLD / NOT AUTHORIZED**；当前 G2 runtime artifact 仅是 PREPARE-ONLY 安全基线，不可直接修改 RK809 status 后启动。下一步只允许补齐实际芯片版本 register-map/errata 证据、明确 RTC child 策略和精确副作用清单、建立部分失败及安全退出方案；在此之前不生成 PMIC-enabled 实机镜像、不写 SU08G、不启动设备。ABCD 仍 NOT EXECUTABLE。
+
+
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
 
 G2-B build-only 已由 run `45924949130` 完成并通过：Image、MFD built-in 对象/链接符号、最终配置、DTB 隔离和 artifact SHA256 均通过。该结果只证明 build/link，不证明 PMIC 实机行为。后续 Project-A 6.18.63 minimal runtime 已由 run `45935908005` 完成 PREPARE-ONLY 打包，artifact `15170487170` 经独立下载审查，内部 SHA256 清单、Zstandard、2GiB raw image、主/备 GPT CRC、分区边界和 ext4 superblock 均通过。安全基线仍保持 RK809、GMAC1、MDIO、PHY disabled；未访问设备、未写 TF/eMMC、未触发 PMIC probe。通用 QEMU virt 不模拟 RK3566/Panther X2，不执行无代表性的 system boot。下一步不是直接启动，而是单独评审 G2-PROBE 的副作用、回退和观测方案，并取得明确授权；在此之前 G2-PROBE、SU08G 写入及实机启动均保持 HOLD。
