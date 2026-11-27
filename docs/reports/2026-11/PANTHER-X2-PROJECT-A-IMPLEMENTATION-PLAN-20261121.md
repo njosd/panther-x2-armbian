@@ -415,5 +415,4 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 
 本次只完成脚本与 workflow 的仓库准备，workflow 尚未运行，因此没有 runtime image 或新的 runtime artifact。下一步只运行该 PREPARE-ONLY workflow 并审查产物；不写 SU08G、不碰 SN64G/eMMC、不启动 Panther X2。G2-PROBE 仍须先完成独立副作用审查和明确授权。
 
-补充核对：G2-B 最终 `.config` 中 `CONFIG_BLOCK/MMC/MMC_DW/MMC_DW_ROCKCHIP/USB` 等为 y，这是既有 B1/R1 基线设计的一部分，不应误判为本轮新增或意外启用。B1 的 Linux 设备树本来就保留指定 eMMC/TF/SD 与 USB host/PHY 节点，项目约束是 RAM initramfs 不挂载/写入持久化文件系统，而不是完全关闭存储/USB驱动。G2 runtime 会原样保留此边界，并对 MMC/USB DT 节点状态增加显式核验与启动时状态输出。
-
+**纠错（2026-11-27）：** 复核实际冻结文件后确认，B1 并未保留 Linux 存储/USB 支持。`scripts/panther-x2-b1/kernel.config.fragment` 明确关闭 `CONFIG_BLOCK`、`CONFIG_MMC`、`CONFIG_USB`；`prepare-clean-dtb.py` 明确禁用 eMMC/TF/SDIO、USB host/PHY；R1 从 B1 最终 `.config` 与 DTB 继承该边界，G2 仅在 DTB 中调整 RK809 节点，不应改变存储/USB状态。此前本计划中关于 B1 保留存储/USB 的补充说明有误，现撤销。G2 runtime 将继续保持 BLOCK/MMC/USB 驱动及对应 DT 节点 disabled；U-Boot 在 Linux 启动前读取 TF 上的启动文件，Linux 只运行 RAM initramfs。若后续需要 Linux 存储支持，应作为独立配置阶段审查，不在本轮网络 TX 最小环境中顺手启用。
