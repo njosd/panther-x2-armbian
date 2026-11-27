@@ -103,3 +103,49 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
 
 下一步 G2-B 仅做 build-only：启用 MFD_RK8XX_I2C（可选 INPUT_RK805_PWRKEY），不启用 REGULATOR_RK808；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。检查最终 config、built-in 对象、Image/DTB 与 QEMU 非硬件自检。G2-B 不访问 PMIC、不触发 probe、不改写设备。G2-PROBE 仍须另行提交明确的 PMIC 写入清单并取得用户授权。
+
+
+## 2026-11-27 GMAC 高风险准入原则（强制）
+
+用户明确强调：第一轮项目 A 的目标始终是 Panther X2 实机运行最小网络组件的 Linux 6.18，并逐层打通真实 Ethernet TX；GMAC 是黄金版本之后变化较大、也是最主要的风险堵点。后续不得把 GMAC 当作普通驱动开关处理。
+
+### A. 当前已知的高风险变化
+
+1. **Rockchip glue 初始化路径变化**：6.1.65 在 RK3568 专属 `set_to_rgmii()` 路径中显式设置 interface mode；6.18 增加 `rk3568_init()`、`gmac_phy_intf_sel_mask`，并将 interface selection 迁入通用 `rk_gmac_powerup()` / write-mask 路径。寄存器最终意图相近，不代表写入顺序、掩码、时序完全相同。
+2. **GRF mode 处理变化**：6.18 显式处理 CON1 bit7 的 RMII/RGMII mode；6.1.65 依赖复位默认值。TRM 证实 reset=0 且 0=RMII/RGMII，因此当前静态意图相符，但必须核对 6.18 实际写入时机和 readback 证据。
+3. **STMMAC core/Kconfig/对象结构变化**：6.18 新增 `ETHTOOL_NETLINK` 依赖及 `NET_DEVLINK` select，并存在 STMMAC/DWMAC4 core 结构变化。必须以最终解析后的 `.config`、built-in 对象和实际调用路径为准，不按配置片段推断。
+4. **DMA/TX 生命周期**：descriptor、DMA mapping、OWN、completion、reclaim 必须分别取证；不能把 netdev 注册、carrier、计数器增长或 descriptor OWN 清除视为物理 TX 成功。
+5. **时钟链**：DTS 的 125MHz fixed-clock 只证明 CCF 逻辑描述，不证明板上实际时钟来源/波形。现有证据没有把 RK809 CLKOUT 与 gmac1_clkin 连起来；RTL8211F CLKOUT 只是候选。此项优先通过黄金系统实际 clock tree、PHY 驱动配置与启动/运行证据反向确认，不因抽象上的 UNKNOWN 就直接要求测板或量电压。
+
+### B. GMAC 启用前的强制准入清单
+
+在 G5-A 恢复 GMAC1 节点/驱动之前，必须逐项归档并由用户审阅：
+
+- [ ] **Golden source diff**：6.1.65 与 6.18 的 Rockchip glue 关键函数逐函数差异，涵盖 probe、powerup/powerdown、interface mode、GRF write-mask、clock/reset、regulator、PHY reset、delay 配置。
+- [ ] **Golden config/object diff**：两条黄金基线与 6.18 最终配置中 STMMAC_ETH、DWMAC4、ROCKCHIP_DW_MAC、PHYLINK、MDIO、DMA、IRQ、clock/reset 依赖闭包及实际 built-in 对象。
+- [ ] **Golden DTB diff**：6.1.65 原始 GMAC1/PHY/clock/reset/pinctrl/PMIC/IO-domain 相关子树与 6.18 实际 DTB 的属性、phandle、resource、status、供电映射对照。只提取相关子树，不重新提取整盘镜像；6.1.116 与 6.18 DTB 字节相同的事实作为第二参照。
+- [ ] **Provider/consumer readiness**：RK809 MFD/regulator 与 IO-domain supplier 实际 bind/probe 状态、deferred-probe 原因、PHY supply consumer 获取/enable 路径；以黄金驱动实际行为为对照，不预设必须进行电压测量。
+- [ ] **Clock/reset/pinctrl readiness**：CCF 实际 parent/rate/enable 状态、GMAC1 reset controller 结果、RGMII pinctrl 组与 PHY reset GPIO 极性/时序。125MHz 物理来源若软件证据仍不能确认，先标注 BLOCKED/UNKNOWN，给出针对性最小补证方案，不擅自假定某个芯片输出。
+- [ ] **Observability and rollback**：在启用前准备 probe 日志、trace、netdev stats、DMA mapping/descriptor/completion 观察手段；固定回退到 B1-clean 与前一阶段 Project-A runtime 的资产及哈希。
+
+任何一项未完成或出现无法解释的黄金差异，G5-A 保持 HOLD；不通过“先启用再看日志”代替准入审计。
+
+### C. GMAC 分段启用与测试边界
+
+1. **G5-A1：MAC glue/probe only** — 只恢复 GMAC1 所需节点和最小驱动闭包；确认 probe/bind、资源获取、netdev 注册。此时不主动 open，不启动 PHY 链路协商，不发送帧。
+2. **G5-A2：MDIO/PHY attach** — 单独确认 MDIO bus、PHY address 0、RTL8211F ID、PHY driver bind。只使用驱动正常初始化路径，不随意写 PHY 寄存器；link 状态需有实际证据。
+3. **G6-A：interface open/DMA init** — 单独 open，记录 MAC/MTL/DMA reset outcome、ring allocation、DMA mask/address width、IRQ、queue/NAPI 和 DMA mapping。6.18 reset failure warning-and-continue 必须单独判定，不能因 probe 成功而放过。
+4. **G6-B：ABCD 单帧 TX** — 一旦 AF_PACKET、netdev open、DMA ring 条件齐备，立即发送一个 0x88B5 广播测试帧，关联同一 run_id/sequence/hash 的 A 用户态、B skb、C stmmac_xmit、D DMA mapping/descriptor/completion/reclaim 证据。
+5. **G7：E6 物理验收** — 独立 LAN 对端抓包，确认同一帧的 MAC、EtherType、sequence、length、payload hash。只有 E6 收到正确帧才判定 TX PASS。
+
+G5-A1/G5-A2 若不具备发送条件，ABCD 明确记录 NOT EXECUTABLE 与缺失条件；每隔一门复核一次。一旦 G6-A 条件具备，不能再以“还没到协议栈阶段”为由推迟单帧 TX。
+
+### D. 明确禁止的捷径
+
+- 不因两条黄金系统网络正常就推断 6.18 GMAC glue/core 一定兼容；黄金系统的作用是提供配置、源码、启动行为与功能对照证据。
+- 不因 6.18 与黄金 DTB 的关键属性相同就跳过驱动源码/调用顺序差异审计。
+- 不以人为强制时钟、手工寄存器写、绕过 regulator/IO-domain、伪造 PHY link 或修改 DMA 算法来快速“打通”。
+- 不把增加完整 Armbian/systemd/NetworkManager/DHCP 等用户空间作为 GMAC 排障手段。
+- 不把 PMIC 3.3V rail 测量或 PCB 测点搜索设为默认前置条件；优先反向核对黄金版本如何配置和使用同一 provider/consumer。只有发现具体且无法由软件证据解释的物理异常假设时，才提出有针对性的补证。
+
+**准入总原则：先解释黄金到 6.18 的差异，再按资源依赖逐层启用；每一步都留有可观测证据、单变量边界和回退点。第一轮成功标准仍是对端收到正确 TX 帧，不是 GMAC probe 成功。**
