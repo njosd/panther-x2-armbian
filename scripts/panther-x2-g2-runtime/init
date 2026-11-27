@@ -46,7 +46,7 @@ echo "--- Memory ---"
 cat /proc/meminfo
 
 echo
-echo "--- Network interfaces (loopback expected; no physical NIC) ---"
+echo "--- Network interfaces (no physical NIC expected) ---"
 if [ -d /sys/class/net ]; then
     for item in /sys/class/net/*; do
         [ -e "$item" ] && echo "${item##*/}"
