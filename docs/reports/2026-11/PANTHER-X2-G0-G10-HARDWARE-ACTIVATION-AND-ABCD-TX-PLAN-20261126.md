@@ -102,7 +102,7 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
 
-下一步 G2-B 仅做 build-only：启用 MFD_RK8XX_I2C（可选 INPUT_RK805_PWRKEY），不启用 REGULATOR_RK808；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。检查最终 config、built-in 对象、Image/DTB 与 QEMU 非硬件自检。G2-B 不访问 PMIC、不触发 probe、不改写设备。G2-PROBE 仍须另行提交明确的 PMIC 写入清单并取得用户授权。
+下一步 G2-B 仅做 build-only：启用 MFD_RK8XX_I2C，不启用 INPUT_RK805_PWRKEY 或 REGULATOR_RK808；RK809 节点保持 disabled，GMAC/MDIO/PHY 继续 disabled。检查最终 config、built-in 对象、Image/DTB 和 manifest。通用 QEMU virt 不模拟 RK3566/Panther X2，不安排无代表性的 kernel system boot。G2-B 不访问 PMIC、不触发 probe、不改写设备。G2-PROBE 仍须另行提交明确的 PMIC 写入清单并取得用户授权。
 
 
 ## 2026-11-27 GMAC 高风险准入原则（强制）
