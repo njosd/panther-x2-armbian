@@ -2,7 +2,10 @@
 # Build-only preparation; no device is accessed and no PMIC probe is performed.
 CONFIG_I2C=y
 CONFIG_MFD_RK8XX_I2C=y
+CONFIG_RTC_CLASS=y
 CONFIG_RTC_DRV_RK808=y
+CONFIG_INPUT=y
+CONFIG_INPUT_MISC=y
 CONFIG_INPUT_RK805_PWRKEY=y
 # Regulator provider is intentionally deferred to G3.
 # CONFIG_REGULATOR_RK808 is not set
