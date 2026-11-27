@@ -1051,3 +1051,8 @@ G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` �
 只读审查固定 6.18.63 io-domain driver 与 regulator core 后，确认 stock driver 的 14 次潜在 GRF 写入缺少错误传播、probe 失败不恢复已写 selector；regulator notifier 在 regulator mutex 持有期间执行，因此不能在持有 IO-domain mutex 时调用 regulator core API。另确认普通 remove/unbind 时自动恢复快照不安全，除非证明 regulator rail 在 teardown/restore 全窗口冻结。
 
 **当前仍为设计审查，不是 patch 实现或运行时验证。** G4-P-SAFE patch、fake-regmap/KUnit 故障注入、build-only 均未完成；G4-P 继续 NO-GO / HOLD / NOT AUTHORIZED。下一步仍限定为独立代码候选与纯软件测试，不启动 Panther X2、不访问 PMIC/PMU GRF、不写任何介质。
+
+
+## 2026-11-27 PMU GRF 只读 readback 静态可行性补充
+
+固定 Linux 6.18.63 syscon 使用通用 32-bit MMIO regmap，regmap debugfs 的 registers 文件默认只读；静态上可通过 PMU GRF syscon 的 regmap_read() 路径观察 VSEL0/1/2。Panther X2 运行时 debugfs/regmap 目录及 readable/access 状态尚未核验，因此只收窄源码机制疑点，不代表 readback 已实机通过。G4-P 仍 NO-GO / HOLD / NOT AUTHORIZED。细节见 G4-P-SAFE 设计审查与 G4-P runtime readiness 报告。
