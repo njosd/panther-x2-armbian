@@ -889,3 +889,20 @@ G2-B 已完成 BUILD PASS。现已提交以下 runtime 资产准备文件：
 - 最终 Actions run `45941220581` 全部通过，artifact `15172507107`；最终 ELF SHA256 `e0f29848bd4bb8378e3925ac1214731dff987a0b3d5fc2d8fe1fe6fe657bc9f9`。最终下载 artifact 的内部 SHA256 清单及 ELF 架构/静态链接已独立核验。详细记录见 `PANTHER-X2-PROJECT-A-ABCD-SENDER-AND-PCAP-VERIFIER-20261127.md`。
 
 **证据边界：** 以上仅为 SOURCE/BUILD/OFFLINE SELF-TEST PASS；没有将 sender 放入 runtime/initramfs，没有在 Panther 实机执行，没有注册 tracing/kprobe，没有发送物理帧。R1 loopback 证据仍不等价于 Ethernet TX。G2-PROBE 仍 HOLD / NOT AUTHORIZED；G2→G3→G4→G5→G6 顺序和逐门授权不变。只有未来获准阶段在 interface open/DMA 条件满足后，才执行单帧 ABCD；最终 TX PASS 仍必须由独立对端 pcap E6 证明。
+
+
+## 2026-11-27 G3 RK809 regulator-provider runtime preparation
+
+G3-S 静态审计已完成，G3-B build-only 已通过 Actions run `45984035650`（artifact `15192123549`）。构建产物为 Linux 6.18.63 Image、Panther X2 G3 隔离 DTB、kernel.config、vmlinux/System.map、对象/符号审计及 SHA256 清单；它不是可直接启动的完整 TF 镜像。产物内部 SHA256 已独立校验。G3 config 已确认 `CONFIG_REGULATOR_RK808=y`、`CONFIG_DEBUG_FS=y`、`CONFIG_DEBUG_FS_ALLOW_ALL=y`；`CONFIG_ROCKCHIP_IODOMAIN` 未启用。DTB 中 RK809 节点启用，IO-domain、eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1/MDIO/PHY 均 disabled。
+
+用户已明确授权一次 G3-P：仅在 SU08G 上进行 RAM-only 启动，允许 RK809 regulator provider probe 及其预期 PMIC 初始化寄存器写入；不包括 eMMC/SN64G 写入、IO-domain、MMC/SDIO/GPU/SARADC/GMAC/MDIO/PHY 启用、suspend 或手动 I2C/PMIC 写操作。**授权已取得，但设备尚未启动，G3-P 仍未执行。**
+
+为避免把 G3-B build-only artifact 错当作启动包，已在独立分支 `g3-provider-runtime-package` 建立 G3 runtime PREPARE-ONLY 流程：
+- `.github/workflows/package-panther-x2-g3-provider-runtime.yml`：手动触发；复用 G3-B 固定 Image/DTB 和 B1 静态 BusyBox/JP-TvBox U-Boot proper；校验 G3 config、DTB 隔离、artifact SHA256、initramfs round-trip、SU08G GPT/ext4、U-Boot proper LBA readback，并生成 PREPARE-ONLY 镜像与 manifest。该 workflow 尚未运行。
+- `scripts/panther-x2-g3-runtime/init`：RAM-only init，挂载 procfs/sysfs 后进行初次采集并进入交互 shell。
+- `scripts/panther-x2-g3-runtime/capture-g3.sh`：只读采集 RK809 I2C driver binding、regulator class/summary、`devices_deferred`、隔离节点状态和完整/尾部 dmesg；所有采集文件仅写入 RAM 的 `/run/g3-provider`。进入 shell 后等待至少 12 秒，再运行一次该脚本，以覆盖内核默认 10 秒 deferred-probe timeout 后的状态。
+- `scripts/panther-x2-g3-runtime/boot.cmd`：沿用已验证的 U-Boot load addresses，bootargs 加入 `regulator_ignore_unused`；不 saveenv、不自动 reset/fallback。
+
+注意：`regulator_ignore_unused` 仅抑制 late unused-regulator cleanup，不抑制 provider probe 初始化写入。debugfs 的 `regulator_summary` 和 `devices_deferred` 已有内核配置/源码依据；采集脚本不向 sysfs 写入、不执行手动 PMIC 操作，也不挂载持久化文件系统。
+
+当前状态：**G3-S PASS；G3-B BUILD PASS；G3 runtime package 已提交但待 Actions 构建；G3-P AUTHORIZED / NOT YET EXECUTED。** 构建、打包阶段均不访问硬件、不写实体 TF/eMMC。G3-P 的下一步必须先完成 runtime package workflow 和产物审计，再使用 SU08G 执行获准的 RAM-only 启动并回收 UART 证据；不得跳过产物审计直接使用 G3-B artifact。
