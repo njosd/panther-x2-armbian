@@ -95,6 +95,7 @@ jobs:
             echo "G2_DTB_SHA256=$G2_DTB_SHA256"
           } >> "$GITHUB_ENV"
           grep -qx 'rk809_node=okay' work/g2/output/BUILD-MANIFEST.txt
+          grep -qx 'built_in_symbols=rk3x_i2c_probe,rockchip_gpio_probe,rockchip_pinctrl_probe,rk8xx_probe,rk8xx_i2c_probe,rk808_rtc_probe,rk805_pwrkey_probe' work/g2/output/BUILD-MANIFEST.txt
           grep -qx 'rtc_drv_rk808=built-in' work/g2/output/BUILD-MANIFEST.txt
           grep -qx 'input_rk805_pwrkey=built-in' work/g2/output/BUILD-MANIFEST.txt
           grep -qx 'gmac1_mdio_phy=disabled' work/g2/output/BUILD-MANIFEST.txt
@@ -229,7 +230,7 @@ jobs:
           {
             echo "g2_run_id=$G2_RUN_ID"
             echo "g2_artifact_name=panther-x2-g2-stock-runtime-candidate-build-only"
-            echo "g2_artifact_sha256s_verified=yes"
+            echo "g2_artifact_internal_sha256s_verified=yes"
             echo "b1_run_id=$B1_RUN_ID"
             echo "b1_artifact_id=$B1_ARTIFACT_ID"
             echo "b1_artifact_sha256=9274e557ea5b62b6c2fc086d5aa3fd9a502215ff0070870ae36a9d6dfcfd4b9c"
@@ -257,7 +258,7 @@ jobs:
             find . -print0 | sort -z | cpio --null -o --format=newc
           ) | gzip -n -9 > work/output/initramfs.cpio.gz
 
-          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 Project-A G2 minimal RAM runtime" -d work/output/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 Project-A G2 stock PMIC RAM runtime" -d work/output/initramfs.cpio.gz work/boot/uInitrd
           mkimage -l work/boot/uInitrd | tee work/output/uinitrd-header.txt
           grep -qi AArch64 work/output/uinitrd-header.txt
 
@@ -396,6 +397,7 @@ jobs:
             echo "physical_media_writes=none"
             echo "boot_authorization=not_granted; PMIC probe authorization is separate and not granted"
             echo "g2_build_manifest_sha256=$(sha256sum work/output/G2-BUILD-MANIFEST.txt | cut -c1-64)"
+            echo "g2_pmic_dependency_objects_sha256=$(sha256sum work/g2/output/G2-PMIC-DEPENDENCY-OBJECTS-SHA256.txt | cut -c1-64)"
             echo "g2_dtb_isolation_sha256=$(sha256sum work/output/G2-DTB-ISOLATION.txt | cut -c1-64)"
             echo "init_sha256=$(sha256sum work/output/init | cut -c1-64)"
             echo "boot_cmd_sha256=$(sha256sum work/output/boot.cmd | cut -c1-64)"
