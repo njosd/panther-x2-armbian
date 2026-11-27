@@ -6,6 +6,7 @@
 
 - [项目 A 总路线图](reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威路线，涵盖项目边界、JP U-Boot 测试基线论证、最小系统架构、组件选择原则、安全门和 B0—B7。
 - [项目 A 分阶段实施计划](reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 细化为可执行子步骤、验收标准和停止条件。
+- [项目 A TF-only 边界与运行环境切换门](reports/2026-11/PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)：固定 SU08G 唯一实验介质、RAM→TF 完整用户空间切换节点及 eMMC 最终验收/单独授权条件。
 - [B1 最小 RAM 启动与 eMMC 安全关口审计](reports/2026-11/PANTHER-X2-MINIMAL-RAM-BOOT-PLAN-AND-EMMC-SAFETY-GATE-20261121.md)：B1 的专项技术证据与安全审计。
 - [项目 A 干净基线与网络组件隔离决策（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-CLEAN-BASELINE-AND-NETWORK-COMPONENT-ISOLATION-20261122.md)：项目 A 总目标修订、B1 网络变量隔离门和逐项引入规则。
 - [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、CI workflow 和当前未验证项。
