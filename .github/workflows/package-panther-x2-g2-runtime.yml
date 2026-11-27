@@ -221,7 +221,7 @@ jobs:
             "Kernel: Linux 6.18.63; Image and DTB are SHA256-pinned." \
             "RK809 MFD code is built-in but the RK809 DT node is disabled; no PMIC probe." \
             "GMAC1/MDIO/RTL8211F remain disabled; no physical Ethernet activation or TX." \
-            "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \\
+            "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \
             "B1 storage/USB support is retained; MMC/eMMC/TF/SD and USB host/PHY may enumerate." \
             "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
             "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
