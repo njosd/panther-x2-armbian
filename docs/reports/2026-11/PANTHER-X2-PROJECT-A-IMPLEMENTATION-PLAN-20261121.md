@@ -416,3 +416,19 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 本次只完成脚本与 workflow 的仓库准备，workflow 尚未运行，因此没有 runtime image 或新的 runtime artifact。下一步只运行该 PREPARE-ONLY workflow 并审查产物；不写 SU08G、不碰 SN64G/eMMC、不启动 Panther X2。G2-PROBE 仍须先完成独立副作用审查和明确授权。
 
 **纠错（2026-11-27，按冻结 artifact 回溯）：** B1 实际构建产物并非关闭存储/USB。B1 build workflow（run `45309219886`）明确验收 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`；实际 B1/R1 DTB 保留 TF/eMMC、USB host/PHY0、UART1/UART2，禁用 SDIO/Wi-Fi、GMAC1/MDIO/PHY/RTL8211F，移除 Bluetooth 子节点。G2 继承 R1 DTB，仅将 RK809 节点保持 disabled。RAM-only 的含义是 Linux root 为 initramfs、`/init` 不挂载或写入持久化文件系统，不是关闭 MMC/USB 驱动或相关板级节点。当前默认分支 B1 fragment、DTB 生成脚本和 B1 workflow 后续发生了与冻结 artifact 不一致的改动；在重新审计并恢复一致性前，不得用当前源码重新生成/覆盖冻结 B1 artifact。
+
+## 2026-11-27 强制修订：TF-only 实验介质与 RAM→TF 用户空间切换
+
+本实施计划服从项目 A TF-only 边界：SU08G（8GB TF）是唯一实验存储介质；SN64G 冻结；eMMC 在 TF 系统完全验收前不写入、不挂载、不安装、不修改。当前启动链使用 eMMC 前级 SPL 属既有启动依赖，不构成主动修改 eMMC 的授权。
+
+### 切换节点
+- G4-B build-only：先核验 CI 构建、对象/符号、DTB 隔离、manifest 和哈希；不得将构建成功记为硬件通过。
+- G4-P：仍为 HOLD / NOT AUTHORIZED，须单独风险审查和明确授权；本计划不授权任何 PMIC/GRF/IO-domain 写入或 probe。
+- G4 前置门按计划完成后：在 SU08G 建立项目 A 完整 Linux 测试 rootfs，补齐 shell、ip/iproute2、ethtool、tcpdump、dmesg、lsblk/blkid、mount、debugfs 等诊断工具。工具按阶段和依赖审查引入。
+- G5 及后续网络/硬件验证：均在 SU08G 完整用户空间中继续，按单变量顺序放行；不得因为用户空间完整而一次性启用所有设备/驱动。
+- RAM-only B1/G3/G4 基线与哈希必须保留，作为隔离与回退资产。
+
+### eMMC 部署门
+只有当 SU08G 系统完成可重复启动、目标硬件与网络功能、存储识别/挂载、基础服务、升级回退、备份恢复和数据完整性验收，并形成最终报告后，才可进入 eMMC 部署方案评审。方案必须明确目标设备/区域、备份与校验、具体步骤、影响范围和回退路径，并由用户对具体 eMMC 写入另行授权。全部验收通过不等于自动获得写入授权。
+
+权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。
