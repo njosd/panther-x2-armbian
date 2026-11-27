@@ -397,3 +397,21 @@ DHCP help 显示 DHCP/TFTP 组合命令，未给出显式 DHCP-only 参数。必
 Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/TF 存储驱动、持久化挂载和文件系统行为混入 TX 验证变量。启动资产可由已固定的 U-Boot 从专用 SU08G TF 读取；不得写 eMMC，不触碰冻结的 64GB 对照卡。任何 TF 写入/实机启动仍按逐次授权规则执行。RAM 根文件系统不等于 B1-clean：两者内核版本可相同，但网络配置、驱动集合、用户空间和阶段用途不同。
 
 **核心判断：项目 A 的“真实运行环境”指真实 Panther X2 上运行的项目 A 专用 6.18.63 最小系统，不等于必须先安装完整发行版或持久化 rootfs。**
+
+## 2026-11-27 G2 runtime 资产准备进度
+
+G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packaging workflow：
+`.github/workflows/package-panther-x2-g2-runtime.yml`
+
+固定输入：
+- G2-B Image / config / DTB：artifact `15167050233`，run `45924949130`；
+- B1 static BusyBox / JP-TvBox U-Boot proper：artifact `14890817693`，run `45328201244`；
+- Image SHA256：`c8ad5e8c6d4f7b095374abd66e2fc44379e83954c3991b453c3d7c8da3b7edf7`；
+- DTB SHA256：`f6d83d86231b50c903abdf158893b6caa1e8c2aab931c9bf2dbb1b6ca36576dc`；
+- BusyBox SHA256：`2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15`；
+- JP-TvBox U-Boot proper SHA256：`a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce`。
+
+新 runtime 使用 RAM initramfs 和 B1 已验证的静态 BusyBox，不安装持久化 rootfs。其 init 仅输出系统/DTB/接口状态并进入 shell；不配置网络、不发送报文。安全基线继续将 RK809、GMAC1、MDIO、RTL8211F 节点设为 disabled。U-Boot load addresses 与 bootargs 沿用已验证组合。
+
+本次只完成脚本与 workflow 的仓库准备，workflow 尚未运行，因此没有 runtime image 或新的 runtime artifact。下一步只运行该 PREPARE-ONLY workflow 并审查产物；不写 SU08G、不碰 SN64G/eMMC、不启动 Panther X2。G2-PROBE 仍须先完成独立副作用审查和明确授权。
+
