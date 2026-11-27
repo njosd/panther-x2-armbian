@@ -240,6 +240,7 @@ jobs:
             "GMAC1/MDIO/RTL8211F remain disabled; no physical Ethernet activation or TX." \
             "RAM initramfs with static BusyBox; no persistent root filesystem is mounted or written by /init." \
             "B1 storage/USB support is retained; MMC/eMMC/TF/SD and USB host/PHY may enumerate." \
+            "USB network adapters remain disabled; external USB NICs are out of scope." \
             "Boot chain requires the existing eMMC SPL; JP-TvBox U-Boot proper is stored at raw LBA 16384." \
             "This image has not been written to any physical TF/eMMC and is not authorized for boot." \
             | sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null
@@ -305,6 +306,7 @@ jobs:
             echo "gmac1=disabled; mdio=disabled; rtl8211f=disabled; physical_tx=not_performed"
             echo "network_core=enabled; AF_PACKET=enabled; no physical netdev expected"
             echo "storage_usb=BLOCK/MMC/USB support retained per B1 baseline; DTB node statuses audited; /init does not mount or write persistent storage"
+            echo "usb_network_adapters=disabled; USB external NICs excluded"
             echo "rootfs=RAM initramfs; no persistent rootfs"
             echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init"
             echo "load_addresses=Image:0x00280000;uInitrd:0x0a200000;DTB:0x0a100000"
