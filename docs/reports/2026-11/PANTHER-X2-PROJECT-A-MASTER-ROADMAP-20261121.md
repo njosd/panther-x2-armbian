@@ -906,3 +906,23 @@ G3-S 静态审计已完成，G3-B build-only 已通过 Actions run `45984035650`
 注意：`regulator_ignore_unused` 仅抑制 late unused-regulator cleanup，不抑制 provider probe 初始化写入。debugfs 的 `regulator_summary` 和 `devices_deferred` 已有内核配置/源码依据；采集脚本不向 sysfs 写入、不执行手动 PMIC 操作，也不挂载持久化文件系统。
 
 当前状态：**G3-S PASS；G3-B BUILD PASS；G3 runtime package 已提交但待 Actions 构建；G3-P AUTHORIZED / NOT YET EXECUTED。** 构建、打包阶段均不访问硬件、不写实体 TF/eMMC。G3-P 的下一步必须先完成 runtime package workflow 和产物审计，再使用 SU08G 执行获准的 RAM-only 启动并回收 UART 证据；不得跳过产物审计直接使用 G3-B artifact。
+
+
+### G3 runtime PREPARE-ONLY packaging result（2026-11-27）
+
+G3 runtime packaging workflow 已由 PR validation run `45991658437` **PASS**，artifact `15193991660`（`panther-x2-project-a-g3-provider-runtime-PREPARE-ONLY`）。此前首轮 run `45991437011` 在 runner 对 root-owned ext4 loop mount 直接重定向写 `TEST-INFO.txt` 时失败；改为 `sudo tee` 后重跑通过。失败原因仅为 CI 文件权限，前置输入/配置/DTB审计及 initramfs 构建已通过。
+
+本次成功产物独立下载并完成 artifact 内部 `SHA256SUMS` 全量校验；Zstandard 完整性检查 PASS，压缩镜像解压声明大小为 7,948,206,080 bytes（SU08G 实测容量）。镜像内 GPT 分区边界为 LBA 32768–15523806，分区类型 Linux filesystem，标签 PANTHER_BOOT；CI 中 GPT 校验、ext4 `e2fsck -fn`、只读挂载文件核验、JP-TvBox U-Boot proper 在 LBA 16384 的 SHA256 readback 均通过。
+
+固定产物哈希：
+- Kernel Image：`d1830f649e3bfa789fec3589c2ef16b1e46465846c6bb150e666f8df4c610a61`
+- G3 DTB：`9364c6d7aadddb8520388418e8db570e0b4020a38c5ceb8acbd2343165bb5209`
+- uInitrd：`332c09d5acae64fff0261849e1fb9c229f52f278acda76cb0a6ed8e9dde353e9`
+- gzip initramfs：`3adeefd44fccec3eac79135642a5c6f37e17d8265e1d81e036d1c33faba35963`
+- boot.scr：`4a8526de9d430f92af32b01798fe122758e927d098172f656d33a3b523635c5c`
+- SU08G raw image：`c62c28e4ced0f7a3e9aa8c409ce89e53247a7dbcddf7fe4c41f7131d6fdf32c5`
+- SU08G compressed image：`4b3c9198c09bf6f6dc5d9e1f99dd36010ed03593fc8999475c597ac3aa5b6e46`
+
+Artifact ZIP 外层 SHA256（GitHub Actions artifact digest）：`befae7113ddd98bbd8f668b2c33886909fc33431bc125fb4ca8d09f516c62bca`。下载入口见 Actions run `45991658437` / artifact `15193991660`。
+
+该 artifact 仍为 **PREPARE-ONLY**：CI 仅在 runner 内构建和验证镜像，没有写入实体 TF/eMMC，没有启动 Panther X2，没有 PMIC 访问。G3-P 的用户授权仍有效，但 G3-P **尚未执行**。后续只能将此镜像用于获准的 SU08G RAM-only 会话；不得写 eMMC/SN64G，也不得启用已隔离 consumer。
