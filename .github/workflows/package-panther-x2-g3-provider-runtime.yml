@@ -3,7 +3,7 @@ name: Panther X2 Project-A G3 RK809 regulator-provider runtime (PREPARE ONLY)
 on:
   pull_request:
     branches:
-      - main
+      - g3-provider-build-only
     paths:
       - "scripts/panther-x2-g3-runtime/**"
       - ".github/workflows/package-panther-x2-g3-provider-runtime.yml"
