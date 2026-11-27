@@ -26,11 +26,11 @@ G4-P 不是“只设置 GMAC 所在 VCCIO5”。按固定 DTS，driver 会尝试
 |---:|---|---|---|---|
 | 0 | pmuio1 | vcc3v3_pmu | 固定约束 3.3V | 无 selector write |
 | 1 | pmuio2 | vcc3v3_pmu | 固定约束 3.3V | VSEL2 两次 |
-| 2 | vccio1 | vcc_3v3 / SWITCH_REG1 | switch 本身无独立 voltage selector；regulator core 可沿上游 vcc8 读取约 3.3V | VSEL0、VSEL1 |
+| 2 | vccio1 | vcc_3v3 / SWITCH_REG1 | switch 本身无独立 voltage selector；RK809 SWITCH_REG1 descriptor 的 upstream 为 vcc9；Panther DTS 将 vcc9-supply 指向固定 3.3V vcc3v3_sys，因此 regulator core 可递归报告约 3.3V | VSEL0、VSEL1 |
 | 3 | vccio2 | vcc_1v8 | 固定约束 1.8V | 无 selector write（硬件 FLASH_VOL_SEL） |
 | 4 | vccio3 | vccio_sd / LDO_REG5 | 可调范围 1.8–3.3V；实际当前 selector/读数未验证 | VSEL0、VSEL1 |
 | 5 | vccio4 | vcc_1v8 | 固定约束 1.8V | VSEL0、VSEL1 |
-| 6 | vccio5 | vcc_3v3 / SWITCH_REG1 | switch 电压读数可回退到上游固定 3.3V；不证明 switch 输出端实体供电 | VSEL0、VSEL1 |
+| 6 | vccio5 | vcc_3v3 / SWITCH_REG1 | switch 电压读数可回退到 upstream vcc9（DTS 固定 3.3V vcc3v3_sys）；不证明 switch 输出端实体供电 | VSEL0、VSEL1 |
 | 7 | vccio6 | vcc_3v3 / SWITCH_REG1 | 同上 | VSEL0、VSEL1 |
 | 8 | vccio7 | vcc_3v3 / SWITCH_REG1 | 同上 | VSEL0、VSEL1 |
 
@@ -46,7 +46,7 @@ G4-P 不是“只设置 GMAC 所在 VCCIO5”。按固定 DTS，driver 会尝试
 
 | 顺序 | supply / index | register | 1.8V 分类时写值 | 3.3V 分类时写值 |
 |---:|---|---|---:|---:|
-| 1 | pmuio2 / 1 | VSEL2 `0x148` | `0x00200002` | `0x00020000` |
+| 1 | pmuio2 / 1 | VSEL2 `0x148` | `0x00020002` | `0x00020000` |
 | 2 | pmuio2 / 1 | VSEL2 `0x148` | `0x00200000` | `0x00200020` |
 | 3 | vccio1 / 2 | VSEL0 `0x140` | `0x00020002` | `0x00020000` |
 | 4 | vccio1 / 2 | VSEL1 `0x144` | `0x00020000` | `0x00020002` |
