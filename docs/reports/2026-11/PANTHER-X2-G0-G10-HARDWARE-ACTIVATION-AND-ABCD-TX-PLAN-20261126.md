@@ -100,7 +100,7 @@ G0-P4 证据状态已修正：6.1.116 与 6.18.63 完整 DTB 字节级相同；6
 
 
 
-**G2 runtime 基线纠错（2026-11-27）：** 复核冻结 B1/R1 artifact 的实际配置与 DTB 后确认，Linux BLOCK/MMC/eMMC/TF/SDIO、USB host/PHY 均 disabled；UART1（Bluetooth）disabled，UART2 console enabled。G2 继承 R1 的 B1-clean DTB，只调整 RK809 节点，不能误把原始 Panther DTS 的默认设备状态当成 G2 实际 DTB。此前 runtime workflow 曾误将 MMC/USB/UART1 状态要求为 enabled，现已修正为冻结基线的 disabled 状态，并把配置符号与全部相关 DTB 节点纳入门控。G2 runtime 仍是最小 RAM 系统；TF 由 U-Boot 在 Linux 启动前读取。
+**G2 runtime 基线纠错（2026-11-27，按冻结 artifact 回溯）：** B1/R1/G2 最终 `.config` 包含 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`；TF/eMMC、USB host/PHY0、UART1/UART2 在 DTB 中保持 enabled，SDIO/Wi-Fi、第二 USB host/PHY、GMAC1/MDIO/PHY disabled，Bluetooth 子节点移除。G2 继承 R1 的 DTB，仅将 RK809 节点保持 disabled。RAM-only 指 Linux root 为 initramfs、`/init` 不挂载/写入持久化文件系统。此次 runtime workflow 的失败源于错误地把 `CONFIG_BLOCK=y` 列入禁止项；后续门控改为核验冻结 artifact 的实际 Kconfig 和 DTB 节点状态。
 ## 2026-11-27 G2-S/G2-B 完成与 G2-PROBE HOLD
 
 G2-S 静态对照已完成，详见 `PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md`。黄金 6.1.116 与 6.18.63 的 RK817 IRQ chip / 24-bit mapping / pre-init 表 / MFD cell 集合一致；未发现 6.18 新增 PMIC pre-init 写入。6.18 的 pwrkey resource 顺序修正为 consumer 驱动所期望的 FALL、RISE；不回退。黄金 IRQ 记录提供 parent/child IRQ 注册的正向证据，但计数为 0，不证明物理按键边沿。
