@@ -3,6 +3,9 @@
 CONFIG_I2C=y
 CONFIG_MFD_RK8XX_I2C=y
 CONFIG_RTC_CLASS=y
+# Avoid changing the kernel wall clock or writing RTC during this isolated probe.
+# CONFIG_RTC_HCTOSYS is not set
+# CONFIG_RTC_SYSTOHC is not set
 CONFIG_RTC_DRV_RK808=y
 CONFIG_INPUT=y
 CONFIG_INPUT_MISC=y
