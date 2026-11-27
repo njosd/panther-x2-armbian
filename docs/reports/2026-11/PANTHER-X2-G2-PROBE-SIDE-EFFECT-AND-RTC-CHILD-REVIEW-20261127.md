@@ -69,7 +69,8 @@ RK817 IRQ 表定义 24 个逻辑 IRQ，按 3 组、每组 8 位映射到 status/
 ### 3.1 parent IRQ 初始化阶段
 
 regmap-irq 初始化会：
-- 对 0xF9、0xFB、0xFD 执行 mask register update，将映射位默认全部 mask；
+- 根据 24 个 `REGMAP_IRQ_REG_LINE(id, 8)` 生成三组 `mask_buf_def=0xFF`；
+- 对 0xF9、0xFB、0xFD 执行 mask register update，将每组 8 位全部设为 masked。由此 0xFB[7:2]、0xFD[7:6] 与 0xFD[1:0] 这些在 Rev 2.5 标为 reserved RW 的位也会被写成 1；
 - 读取 0xF8、0xFA、0xFC；
 - 如果某组 status 非零，对相应 ACK/status register 写入 `status & mask`；
 - 然后建立 IRQ domain 并请求 parent threaded IRQ。
