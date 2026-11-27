@@ -1003,3 +1003,20 @@ G4-S 静态/黄金对照已 PASS，详细报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN
 - G4 仍是最大未闭合跨层点：IO-domain 未 probe，实际 rail/selector 未验证。G4-S 已识别 9 supplies / 预期 14 次 GRF write call，必须按独立准入门处理。
 
 **状态：** G3-P 按定义结项，不重复运行；G4-S PASS；G4-B Actions 正在构建；G4-P HOLD / NOT AUTHORIZED；G5/ABCD 不提前执行。
+
+
+## 2026-11-27 用户确认：项目 A TF-only 实验边界与运行环境切换门
+
+**强制边界：项目 A 在 TF 阶段完成全部构建准备、实机运行、硬件激活、网络验证和系统稳定性验收。唯一实验存储介质为 SU08G（8GB TF）；SN64G（64GB 对照卡）冻结；eMMC 在 TF 系统完全验收通过前不得写入、挂载、格式化、分区调整、安装或修改。**
+
+当前启动链存在 eMMC 前级 SPL 的既有启动依赖；这不等于允许项目 A 主动修改 eMMC。所有项目 A 测试 rootfs、日志、测试数据及可写状态均留在 SU08G 或 RAM。RAM-only 是早期隔离环境，不是后续网络验证的永久环境。
+
+**环境切换顺序：**
+1. 完成 G4-B build-only 结果核验（CI 成功不等于实机通过）。
+2. G4-P 仍须独立风险审查及明确授权；当前 HOLD / NOT AUTHORIZED。本路线图及政策文件均不构成 G4-P 操作授权。
+3. 前置门按计划放行后，在 SU08G 上准备项目 A 完整 Linux 测试 rootfs，提供后续诊断所需的 shell、ip/iproute2、ethtool、tcpdump、dmesg、lsblk/blkid、mount、debugfs 等能力；按阶段纳入工具，不因此一次性启用全部硬件。
+4. G5 及后续 GMAC1/MDIO/RTL8211F、TX/RX、ARP/IP/ICMP、TCP/UDP 验证均在 SU08G 完整用户空间中按单变量顺序执行。切换用户空间不自动放行硬件 probe、寄存器写入或网络配置。
+
+B1/G3/G4 RAM-only 已验证资产继续保留为回退基线。只有当 TF 系统完成可重复启动、硬件与网络功能、存储识别/挂载、服务行为、升级回退及恢复验收，并形成最终报告后，才进入 eMMC 部署方案评审。即使满足全部条件，也必须另行审阅目标区域、备份校验、写入步骤、回退方案并取得具体 eMMC 写入授权；不得自动开始写入。
+
+权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。本决策覆盖此前把 eMMC pre-Linux 写入安全门设为 TF 实验写入/启动前置条件，以及把 RAM initramfs 描述为后续唯一正式实验运行环境的冲突表述。
