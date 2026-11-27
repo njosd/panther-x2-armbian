@@ -62,7 +62,7 @@ The eMMC SPL remains an existing boot dependency. This workflow does not install
 
 ## 5. Safety and isolation gates
 
-The network isolation gate checks concrete driver/protocol symbols (STMMAC, Rockchip DWMAC, MDIO, PHYLIB/PHY driver, USB NIC drivers, wireless/Bluetooth), not broad `CONFIG_NET_VENDOR_*` menu-group symbols. A vendor menu being selected is not proof that a concrete NIC driver is enabled and would create false positives. The runtime script also reports whatever interfaces actually exist rather than assuming loopback must be present.
+The network isolation gate checks concrete driver/protocol symbols (STMMAC, Rockchip DWMAC, MDIO, PHYLIB/PHY driver, individual USB NIC drivers, wireless/Bluetooth), not broad menu-group symbols such as `CONFIG_NET_VENDOR_*` or `CONFIG_USB_NET_DRIVERS`. These umbrella options may be `y` without any concrete NIC driver being selected; treating them as a driver would create false positives. The full Linux 6.18.63 USB-network driver symbol list is checked individually. The runtime script also reports whatever interfaces actually exist rather than assuming loopback must be present.
 
 The packaging workflow must verify before assembling the image:
 
