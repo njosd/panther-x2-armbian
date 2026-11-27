@@ -213,7 +213,7 @@ jobs:
           nm -a "$OUT/drivers/regulator/of_regulator.o" > work/logs/of-regulator-symbols.txt
           grep -q 'of_get_regulator' work/logs/of-regulator-symbols.txt
           nm -a work/output/vmlinux > work/logs/g3-vmlinux-symbols.txt
-          for sym in rk808_regulator_probe regulator_fixed_voltage_probe regulator_register rk8xx_probe rk8xx_i2c_probe rk808_rtc_probe rk805_pwrkey_probe; do
+          for sym in rk808_regulator_probe reg_fixed_voltage_probe regulator_register rk8xx_probe rk8xx_i2c_probe rk808_rtc_probe rk805_pwrkey_probe; do
             grep -q "$sym" work/logs/g3-vmlinux-symbols.txt
           done
           if grep -q 'rockchip_iodomain_probe' work/logs/g3-vmlinux-symbols.txt; then
