@@ -851,7 +851,7 @@ GMAC 是项目 A 当前最高风险堵点。G5-A 之前必须完成黄金与 6.1
 
 G2-B build-only 已通过（run `45924949130`，artifact `15167050233` 已校验）。当前下一步是按既定计划准备 Project-A 6.18.63 minimal runtime 资产；不因此自动授权 G2-PROBE。PMIC probe 仍须独立副作用审查与明确授权，不恢复 GMAC/MDIO/PHY。
 
-## 2026-11-27 G2-B workflow 已准备
+## 2026-11-27 G2-B workflow 与构建结果
 
 G2-B 专用 workflow 已新增：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，配置片段为 `scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。它复用成功 R1 artifact（run `45611898629`）中的 R1 最终配置和 Panther DTB，固定 6.18.63 源码重建 built-in-only Image（保留 R1 的 `CONFIG_MODULES=y`，但本门只构建 Image，不构建 modules），显式增加 `I2C=y` 与 `MFD_RK8XX_I2C=y`；`REGULATOR_RK808`、`INPUT_RK805_PWRKEY` 关闭，构建用 DTB 中 RK809、GMAC1、MDIO、PHY 均 disabled。输出构建配置、对象/符号、Image、DTB、manifest 和哈希。
 
