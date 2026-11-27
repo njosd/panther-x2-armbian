@@ -33,7 +33,7 @@ RK809 在 6.18 复用 RK817 IRQ、pre-init 与 MFD cell 集合。probe 顺序为
 - Linux 初始化构造的默认 mask 为每组 0xFF，预期更新 mask registers 0xF9、0xFB、0xFD。
 - 初始化读取 status 0xF8、0xFA、0xFC；若状态非零，对相应 ACK/status register 写回 `status & mask`。不是无条件写 0xFF，但可能清除已锁存事件。
 - RK809 Datasheet Rev 2.4 对 0xFA bit2–7、0xFC bit0–1 标为 W1C reserved，0xFC bit6–7 标为 RC reserved；Linux 24-bit RK817 mapping 却为这些位定义 IRQ。
-- 6.1.65 候选源码已使用相同 24-bit mapping、默认 mask 和 ACK 策略。因此这是跨版本历史兼容疑点，不是已证实的 6.18 regression；仍未证明当前 0x8094 芯片版本对这些保留位的真实语义。
+- 6.1.65 候选源码已使用相同 24-bit mapping、默认 mask 和 ACK 策略。因此这是跨版本历史兼容疑点，不是已证实的 6.18 regression；同时，0xEE 低 nibble 的 reserved 非默认值需要单独向 Rockchip 澄清，不能据此推断芯片 revision 或 IRQ 布局。
 
 **判定：** 0xF8–0xFD 不能列入当前允许访问或允许自动写入白名单。没有额外官方 silicon/register-map 证据前，MFD IRQ 初始化不可放行。
 
