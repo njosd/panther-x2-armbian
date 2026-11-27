@@ -42,7 +42,7 @@ G0 的 CONDITIONAL PASS 仅表示已有静态和运行证据足以编制下一�
 
 - 6.1.65 原始 DTB 的 RK809/IO-domain 子树尚未从二进制重新解析；候选 DTS 对照为高置信度但非 binary PASS。
 - R1 中 IO-domain deferred-probe 的最终重试/绑定状态未留存；这是 provider 恢复后的运行时验证项。
-- RK809 0xEE=0x94 的低 nibble 在 Rev 2.5 中明确标为 RESV、reset default=0x2；实测为 0x4。高 nibble 0x9 与 RK809 CHIP_NAME code 相符，但 reserved 非默认值的原因仍 UNKNOWN，不能称为 silicon revision，需 Rockchip 说明。
+- RK809 0xEE=0x94 的高 nibble 0x9 与 CHIP_NAME code 相符。低 nibble 0x4：Rev 1.01 曾定义为 CHIP_VER code；Rev 1.7 至 Rev 2.5 则改标 RESV、reset default=0x2。不能仅凭 0x94 宣称当前硅片 revision 4；手册定义变更和当前 reserved 非默认值原因仍需 Rockchip 说明。
 - 125MHz fixed-clock 是 CCF 模型；实体来源/波形未知。此项属于 G4/R7-A 前置，不阻塞只验证 PMIC MFD。
 - 6.18 Rockchip glue 的 powerup 生命周期与 6.1.65 不同；这是 G5-A probe 前必须审查的真实版本差异，不应在 G2/G3 提前处理。
 
