@@ -100,3 +100,6 @@
 - [G0 Golden 基准 PMIC/Regulator 反向追踪计划（2026-11-26）](./PANTHER-X2-G0-GOLDEN-PMIC-REGULATOR-REVERSE-AUDIT-PLAN-20261126.md)：纠正 G0 优先级，先恢复 6.1.65/6.1.116 的真实配置/对象和驱动初始化行为，再对照 6.18.63；G0.6 fixed-regulator 降为备选，G0.7 PCB 测点不再作为准入条件。
 
 - [G0 两条黄金基准 PMIC/PHY 源码共性核验（2026-11-27）](./PANTHER-X2-G0-GOLDEN-65-116-PMIC-PHY-SOURCE-COMMONALITY-20261127.md)：6.1.65 与 6.1.116 的 RK809 MFD、regulator、IO-domain、GMAC glue 和 Panther DTS 关键文件逐字节相同；regulator core 四个关键函数相同。下一项只补齐黄金 DTB binary diff。
+
+- [G0-P4 黄金 DTB 证据复核（2026-11-27）](./PANTHER-X2-G0-P4-GOLDEN-DTB-EVIDENCE-RECONCILIATION-20261127.md)：6.1.116 与 6.18.63 完整 DTB 字节级相同；6.1.65 原始 DTB GMAC 核心解析已归档，仅 PMIC/IO-domain 子树二进制复核仍缺。
+- [G0 总体复核与 G2 受控激活预案（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：G0 CONDITIONAL PASS（仅计划层面）；G2 只拟验证 RK809 MFD/regmap，probe 需要单独授权，不启用 regulator/GMAC。
