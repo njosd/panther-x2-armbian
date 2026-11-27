@@ -85,3 +85,32 @@ probe 侧不在 IO-domain mutex 内调用任何 regulator core API：
 - 不将 driver unbind/remove 作为 rollback。
 - 不在 IO-domain mutex 持有期间调用 regulator core API。
 - 不触碰 eMMC 或 SN64G；不安装软件、不改变设备配置。
+
+
+## 7. 固定 regulator core 锁与 notifier chain 的精确调用关系
+
+进一步核对固定源码 drivers/regulator/core.c，把 regulator mutex 与 notifier chain 锁区分如下：
+
+- _notifier_call_chain() 上方源码注释明确写明：调用者必须持有 regulator mutex；该函数内部调用 blocking_notifier_call_chain()。见 core.c 约 5092–5115 行。
+- 电压调整入口 regulator_set_voltage() 在调用 _regulator_do_set_voltage() 前执行 regulator_lock(rdev)，并在退出路径 regulator_unlock(rdev)。见约 4500–4520 行。其内部 _regulator_call_set_voltage() 在该锁保护路径中发出 PRE；底层 set_voltage 失败时发出 ABORT。见约 3571–3608 行。
+- regulator_register_notifier() 和 regulator_unregister_notifier() 本身直接调用 blocking_notifier_chain_register/unregister()，并不在这两个 wrapper 内获取 regulator mutex。见约 5052–5090 行。
+- 因此有两把不同的锁：regulator mutex（保护电压变化路径）与 blocking notifier chain 的 rwsem（保护 notifier 链表/调用同步）。不能把二者混为一谈。
+
+### 对锁序与 teardown 的具体影响
+
+1. callback 执行时持有 regulator mutex，并在 blocking notifier call-chain 的读侧同步区间内执行。
+2. callback 若等待 IO-domain mutex，而 probe/remove 持有 IO-domain mutex 再调用 regulator API 或 notifier unregister，可能出现锁序反转/等待环。
+3. 特别是 unregister：如果 callback 已进入并等待 IO-domain mutex，另一个线程持有 IO-domain mutex 调用 blocking_notifier_chain_unregister()，会等待正在执行的 callback 退出；callback 又等待 IO-domain mutex，形成确定的等待环。
+4. 所以所有 regulator core API（包括 register/unregister notifier、get_voltage）均不得在持有 IO-domain mutex 时调用。notifier unregister 必须在 IO-domain mutex 外完成。
+5. 但“在 mutex 外 unregister”只解决死锁，不自动解决 unregister 后 rail 继续变化与 selector 失去跟踪的问题；仍需要可证明的 rail freeze 或其他完整生命周期协议。
+
+### 对 generation-counter 候选的修订要求
+
+- 每个 supply 的 generation 需使用原子/锁保护，callback 在完成 selector 写入后更新 generation；不能只在事件入口递增后忽略写入失败。
+- 初始采样与 notifier 必须先建立订阅关系，再在 IO-domain mutex 外调用 regulator_get_voltage()；随后在 IO-domain mutex 下比较 generation 并执行初始 transaction。
+- 不得在 IO-domain mutex 内调用任何 regulator API。
+- 必须证明 regulator PRE callback 与实际 rail 改变之间的顺序，以及 ABORT/POST 的回调覆盖范围；不能仅测试“callback 最终被调用”。
+- 多 supply transaction 期间，任一 regulator 的 PRE callback 可能持有自己的 regulator mutex 等待 IO-domain mutex；初始 transaction 本身不能再反向请求任何 regulator mutex。
+- 该候选仍不能解决 probe transaction 中途失败后的 notifier 生命周期与 devm 清理问题；不能据此声称具备安全 rollback。
+
+以上行号以固定 commit 的源文件为准；未来 kernel commit 变更时必须重新定位与复核。
