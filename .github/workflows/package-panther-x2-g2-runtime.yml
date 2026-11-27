@@ -155,7 +155,7 @@ jobs:
             /usb2phy@fe8b0000 /usb2phy@fe8b0000/host-port /usb2phy@fe8b0000/otg-port; do
             assert_status "$node" disabled
           done
-          assert_status /serial@fe650000 okay
+          assert_status /serial@fe650000 disabled
           assert_status /serial@fe660000 okay
           test "$(fdtget -t s "$DTB" /chosen stdout-path)" = "serial2:1500000n8"
           test "$(fdtget -t s "$DTB" /aliases serial2)" = "/serial@fe660000"
