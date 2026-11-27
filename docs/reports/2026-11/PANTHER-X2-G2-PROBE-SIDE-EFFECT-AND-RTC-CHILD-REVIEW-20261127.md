@@ -108,6 +108,8 @@ RK817 Rev 2.1 数据手册对同一组 0xFA/0xFB、0xFC/0xFD 寄存器定义了�
 
 准入影响：不能把 RK817 datasheet 的 24 个 IRQ 定义自动套用到 Panther 的 RK809；也不能仅因 RK809 datasheet 标为 reserved 就擅自修改 Linux map。需要 Rockchip 明确 RK809 实际 silicon 对 0xFA[7:2]、0xFC[7:6]、0xFC[1:0] 的行为及共用 24-line IRQ map 的适用条件。
 
+**MFD child 实际 IRQ 消费范围（6.18.63 源码）：** PWRKEY child 只请求 IRQ 0/1（0xF8 bit0/1）；RTC child 只请求 IRQ 5（0xF8 bit5）；charger child 只请求 IRQ 8/9（0xFA bit0/1，RK809 文档定义为 plug-in/out）；codec child 没有 MFD IRQ resource。也就是说，RK809 文档未定义的 10 个 line（IRQ 10–17、22–23）没有被这些 MFD child resource 请求，但它们仍留在 parent 的 24-line regmap IRQ map 中，默认 mask=1，并可能参与初始化 status read/ACK。这个事实降低了“子驱动主动使用这些 reserved IRQ”的风险，但不能消除 parent 初始化触碰这些位的兼容性问题。
+
 资料：
 - [RK809 Datasheet Rev 2.5](https://datasheet.lcsc.com/datasheet/pdf/dc4249f899d1f7640dc738c73aecc6ea.pdf?productCode=C54771187)，§5.2 pp.125–126。
 - [RK817 Datasheet Rev 2.1](https://atta.szlcsc.com/upload/public/pdf/source/20240126/1D84E9BEA212072F9DD3BF1F36FC3510.pdf)，§5.2 pp.136–138。
