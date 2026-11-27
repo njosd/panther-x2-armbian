@@ -62,16 +62,13 @@
 
 验收：固定源码 commit、交叉工具链、最终 .config、Kernel Image、从同一源码构建的 clean-test DTB、initramfs 和 BusyBox 的哈希；记录 DTB model/compatible、禁用节点和未验证边界。
 
-### B0.4 eMMC pre-Linux 写入安全审计
-- 确认当前实际 eMMC IDB/SPL 身份，不用 JP IDB 哈希替代。
-- 尽可能追溯实际 SPL/proper 源码 commit、defconfig、最终 .config。
-- 审查 SPL A/B、MMC fallback、Vendor Storage、环境保存、升级/recovery 等自动写路径。
-- 核对 GPT、misc、Vendor Storage LBA 7168–7679、boot0/boot1/RPMB 等可能写入目标。
-- 回读已完成 EXT_CSD/WP 查询记录；信息不完整时只设计只读补查。
-- 芯片级 power-on write protect 必须先证明支持能力、WP group、覆盖范围和复位保持语义；设置本身是硬件配置写操作，须另行授权，严禁永久写保护。
-- 不得清除 eMMC IDB、改写 boot area、短接或拆焊试错。
+### B0.4 eMMC 不写入边界的必要只读核查（不再作为全面 WP/Rescue 专题）
+- 当前项目 A 只允许使用既有启动链；eMMC 前级 SPL 是已知启动依赖，但项目 A 不修改 SPL、IDB、boot area、EXT_CSD、Vendor Storage、分区、文件系统或原系统。
+- 只读核对本轮启动与测试步骤，不得包含 eMMC 写入、环境保存、升级、recovery 或自动修复命令。
+- 不执行芯片级 power-on write protect 设置，不做 eMMC 写入试验，不为 TF 实验扩大为完整 eMMC WP/Rescue 研究。
+- 若证据显示启动链/脚本会自动写 eMMC，停止实机操作，先审查并消除该路径风险；不得靠写保护配置绕过。
 
-验收：形成正常启动、TF 读取失败、proper/FIT 校验失败、MMC 初始化失败/回退等路径的写入目标矩阵。无法证明 eMMC 不写入且没有可靠隔离保护时，安全门不通过。
+验收：能明确说明本轮操作仅从既有启动链读取启动所需内容，所有项目 A 可写实验状态位于 RAM/SU08G，且没有主动 eMMC 写入步骤。该只读核查不是 eMMC 部署准入，也不要求完成 eMMC 全区域写入矩阵。
 
 ### B0.5 实验介质确认
 - 8GB SU08G：CID `035344535530384780b16ad9b700c15f`，sectors 15,523,840；每次写入前重新核对身份。
@@ -79,7 +76,7 @@
 - eMMC DF4032：冻结，不写入。
 - 每次写卡前重新确认 CID、型号、容量、设备节点、分区及挂载状态，不依赖历史 mmcblk 编号。
 
-验收：目标介质唯一且卸载；B0.4 通过；用户明确授权本次具体写入。
+验收：目标介质唯一且卸载；确认本轮启动/测试无主动 eMMC 写入路径；用户明确授权本次 SU08G TF 具体写入。
 
 ## B1 — 最小 RAM Linux 启动
 
@@ -416,3 +413,35 @@ G2-B 已通过（run `45924949130`）。现已新增 PREPARE-ONLY runtime packag
 本次只完成脚本与 workflow 的仓库准备，workflow 尚未运行，因此没有 runtime image 或新的 runtime artifact。下一步只运行该 PREPARE-ONLY workflow 并审查产物；不写 SU08G、不碰 SN64G/eMMC、不启动 Panther X2。G2-PROBE 仍须先完成独立副作用审查和明确授权。
 
 **纠错（2026-11-27，按冻结 artifact 回溯）：** B1 实际构建产物并非关闭存储/USB。B1 build workflow（run `45309219886`）明确验收 `CONFIG_BLOCK=y`、`CONFIG_MMC=y`、`CONFIG_USB=y`、`CONFIG_MODULES=y`；实际 B1/R1 DTB 保留 TF/eMMC、USB host/PHY0、UART1/UART2，禁用 SDIO/Wi-Fi、GMAC1/MDIO/PHY/RTL8211F，移除 Bluetooth 子节点。G2 继承 R1 DTB，仅将 RK809 节点保持 disabled。RAM-only 的含义是 Linux root 为 initramfs、`/init` 不挂载或写入持久化文件系统，不是关闭 MMC/USB 驱动或相关板级节点。当前默认分支 B1 fragment、DTB 生成脚本和 B1 workflow 后续发生了与冻结 artifact 不一致的改动；在重新审计并恢复一致性前，不得用当前源码重新生成/覆盖冻结 B1 artifact。
+
+## 2026-11-27 强制修订：TF-only 实验介质与 RAM→TF 用户空间切换
+
+本实施计划服从项目 A TF-only 边界：SU08G（8GB TF）是唯一实验存储介质；SN64G 冻结；eMMC 在 TF 系统完全验收前不写入、不挂载、不安装、不修改。当前启动链使用 eMMC 前级 SPL 属既有启动依赖，不构成主动修改 eMMC 的授权。
+
+### 切换节点
+- G4-B build-only：先核验 CI 构建、对象/符号、DTB 隔离、manifest 和哈希；不得将构建成功记为硬件通过。
+- G4-P：仍为 HOLD / NOT AUTHORIZED，须单独风险审查和明确授权；本计划不授权任何 PMIC/GRF/IO-domain 写入或 probe。
+- G4 前置门按计划完成后：在 SU08G 建立项目 A 完整 Linux 测试 rootfs，补齐 shell、ip/iproute2、ethtool、tcpdump、dmesg、lsblk/blkid、mount、debugfs 等诊断工具。工具按阶段和依赖审查引入。
+- G5 及后续网络/硬件验证：均在 SU08G 完整用户空间中继续，按单变量顺序放行；不得因为用户空间完整而一次性启用所有设备/驱动。
+- RAM-only B1/G3/G4 基线与哈希必须保留，作为隔离与回退资产。
+
+### eMMC 部署门
+只有当 SU08G 系统完成可重复启动、目标硬件与网络功能、存储识别/挂载、基础服务、升级回退、备份恢复和数据完整性验收，并形成最终报告后，才可进入 eMMC 部署方案评审。方案必须明确目标设备/区域、备份与校验、具体步骤、影响范围和回退路径，并由用户对具体 eMMC 写入另行授权。全部验收通过不等于自动获得写入授权。
+
+权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。
+
+
+## 2026-11-27 G4-B build-only 验收状态更新
+
+G4-B Actions run `45997129528` PASS；完整构建与 artifact 独立校验结果见 `PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。该产物 DTB 禁用了 Linux TF SDMMC0 和 eMMC 控制器，只能作为 RAM-only G4-P 隔离候选，不可直接用于 TF rootfs。G4-P 仍 HOLD / NOT AUTHORIZED。
+
+G4-P 经独立授权并验证后，下一构建门必须单独恢复 TF SDMMC0、保持 eMMC disabled，产出 TF-rootfs 专用 DTB 并做 build-only 审计；随后才在 SU08G 上建立完整用户空间。G5 及后续硬件/网络测试继续留在 SU08G。eMMC 不写入、不挂载、不安装、不修改，直到 TF 系统完整验收后另行评审和单独授权。
+
+
+## 2026-11-27 G4-P preflight 结果与停止条件
+
+只读完成 G4-P 14 项 PMU GRF write 参数矩阵；完整细节见 `PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md`。确认固定 stock driver 不检查 RK3568 `regmap_write()` 返回值，部分 probe 失败不回滚已写 selector；当前 regmap debugfs registers 为只读，安全受限 rollback helper 尚未实现/验证。
+
+因此 G4-P 当前 **NO-GO / HOLD / NOT AUTHORIZED**。不得启动 G4-P runtime，不得加载会触发 IO-domain probe 的 DTB，不得执行 PMU GRF 写入。后续必须先解决只读 readback 接口核验与可验证 rollback 机制，再提交完整风险方案并取得单独明确授权。不得为了赶进度直接沿用 stock probe。
+
+SU08G 是唯一实验介质；eMMC/SN64G 冻结。TF-rootfs 专用 DTB、完整用户空间和 G5 均不越过 G4-P 门提前启动。

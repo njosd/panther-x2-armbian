@@ -109,7 +109,7 @@
 - [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 与 G2-B build-only 已完成，stock RK809 probe 仍 HOLD。
 - [G2-PROBE 副作用、RTC 子设备与 IRQ 语义复核（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：G2-B 未启用 RTC_DRV_RK808，而 MFD pre-init 会置 RTC_STOP；启用 RTC child 又会清 STOP、写 RTC_STATUS 并触发 alarm IRQ ACK。另发现 RK809 Rev 2.5 仅列 14 个有效 IRQ，Linux 却对 RK809/RK817 共用 24-line RK817 map；0xEE=0x94 低 nibble 也是跨手册版本变化的 reserved 非默认值。需 Rockchip 澄清；probe 失败无 PMIC register rollback，G2-PROBE 继续 HOLD。
 
-- [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
+- [项目 A TF-only 实验边界与真实运行环境切换门（2026-11-27）](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)：SU08G 是唯一实验介质；G4 前置门完成后在 TF 建立完整用户空间，G5 及后续验证仍留在 TF；TF 系统完全验收后才评审 eMMC 部署，并须单独授权具体写入。
 
 - GMAC 高风险准入与 TX 分段计划：见 [G0–G10 硬件准入与 ABCD-TX 分层验证计划](./PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md) 的“GMAC 高风险准入原则”章节。
 
@@ -124,3 +124,8 @@
 - [G2 RK809 IRQ 语义与 stock runtime 准入修订（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：追加 §10，按 RK809 Rev 2.5 与 Linux regmap-irq 源码厘清 0xFC RC/W1C 初始化语义；不再将其作为 build 候选阻塞，也不修改 stock IRQ map。G2-PROBE 仍需独立授权。
 - [G2 stock-runtime candidate build workflow](../../../.github/workflows/build-panther-x2-g2-stock-runtime.yml)：新增独立 build-only 候选，启用 RK809 MFD、RTC、PWRKEY，保留 regulator 与 GMAC/MDIO/PHY disabled；工作流尚未执行，未产生新 artifact，不得用于实机启动。
 - [G2 stock-runtime workflow 二次审计与修正（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：补齐 RTC_CLASS、INPUT/INPUT_MISC、RK3x I2C、GPIO/pinctrl/IRQ 等真实依赖；关闭 RTC 自动校时/回写；修复失败 artifact 上传、缓存保存条件和打包 workflow 跨 step hash 变量作用域。新增 G2 stock PMIC runtime 独立 PREPARE-ONLY packaging workflow。所有 workflow 仍未执行，未产生新候选 artifact。
+- [G4-B IO-domain build-only 结果报告（2026-11-27）](./PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md)：Actions run 45997129528 PASS；含 artifact SHA-256/内部清单核验、对象符号、DTB 隔离和后续 TF-rootfs DTB 门说明。
+
+- [G4-P IO-domain 运行时写入与回退准备审查（2026-11-27）](./PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md)：展开 9 supplies / 14 次 PMU GRF hiword-mask write 矩阵；确认 stock driver 写入错误检查与部分失败回滚缺口、debugfs 默认只读；G4-P 当前 NO-GO / HOLD / NOT AUTHORIZED。
+
+- [G4-P-SAFE 驱动事务设计审查（2026-11-27）](./PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md)：固定 6.18.63 io-domain/regulator core 锁序、probe 失败回退、notifier 并发和 remove/unbind 安全边界审查。

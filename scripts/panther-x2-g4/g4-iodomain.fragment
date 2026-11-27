@@ -1,0 +1,3 @@
+# G4-B: enable only the RK3568 IO-domain provider/consumer driver in the G3 build baseline.
+# Build-only candidate. No device probe, PMU GRF access, PMIC access, or physical media writes.
+CONFIG_ROCKCHIP_IODOMAIN=y

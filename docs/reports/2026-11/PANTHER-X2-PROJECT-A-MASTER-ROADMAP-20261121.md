@@ -210,12 +210,12 @@ Wi-Fi/无线网络、蓝牙、USB/PCIe 网络适配器及其他非板载有线�
 
 - 8GB SU08G 是指定实验 TF，CID：`035344535530384780b16ad9b700c15f`，sectors：15,523,840。用户已授权清空该卡，但每次破坏性操作前仍须重新核对 CID、型号、容量、设备节点和挂载状态。
 - 64GB SD64G 对照卡保持原样，不格式化、不分区、不写入。
-- eMMC DF4032 保持只读，不擦除、不重分区、不替换 IDB，不修改 boot area、EXT_CSD、Vendor Storage 或原系统。
+- eMMC DF4032 在项目 A TF 阶段完全冻结：不写入、不挂载、不擦除、不重分区、不替换 IDB，不修改 boot area、EXT_CSD、Vendor Storage、分区/文件系统或原系统。现有启动链对 eMMC 前级 SPL 的既有依赖不构成主动操作授权。
 - 仅在用户逐次明确授权后，才执行写 TF、启动实验系统或硬件写保护设置。
 - eMMC 芯片级 power-on write protect 的支持、覆盖范围和实际保护状态尚未完成验收；不得假设已启用。
 - Linux `blockro` 不能替代 pre-Linux 写保护。
 
-B1 写卡/启动放行前必须完成实际执行 eMMC SPL/前级资产身份核对、自动写入路径审计或经验证的硬件隔离保护、eMMC 各区域写入目标矩阵、异常/回退路径分析，并取得本次操作授权。任一项不清楚即停止。
+项目 A TF 阶段只做确保测试流程不会主动写入 eMMC 的必要只读核查：确认启动/测试步骤不调用 eMMC 写入、环境保存、升级或恢复命令；不得为此执行 eMMC 写保护配置或任何写入试验。SU08G 写卡/启动按该 TF 操作自身的身份核验与逐次授权执行，不再以完整 eMMC WP/Rescue 研究或全区域写入矩阵作为 TF 阶段前置门。若发现现有启动链或脚本可能自动写 eMMC，立即停止实机操作并先消除该风险。
 
 ## 7. 阶段总览（B0—B7）
 
@@ -974,3 +974,85 @@ G4-S 新增报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN-SOURCE-AND-WRITE-AUDIT-202611
 5. G4 恢复 IO-domain 节点会处理全部 9 个 supply，即使其他外围控制器仍 disabled；不能把它描述为单独 VCCIO5 测试。
 
 **状态：G4-S PASS（静态/黄金对照）；G4-P HOLD / NOT AUTHORIZED。** 下一步仅准备 G4-B build-only candidate：启用 `CONFIG_ROCKCHIP_IODOMAIN=y` 和 `pmu_io_domains` 节点，其他 GMAC/MDIO/PHY、存储、SDIO、GPU、SARADC 节点继续 disabled。Actions 只构建 PREPARE-ONLY artifact，不访问硬件。任何 G4-P consumer probe/GRF 写入必须另行提交完整副作用和 readback 方案并取得明确授权。ABCD 仍 NOT EXECUTABLE。
+
+
+## 2026-11-27 G4-B build-only candidate prepared（历史记录；后续已 PASS）
+
+G4-S 静态/黄金对照已 PASS，详细报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN-SOURCE-AND-WRITE-AUDIT-20261127.md`。
+
+在独立分支 `g4-iodomain-build-only` 新增：
+- `scripts/panther-x2-g4/g4-iodomain.fragment`：只增加 `CONFIG_ROCKCHIP_IODOMAIN=y`。
+- `.github/workflows/build-panther-x2-g4-iodomain.yml`：固定使用 G3-B run `45984035650` / artifact `15192123549` 作为输入，校验 G3 artifact 内部 SHA256、G3 Image/DTB 哈希和隔离状态；在固定 Linux 6.18.63 commit 上恢复 G3 config，增量合入 G4 唯一 Kconfig 变量并构建 Image；仅把 `/syscon@fdc20000/io-domains` 从 disabled 改为 okay，继续禁用 GMAC1/MDIO/PHY、eMMC、TF、SDIO、GPU、SARADC；核验 `io-domain.o`、probe/write symbols、config、DTB 和产物 manifest。
+
+该 workflow 是 build-only：Actions runner 不访问 Panther X2，不执行 driver probe，不读取/写入 PMIC 或 PMU GRF，不写物理介质，不生成可直接烧录的 TF 镜像。本节记录提交 workflow 时的候选状态；后续 G4-B 已于 Actions run `45997129528` 通过，结果见本路线图后文及 `PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。
+
+**G4-P 仍 HOLD / NOT AUTHORIZED。** G4-S 已证明 IO-domain probe 对当前 9 个 supply 的预期影响是多域 14 次 GRF write call，且 stock driver 不检查 regmap_write 返回值、不回滚部分失败。SWITCH_REG1 电压读回可能继承上游固定 3.3V，不能证明实体输出。任何 G4-P probe/GRF 写入必须另行提交读写范围、readback、失败停止和回退计划，并取得明确授权。
+
+
+## 2026-11-27 G3 截止点黄金偏离评估
+
+新增报告：`PANTHER-X2-G3-GOLDEN-DEVIATION-ASSESSMENT-20261127.md`（commit `3928daea714ba02c1dd0140c51c8e5edbc7ef8da`）。
+
+**总体判断：** 截至 G3，6.18.63 的 RK809/MFD/regulator provider 软件主链与黄金基线实现偏离程度为低到中等；没有发现 G3 范围内足以解释 GMAC TX 故障的重大新增回归。运行态只证明 provider driver binding + 16 个 regulator object registration，不证明实体 rail 电压/enable、IO-domain 或 GMAC/PHY/TX。
+
+要点：
+- 6.1.65/6.1.116 的 RK809 MFD、regulator、IO-domain、Rockchip GMAC glue 关键源码文件高度一致；6.1.65 源码身份仍是 candidate，未与 Image 二进制绑定。
+- 6.1.116 完整 Panther DTB 与 6.18.63 完整 DTB 字节级相同；6.1.65 PMIC/IO-domain 原始 DTB 子树保留证据限制。
+- MFD 的 24-line IRQ map、mask/status/ACK 布局和 RK817-family pre-init 表与黄金共性高；variant 选择、devm IRQ 生命周期、power handler API、PWRKEY resource 顺序有差异，但未见 G3 主链新增重大功能偏离。
+- 6.18 regulator core 的约束处理顺序/部分电压处理逻辑与黄金存在差异；约 30 秒 unused-regulator cleanup 是共有行为。G3 的 `regulator_ignore_unused` 仅为临时测试保护，不能视为黄金等价或正式修复。
+- G4-P 仍是最大未闭合跨层点：IO-domain 尚未在实机 probe，实际 rail/selector 未验证。G4-S 已识别 9 supplies / 预期 14 次 GRF write call，必须按独立准入门处理；G4-B build-only PASS 不改变该结论。
+
+**当时状态（2026-11-27 G3 截止点评估时）：** G3-P 按定义结项，不重复运行；G4-S PASS；G4-B 当时正在构建；G4-P HOLD / NOT AUTHORIZED；G5/ABCD 不提前执行。后续 G4-B PASS 状态以本路线图后文更新为准。
+
+
+## 2026-11-27 用户确认：项目 A TF-only 实验边界与运行环境切换门
+
+**强制边界：项目 A 在 TF 阶段完成全部构建准备、实机运行、硬件激活、网络验证和系统稳定性验收。唯一实验存储介质为 SU08G（8GB TF）；SN64G（64GB 对照卡）冻结；eMMC 在 TF 系统完全验收通过前不得写入、挂载、格式化、分区调整、安装或修改。**
+
+当前启动链存在 eMMC 前级 SPL 的既有启动依赖；这不等于允许项目 A 主动修改 eMMC。所有项目 A 测试 rootfs、日志、测试数据及可写状态均留在 SU08G 或 RAM。RAM-only 是早期隔离环境，不是后续网络验证的永久环境。
+
+**环境切换顺序：**
+1. G4-B build-only 已完成结果核验并 PASS（Actions run `45997129528`）；该结果仅为 build-only，不等于实机通过。
+2. G4-P 仍须独立风险审查及明确授权；当前 HOLD / NOT AUTHORIZED。本路线图及政策文件均不构成 G4-P 操作授权。
+3. 前置门按计划放行后，在 SU08G 上准备项目 A 完整 Linux 测试 rootfs，提供后续诊断所需的 shell、ip/iproute2、ethtool、tcpdump、dmesg、lsblk/blkid、mount、debugfs 等能力；按阶段纳入工具，不因此一次性启用全部硬件。
+4. G5 及后续 GMAC1/MDIO/RTL8211F、TX/RX、ARP/IP/ICMP、TCP/UDP 验证均在 SU08G 完整用户空间中按单变量顺序执行。切换用户空间不自动放行硬件 probe、寄存器写入或网络配置。
+
+B1/G3/G4 RAM-only 已验证资产继续保留为回退基线。只有当 TF 系统完成可重复启动、硬件与网络功能、存储识别/挂载、服务行为、升级回退及恢复验收，并形成最终报告后，才进入 eMMC 部署方案评审。即使满足全部条件，也必须另行审阅目标区域、备份校验、写入步骤、回退方案并取得具体 eMMC 写入授权；不得自动开始写入。
+
+权威细则：[TF-only 实验边界与真实运行环境切换门](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)。本决策覆盖此前把 eMMC pre-Linux 写入安全门设为 TF 实验写入/启动前置条件，以及把 RAM initramfs 描述为后续唯一正式实验运行环境的冲突表述。
+
+
+## 2026-11-27 G4-B build-only PASS：构建审计结项
+
+G4-B Actions run `45997129528` 已完成，结论 SUCCESS；Job `140499220529` 全部必需步骤通过，artifact `15196608755`（211,500,487 bytes）已上传。artifact ZIP SHA-256：`f374a900c20a9090e74d7ac668721d8cb6a9317fe15c0f998c32aaecd77361fa`。独立下载后复算 ZIP 摘要与 Actions 一致；包内 `SHA256SUMS` 全部通过。Linux 6.18.63 固定源码 `aee4e352a15d636cbc484f56819c6e59474dfd9f)，G4 配置相对 G3 仅增加 `CONFIG_ROCKCHIP_IODOMAIN=y`；构建日志无编译/链接错误，IO-domain 对象与目标符号存在。
+
+结果报告：`PANTHER-X2-G4-B-BUILD-ONLY-RESULT-20261127.md`。
+
+**重要限制：** G4-B DTB 中 IO-domain 为 okay，但 eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1/MDIO/PHY 均 disabled。它是 G4-P 的 RAM-only 隔离候选，不是 TF rootfs 启动 DTB。未来切换到 SU08G 完整用户空间前，须在 G4-P 完成后单独构建 TF-rootfs DTB：只恢复 TF SDMMC0，继续禁用 eMMC，并完成 config/DTB/hash 审计。U-Boot 从 TF 读取内核/initramfs，不等于 Linux handoff 后能够从 TF 挂载 rootfs。
+
+**当前阶段状态：G4-S PASS；G4-B PASS；G4-P HOLD / NOT AUTHORIZED；TF 完整用户空间尚未构建；G5 未开始。** 本次仅 CI 构建及 artifact 离线核验，无实机 probe、无 PMIC/GRF 访问、无物理介质写入。项目 A 仍严格 TF-only；G4-B PASS 不改变 eMMC 冻结边界，也不授予 G4-P 操作权限。
+
+
+## 2026-11-27 G4-P preflight：写入矩阵完成，运行时 NO-GO
+
+新增报告：`PANTHER-X2-G4-P-RUNTIME-WRITE-AND-ROLLBACK-READINESS-20261127.md`。
+
+本轮只读复核固定 6.18.63 源码与 Panther DTS，展开 G4-P 完整写入矩阵：若 9 个 supply 全部成功 resolve，probe 初始路径执行 14 次 PMU GRF hiword-mask write，覆盖 `0xfdc20140` / `0xfdc20144` / `0xfdc20148`（VSEL0/1/2）。这不是只修改 VCCIO5 的单 rail 操作。报告列出 14 项 1.8V/3.3V 分类写参数，并记录 vccio3/LDO5 实际 selector 尚未验证。
+
+新增关键限制：RK3568 stock write function 不检查底层 `regmap_write()` 返回值；probe 部分失败时不回滚此前已写 selector。固定内核 regmap debugfs `registers` 默认只读，当前未发现已验证的安全回写路径；masked-restore 仅是理论设计，专用受限 helper 尚未实现/验证。故当前不能形成完整可执行且可恢复的 G4-P 操作。
+
+**状态更新：G4-S PASS；G4-B PASS；G4-P 静态矩阵已展开，但 readback runtime path 未验证、rollback helper 未实现，G4-P = NO-GO / HOLD / NOT AUTHORIZED。** 不启动设备、不加载 G4-P DTB、不触发 probe、不写 PMU GRF。G5、TF-rootfs DTB 和完整用户空间准备暂不跨越 G4-P 决策门。SU08G TF-only 边界不变，eMMC/SN64G 均不触碰。
+
+
+## 2026-11-27 G4-P-SAFE 源码事务设计审查
+
+新增报告：`PANTHER-X2-G4-P-SAFE-DRIVER-DESIGN-REVIEW-20261127.md`。
+
+只读审查固定 6.18.63 io-domain driver 与 regulator core 后，确认 stock driver 的 14 次潜在 GRF 写入缺少错误传播、probe 失败不恢复已写 selector；regulator notifier 在 regulator mutex 持有期间执行，因此不能在持有 IO-domain mutex 时调用 regulator core API。另确认普通 remove/unbind 时自动恢复快照不安全，除非证明 regulator rail 在 teardown/restore 全窗口冻结。
+
+**当前仍为设计审查，不是 patch 实现或运行时验证。** G4-P-SAFE patch、fake-regmap/KUnit 故障注入、build-only 均未完成；G4-P 继续 NO-GO / HOLD / NOT AUTHORIZED。下一步仍限定为独立代码候选与纯软件测试，不启动 Panther X2、不访问 PMIC/PMU GRF、不写任何介质。
+
+
+## 2026-11-27 PMU GRF 只读 readback 静态可行性补充
+
+固定 Linux 6.18.63 syscon 使用通用 32-bit MMIO regmap，regmap debugfs 的 registers 文件默认只读；静态上可通过 PMU GRF syscon 的 regmap_read() 路径观察 VSEL0/1/2。Panther X2 运行时 debugfs/regmap 目录及 readable/access 状态尚未核验，因此只收窄源码机制疑点，不代表 readback 已实机通过。G4-P 仍 NO-GO / HOLD / NOT AUTHORIZED。细节见 G4-P-SAFE 设计审查与 G4-P runtime readiness 报告。

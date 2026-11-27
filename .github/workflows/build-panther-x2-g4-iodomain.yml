@@ -1,0 +1,333 @@
+name: Panther X2 Project A G4 IO-domain build-only
+
+on:
+  push:
+    branches:
+      - g4-iodomain-build-only
+    paths:
+      - "scripts/panther-x2-g4/**"
+      - ".github/workflows/build-panther-x2-g4-iodomain.yml"
+  pull_request:
+    branches:
+      - g3-provider-runtime-package
+    paths:
+      - "scripts/panther-x2-g4/**"
+      - ".github/workflows/build-panther-x2-g4-iodomain.yml"
+  workflow_dispatch:
+    inputs:
+      g3_run_id:
+        description: "Successful G3 provider build-only run"
+        required: true
+        type: string
+        default: "45984035650"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g4-iodomain-build-only
+  cancel-in-progress: false
+
+env:
+  KERNEL_VERSION: "6.18.63"
+  KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+  KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+  G3_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g3_run_id || '45984035650' }}
+
+jobs:
+  g4-iodomain-build-only:
+    name: Build and audit isolated RK3568 IO-domain; no hardware access
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install isolated build toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential curl device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git libelf-dev \
+            libncurses-dev libssl-dev make perl python3 \
+            binutils kmod zstd
+
+      - name: Restore and verify frozen G3 provider build artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-g3-rk809-regulator-provider-build-only
+          path: work/g3-reference
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G3_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify G3 artifact identity and freeze G4 baseline
+        id: freeze_g3_inputs
+        run: |
+          set -euo pipefail
+          G3_OUT=work/g3-reference/output
+          test -s "$G3_OUT/SHA256SUMS"
+          (
+            cd "$G3_OUT"
+            sha256sum --check SHA256SUMS
+          )
+          G3_IMAGE="$G3_OUT/Image"
+          G3_CONFIG="$G3_OUT/kernel.config"
+          G3_DTB="$G3_OUT/dtb/rockchip/rk3566-panther-x2.dtb"
+          test -s "$G3_IMAGE"
+          test -s "$G3_CONFIG"
+          test -s "$G3_DTB"
+          test "$(sha256sum "$G3_IMAGE" | awk '{print $1}')" = "d1830f649e3bfa789fec3589c2ef16b1e46465846c6bb150e666f8df4c610a61"
+          test "$(sha256sum "$G3_DTB" | awk '{print $1}')" = "9364c6d7aadddb8520388418e8db570e0b4020a38c5ceb8acbd2343165bb5209"
+          test "$(fdtget -t s "$G3_DTB" / model)" = "Panther X2"
+          fdtget -t s "$G3_DTB" / compatible | grep -q 'panther,x2'
+          fdtget -t s "$G3_DTB" / compatible | grep -q 'rockchip,rk3566'
+          if grep -Eq '^CONFIG_ROCKCHIP_IODOMAIN=[ym]$' "$G3_CONFIG"; then
+            echo "::error::G3 baseline unexpectedly enables ROCKCHIP_IODOMAIN"
+            exit 1
+          fi
+          test "$(fdtget -t s "$G3_DTB" /syscon@fdc20000/io-domains status)" = "disabled"
+          mkdir -p work/reference
+          cp "$G3_CONFIG" work/reference/g3-kernel.config
+          cp "$G3_DTB" work/reference/g3-panther-x2.dtb
+          cp "$G3_IMAGE" work/reference/g3-Image
+          cp "$G3_OUT/G3-source-lock.txt" work/reference/G3-source-lock.txt
+          cp "$G3_OUT/G3-BUILD-MANIFEST.txt" work/reference/G3-BUILD-MANIFEST.txt
+          {
+            echo "g3_run_id=${G3_RUN_ID}"
+            echo "g3_image_sha256=$(sha256sum work/reference/g3-Image | awk '{print $1}')"
+            echo "g3_config_sha256=$(sha256sum work/reference/g3-kernel.config | awk '{print $1}')"
+            echo "g3_dtb_sha256=$(sha256sum work/reference/g3-panther-x2.dtb | awk '{print $1}')"
+            echo "g3_artifact=panther-x2-g3-rk809-regulator-provider-build-only"
+          } | tee work/g3-reference-lock.txt
+          echo "g3_config_sha256=$(sha256sum work/reference/g3-kernel.config | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned Linux source and apply audited R1 compatibility patch
+        run: |
+          set -euo pipefail
+          mkdir -p work/logs work/output work/kernel-out
+          git init work/linux
+          git -C work/linux remote add origin "$KERNEL_SOURCE_REPO"
+          git -C work/linux fetch --depth=1 origin "$KERNEL_SOURCE_COMMIT"
+          git -C work/linux checkout --detach FETCH_HEAD
+          test "$(git -C work/linux rev-parse HEAD)" = "$KERNEL_SOURCE_COMMIT"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          PATCH="$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          test -s "$PATCH"
+          git -C work/linux apply --check "$PATCH"
+          git -C work/linux apply "$PATCH"
+          git -C work/linux diff --check
+          {
+            echo "kernel_source=$KERNEL_SOURCE_REPO"
+            echo "kernel_commit=$KERNEL_SOURCE_COMMIT"
+            echo "kernel_version=$KERNEL_VERSION"
+            echo "r1_compat_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
+            echo "g3_config_sha256=$(sha256sum work/reference/g3-kernel.config | awk '{print $1}')"
+            echo "g4_fragment_sha256=$(sha256sum scripts/panther-x2-g4/g4-iodomain.fragment | awk '{print $1}')"
+          } | tee work/source-lock.txt
+
+      - name: Restore incremental G3 kernel object cache
+        uses: actions/cache/restore@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g4-iodomain-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_g3_inputs.outputs.g3_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g4/g4-iodomain.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g4-iodomain.yml') }}
+          restore-keys: |
+            panther-x2-g3-provider-${{ env.KERNEL_SOURCE_COMMIT }}-
+
+      - name: Merge G4 IO-domain delta into frozen G3 config
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          BASE="$GITHUB_WORKSPACE/work/reference/g3-kernel.config"
+          G4="$GITHUB_WORKSPACE/scripts/panther-x2-g4/g4-iodomain.fragment"
+          mkdir -p "$OUT"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$BASE" "$G4" \
+            2>&1 | tee work/logs/g4-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/output/kernel.config
+          diff -u "$BASE" work/output/kernel.config > work/logs/g4-config-diff.txt || test "$?" -eq 1
+
+          require_y() {
+            grep -qx "$1=y" work/output/kernel.config || {
+              echo "::error::Expected $1=y"
+              exit 1
+            }
+          }
+          require_off() {
+            if grep -Eq "^$1=[ym]$" work/output/kernel.config; then
+              echo "::error::Forbidden $1 enabled"
+              grep -E "^$1=" work/output/kernel.config
+              exit 1
+            fi
+          }
+          for key in CONFIG_OF CONFIG_REGULATOR CONFIG_REGULATOR_FIXED_VOLTAGE \
+                     CONFIG_REGULATOR_RK808 CONFIG_MFD_RK8XX_I2C CONFIG_RTC_DRV_RK808 \
+                     CONFIG_INPUT_RK805_PWRKEY CONFIG_ROCKCHIP_IODOMAIN; do
+            require_y "$key"
+          done
+          for key in CONFIG_STMMAC_ETH CONFIG_DWMAC_ROCKCHIP CONFIG_MDIO_BUS \
+                     CONFIG_PHYLIB CONFIG_REALTEK_PHY CONFIG_BT CONFIG_WIRELESS \
+                     CONFIG_WLAN CONFIG_CFG80211 CONFIG_MAC80211 CONFIG_RFKILL; do
+            require_off "$key"
+          done
+          cp "$G4" work/output/g4-iodomain.fragment
+          echo "G4 Kconfig dependency and isolation gates: PASS" | tee work/logs/g4-config-gates.txt
+
+      - name: Build configured Linux Image
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
+            2>&1 | tee work/logs/g4-kernel-build.log
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          install -m 0644 "$OUT/System.map" work/output/System.map
+          install -m 0644 "$OUT/vmlinux" work/output/vmlinux
+          file work/output/Image | tee work/output/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \\n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+
+      - name: Audit IO-domain object, symbols and isolated DTB
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          test -s "$OUT/drivers/soc/rockchip/io-domain.o"
+          nm -a "$OUT/drivers/soc/rockchip/io-domain.o" > work/logs/io-domain-object-symbols.txt
+          grep -q 'rockchip_iodomain_probe' work/logs/io-domain-object-symbols.txt
+          grep -q 'rk3568_iodomain_write' work/logs/io-domain-object-symbols.txt
+
+          nm -a work/output/vmlinux > work/logs/g4-vmlinux-symbols.txt
+          for sym in rockchip_iodomain_probe rockchip_iodomain_write rk808_regulator_probe; do
+            grep -q "$sym" work/logs/g4-vmlinux-symbols.txt
+          done
+
+          mkdir -p work/output/dtb/rockchip
+          cp work/reference/g3-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          DTB=work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          IO_DOMAIN=/syscon@fdc20000/io-domains
+
+          # G3 starts with this node disabled; G4-B changes only this DTB node.
+          test "$(fdtget -t s "$DTB" "$IO_DOMAIN" status)" = "disabled"
+          for prop in pmuio1-supply pmuio2-supply vccio1-supply vccio2-supply \
+                      vccio3-supply vccio4-supply vccio5-supply vccio6-supply vccio7-supply; do
+            fdtget -t x "$DTB" "$IO_DOMAIN" "$prop" >/dev/null
+          done
+          fdtput -t s "$DTB" "$IO_DOMAIN" status okay
+
+          assert_status() {
+            local node="$1" expected="$2" actual
+            actual="$(fdtget -t s "$DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            test "$actual" = "$expected" || {
+              echo "::error::DTB status mismatch: $node expected=$expected actual=$actual"
+              exit 1
+            }
+          }
+          assert_status "$IO_DOMAIN" okay
+          assert_status /i2c@fdd40000/pmic@20 okay
+          assert_status /mmc@fe310000 disabled
+          assert_status /mmc@fe2b0000 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /gpu@fde60000 disabled
+          assert_status /saradc@fe720000 disabled
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+          test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
+
+          {
+            echo "model=$(fdtget -t s "$DTB" / model)"
+            echo "rk809_status=$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)"
+            echo "io_domains_status=$(fdtget -t s "$DTB" "$IO_DOMAIN" status)"
+            echo "emmc_sdhci_status=$(fdtget -t s "$DTB" /mmc@fe310000 status)"
+            echo "tf_sdmmc0_status=$(fdtget -t s "$DTB" /mmc@fe2b0000 status)"
+            echo "sdio_sdmmc1_status=$(fdtget -t s "$DTB" /mmc@fe2c0000 status)"
+            echo "gpu_status=$(fdtget -t s "$DTB" /gpu@fde60000 status)"
+            echo "saradc_status=$(fdtget -t s "$DTB" /saradc@fe720000 status)"
+            echo "gmac1_status=$(fdtget -t s "$DTB" /ethernet@fe010000 status)"
+            echo "mdio_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)"
+            echo "phy_status=$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)"
+            sha256sum "$DTB"
+          } | tee work/output/G4-DTB-ISOLATION.txt
+
+          sha256sum "$OUT/drivers/soc/rockchip/io-domain.o" \
+            "$OUT/drivers/regulator/rk808-regulator.o" \
+            "$OUT/drivers/regulator/core.o" | tee work/output/G4-DEPENDENCY-OBJECTS-SHA256.txt
+
+          {
+            echo "purpose=G4 IO-domain build-only candidate"
+            echo "kernel_version=$KERNEL_VERSION"
+            echo "kernel_commit=$KERNEL_SOURCE_COMMIT"
+            echo "g3_run_id=$G3_RUN_ID"
+            echo "g3_image_sha256=$(sha256sum work/reference/g3-Image | awk '{print $1}')"
+            echo "g3_config_sha256=$(sha256sum work/reference/g3-kernel.config | awk '{print $1}')"
+            echo "g3_dtb_sha256=$(sha256sum work/reference/g3-panther-x2.dtb | awk '{print $1}')"
+            echo "kernel_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "Image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
+            echo "dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
+            echo "rockchip_iodomain=built-in"
+            echo "rk809_regulator_provider=built-in"
+            echo "io_domain_status=okay"
+            echo "io_domain_supplies=9_declared"
+            echo "gmac1_mdio_phy=disabled"
+            echo "emmc_sdhci=disabled"
+            echo "tf_sdmmc0=disabled"
+            echo "sdio_sdmmc1=disabled"
+            echo "gpu=disabled"
+            echo "saradc=disabled"
+            echo "hardware_access=none"
+            echo "pmu_grf_access=none"
+            echo "pmic_register_access=none"
+            echo "physical_media_writes=none"
+            echo "runtime_probe=not_executed"
+            echo "runtime_authorization=not_granted"
+            echo "ABCD=NOT_EXECUTABLE"
+          } | tee work/output/G4-BUILD-MANIFEST.txt
+
+          cp work/source-lock.txt work/output/G4-source-lock.txt
+          cp work/g3-reference-lock.txt work/output/G4-G3-reference-lock.txt
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Save incremental G4 kernel object cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-g4-iodomain-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_g3_inputs.outputs.g3_config_sha256 }}-${{ hashFiles('scripts/panther-x2-g4/g4-iodomain.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-g4-iodomain.yml') }}
+
+      - name: Upload G4 IO-domain build-only artifact
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g4-iodomain-build-only
+          path: |
+            work/output/
+            work/logs/
+            work/source-lock.txt
+            work/g3-reference-lock.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload failed G4 diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-g4-iodomain-failed-diagnostics
+          path: |
+            work/logs/
+            work/source-lock.txt
+            work/g3-reference-lock.txt
+            work/output/kernel.config
+          if-no-files-found: warn
+          retention-days: 14

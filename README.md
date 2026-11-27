@@ -6,12 +6,13 @@
 
 - [项目 A 总路线图](docs/reports/2026-11/PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：唯一权威架构、决策原则、U-Boot 论证、组件边界和阶段总览。
 - [项目 A 分阶段实施计划](docs/reports/2026-11/PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)：B0—B7 及 B0.1、B1.1 等可执行步骤、验收和停止条件。
+- [项目 A TF-only 边界与运行环境切换门](docs/reports/2026-11/PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)：SU08G 为唯一实验介质；RAM-only→TF 完整用户空间；TF 完整验收后才评审 eMMC 部署。
 - [B1 纯 RAM 干净基线构建实施记录](docs/reports/2026-11/PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 构建输入、隔离边界、workflow 和未验证事项。
 - [文档总索引](docs/README.md)：主题文档、证据与历史路线映射。
 
 ## 项目 A 当前方向
 
-固定已实机验证的 JP-TvBox U-Boot proper 作为 B1—B3 测试入口。项目 A 的网络目标仅为 Panther X2 板载有线千兆以太网口。B1 先建立不含网络功能变量的干净 RAM Linux 基线，隔离板载 Ethernet 的 GMAC/STMMAC/DWMAC、MDIO/PHY 及网络协议和用户空间工具；基线通过后，再按单变量顺序逐项引入板载有线 Ethernet 所需组件，最后验证静态 IP/ARP/ICMP 和 TCP/UDP。Wi-Fi/无线网络、蓝牙及其控制器、驱动、固件、协议和用户空间组件永久排除在项目 A 的研究、构建、测试、验收和后续引入范围之外；USB/PCIe 外接网卡亦排除。B1—B3 不替换 U-Boot proper，不引入完整发行版服务。eMMC pre-Linux 写入安全门未通过前，不写实验卡、不启动实验固件。
+固定已实机验证的 JP-TvBox U-Boot proper 作为 B1—B3 测试入口。项目 A 的网络目标仅为 Panther X2 板载有线千兆以太网口。B1 先建立不含网络功能变量的干净 RAM Linux 基线，隔离板载 Ethernet 的 GMAC/STMMAC/DWMAC、MDIO/PHY 及网络协议和用户空间工具；基线通过后，再按单变量顺序逐项引入板载有线 Ethernet 所需组件，最后验证静态 IP/ARP/ICMP 和 TCP/UDP。Wi-Fi/无线网络、蓝牙及其控制器、驱动、固件、协议和用户空间组件永久排除在项目 A 的研究、构建、测试、验收和后续引入范围之外；USB/PCIe 外接网卡亦排除。B1—B3 不替换 U-Boot proper，不引入完整发行版服务。项目 A 全阶段仅使用 SU08G TF；TF 系统完全验收前不写入、不挂载、不安装、不修改 eMMC。
 
 项目 A 不开展项目 B 的网卡故障根因调查或 GMAC/MDIO/PHY 专项根因排障；相关历史报告保留为独立专题证据。但项目 A 必须将这些历史线索作为风险输入，在 B1 隔离所有可能干扰网络验证的组件，并在干净基线通过后逐项受控引入。组件隔离和单变量验证属于项目 A 的实验设计，不等于恢复项目 B。
 
