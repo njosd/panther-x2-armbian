@@ -132,3 +132,17 @@ G4-P-SAFE 必须先作为独立 patch/build-only 候选，不覆盖 G4-B frozen 
 probe 中途失败的恢复仍可设计为：标记 quiescing → 在不持有 IO-domain mutex 时注销/同步 notifier → 确认 rail 未发生实际变化且快照有效 → 执行受限 masked restore → readback；任何条件不满足则 STATE UNKNOWN / STOP。对于已成功 probe 的运行态，不把 driver unbind 当作实验回退按钮。
 
 这项修订不改变当前 NO-GO / HOLD / NOT AUTHORIZED 结论。CPU hang、kernel panic、断电、总线失联等仍无法保证自动回退。
+
+
+## 8. 补充：PMU GRF readback 的静态可行性
+
+继续只读检查固定 6.18.63 的 drivers/mfd/syscon.c：
+
+- syscon_regmap_config 默认 reg_bits=32、val_bits=32、reg_stride=4。
+- of_syscon_register() 从 DT resource 建立 MMIO regmap，按 resource size 设置 max_register = res_size - reg_io_width；没有在通用 syscon config 中设置自定义 readable_reg/writeable_reg 回调或限制表。
+- regmap_debugfs.c 的 registers 文件使用 regmap_read() 枚举可读寄存器；本固定源码默认 registers 文件 mode=0400（只读），REGMAP_ALLOW_WRITE_DEBUGFS 未启用。
+- IO-domain driver 从 PMU GRF parent syscon 获取 regmap，因此静态实现支持通过同一 regmap 的只读 registers dump 观察寄存器；这比此前“readback 路径完全未知”的表述更具体。
+
+**证据边界：** 以上仅证明 generic syscon/regmap 的静态机制具备只读 readback 能力，不证明 Panther X2 当前 G4 RAM-only 启动时 debugfs 已挂载、PMU GRF regmap debugfs 目录确实创建、VSEL0/1/2 被列为 readable，或读取值与硬件寄存器相符。目标设备上的目录、权限、range/access 项和三寄存器读回仍须另行只读核验。若目录缺失或寄存器不可读，不得改用 /dev/mem 或开放 debugfs 写权限替代。
+
+因此 readback blocker 从“源码机制未知”收窄为“静态机制可行，目标运行时入口尚待只读确认”。这不改变 G4-P NO-GO：可验证 rollback、9 路实际软件电压/状态、notifier 并发与 teardown 协议仍未闭合。
