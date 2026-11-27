@@ -109,7 +109,7 @@
 - [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 与 G2-B build-only 已完成，stock RK809 probe 仍 HOLD。
 - [G2-PROBE 副作用、RTC 子设备与 IRQ 语义复核（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：G2-B 未启用 RTC_DRV_RK808，而 MFD pre-init 会置 RTC_STOP；启用 RTC child 又会清 STOP、写 RTC_STATUS 并触发 alarm IRQ ACK。另发现 RK809 Rev 2.5 仅列 14 个有效 IRQ，Linux 却对 RK809/RK817 共用 24-line RK817 map；0xEE=0x94 低 nibble 也是跨手册版本变化的 reserved 非默认值。需 Rockchip 澄清；probe 失败无 PMIC register rollback，G2-PROBE 继续 HOLD。
 
-- [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
+- [项目 A TF-only 实验边界与真实运行环境切换门（2026-11-27）](./PANTHER-X2-PROJECT-A-TF-ONLY-AND-RUNTIME-CUTOVER-POLICY-20261127.md)：SU08G 是唯一实验介质；G4 前置门完成后在 TF 建立完整用户空间，G5 及后续验证仍留在 TF；TF 系统完全验收后才评审 eMMC 部署，并须单独授权具体写入。
 
 - GMAC 高风险准入与 TX 分段计划：见 [G0–G10 硬件准入与 ABCD-TX 分层验证计划](./PANTHER-X2-G0-G10-HARDWARE-ACTIVATION-AND-ABCD-TX-PLAN-20261126.md) 的“GMAC 高风险准入原则”章节。
 
