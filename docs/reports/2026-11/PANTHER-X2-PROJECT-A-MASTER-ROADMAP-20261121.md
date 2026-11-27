@@ -987,3 +987,19 @@ G4-S 静态/黄金对照已 PASS，详细报告：`PANTHER-X2-G4-IODOMAIN-GOLDEN
 该 workflow 是 build-only：Actions runner 不访问 Panther X2，不执行 driver probe，不读取/写入 PMIC 或 PMU GRF，不写物理介质，不生成可直接烧录的 TF 镜像。G4-B 仍为待 Actions 验证状态；PR review/Actions 通过前不标记 BUILD PASS。
 
 **G4-P 仍 HOLD / NOT AUTHORIZED。** G4-S 已证明 IO-domain probe 对当前 9 个 supply 的预期影响是多域 14 次 GRF write call，且 stock driver 不检查 regmap_write 返回值、不回滚部分失败。SWITCH_REG1 电压读回可能继承上游固定 3.3V，不能证明实体输出。任何 G4-P probe/GRF 写入必须另行提交读写范围、readback、失败停止和回退计划，并取得明确授权。
+
+
+## 2026-11-27 G3 截止点黄金偏离评估
+
+新增报告：`PANTHER-X2-G3-GOLDEN-DEVIATION-ASSESSMENT-20261127.md`（commit `3928daea714ba02c1dd0140c51c8e5edbc7ef8da`）。
+
+**总体判断：** 截至 G3，6.18.63 的 RK809/MFD/regulator provider 软件主链与黄金基线实现偏离程度为低到中等；没有发现 G3 范围内足以解释 GMAC TX 故障的重大新增回归。运行态只证明 provider driver binding + 16 个 regulator object registration，不证明实体 rail 电压/enable、IO-domain 或 GMAC/PHY/TX。
+
+要点：
+- 6.1.65/6.1.116 的 RK809 MFD、regulator、IO-domain、Rockchip GMAC glue 关键源码文件高度一致；6.1.65 源码身份仍是 candidate，未与 Image 二进制绑定。
+- 6.1.116 完整 Panther DTB 与 6.18.63 完整 DTB 字节级相同；6.1.65 PMIC/IO-domain 原始 DTB 子树保留证据限制。
+- MFD 的 24-line IRQ map、mask/status/ACK 布局和 RK817-family pre-init 表与黄金共性高；variant 选择、devm IRQ 生命周期、power handler API、PWRKEY resource 顺序有差异，但未见 G3 主链新增重大功能偏离。
+- 6.18 regulator core 的约束处理顺序/部分电压处理逻辑与黄金存在差异；约 30 秒 unused-regulator cleanup 是共有行为。G3 的 `regulator_ignore_unused` 仅为临时测试保护，不能视为黄金等价或正式修复。
+- G4 仍是最大未闭合跨层点：IO-domain 未 probe，实际 rail/selector 未验证。G4-S 已识别 9 supplies / 预期 14 次 GRF write call，必须按独立准入门处理。
+
+**状态：** G3-P 按定义结项，不重复运行；G4-S PASS；G4-B Actions 正在构建；G4-P HOLD / NOT AUTHORIZED；G5/ABCD 不提前执行。
