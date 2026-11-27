@@ -163,7 +163,7 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 
 - R1 workflow run：`45611898629`；job `139197305317`，状态 `completed / success`。
 - 输入 artifact：`b2-1-r1-network-core`；artifact ID `15023630465`，截至本报告日期未过期。
-- 新增配置片段：`scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。只启用 `CONFIG_MFD_RK8XX_I2C=y`，明确关闭 `CONFIG_REGULATOR_RK808` 与 `CONFIG_INPUT_RK805_PWRKEY`。
+- 新增配置片段：`scripts/panther-x2-g2/g2-rk8xx-mfd.fragment`。显式启用 `CONFIG_I2C=y` 与 `CONFIG_MFD_RK8XX_I2C=y`（不启用 RK3x 控制器），明确关闭 `CONFIG_REGULATOR_RK808` 与 `CONFIG_INPUT_RK805_PWRKEY`。
 - 新增 workflow：`.github/workflows/build-panther-x2-g2-b-rk8xx-mfd.yml`，手动触发，默认读取上述 R1 run ID；从固定 Linux 6.18.63 commit 重建内核 Image（R1 基线关闭 CONFIG_MODULES，因此不构建或安装外置 modules），并保留 R1 配置、源码补丁、DTB 输入的来源锁。
 - workflow 将在 R1 DTB 的独立副本上把 `/i2c@fdd40000/pmic@20` 设置为 disabled，并再次确认 GMAC1、MDIO1、RTL8211F 节点仍 disabled；不会改写 R1 原始 artifact。
 - workflow 增加以源码 commit、R1 config SHA、G2 fragment、兼容补丁和 workflow 文件哈希为键的 kernel object cache；首次运行因没有 G2 缓存仍需完整编译，后续同一输入的失败重跑可恢复部分 `work/kernel-out`，由 Kbuild 继续处理未完成对象。R1 artifact 本身没有保存完整 object tree，因此不能声称 G2 首次构建能直接复用 R1 的 .o 文件。
@@ -175,4 +175,4 @@ Project-A minimal runtime 首轮优先采用 RAM initramfs，以避免将 eMMC/T
 
 **QEMU 边界修订：** 当前 G2-B 目标是 RK3566/Panther X2 内核与 DTB。通用 QEMU `virt` 机器并不模拟 Panther X2/RK3566 板级平台，不能把其启动结果作为本门验收；本 workflow 不执行误导性的 QEMU system boot。若以后对静态 AArch64 用户态工具做 QEMU user-mode smoke test，应单独标注为用户态测试，不得称为 RK3566 kernel boot。
 
-工作流首次提交后发现 YAML 尾部重复残片和兼容补丁路径错误；已于 2026-11-27 修复（commit `797ad7802911337352cb7efb9c1a4f096ccc3895`），并将构建范围收敛为 built-in-only Image，避免调用 modules/modules_install；同时删除对 `modules.builtin` 文件存在的假设，因为该门不执行 modules 构建。G2 fragment 显式声明 `CONFIG_I2C=y`，workflow 检查 `CONFIG_OF=y` 和 I2C/MFD 依赖闭包；不启用 `I2C_RK3X` 控制器驱动，RK809 节点仍 disabled。修复后已回读检查文件尾部、补丁路径、构建目标、上传 artifact 名称及隔离检查。**尚未触发运行**。只有 Actions 实际成功并审查 artifact 后，才能把 G2-B 标记为 BUILD PASS。G2-PROBE 仍然 HOLD / NOT AUTHORIZED。
+工作流首次提交后发现 YAML 尾部重复残片、兼容补丁路径错误及无模块配置下的构建目标问题；已于 2026-11-27 修复，最终工作流版本 commit `7a730f6ee0a5d00b6718782d735b6fd4af11be71`，并将构建范围收敛为 built-in-only Image，避免调用 modules/modules_install；同时删除对 `modules.builtin` 文件存在的假设，因为该门不执行 modules 构建。G2 fragment 显式声明 `CONFIG_I2C=y`，workflow 检查 `CONFIG_OF=y` 和 I2C/MFD 依赖闭包；不启用 `I2C_RK3X` 控制器驱动，RK809 节点仍 disabled。修复后已回读检查文件尾部、补丁路径、构建目标、上传 artifact 名称及隔离检查。**尚未触发运行**。只有 Actions 实际成功并审查 artifact 后，才能把 G2-B 标记为 BUILD PASS。G2-PROBE 仍然 HOLD / NOT AUTHORIZED。
