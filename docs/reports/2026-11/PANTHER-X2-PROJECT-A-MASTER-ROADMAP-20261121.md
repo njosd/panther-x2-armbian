@@ -935,3 +935,16 @@ G4-P0 静态设计审计完成（尚未构建/启动）。Linux 6.18.63 OF defau
 必要配置除 `CONFIG_OF=y`、`CONFIG_ROCKCHIP_IODOMAIN=y` 外，还必须 `CONFIG_MFD_SYSCON=y`：若未启用，syscon.h stub 返回 -ENOTSUPP；MFD_SYSCON selects REGMAP_MMIO。建议 built-in IODOMAIN=y。注意 probe 会通过 syscon_node_to_regmap -> of_iomap 建立 PMUGRF MMIO 映射和 regmap 对象，但在无 supply 路径中 IO-domain driver 不调用 regmap_read/write；准确边界是“无 selector 寄存器事务”，不是“完全无 MMIO 映射”。
 
 DTB 只允许 io-domains status=okay 并删除九个 supply properties；其余 G3 资产/硬件隔离保持不变。build 后必须核验 config、compatible、status、九个属性全部缺失，并反编译审计 DTB diff。G4-P0 静态设计 PASS，可进入独立 PREPARE-ONLY build workflow 设计；artifact 尚未构建，实体启动/probe 未执行且未授权。详见 G4-P 报告第 15 节。
+
+
+## 2026-11-28 G4-P0 binding-only build workflow 已准备（尚未运行）
+
+G4-P0 静态设计审计 PASS 后，已在独立分支 `g4-p0-binding-only-build` 准备 build-only workflow，避免复用旧 G4-B 完整九路 supply 候选。新增：
+- `scripts/panther-x2-g4-p0/g4-p0-binding-only.fragment`：显式启用 `CONFIG_MFD_SYSCON=y`、`CONFIG_REGMAP=y`、`CONFIG_REGMAP_MMIO=y`、`CONFIG_ROCKCHIP_IODOMAIN=y`。
+- `.github/workflows/build-panther-x2-g4-p0-binding-only.yml`：固定复用 G3 build-only run `45984035650` / artifact `15192123549`；固定 Linux 6.18.63 commit；从 G3 config 增量合入 G4-P0；构建 Image；检查 IO-domain/syscon objects 与 symbols；仅修改 DTB IO-domain child status 并删除全部九个 supply 属性，逐一验证属性缺失并输出反编译 diff、manifest、SHA256SUMS。保留 G3 对 RK809 以外外围设备的隔离状态，尤其 GMAC1/MDIO/PHY、eMMC、TF SDMMC0、SDIO、GPU、SARADC 均 disabled。cache restore 可回退复用 G3 kernel object cache。
+
+**与旧 G4-B 的关键区别：** 旧 `.github/workflows/build-panther-x2-g4-iodomain.yml` 保留九路 supply，存在已审计的 partial-write 风险，不得作为 G4-P0 运行入口。G4-P0 删除全部九路 supply，按 6.18.63 源码预期跳过 voltage read/notifier/selector-write 路径；但 probe 仍会获取 PMUGRF syscon regmap 并可能建立 MMIO mapping，准确结论仅为“无 selector register transaction”，不是“无 MMIO mapping”。
+
+当前状态：**G4-P0 static design PASS；workflow/fragment 已提交到独立分支；Actions 尚未运行；artifact 不存在；runtime probe 未执行且未授权。** 本次没有启动 Panther X2、访问 PMIC/PMU GRF 寄存器或写入 SU08G/SN64G/eMMC。运行环境仍保持 RAM initramfs 设计，云端 CI build 不等于转向持久化 rootfs。
+
+下一步先离线审查 workflow YAML/脚本，再手动触发 build-only；构建和 artifact 完成独立校验后，才评估单独的 SU08G RAM-only 实机验证授权。详见 `PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md` 第 16 节。
