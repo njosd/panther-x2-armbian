@@ -105,7 +105,7 @@
 - [G0 总体复核与 G2 受控激活预案（2026-11-27）](./PANTHER-X2-G0-OVERALL-REVIEW-AND-G2-CONTROLLED-PLAN-20261127.md)：G0 CONDITIONAL PASS（仅计划层面）；G2 只拟验证 RK809 MFD/regmap，probe 需要单独授权，不启用 regulator/GMAC。
 
 - [G2 RK809 MFD 准入再评估（2026-11-27）](./PANTHER-X2-G2-RK809-MFD-GATE-REASSESSMENT-20261127.md)：黄金与 6.18 IRQ mapping/pre-init/MFD cells 对照；识别 PWRKEY resource 顺序差异；G2-S 与 G2-B build-only 已完成，stock RK809 probe 仍 HOLD。
-- [G2-PROBE 副作用、RTC 子设备与 IRQ 语义复核（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：回溯 G2-B 实际配置发现 RTC_DRV_RK808 未启用，而 MFD pre-init 会置 RTC_STOP；确认需审查 RTC child 恢复写入、RTC alarm unmask/ACK、IRQ reserved/RC 位及 probe 部分失败无寄存器回滚。G2-PROBE 继续 HOLD。
+- [G2-PROBE 副作用、RTC 子设备与 IRQ 语义复核（2026-11-27）](./PANTHER-X2-G2-PROBE-SIDE-EFFECT-AND-RTC-CHILD-REVIEW-20261127.md)：G2-B 未启用 RTC_DRV_RK808，而 MFD pre-init 会置 RTC_STOP；启用 RTC child 又会清 STOP、写 RTC_STATUS 并触发 alarm IRQ ACK。另发现 RK809 Rev 2.5 仅列 14 个有效 IRQ，Linux 却对 RK809/RK817 共用 24-line RK817 map；0xEE=0x94 低 nibble 也是跨手册版本变化的 reserved 非默认值。需 Rockchip 澄清；probe 失败无 PMIC register rollback，G2-PROBE 继续 HOLD。
 
 - [项目 A 6.18 真实运行环境切换原则（2026-11-27）](./PANTHER-X2-PROJECT-A-MASTER-ROADMAP-20261121.md)：B1-clean 只保留启动基线；G2-B build-only 后冻结项目 A 专用 6.18.63 minimal runtime，并从 G2-PROBE 起在 Panther X2 实机运行；R7 首次进行真实 TX 验收。
 
