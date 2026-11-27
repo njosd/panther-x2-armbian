@@ -106,12 +106,24 @@ Run `45933429153`, job `140291064301`, completed artifact downloads and validate
 
 The workflow was corrected to allow the frozen storage/USB host baseline while continuing to reject concrete USB NIC drivers and all out-of-scope network/PHY drivers. DTB assertions now match the exact frozen state: TF/eMMC enabled, SDIO disabled, USB host/PHY0 enabled, unused SDHCI/second USB controller/PHY disabled, UART1/UART2 enabled with no Bluetooth child, and RK809/GMAC1/MDIO/PHY disabled. The next run remains PREPARE-ONLY and must still pass all remaining offline packaging and image-integrity gates.
 
+## 7.2 Second packaging attempt and initramfs audit correction (2026-11-27)
+
+Run `45935456629`, job `140297518604`, passed frozen input download/SHA256 verification, the corrected Kconfig gate, all DTB isolation assertions, Image checks, BusyBox static-link checks, shell syntax validation, cpio creation, and U-Boot ramdisk header validation. The generated gzip initramfs was 495,855 bytes; `uInitrd` was recognized as an AArch64 gzip RAMDisk.
+
+The job then failed only at the post-build unpack comparison:
+```
+cmp: work/initramfs/busybox: No such file or directory
+```
+The packaging step had already copied BusyBox to `work/initramfs/bin/busybox` and removed the staging copy at `work/initramfs/busybox`; the subsequent comparison incorrectly referenced the removed staging path. This is a workflow path-reference defect, not a BusyBox binary, initramfs generation, kernel, DTB, or hardware failure. The comparison now uses the preserved frozen-input copy `work/output/busybox` against the unpacked `work/initramfs-check/bin/busybox`.
+
+No TF image generation, loop-device partitioning, PREPARE-ONLY image artifact upload, physical media write, or hardware access occurred in this run. The next manual run should reuse the same immutable G2/B1 inputs and validate the remaining packaging stages.
+
 ## 8. Status
 
 - G2-B build-only: **PASS**.
 - B1 BusyBox/U-Boot support artifact identity: **verified**.
 - New G2 runtime init/boot scripts: **committed**.
-- G2 runtime packaging workflow: **first run `45933429153` failed at the Kconfig preflight because `CONFIG_BLOCK=y` was incorrectly listed as forbidden; immutable input artifact SHA256 checks all passed. No initramfs/image/package steps ran. The concrete-driver and DTB gates have since been corrected to match frozen B1/R1/G2 artifact evidence; awaiting a fresh manual Actions run.**
-- Runtime image build and offline artifact audit: **PENDING; no runtime image artifact was produced by run `45933429153`**.
+- G2 runtime packaging workflow: **run `45935456629` passed frozen-input, Kconfig, DTB, Image, BusyBox and initramfs-generation checks; failed only because the post-build BusyBox comparison referenced a removed staging path. The path was corrected to compare against the preserved frozen-input copy; awaiting the next manual Actions run.**
+- Runtime image build and offline artifact audit: **PENDING; run `45935456629` did not reach TF image generation or artifact upload.**
 - G2-PROBE: **HOLD / NOT AUTHORIZED**.
 - Physical media write / Panther X2 boot: **NOT AUTHORIZED**.
