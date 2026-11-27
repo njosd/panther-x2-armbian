@@ -27,7 +27,7 @@ env:
   KERNEL_VERSION: "6.18.63"
   KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
   KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
-  R1_RUN_ID: ${{ inputs.r1_run_id }}
+  R1_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.r1_run_id || '45611898629' }}
 
 jobs:
   g3-provider-build-only:
@@ -54,7 +54,7 @@ jobs:
           name: b2-1-r1-network-core
           path: work/r1-reference
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.r1_run_id }}
+          run-id: ${{ env.R1_RUN_ID }}
           github-token: ${{ github.token }}
 
       - name: Verify and freeze R1 input identity
