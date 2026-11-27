@@ -162,3 +162,12 @@ probe 后再次读取完整寄存器值，比较目标 bit 是否符合当次实
 该候选有严格局限：软件无法保证在 CPU hang、kernel panic、突然断电或 GRF 总线不可访问时完成 rollback；remove/unbind 的可用性、regmap 锁与 notifier 生命周期还必须静态审计。即使 build-only 和软件测试通过，也不能代替 G4-P 运行时 readback，更不构成硬件操作授权。
 
 **当前执行建议：** 先做上述 driver patch 的源码级设计审查与 build-only 验证；在确认安全增强机制可实现、可测试且不会扩展到 PMIC 写入或其他外围设备后，再提交一份独立的 G4-P runtime 操作申请。未经明确授权，继续不启动设备、不 probe、不写 GRF。
+
+
+## 10. 2026-11-27 补充：PMU GRF readback 静态机制已收窄
+
+固定 Linux 6.18.63 drivers/mfd/syscon.c 使用通用 32-bit MMIO regmap（reg_bits=32、val_bits=32、stride=4），按 DT resource size 设置 max_register；通用配置未设置额外 readable_reg 限制。drivers/base/regmap/regmap-debugfs.c 的 registers 文件默认只读（0400），可通过 regmap_read() 读取可读寄存器。
+
+这说明固定源码中的 PMU GRF syscon regmap 在机制上可支持只读观察 VSEL0/1/2；但 Panther X2 目标运行时的 debugfs 挂载、regmap 目录、access/readable 状态和实际读值仍未核验。不可使用 /dev/mem 或开放 debugfs 写权限代替。
+
+阻塞状态修订：readback 从“源码机制未知”改为“静态可行、运行时入口待只读确认”。G4-P 仍 NO-GO / HOLD，原因还包括 rollback helper 未实现/未验证、9 路 consumer 电压/状态未采集，以及 notifier/teardown 生命周期风险。
