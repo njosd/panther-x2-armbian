@@ -1,0 +1,25 @@
+# Panther X2 Project A — R7-prep kernel configuration delta
+# Build-only preparation for the entire R7-A..R7-D software chain.
+# GMAC1, MDIO and RTL8211F DT nodes remain disabled in the frozen DTB.
+# This fragment does not activate hardware or authorize a device boot.
+
+# Generic Ethernet framing and AF_PACKET are inherited from R1; assert them.
+CONFIG_NET=y
+CONFIG_NETDEVICES=y
+CONFIG_NET_CORE=y
+CONFIG_ETHERNET=y
+CONFIG_PACKET=y
+
+# Panther X2 board MAC path: all built-in, not loadable modules.
+CONFIG_STMMAC_ETH=y
+CONFIG_STMMAC_PLATFORM=y
+CONFIG_DWMAC_ROCKCHIP=y
+
+# Required for later R7-B PHY attach; no PHY node is enabled at R7-prep.
+# REALTEK_PHY is not selected by PHYLIB/PHYLINK/DWMAC_ROCKCHIP.
+CONFIG_REALTEK_PHY=y
+
+# Avoid the generic platform glue defaulting on with STMMAC_PLATFORM.
+# Keep selftests off (they require INET and are not part of TX-first).
+# CONFIG_DWMAC_GENERIC is not set
+# CONFIG_STMMAC_SELFTESTS is not set
