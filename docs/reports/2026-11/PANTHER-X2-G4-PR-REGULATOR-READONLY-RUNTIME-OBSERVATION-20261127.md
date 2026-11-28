@@ -505,3 +505,61 @@ DTB 只允许以下目标节点变更：
 workflow 原并发策略为 `cancel-in-progress: false`，导致修订后的新 run 排队等待旧 revision 完成。为避免已知存在错误符号路径的旧 revision继续占用 runner，已将并发策略改为 `cancel-in-progress: true`。修订 commit：`ab728a83bd3a13324635c342e167ff39ad728336`。
 
 最新 run `46091659151`（https://github.com/njosd/panther-x2-armbian/actions/runs/46091659151）对应完整修复后的 workflow revision，创建时 pending；旧 run `46091254678` 当时仍显示 in_progress，取消状态尚待确认。最终只接受最新 revision 对应 run 的完整成功结果。
+
+
+## 18. G4-P0 binding-only build-only 验收（2026-11-28）
+
+### 18.1 Actions 结果
+
+最新修正版 workflow run：
+
+- Run：[`46091659151`](https://github.com/njosd/panther-x2-armbian/actions/runs/46091659151)
+- Workflow：`.github/workflows/build-panther-x2-g4-p0-binding-only.yml`
+- Branch：`g4-p0-binding-only-build`
+- Commit：`ab728a83bd3a13324635c342e167ff39ad728336`
+- Job：`140813798802`
+- 最终状态：`completed / success`
+
+全部关键步骤 PASS：冻结 G3 artifact 身份与哈希核验、Linux 6.18.63 固定源码及 R1 compatibility patch、G3 kernel object cache restore、G4-P0 config merge、Image build、IO-domain object/symbol audit、DTB 隔离与 diff allowlist audit、cache save、正式 artifact 上传。失败诊断上传步骤按预期 skipped。此前的文件名/符号名错误均已在最终 revision 修复；本 run 不再包含这些错误。
+
+### 18.2 Artifact 下载与独立完整性校验
+
+- Artifact：`panther-x2-g4-p0-binding-only-build-only`
+- Artifact ID：`15242113092`
+- ZIP 大小：`211542152` bytes
+- GitHub artifact digest：`sha256:2d93855944c3a28b86631e356cdcfa73bc9b75996f48d8409f74ebd69ae4c893`
+- 下载后本地复算 ZIP SHA256：与 GitHub digest 完全一致。
+- Artifact 内共 24 个文件；`output/SHA256SUMS` 对全部 12 个输出资产逐项执行 `sha256sum --check`，全部 PASS。
+
+关键产物身份：
+
+| 项目 | 值 |
+|---|---|
+| Kernel | Linux 6.18.63 |
+| Source commit | `aee4e352a15d636cbc484f56819c6e59474dfd9` |
+| Image size | 32,381,440 bytes |
+| Image SHA256 | `b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090` |
+| DTB SHA256 | `c967aff4bb99748828fdf083a8e1701b915966e47c6828375399bef5e0048ff8` |
+| kernel.config SHA256 | `c990c913b283a7042a81be12369886e1faa95bbf5b2cc031fd9e1155a4357be2` |
+
+### 18.3 配置与 DTB 差异验收
+
+- G3→G4-P0 最终 kernel.config diff 仅一项：`CONFIG_ROCKCHIP_IODOMAIN` 从 not set 改为 `y`。其余配置未发生差异。
+- DTB diff allowlist PASS：仅将 `/syscon@fdc20000/io-domains/status` 从 `disabled` 改为 `okay`，并删除全部九个 supply 属性（`pmuio1/2-supply`、`vccio1..7-supply`）。
+- IO-domain child compatible 保持原值；RK809 节点保持 okay。
+- eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1、MDIO、PHY 均保持 disabled。
+- 必要配置与链接审计 PASS：`CONFIG_MFD_SYSCON=y`、`CONFIG_REGMAP_MMIO=y`、RK809 regulator provider 保留；IO-domain driver built-in；对象及 vmlinux 符号审计通过。
+
+### 18.4 阶段结论与严格边界
+
+**G4-P0 BUILD / CONFIG / DTB / OBJECT-SYMBOL AUDIT：PASS。**
+
+该 PASS 证明候选 Image 与 DTB 按预定最小差异成功构建，且静态审计门通过。它不证明目标板启动、IO-domain child 枚举、driver bind、PMUGRF regmap runtime acquisition 或物理电气状态。源代码路径预期在九路 supply 全缺失时跳过 voltage read/notifier/selector-write；这仍是源码推导，尚未通过实机运行时观察验证。
+
+本轮只在 GitHub Actions 云端构建并下载离线 artifact：
+- 没有启动 Panther X2，没有执行 runtime probe；
+- 没有读取或写入 PMUGRF/PMIC 寄存器，没有 selector register transaction；
+- 没有写入 SU08G、SN64G 或 eMMC；
+- 没有改变当前设备系统、内核、驱动、DTB、网络或存储配置。
+
+**下一阶段入口：** 先基于 G4-P0 artifact 做启动前资产/副作用复核，形成独立的 SU08G RAM-only runtime 验证方案与命令清单；只有在明确授权后才允许写入 SU08G 并启动。不得触碰 eMMC 或 SN64G，不得自动进入真实 supply mapping 或 selector 测试。G4-P full-supply mapping 继续 NO-GO。
