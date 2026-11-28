@@ -1,0 +1,40 @@
+#!/bin/sh
+# G4-P2 full-supply IO-domain runtime: RAM-only observation.
+# The enabled IO-domain consumer will perform regulator voltage lookups,
+# register regulator notifiers and issue PMU GRF selector writes during probe.
+# No persistent storage is mounted or written by this initramfs.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-g4-p2-runtime) # '
+export PATH HOME PS1
+
+echo
+echo "=== Panther X2 Project-A G4-P2 full-supply IO-domain runtime ==="
+echo "All nine IO-domain supplies are retained from the frozen G3 DTB."
+echo "IO-domain probe may perform regulator voltage lookups, notifier registration,"
+echo "and PMU GRF selector writes through the standard kernel driver path."
+echo "No raw PMIC/PMUGRF register access is performed by this initramfs."
+echo "GMAC1, MDIO and RTL8211F remain disabled; no netdev is opened."
+echo "eMMC, TF SDMMC0, SDIO, GPU and SARADC remain disabled."
+echo "Linux root is initramfs in RAM; no persistent filesystem is mounted or written."
+echo "This image is PREPARE-ONLY; runtime boot requires separate explicit authorization."
+
+mkdir -p /proc /sys /dev /run
+if ! mount -t proc proc /proc; then
+    echo "WARNING: procfs mount failed"
+fi
+if ! mount -t sysfs sysfs /sys; then
+    echo "WARNING: sysfs mount failed"
+fi
+
+echo
+echo "Initial G4-P2 capture follows."
+/bin/sh /capture-g4-p2.sh
+
+echo
+echo "G4-P2 RAM runtime shell ready."
+echo "Wait at least 12 seconds after this prompt, then run:"
+echo "  /bin/sh /capture-g4-p2.sh"
+echo "The second capture records settled deferred-probe state."
+echo "All capture files remain in RAM under /run/g4-p2."
+exec /bin/sh -i
