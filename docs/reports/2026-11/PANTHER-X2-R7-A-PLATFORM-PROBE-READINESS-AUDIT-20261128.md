@@ -58,7 +58,8 @@
 4. STMMAC 将该 `-ENODEV` 作为“MDIO bus is disabled”正常处理并继续 probe。
 
 因此该边界下：
-- 不会注册 MDIO bus；
+- 不会注册 MDIO bus，也不会执行外部 PHY 的 MDIO read/write 事务；
+- `stmmac_mdio_register()` 在调用 `of_mdiobus_register()` 前仍会执行 `stmmac_mdio_bus_config()`，因此可能读取/写入 MAC 内部 MDIO clock-divider/config 寄存器；这不是 MDIO bus transaction；
 - 不会触发 bus reset callback；
 - GMAC 的 `snps,reset-gpio` 不会由 `stmmac_mdio_reset()` 操作；
 - MDIO 子节点下的 RTL8211F PHY 不会被创建或绑定；
@@ -84,7 +85,7 @@ R7-A 不调用 `ndo_open`，接口保持 DOWN。按已归档 R5-2：
 | GMAC clocks | enable | 由 Rockchip glue powerup |
 | main-GRF GMAC1 mode/delay | 写入 | 包括 RGMII mode/delay 字段；与 PMUGRF IO-domain selector 是不同寄存器域 |
 | SWITCH_REG1 / vcc_3v3 | 调用 regulator_enable | 可能写 PMIC enable bit；consumer 计数/状态必须采集 |
-| MDIO bus | 不注册 | MDIO 子节点 disabled |
+| MDIO bus | 不注册；内部 MDIO clock config 仍可能发生 | MDIO 子节点 disabled；`stmmac_mdio_bus_config()` 先于 OF bus 注册调用 |
 | PHY reset GPIO3_PA1 | 不操作 | MDIO bus disabled，reset callback 不会运行 |
 | RTL8211F MDIO 寄存器 | 不访问 | PHY 节点 disabled、无 PHY device |
 | DMA ring / TX / RX | 不执行 | interface 不 open |
