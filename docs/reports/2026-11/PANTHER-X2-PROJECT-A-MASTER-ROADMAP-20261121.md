@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测，GMAC1/MDIO/RTL8211F 仍 disabled，Ethernet 6.18 对黄金基线等价性未测试。G4-P0 collector 首轮因 BusyBox 无 `[` applet 出错，14 个条件判断已在 commit `205053232799114ce8ecb15354831900a9db4d0f` 改用 `test`；目标 BusyBox ash/CI 验证已 PASS（Actions run `46120998151`，artifact `15253991870`），不安排第二次实机启动。详见 G4-P0 runtime binding 与 golden deviation 报告。
+- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测。G4-P0 collector 已修复 BusyBox `[` applet 缺失问题，目标 ash/打包 CI PASS（Actions run `46120998151`，artifact `15253991870`），不安排第二次实机启动。R7-A platform-probe 静态准入审计 PASS：候选只启用 GMAC1 父节点，MDIO/PHY 保持 disabled，IO-domain 九路 supply 继续缺失；预期副作用为 clocks/main-GRF/SWITCH_REG1 consumer enable。R7-A build-only 尚未执行，实机 probe 未授权；Ethernet 6.18 对黄金基线等价性仍未测试。详见 G4-P0 与 R7-A 报告。
 
 ## 0. 统一项目定义
 
@@ -1016,3 +1016,26 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 - `PANTHER-X2-G4-P0-GOLDEN-BASELINE-DEVIATION-20261128.md`
 
 下一步先完成主机侧 BusyBox ash/CI 采集脚本验证，再回读 G4 full-supply 风险与 G0 黄金基线证据，制定不触发 partial-write 的后续 provider/consumer 分层方案。任何新的实机启动、PMIC/selector 操作、TF 写入均须独立授权；SN64G/eMMC 不触碰。
+
+
+## 2026-11-28 R7-A Platform Probe 准入静态审计完成
+
+在 G4-P0 binding-only runtime PASS、collector 修复并通过 Actions run `46120998151` 后，回读 R3/R4/R5/R6、G0 provider-consumer matrix 与 R7 gated acceptance plan，完成 R7-A 的只读源码控制流审计。详见 `PANTHER-X2-R7-A-PLATFORM-PROBE-READINESS-AUDIT-20261128.md`。
+
+**可控候选边界：**
+- 从 G4-P0 frozen Image/config/DTB 出发，新增 STMMAC / DWMAC Rockchip 最小 Kconfig/object closure；
+- DTB 只把 GMAC1 parent `/ethernet@fe010000/status` 设为 okay；
+- MDIO child 和 RTL8211F PHY child 保持 disabled；
+- IO-domain child 保持 okay，全部九个 supply 属性继续缺失；
+- 保留当前 RAM initramfs、U-Boot、bootargs；不启用接口、不发送帧。
+
+固定 6.18.63 源码控制流表明：MDIO 子节点 disabled 时，`__of_mdiobus_register()` 在 `__mdiobus_register()` 前返回 `-ENODEV`，STMMAC 将其作为 MDIO disabled 正常处理；因此本门可避免 MDIO bus 注册、PHY reset GPIO callback、PHY device 创建及 RTL8211F probe/config_init。与此同时，Rockchip glue 的 platform init 会 enable GMAC clocks、写 main-GRF RGMII mode/delay，并调用 SWITCH_REG1/`vcc_3v3` 的 `regulator_enable()`；这不是只读 probe，必须纳入未来单独授权。接口保持 DOWN，不进入 DMA ring/open/TX。
+
+阶段状态：
+- R7-A static boundary: PASS；
+- exact Kconfig/object closure and build audit: PENDING；
+- PREPARE-ONLY artifact: NOT BUILT；
+- hardware probe: NOT AUTHORIZED / NOT RUN；
+- MDIO/PHY/link, DMA, TX: NOT TESTED。
+
+下一步只在云端准备独立 R7-A build-only artifact，核验唯一 DTB status diff、最终 config/object closure、manifest 和回滚资产；不写 SU08G、不启动设备、不触碰 SN64G/eMMC。任何实机启动需另行明确授权。
