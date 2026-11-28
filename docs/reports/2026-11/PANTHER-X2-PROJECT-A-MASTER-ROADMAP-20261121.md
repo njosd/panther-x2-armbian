@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测。G4-P0 collector 已修复 BusyBox `[` applet 缺失问题，目标 ash/打包 CI PASS（Actions run `46120998151`，artifact `15253991870`），不安排第二次实机启动。R7-A platform-probe 静态准入审计 PASS：候选只启用 GMAC1 父节点，MDIO/PHY 保持 disabled，IO-domain 九路 supply 继续缺失；预期副作用为 clocks/main-GRF/SWITCH_REG1 consumer enable。R7-A build-only 尚未执行，实机 probe 未授权；Ethernet 6.18 对黄金基线等价性仍未测试。详见 G4-P0 与 R7-A 报告。
+- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测。G4-P0 collector 修复及 ash/打包 CI PASS（Actions run `46120998151`，artifact `15253991870`），不安排第二次实机启动。R7-A 原始方案仅属预审，不是 gate-pass；R7-prep build-only 尚未执行。最新顺序为 R7-prep → G4-P1 非 GMAC 共享基础组件就绪 → G4-P2 供电/IO-domain 安全准入 → R7-A/G5-A 最后启用 GMAC → R7-B/G5-B MDIO/PHY → R7-C/G6-A DMA open → R7-D/G6-B/G7 ABCD 物理 TX。G4-P2 尚受 full-supply mapping NO-GO 阻塞；GMAC 实机 probe 未授权。详见 R7-prep 与 G0–G10 计划。
 
 ## 0. 统一项目定义
 
@@ -1033,3 +1033,17 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 固定 6.18.63 源码审计发现，R7-A/G5-A probe 不是只读：会启用 GMAC clocks、写 main-GRF RGMII mode/delay，并调用 SWITCH_REG1/`vcc_3v3` 的 `regulator_enable()`；可能的 probe 失败回滚还会调用 regulator_disable/clock disable。MDIO child disabled 可隔离外部 MDIO bus 注册与 PHY probe，但 STMMAC 仍可能配置 MAC 内部 MDIO clock divider。所有副作用须纳入独立授权。
 
 阶段状态：G4-P0 binding-only runtime PASS；G4-P full-supply mapping NO-GO；R7-prep build-only NOT STARTED；R7-A/G5-A NOT AUTHORIZED / NOT RUN；R7-B/C/D NOT STARTED。详见 R7-A 预审报告和原始 R2–R7/G0–G10 计划。
+
+## 2026-11-28 执行顺序最终修订：先非 GMAC，GMAC 最后
+
+用户明确要求把最可能故障的 GMAC 留到最后启用。项目执行顺序据此修订为：
+
+1. **R7-prep（build-only）**：云端预构建完整 Ethernet 软件闭包；GMAC1/MDIO/PHY 设备树节点继续 disabled。
+2. **G4-P1 / Pre-GMAC provider readiness**：GMAC 仍 disabled，复用 R2/R3/G4-P0 已有证据，核对共享 clock/CRU、pinctrl/GPIO、GRF/syscon、reset、I2C0、RK809 MFD/regulator、IO-domain provider。已通过的 binding 不重跑；只对真实缺口设计最小只读补证。
+3. **G4-P2 / Pre-GMAC supply & IO-domain safety**：解决 SWITCH_REG1/vcc_3v3 PHY supply consumer enable 与 IO-domain supply/selector 风险。G4-P0 binding 不代表 supply/selector 功能通过；full nine-supply mapping 保持 NO-GO，partial-write 风险不得触发。
+4. **R7-A / G5-A**：仅在 G4-P1、G4-P2 均通过并取得独立授权后，最后启用 GMAC1 parent；MDIO/PHY disabled，interface DOWN，不 open、不发送帧。
+5. **R7-B / G5-B**：再启用 MDIO/RTL8211F 并验收 PHY/link。
+6. **R7-C / G6-A**：再 open interface，验收 MAC/DMA/ring/IRQ/NAPI。
+7. **R7-D / G6-B/G7**：最后执行 ABCD 同帧 TX 和独立对端捕获。
+
+该顺序不要求为了“先启动其他组件”而主动切换电源、翻转 GPIO、触发 reset 或写寄存器。所有已验证的非 GMAC 基础设施证据优先复用；任何前置门 FAIL/BLOCKED，均停留在该门，不绕过启动 GMAC。R7-A 的 clocks enable、main-GRF RGMII mode/delay writes、SWITCH_REG1 regulator enable 等副作用，必须在其独立授权前完整评估。
