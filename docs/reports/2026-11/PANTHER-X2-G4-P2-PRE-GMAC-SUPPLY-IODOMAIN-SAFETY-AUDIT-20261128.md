@@ -1,6 +1,6 @@
 # Panther X2 Project A — G4-P2 Pre-GMAC 供电与 IO-domain 安全审计（静态阶段记录，2026-11-28）
 
-- 状态：**STATIC AUDIT IN PROGRESS / HOLD；无硬件授权**
+- 当前状态：**STATIC SUPPLY-RESOLUTION PASS / 6.18 FULL-SUPPLY RUNTIME NOT VERIFIED / 无硬件授权**（原 §1–§5 的 partial-write HOLD 已由 §7 更正）
 - 目标：在 GMAC 仍 disabled 时，判断真实恢复 IO-domain supply / PHY supply 是否存在安全、可解释且与黄金基线一致的路径
 - 本轮范围：固定源码、归档 Kconfig、既有 DTS/DTB 审计报告；不访问设备，不执行任何 regulator/PMIC/GRF/MDIO 操作
 
@@ -89,3 +89,69 @@ G4-P0 binding-only 已证明另一条安全边界：child status okay、九路 s
 ## 6. 安全边界
 
 本报告只读取仓库固定源码、已有报告和 Dropbox 中的配置归档文本；没有下载或改写原始镜像，没有访问 Panther X2，没有启动设备，没有读取/写入 PMIC、GRF、GPIO、clock、reset、MDIO，没有启停 regulator，没有发送网络帧，没有写入 SU08G/SN64G/eMMC。
+
+## 7. 2026-11-28 关键路径纠正：SWITCH_REG1 的上游 supply 被遗漏，原 partial-write 推断不成立
+
+本节优先级高于本报告 §1.2、§2、§3、§4、§5 中关于“index 2 vccio1 必然 voltage-read 失败并造成 partial-write”的旧结论。旧分析只检查了 SWITCH_REG1 子节点本身没有本地 `vin-supply`，遗漏了 RK809 PMIC 父节点的 `vcc9-supply` 以及 regulator descriptor 的 `supply_name = "vcc9"`。
+
+### 7.1 完整 regulator supply 链
+
+固定源码和 DTS 的实际链路如下：
+
+1. RK809 `SWITCH_REG1` descriptor 的 `supply_name` 为 `vcc9`；其 `rk817_switch_ops` 确实没有 `get_voltage`、`get_voltage_sel` 或 `list_voltage`。
+2. 但 Panther X2 RK809 PMIC 父节点明确包含 `vcc9-supply = <&vcc3v3_sys>`。这不是 SWITCH_REG1 子节点的局部属性，而是 PMIC provider 节点上的 regulator input mapping。
+3. `vcc3v3_sys` 是 fixed regulator，DTS 约束为 3,300,000 µV，always-on/boot-on，并由 `vcc5v0_sys` 供电。
+4. regulator core 的 `regulator_resolve_supply()` 会使用 provider parent device 的 OF node 解析 descriptor `supply_name`；对 RK809 MFD regulator child，该 parent device 对应 PMIC 节点，因此可解析 PMIC 节点的 `vcc9-supply`。
+5. 当 SWITCH_REG1 没有自身 voltage getter 时，`regulator_get_voltage_rdev()` 在 `rdev->supply` 已解析的情况下递归读取 upstream regulator 的电压。因此“无本地 getter”不等于“必然返回负值”。
+
+该映射在以下固定源码端点均存在：
+- 6.1.65 候选：`unifreq/linux-6.1.y@4428b96f34a16e9a0beeed1dcb0ae3d4326145fc`；
+- 6.1.116 对照：`unifreq/linux-6.1.y@5eb841b59d6ead6e264163785a634e78f0253c8e`；
+- 6.12.81 历史运行样本：`ophub/linux-6.12.y-rockchip@661b2d8bf1284556f8876d5ed5fb80c64b22f94c`；
+- 6.18.63 当前固定源码：`ophub/linux-6.18.y@aee4e352a15d636cbc484f56819c6e59474dfd9`。
+
+6.1.116 实际 DTB 与 6.18.63 完整 DTB 的 SHA256 已字节级相同，故其实际 DTB 也包含上述 PMIC supply mapping。6.1.65 原始 DTB 的 PMIC 子树 binary diff 仍保留原有证据限制，不升级为 PASS。
+
+### 7.2 既有 6.12.81 runtime 日志的独立交叉证据
+
+回读仓库已有日志，没有重启设备，也没有重新执行 Project B 的网络测试：
+
+- `evidence/uart/panther-jp-tvbox-u-boot-boot-20261117-redacted.txt` 明确记录 Linux `6.12.81-rk35xx-ophub`；
+- `evidence/boot/2026-11-19-panther-x2-jp-idbloader-uart-redacted.log` 同样记录 Linux `6.12.81-rk35xx-ophub`；
+- 两份日志均打印 IO-domain 九路供电信息。关键项包括 `vccio1(3300000 uV) supplied by vcc_3v3`、`vccio5(3300000 uV) supplied by vcc_3v3`、`vccio6(3300000 uV) supplied by vcc_3v3`、`vccio7(3300000 uV) supplied by vcc_3v3`；pmuio1/2、vccio2/3/4 也均有正电压输出。
+- 对应 6.12.81 源码的 `rockchip_iodomain_dump()` 在输出每条信息时调用 `regulator_get_voltage()`；IO-domain probe 的 supply loop 也必须先通过 voltage read 才会进入后续 notifier/write 流程。因此日志是历史运行环境中九路 supply voltage lookup 均返回正值的直接软件证据。
+
+6.12.81 是 Project B 的历史故障样本，不是黄金基准；本节只复用其 IO-domain/PMIC 非 GMAC 证据，不重开 GMAC/TX 根因调查，不引用其网络结果作为本阶段判断。
+
+### 7.3 修正后的风险判定
+
+原先的条件链在 index 2 断言 SWITCH_REG1 voltage read 必然失败，是错误的。完整 PMIC parent supply mapping 和 regulator core upstream fallback 使该断言不成立；6.12.81 的既有日志进一步证明相同板级供电链曾报告九路正电压。
+
+因此：
+- **撤销**“index 1 写 VSEL2 后 index 2 必然因 SWITCH_REG1 无 getter 失败”的预测；
+- **撤销**以该 partial-write 预测为理由的 full nine-supply mapping NO-GO；
+- **保留**`rk3568_iodomain_write()` 对 PMU GRF `regmap_write()` 返回值不检查这一限制。即使所有供电电压 lookup 成功、probe 绑定并打印九路日志，也不能单凭 probe success 证明 selector register transaction 成功；
+- **保留**实际 rail 电压、SWITCH_REG1 输出端物理电压、PMU GRF VSEL0/1/2 readback 未验证的边界。upstream regulator 的 3.3V 软件回报不是 SWITCH_REG1 输出端的物理测量；
+- G4-P0 no-supply binding-only 仍是已验证的独立路径，但不再是完整供电路径唯一可接受的选择。
+
+### 7.4 G4-P2 状态与下一步顺序
+
+| 子项 | 修正后状态 |
+|---|---|
+| SWITCH_REG1 descriptor 无自身 voltage getter | PASS-STATIC（事实保留） |
+| PMIC `vcc9-supply -> vcc3v3_sys` 上游映射 | PASS-STATIC（此前遗漏） |
+| regulator core upstream voltage fallback | PASS-STATIC（6.18 固定源码路径已核对） |
+| 6.12.81 历史 runtime 九路正电压日志 | PASS-HISTORICAL-RUNTIME（非黄金、非当前 6.18） |
+| 6.18.63 full-supply IO-domain probe | NOT VERIFIED |
+| PMU GRF selector 写入返回值/寄存器最终值 | NOT VERIFIED |
+| 物理 rail 输出电压 | NOT VERIFIED；不据此要求盲测 |
+
+**G4-P2 = CONDITIONAL PASS（供电解析静态链闭合）；full-supply 6.18 runtime 尚待单独授权验证。**
+
+建议下一步建立 G4-P2 PREPARE-ONLY candidate：复用已通过的 G4-P0 Image/kernel.config（其中 regulator provider 与 IO-domain driver 已 built-in），使用 G3 原始 DTB 作为基础，仅把 `/syscon@fdc20000/io-domains/status` 从 `disabled` 改为 `okay`，保留原有九个 supply 属性，GMAC1/MDIO/RTL8211F 继续 disabled。离线 gate 必须证明 DTB 只改变该一个 status 属性、九路 supply phandle 与黄金/固定源码 DTS 一致，其他节点不变。该 artifact 仍只允许 PREPARE-ONLY；实际 RAM-only 启动会触发真实 IO-domain supply voltage lookup、regulator notifier 注册及 PMU GRF selector write，必须另行取得明确授权。
+
+G4-P2 runtime 若通过，才进入 R7-prep build-only（加入 STMMAC/Rockchip glue/MDIO/PHY built-in，但 DT nodes 仍 disabled）；之后再按 R7-A/G5-A → R7-B/G5-B → R7-C/G6-A → R7-D/G6-B/G7 推进。这样先完成非 GMAC IO-domain 组件验证，GMAC 仍最后启用。
+
+### 7.5 本轮边界
+
+本次只回读 GitHub 已归档日志、固定源码与 DTS；没有访问 Panther X2，没有重复 Project B 测试，没有启动设备，没有读写 PMIC/GRF/MMIO，没有操作 GPIO/reset/clock，没有发送帧，没有写入 SU08G/SN64G/eMMC。G4-P2 candidate 尚未构建，实机启动未授权。
