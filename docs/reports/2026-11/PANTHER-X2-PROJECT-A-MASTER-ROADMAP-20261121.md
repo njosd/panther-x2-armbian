@@ -1077,3 +1077,8 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 G4-P2 full-supply PREPARE-ONLY workflow `46139238851` 成功，artifact `15260906859`（`panther-x2-project-a-g4-p2-full-supply-PREPARE-ONLY`）已生成并独立下载复核。25 个 artifact 内文件校验和全部通过；DTB canonical logical diff 只有 `/syscon@fdc20000/io-domains/status: disabled → okay`；九路 supply phandle 原样保持；RK809 `vcc9-supply` → fixed 3.3V `vcc3v3_sys` 链通过；GMAC1/MDIO/RTL8211F 与存储/GPU/SARADC 隔离状态均通过。Image/DTB/initramfs/GPT/ext4/压缩镜像均完成构建与复核。
 
 **G4-P2 PREPARE-ONLY = PASS；G4-P2 full-supply runtime = NOT VERIFIED；hardware authorization = NOT GRANTED。** 构建只发生在 GitHub runner，没有写入物理介质、没有访问 Panther X2、没有触碰 SU08G/SN64G/eMMC。下一步不是 R7-prep 或 GMAC，而是单独申请一次 SU08G RAM-only boot 授权，验证 full-supply IO-domain runtime；GMAC/MDIO/PHY 继续 disabled。
+
+
+### G4-P2 硬件验证授权状态（2026-11-28）
+
+用户已明确授权一次 SU08G Etcher 写卡及 RAM-only boot session。授权范围严格限于 G4-P2 full-supply IO-domain 只读观察；不包括 SN64G/eMMC、持久存储写入、raw PMIC/GRF、GMAC/MDIO/PHY 或任何 TX 操作。物理操作待用户执行，runtime 仍 NOT VERIFIED。
