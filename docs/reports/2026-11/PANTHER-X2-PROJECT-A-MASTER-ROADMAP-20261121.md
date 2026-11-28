@@ -958,3 +958,6 @@ G4-P0 静态设计审计 PASS 后，已在独立分支 `g4-p0-binding-only-build
 
 
 G4-P0 workflow 在修正对象符号文件路径后，再经全段静态复核发现两个后续潜在错误：vmlinux 符号输出文件 grep 路径仍使用旧名；RK3568 handler 符号误写为 `rockchip_iodomain_write`，实际应为 `rk3568_iodomain_write`。已分别在 commit `80ec93aa416964f65e35c77b67d888855159e74c` 与 `34d85d87b9478fd6d3bca996e31d0b7580628e4e` 修正。前一个 push run `46091484473` 已被后续提交取消；最新 revision run `46091519345` pending。旧 revision run `46091254678` 即使完成也不作为正式验收。详见 G4 报告第 17.4 节。
+
+
+为避免已知存在过期符号审计错误的 CI revision 长时间占用 runner，G4-P0 workflow 并发策略已由 `cancel-in-progress: false` 改为 `true`（commit `ab728a83bd3a13324635c342e167ff39ad728336`）。最新完整修正版 run `46091659151` 已创建，创建时 pending；旧 run `46091254678` 当时仍在构建，取消状态待确认。最终验收只看最新 revision 的 run。详见 G4 报告第 17.5 节。
