@@ -181,3 +181,31 @@ R7 唯一变量是目标 Panther X2 DTB 中 GMAC1、MDIO bus、PHY address 0 及
 - drivers/net/mdio/mdio_bus.c
 - drivers/net/phy/phy_device.c
 - drivers/regulator/rk808-regulator.c
+
+## 2026-11-28 R7-prep 前置构建与 G5-A 编号对齐（不改变 R7-A 单变量）
+
+### 阶段编号交叉表
+
+| 本计划编号 | G0–G10 计划编号 | 功能 |
+|---|---|---|
+| R7-A | G5-A | Rockchip glue / STMMAC platform probe、bind、netdev 注册 |
+| R7-B | G5-B | MDIO bus / RTL8211F attach 与 link |
+| R7-C | G6-A | interface open / MAC、DMA、ring、IRQ/NAPI |
+| R7-D | G6-B / G7 | ABCD 同帧 TX 与对端物理捕获 |
+
+两套编号是同一功能链的交叉索引，不代表跳过 G5 或提前进入物理 TX。门序仍为 R7-A → R7-B → R7-C → R7-D。
+
+### R7-prep（仅 build-only 的前置资产准备）
+
+G4-P0 frozen config 尚未包含 STMMAC/Rockchip glue，因此必须先完成独立的 R7-prep build-only 资产准备，避免 R7-A 实机轮次同时改变 kernel.config 与 DTB：
+
+- 从 G4-P0 冻结输入派生独立 R7-prep；仅增加 R7-A 所需 STMMAC / STMMAC_PLATFORM / DWMAC_ROCKCHIP 最小配置闭包及其必要依赖。
+- GMAC1、MDIO bus、RTL8211F PHY 的 DT 节点全部继续 disabled；IO-domain child 保持 G4-P0 binding-only 状态，九路 supply 属性继续缺失。
+- 完成 6.1.65 第一黄金基线、6.1.116 第二行为参照的配置/对象/DTB/源码调用链对照；核实最终 .config、built-in objects、vmlinux symbols、DTB structured diff、Image 和全部资产哈希。
+- 只在云端 build-only；不写 TF、不启动 Panther X2、不触发 GMAC probe。R7-prep 通过后冻结完整资产和回退点。
+
+### R7-A（即 G5-A）唯一变量恢复
+
+R7-prep 通过并冻结后，R7-A 的硬件候选只允许改变目标 DTB 中 GMAC1 parent 节点状态；kernel.config、Image、initramfs、bootargs、U-Boot、测试程序和其他 DTB 节点均保持冻结。MDIO/PHY 仍 disabled，接口 DOWN，不 open、不发送帧。
+
+R7-prep 是 R7-A 的必要构建前置，不是额外硬件阶段，也不改变 R2–R7 原门序。任何无法解释的黄金基线差异、provider/consumer 阻塞或未评估的 probe 副作用，都使 R7-A 保持 HOLD，不得以 build 成功替代准入。
