@@ -51,6 +51,8 @@ R1 实机只证明 AF_PACKET 软件 API 与 loopback outgoing tap，不证明目
 
 ### 3.2 STMMAC core
 
+**额外的顶层门控核验：** `drivers/net/ethernet/stmicro/Kconfig` 将 STMMAC Kconfig 放在 `if NET_VENDOR_STMICRO` 内；因此 R1 的“全部 vendor group 关闭”策略不能原样继承到 R7-prep。必须只重新启用 `CONFIG_NET_VENDOR_STMICRO=y`，否则 STMMAC 子菜单不可见/目标符号无法按预期配置。该 vendor group 只包含本目标所需 STMMAC 子树；其余 NET_VENDOR_* 仍保持关闭，尤其 `NET_VENDOR_REALTEK`（独立 Realtek Ethernet MAC/网卡厂商组）继续关闭，不能与 PHY 驱动 `REALTEK_PHY` 混淆。
+
 固定 6.18.63 `drivers/net/ethernet/stmicro/stmmac/Kconfig`：
 - `STMMAC_ETH` depends on `HAS_IOMEM && HAS_DMA`、`PTP_1588_CLOCK_OPTIONAL`、`ETHTOOL_NETLINK`；
 - select `MII`、`PCS_XPCS`、`PAGE_POOL`、`PHYLINK`、`CRC32`、`RESET_CONTROLLER`、`NET_DEVLINK`；
@@ -81,6 +83,7 @@ Makefile 将核心聚合为 `stmmac.o`，含 `stmmac_main.o`、`stmmac_mdio.o`�
 
 已新增 `scripts/panther-x2-r7-prep/r7-prep.fragment`。用户选择项仅限：
 - R1 网络核心符号显式确认保持 y；
+- `CONFIG_NET_VENDOR_STMICRO=y`（STMMAC Kconfig 顶层可见性的必要 gate）
 - `CONFIG_STMMAC_ETH=y`
 - `CONFIG_STMMAC_PLATFORM=y`
 - `CONFIG_DWMAC_ROCKCHIP=y`
@@ -106,7 +109,7 @@ Makefile 将核心聚合为 `stmmac.o`，含 `stmmac_main.o`、`stmmac_mdio.o`�
 
 1. 输入 G4-P0 artifact 内部 SHA256 inventory 全部通过；Image/config/DTB 哈希与冻结值一致。
 2. Source commit、Linux 6.18.63 版本、B1 compatibility patch hash 固定。
-3. 最终 `.config`：R1 generic core + PACKET、STMMAC_ETH、STMMAC_PLATFORM、DWMAC_ROCKCHIP、REALTEK_PHY 均为 y；STMMAC_SELFTESTS、DWMAC_GENERIC、INET、IPV6、NETFILTER、无线/蓝牙、非目标网卡保持关闭。
+3. 最终 `.config`：R1 generic core + PACKET、NET_VENDOR_STMICRO、STMMAC_ETH、STMMAC_PLATFORM、DWMAC_ROCKCHIP、REALTEK_PHY 均为 y；其余 NET_VENDOR_*（除 STMICRO）保持关闭；STMMAC_SELFTESTS、DWMAC_GENERIC、INET、IPV6、NETFILTER、无线/蓝牙、非目标网卡保持关闭。
 4. 最终依赖值逐项核验，包括 HAS_IOMEM/HAS_DMA、PTP_1588_CLOCK_OPTIONAL、ETHTOOL_NETLINK、MII、PCS_XPCS、PAGE_POOL、PHYLINK、PHYLIB、MDIO_BUS、OF_MDIO、FIXED_PHY、PCS_XPCS_ROCKCHIP、MFD_SYSCON、REGULATOR_RK808。
 5. 对象存在并为 built-in：`stmmac.o`、`stmmac-platform.o`、`dwmac-rk.o`、`mdio-bus.o`、`libphy.o`、`phylink.o`、`of_mdio.o`、`realtek.o`；记录各对象 SHA256。
 6. 对象/vmlinux 符号审计：记录 `rk_gmac_probe`、`stmmac_dvr_probe`、`stmmac_xmit`、RTL8211F probe/config 函数等符号是否存在及其 local/global binding。不得因为 static/local 符号未进入 kallsyms 就判硬件失败；若后续 kprobe 不可用，按 G0.5 规则评估最小 tracepoint，不开启全局 function tracer。
