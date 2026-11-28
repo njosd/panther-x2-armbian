@@ -454,3 +454,33 @@ DTB 只允许以下目标节点变更：
 - G4-P0 build-only 通过后也只代表 build/config/DTB/object audit PASS；不代表 runtime bind PASS，更不代表任何 rail/selector 或物理电压已验证。实机启动必须另行评估并取得明确授权。
 
 **下一步：** 先完成 workflow 的离线审查和 YAML/脚本校验，再手动触发 G4-P0 build-only；检查 artifact 与所有 SHA256 后，才讨论是否提出单独的 SU08G RAM-only 实机验证申请。RAM initramfs 仍是 runtime root；云端 runner 构建不改变运行环境，不代表切换到持久化 rootfs。
+
+
+## 17. G4-P0 build attempt diagnostics and workflow correction (2026-11-28)
+
+### 17.1 两轮首次构建结果
+
+- Run `46080268808`（workflow revision `3f87f1fe595541b6546a9907e2f73f6253142155`）：G3 artifact identity/freeze、Linux source pin/R1 patch、G3 object-cache restore、G4-P0 config merge、Linux Image build 均 PASS；在 object symbol audit 阶段失败。
+- Run `46080298570`（revision `21db24bc65f33f2a830aab1063ac455ad25ba34f`）：同样完成 Image 编译；DTB 检查与对象文件生成继续执行，最后在相同 object symbol audit 阶段失败。
+- 两轮明确错误均为：`grep: work/logs/io-domain-object-symbols.txt: No such file or directory`。
+- 生成命令实际输出至 `work/logs/g4-p0-io-domain-object-symbols.txt`，而两个 grep 仍引用旧文件名 `work/logs/io-domain-object-symbols.txt`。这是 workflow 自身路径引用不一致；不能归因于内核编译失败或硬件问题。
+- 两轮 Image 均已生成，file 输出识别为 ARM64 Linux kernel Image，little-endian，4K pages。由于审计未走完，未生成正式 G4-P0 build-only artifact；仅上传 failed diagnostics artifact。
+
+### 17.2 修复
+
+- 在 workflow 中将两个过期 grep 路径统一修正为实际生成文件名 `g4-p0-io-domain-object-symbols.txt`。
+- 修复 commit：`125982ebdecc5860ae3fd4fa08114207d87b3780`。
+- 没有修改 Kconfig fragment、内核源码、DTB 变更规则或硬件隔离边界；没有放宽 audit gate。
+- 修复后新 Actions run：`46091254678`，链接 https://github.com/njosd/panther-x2-armbian/actions/runs/46091254678。当前已创建并开始执行；本节写入时仍处于 toolchain setup，最终结论待 run 完成。
+
+### 17.3 当前判定
+
+- Kconfig merge：PASS（两轮）
+- Linux Image build：PASS（两轮）
+- G3 artifact identity/freeze：PASS（两轮）
+- DTB transform 与九路属性缺失检查：在第二轮已执行至后续 object symbol audit；日志未显示这些检查失败。
+- object symbol audit：前两轮因日志文件名错误而 FAIL；修复后的第三轮待确认。
+- 正式 artifact：尚未生成/尚未 SHA256 验收。
+- 设备启动、IO-domain runtime bind、PMUGRF selector access、物理电压：均未执行/未验证。
+
+仍保持 PREPARE-ONLY；没有设备访问或存储写入。RAM initramfs runtime 设计不变。
