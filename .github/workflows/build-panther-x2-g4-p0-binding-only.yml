@@ -27,7 +27,7 @@ permissions:
 
 concurrency:
   group: panther-x2-project-a-g4-p0-binding-only-build-only
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   KERNEL_VERSION: "6.18.63"
