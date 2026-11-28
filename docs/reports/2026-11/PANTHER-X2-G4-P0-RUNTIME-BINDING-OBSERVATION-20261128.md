@@ -125,3 +125,17 @@ The collector defect should be corrected in a future package revision by using t
 | Full nine-supply IO-domain mapping | NO-GO |
 
 **G4-P0 binding-only runtime objective: PASS.** Preserve the full-supply mapping NO-GO decision. The next work should be documentation and collector correction on the host/CI side, not another hardware boot or any selector/rail experiment.
+
+
+## 9. Collector BusyBox compatibility correction (2026-11-28)
+
+The first authorized target-board session exposed a collector defect: the frozen BusyBox build contains the `test` applet but not the `[` applet, while the original collector used `[ ... ]` for shell conditionals. Those checks emitted `[: not found`; therefore conditional-derived output from that collector is invalid and must not be used as hardware evidence. Direct manual observations in Sections 3–4 supersede it.
+
+Corrected `scripts/panther-x2-g4-p0-runtime/capture-g4-p0.sh` in commit `205053232799114ce8ecb15354831900a9db4d0f`:
+- Replaced all 14 conditional `[ ... ]` tests with the already-built BusyBox `test` applet form.
+- Preserved the collector's observation targets, output paths, read-only behavior, and hardware scope.
+- Did not add BusyBox applets, change the initramfs, alter the kernel/DTB/config, or add any sysfs/register writes.
+- The packaging workflow already runs BusyBox `ash -n` against the collector and verifies that `test` is present before packaging.
+
+**Validation status:** source-level replacement audit PASS (zero remaining conditional `if [` expressions); target BusyBox ash syntax/build validation is pending the path-filtered GitHub Actions run. No second target-board boot is required or authorized for this correction. Do not use the corrected collector on hardware until the CI syntax/package check succeeds; the existing manual binding evidence remains valid independently.
+
