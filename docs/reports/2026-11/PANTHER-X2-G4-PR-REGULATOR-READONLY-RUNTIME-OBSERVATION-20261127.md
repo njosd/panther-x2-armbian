@@ -498,3 +498,10 @@ DTB 只允许以下目标节点变更：
 - `34d85d87b9478fd6d3bca996e31d0b7580628e4e`：修正 RK3568 handler symbol 名称。
 
 当前最新 run：`46091519345`，对应包含以上修正的 workflow commit；当时处于 pending。旧 revision run `46091254678` 仍在运行中，但其 workflow 仍含上述第二处旧符号名，不能作为最终验收依据。最终只接受包含 commit `34d85d87b9478fd6d3bca996e31d0b7580628e4e` 的 run 完整通过及 artifact SHA256 核验。
+
+
+### 17.5 防止过期 CI 占用 runner
+
+workflow 原并发策略为 `cancel-in-progress: false`，导致修订后的新 run 排队等待旧 revision 完成。为避免已知存在错误符号路径的旧 revision继续占用 runner，已将并发策略改为 `cancel-in-progress: true`。修订 commit：`ab728a83bd3a13324635c342e167ff39ad728336`。
+
+最新 run `46091659151`（https://github.com/njosd/panther-x2-armbian/actions/runs/46091659151）对应完整修复后的 workflow revision，创建时 pending；旧 run `46091254678` 当时仍显示 in_progress，取消状态尚待确认。最终只接受最新 revision 对应 run 的完整成功结果。
