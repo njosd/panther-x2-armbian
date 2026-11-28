@@ -1071,3 +1071,9 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 ### 2026-11-28 G4-P2 full-supply PREPARE-ONLY 实施计划已归档
 
 新增 `PANTHER-X2-G4-P2-FULL-SUPPLY-PREPARE-ONLY-IMPLEMENTATION-PLAN-20261128.md`。G4-P2 静态供电解析链修正为 CONDITIONAL PASS 后，下一项只做独立 PREPARE-ONLY build/package：复用 G4-P0 已验收 Image/config 与 G3 基础 DTB，只将 IO-domain child status 从 disabled 改为 okay，保留原九路 supply/phandle；PMIC `vcc9-supply -> vcc3v3_sys`、fixed 3.3V upstream 路径保持原样。GMAC/MDIO/PHY 仍 disabled。计划规定 artifact SHA256、DTB 单属性 diff、九路 supply/phandle 精确保持及所有硬件隔离 gate。候选未来启动会执行九路 voltage lookup、notifier registration 和 PMU GRF selector writes，因此必须在 PREPARE-ONLY artifact 独立验收后再申请单独 RAM-only 硬件授权。该 workflow 尚未创建或运行；没有新 artifact，没有设备操作。
+
+### 2026-11-28 G4-P2 PREPARE-ONLY package 完成
+
+G4-P2 full-supply PREPARE-ONLY workflow `46139238851` 成功，artifact `15260906859`（`panther-x2-project-a-g4-p2-full-supply-PREPARE-ONLY`）已生成并独立下载复核。25 个 artifact 内文件校验和全部通过；DTB canonical logical diff 只有 `/syscon@fdc20000/io-domains/status: disabled → okay`；九路 supply phandle 原样保持；RK809 `vcc9-supply` → fixed 3.3V `vcc3v3_sys` 链通过；GMAC1/MDIO/RTL8211F 与存储/GPU/SARADC 隔离状态均通过。Image/DTB/initramfs/GPT/ext4/压缩镜像均完成构建与复核。
+
+**G4-P2 PREPARE-ONLY = PASS；G4-P2 full-supply runtime = NOT VERIFIED；hardware authorization = NOT GRANTED。** 构建只发生在 GitHub runner，没有写入物理介质、没有访问 Panther X2、没有触碰 SU08G/SN64G/eMMC。下一步不是 R7-prep 或 GMAC，而是单独申请一次 SU08G RAM-only boot 授权，验证 full-supply IO-domain runtime；GMAC/MDIO/PHY 继续 disabled。
