@@ -144,13 +144,13 @@ G4-P1 provider readiness（CONDITIONAL PASS）
 
 ### 9.4 最终判定与边界
 
-**G4-P2 PREPARE-ONLY = PASS。G4-P2 full-supply runtime = NOT VERIFIED。**
+**G4-P2 PREPARE-ONLY = PASS。G4-P2 full-supply runtime = NOT VERIFIED。用户已于 2026-11-28 明确授权一次 SU08G Etcher 写卡及 RAM-only boot session；尚待用户执行物理写卡/启动。**
 
 本轮 workflow 只在 GitHub runner 上构建和封装文件。artifact manifest 明确记录：
 - `runtime_probe=not_executed`
 - `selector_writes=not_executed_during_build`
 - `physical_media_writes=none`
-- `hardware_authorization=NOT_GRANTED`
+- `hardware_authorization=GRANTED_FOR_ONE_SU08G_RAM_ONLY_SESSION`
 - `target_media=SU08G only`
 - `SN64G=untouched`
 - `eMMC=untouched`
@@ -159,4 +159,9 @@ G4-P1 provider readiness（CONDITIONAL PASS）
 
 ### 9.5 下一步唯一任务
 
-提交单独的 G4-P2 RAM-only hardware authorization request。只有用户明确授权后，才可使用 Etcher 将 PREPARE-ONLY image 写入 **SU08G**，执行一次 RAM-only boot session；不得触碰 SN64G/eMMC。启动后只做预先定义的只读 dmesg/sysfs/deferred-probe 收集，不访问 raw PMIC/GRF，不启用 GMAC/MDIO/PHY，不 open netdev，不发送帧。若 IO-domain probe 失败或 deferred，立即停止并回到静态证据分析。
+用户已明确授权。下一步由用户使用 Etcher 将 PREPARE-ONLY image 写入 **SU08G**，执行一次 RAM-only boot session；不得触碰 SN64G/eMMC。启动后只做预先定义的只读 dmesg/sysfs/deferred-probe 收集，不访问 raw PMIC/GRF，不启用 GMAC/MDIO/PHY，不 open netdev，不发送帧。若 IO-domain probe 失败或 deferred，立即停止并回到静态证据分析。
+
+
+### 9.6 授权状态更新（2026-11-28）
+
+用户已明确同意本报告 §9.5 所述单次 G4-P2 硬件验证。授权范围仅限：SU08G 8GB TF、Etcher 写入本报告指定 PREPARE-ONLY 镜像、一次 RAM-only boot session、只读 dmesg/sysfs/deferred-probe 采集。授权不包含 SN64G/eMMC、任何持久存储挂载/写入、raw PMIC/GRF 访问、GMAC/MDIO/PHY 启用、netdev open 或 TX 测试。授权已授予但物理操作尚未执行；runtime 仍为 NOT VERIFIED。
