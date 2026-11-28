@@ -10,6 +10,9 @@ CONFIG_NET_CORE=y
 CONFIG_ETHERNET=y
 CONFIG_PACKET=y
 
+# STMMAC lives under the NET_VENDOR_STMICRO Kconfig gate; enable only this vendor group.
+CONFIG_NET_VENDOR_STMICRO=y
+
 # Panther X2 board MAC path: all built-in, not loadable modules.
 CONFIG_STMMAC_ETH=y
 CONFIG_STMMAC_PLATFORM=y
