@@ -206,7 +206,7 @@ jobs:
 
           nm -a work/output/vmlinux > work/logs/g4-p0-vmlinux-symbols.txt
           for sym in rockchip_iodomain_probe rockchip_iodomain_write rk808_regulator_probe syscon_node_to_regmap; do
-            grep -q "$sym" work/logs/g4-vmlinux-symbols.txt
+            grep -q "$sym" work/logs/g4-p0-vmlinux-symbols.txt
           done
 
           mkdir -p work/output/dtb/rockchip
