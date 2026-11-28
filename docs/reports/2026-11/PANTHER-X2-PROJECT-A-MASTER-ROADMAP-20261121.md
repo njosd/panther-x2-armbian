@@ -1051,3 +1051,9 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 ### 2026-11-28 G4-P1 Pre-GMAC provider readiness evidence reconciliation
 
 已新增 `PANTHER-X2-G4-P1-PRE-GMAC-SHARED-PROVIDER-READINESS-20261128.md`，只回读 R2/R3/R6/G4-P0 既有证据，没有重复启动设备。结论：G4-P1 = CONDITIONAL PASS。pinctrl/GPIO runtime registration、main-GRF syscon lookup、G4-P0 PMUGRF regmap acquisition、I2C0/RK809 只读事务、RK809 regulator provider binding/class registration、IO-domain binding-only 均有可复用证据；clock/CRU 和 reset controller 只有配置/静态依赖证据，GMAC clock/reset/pinmux consumer 操作有意未执行。SWITCH_REG1 PHY consumer enable、rail state/use_count 与 IO-domain supply/selector 仍未验证。下一步为 G4-P2 只读安全审计；full nine-supply mapping 保持 NO-GO，未找到安全方案前不得启动 GMAC。
+
+### 2026-11-28 G4-P2 静态供电/IO-domain 风险复核：HOLD
+
+新增 `PANTHER-X2-G4-P2-PRE-GMAC-SUPPLY-IODOMAIN-SAFETY-AUDIT-20261128.md`。本轮从 Dropbox 归档的 `kernel-config-evidence.zip` 只读提取 6.1.65 config，确认 CONFIG_MFD_RK808=y、CONFIG_REGULATOR_RK808=y、CONFIG_ROCKCHIP_IODOMAIN=y。固定源码比较进一步确认 6.1.65 与 6.1.116 的 rk808-regulator.c、io-domain.c、Panther X2 DTS 逐字节相同；6.1.65 与 6.18.63 的关键 supply index、SWITCH_REG1 无 voltage getter、IO-domain probe 顺序与 index 1 selector write 路径一致。因此现有 partial-write 风险并非已证实的 6.18 新增 regression。
+
+黄金系统 Ethernet 正常并不能证明 IO-domain child 曾成功 probe；6.1.65 原始 DTB 的 PMIC/IO-domain 子树 binary diff、6.1.116 实际 DTB 的 IO-domain status/supply 解码及黄金运行日志中的 IO-domain probe 证据仍缺。G4-P2 维持 HOLD，full nine-supply mapping 继续 NO-GO；不改 driver、不伪造 fixed regulator、不启动 GMAC。下一步只补齐既有黄金 DTB/config/log 资产证据。
