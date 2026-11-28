@@ -252,6 +252,5 @@ jobs:
           path: |
             work/output/
             work/boot/
-            work-g4-image-file.txt
           if-no-files-found: error
           retention-days: 30
