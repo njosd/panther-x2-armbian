@@ -1,6 +1,12 @@
 name: Panther X2 Project-A G4-P0 RAM runtime package (PREPARE ONLY)
 
 on:
+  push:
+    branches:
+      - g4-p0-binding-only-build
+    paths:
+      - "scripts/panther-x2-g4-p0-runtime/**"
+      - ".github/workflows/package-panther-x2-g4-p0-runtime.yml"
   workflow_dispatch:
 
 permissions:
