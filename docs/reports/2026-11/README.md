@@ -22,6 +22,12 @@
 - [B2-1 R3 RK809/I2C/regulator 专项审计](./PANTHER-X2-B2-1-R3-RK809-I2C-REGULATOR-PREFLIGHT-20261126.md)：R3 静态审计 COMPLETE（CONDITIONAL）；含 RK809 实机只读身份/状态寄存器证据、6.1.65/6.18.63 黄金对照、MFD/regulator 副作用及 PHY supply consumer 调用链。运行时 MFD/regulator 激活仍未授权。
 - [B2-1 R4 MDIO/PHY 静态审计（已结项，CONDITIONAL）](./PANTHER-X2-B2-1-R4-MDIO-PHY-KCONFIG-AUDIT-20261126.md)：R4-1 Kconfig/Makefile、R4-2 RTL8211F 驱动差异、R4-3 MDIO/PHY 对象组织、R4-4 R1 配置隔离核验均完成。R1 明确关闭 MDIO/PHY/PHYLIB/REALTEK_PHY/PHYLINK/STMMAC/DWMAC，符合隔离目标；实机 PHY probe 仍未放行。
 
+- [G4-P0 runtime binding 观察与黄金基线偏离报告（2026-11-28）](./PANTHER-X2-G4-P0-RUNTIME-BINDING-OBSERVATION-20261128.md)：记录 Linux 6.18.63 RAM-only 实机启动、IO-domain/RK809 provider bind 与 regulator class 证据，并明确 selector/物理 rail 未验证。
+- [G4-P0 runtime PREPARE-ONLY package（2026-11-28）](./PANTHER-X2-G4-P0-RUNTIME-PREPARE-ONLY-PACKAGE-20261128.md)：冻结镜像、启动链、哈希和离线完整性核验；只作 SU08G RAM-only 验证资产。
+- [R2–R7 详细实施计划与分段验收修订（2026-11-25）](./PANTHER-X2-B2-1-R2-R7-DETAILED-IMPLEMENTATION-AND-GATED-ACCEPTANCE-PLAN-20261125.md)：R7-A/B/C/D 四道验收门及单变量规则。
+- [R2–R7 分段验收矩阵（2026-11-25）](./PANTHER-X2-B2-1-R2-R7-GATED-ACCEPTANCE-MATRIX-20261125.md)：各 provider/consumer 与 probe、PHY、DMA、TX 的最早验证阶段和证据边界。
+- [R7-A Platform Probe 预审记录（非阶段放行，2026-11-28）](./PANTHER-X2-R7-A-PLATFORM-PROBE-READINESS-AUDIT-20261128.md)：初步源码边界研究；需先冻结 R7-prep 基线，R7-A 硬件轮次只允许 DTB 单变量。
+
 - [原始 Armbian 6.1.65 镜像静态审计报告（2026-11-23）](./PANTHER-X2-6.1.65-ORIGINAL-IMAGE-AUDIT-20261123.md)：原始镜像布局、启动配置、Panther X2 DTB、Kernel built-in 配置及 Dropbox 证据保留清单；Kernel/uInitrd 二进制闭包仍待补齐。
 
 - [B1 纯 RAM 干净基线构建实施记录（2026-11-22）](./PANTHER-X2-PROJECT-A-B1-CLEAN-RAM-BUILD-IMPLEMENTATION-20261122.md)：B1 纯 RAM 构建实现、输入锁定、隔离策略与待验证事项。
