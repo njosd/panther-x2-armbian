@@ -955,3 +955,6 @@ G4-P0 静态设计审计 PASS 后，已在独立分支 `g4-p0-binding-only-build
 前两轮 G4-P0 Actions（`46080268808`、`46080298570`）均成功完成 G3 基线核验、配置合并和 Linux 6.18.63 Image 编译，但在 object symbol audit 阶段因 workflow 文件名引用错误失败：`nm` 生成 `g4-p0-io-domain-object-symbols.txt`，后续 grep 错误读取旧名称 `io-domain-object-symbols.txt`。这是 CI 脚本路径错误，不是内核构建失败。已在 commit `125982ebdecc5860ae3fd4fa08114207d87b3780` 修复两个 grep 引用，未放宽检查条件或改变 DTB/Kconfig/硬件边界。
 
 修复后的 run `46091254678` 已启动，写入本路线图时仍在 toolchain setup。正式 G4-P0 artifact 仍未产出；前两轮只上传 failed diagnostics。详见 G4 报告第 17 节。继续保持云端 PREPARE-ONLY build，RAM initramfs runtime 架构不变；不启动设备、不写 SU08G/SN64G/eMMC。
+
+
+G4-P0 workflow 在修正对象符号文件路径后，再经全段静态复核发现两个后续潜在错误：vmlinux 符号输出文件 grep 路径仍使用旧名；RK3568 handler 符号误写为 `rockchip_iodomain_write`，实际应为 `rk3568_iodomain_write`。已分别在 commit `80ec93aa416964f65e35c77b67d888855159e74c` 与 `34d85d87b9478fd6d3bca996e31d0b7580628e4e` 修正。前一个 push run `46091484473` 已被后续提交取消；最新 revision run `46091519345` pending。旧 revision run `46091254678` 即使完成也不作为正式验收。详见 G4 报告第 17.4 节。
