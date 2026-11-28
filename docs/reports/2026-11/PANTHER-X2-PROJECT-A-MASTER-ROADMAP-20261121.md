@@ -1047,3 +1047,7 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 7. **R7-D / G6-B/G7**：最后执行 ABCD 同帧 TX 和独立对端捕获。
 
 该顺序不要求为了“先启动其他组件”而主动切换电源、翻转 GPIO、触发 reset 或写寄存器。所有已验证的非 GMAC 基础设施证据优先复用；任何前置门 FAIL/BLOCKED，均停留在该门，不绕过启动 GMAC。R7-A 的 clocks enable、main-GRF RGMII mode/delay writes、SWITCH_REG1 regulator enable 等副作用，必须在其独立授权前完整评估。
+
+### 2026-11-28 G4-P1 Pre-GMAC provider readiness evidence reconciliation
+
+已新增 `PANTHER-X2-G4-P1-PRE-GMAC-SHARED-PROVIDER-READINESS-20261128.md`，只回读 R2/R3/R6/G4-P0 既有证据，没有重复启动设备。结论：G4-P1 = CONDITIONAL PASS。pinctrl/GPIO runtime registration、main-GRF syscon lookup、G4-P0 PMUGRF regmap acquisition、I2C0/RK809 只读事务、RK809 regulator provider binding/class registration、IO-domain binding-only 均有可复用证据；clock/CRU 和 reset controller 只有配置/静态依赖证据，GMAC clock/reset/pinmux consumer 操作有意未执行。SWITCH_REG1 PHY consumer enable、rail state/use_count 与 IO-domain supply/selector 仍未验证。下一步为 G4-P2 只读安全审计；full nine-supply mapping 保持 NO-GO，未找到安全方案前不得启动 GMAC。
