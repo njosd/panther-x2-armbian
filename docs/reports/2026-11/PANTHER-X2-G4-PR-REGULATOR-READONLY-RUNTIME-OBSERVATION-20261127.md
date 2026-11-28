@@ -563,3 +563,23 @@ workflow 原并发策略为 `cancel-in-progress: false`，导致修订后的新 
 - 没有改变当前设备系统、内核、驱动、DTB、网络或存储配置。
 
 **下一阶段入口：** 先基于 G4-P0 artifact 做启动前资产/副作用复核，形成独立的 SU08G RAM-only runtime 验证方案与命令清单；只有在明确授权后才允许写入 SU08G 并启动。不得触碰 eMMC 或 SN64G，不得自动进入真实 supply mapping 或 selector 测试。G4-P full-supply mapping 继续 NO-GO。
+
+
+## 19. G4-P0 RAM runtime PREPARE-ONLY package completed (2026-11-28)
+
+A dedicated runtime package was assembled from the frozen G4-P0 build-only artifact and the already verified G3 runtime boot-support artifact. It is a cloud-runner PREPARE-ONLY output; no target hardware or physical media was accessed.
+
+- Workflow run [46116353755](https://github.com/njosd/panther-x2-armbian/actions/runs/46116353755), commit `8079314c0789b45f9f5e6648dac06a0f98312b48`, job `140890962190`: completed / success.
+- Artifact `panther-x2-project-a-g4-p0-runtime-PREPARE-ONLY`, ID `15251553200`, 26,387,518 bytes.
+- ZIP SHA256 `c3ad1ee99a0878d012c63bda060d2d46746d595f26c87e8ce56770f2ac915226`; independently recomputed after download and matches GitHub artifact digest.
+- All 22 entries in internal `output/SHA256SUMS` pass. Independent zstd integrity/decompression produced exactly 7,948,206,080 bytes and raw image SHA256 `99caff75dd4c49ba229c3453f8bc82a1e904c0b73a3f641bc1ae904e44a501d8`. Compressed image SHA256 `d3d61efaa6576a8e53f39f147d8692339c03239e71c5e37376fe89e82194f742`.
+- G4 Image/DTB/config hashes remain fixed at `b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090`, `c967aff4bb99748828fdf083a8e1701b915966e47c6828375399bef5e0048ff8`, `c990c913b283a7042a81be12369886e1faa95bbf5b2cc031fd9e1155a4357be2`.
+- Initramfs round-trip, BusyBox shell syntax, legacy gzip uInitrd header, U-Boot script header, GPT layout, U-Boot proper LBA readback, ext4 e2fsck and read-only file/hash verification all PASS.
+- SU08G image layout: 7,948,206,080 bytes; GPT 15,523,840 sectors; PANTHER_BOOT ext4 LBA 32768–15523806; JP-TvBox U-Boot proper at LBA 16384. Load addresses remain Image `0x00280000`, uInitrd `0x0a200000`, DTB `0x0a100000`.
+- Non-fatal tooling note: e2fsck/sgdisk warns that the partition end is not on a 2048-sector boundary; GPT verification and ext4 check pass. This is the same end-of-device layout used by the G3 SU08G package and is recorded for future review.
+
+The dedicated G4-P0 RAM initramfs writes captures only to `/run/g4-p0`; it observes DT status/supply-property absence, platform child enumeration and driver binding, deferred-probe state and dmesg. It does not write sysfs, access I2C directly, read raw PMUGRF/PMIC registers or regmap register files, or issue selector reads/writes.
+
+**Boundary:** G4-P0 runtime package is PASS_PREPARE_ONLY only. No Panther X2 boot, physical TF write, SN64G/eMMC access, runtime probe, voltage measurement or selector-state verification occurred. RK809 provider remains enabled; its known PMIC initialization writes may occur if booted. G3's earlier one-session authorization does not authorize G4-P0. Runtime boot authorization remains NOT GRANTED; G4-P full mapping remains NO-GO.
+
+Detailed artifact identity and checks are in [G4-P0 runtime PREPARE-ONLY package report](./PANTHER-X2-G4-P0-RUNTIME-PREPARE-ONLY-PACKAGE-20261128.md). Next gate is a final SU08G target identity/write-scope review and a separate explicit authorization request for one SU08G-only RAM boot session.
