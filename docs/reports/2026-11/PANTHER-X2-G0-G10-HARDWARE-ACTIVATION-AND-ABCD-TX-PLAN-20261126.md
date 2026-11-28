@@ -202,3 +202,11 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 详见 [G4-P-R Provider / Regulator 只读运行时观察](./PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)。本轮仅在 G3 provider runtime 中读取现有 sysfs/procfs：RK809 provider 已绑定；16 个 regulator 名称已盘点；IO-domain 九路 supply 映射到四个 regulator 对象；四个对象 state 均报告 enabled，三个可读电压对象回报 3.3V、1.8V、3.3V；SWITCH_REG1/vcc_3v3 无 microvolts 属性。
 
 本轮没有读取 PMU GRF、没有触发 IO-domain consumer probe、没有写寄存器或挂载 debugfs。软件电压/状态不等于物理 rail 测量。**G4-S PASS、G4-B PASS、G4-P NO-GO；G4-P-SAFE patch 不实施。** 后续只读识别 syscon 的设备树身份，再评估是否存在安全且已开放的 VSEL 只读入口。
+
+## 2026-11-28 R7-A / G5-A 编号对齐与单变量约束
+
+为避免两份计划使用不同编号造成误读，明确：R2–R7 详细计划中的 **R7-A Platform Probe 对应本计划的 G5-A Rockchip glue/STMMAC probe**；R7-B 对应 G5-B MDIO/RTL8211F；R7-C 对应 G6-A interface open/DMA；R7-D 对应 G6-B/G7 ABCD 与物理 TX。它们是同一功能链的交叉编号，不代表跳过 G5 或提前进入物理 TX。
+
+执行时以 R2–R7 详细计划 §3 的单变量约束为准：R7-A 硬件轮次唯一变量是 GMAC1 DTB 状态。由于 G4-P0 冻结 kernel.config 尚未包含 STMMAC/Rockchip glue，必须先完成一个独立 R7-prep build-only 基线（驱动对象预编译、GMAC1/MDIO/PHY DT 节点仍保持 disabled），并完成 6.1.65/6.1.116 黄金对照；冻结该基线后，R7-A 才只改 GMAC1 parent status。不得在同一 R7-A 轮次同时改变 kernel.config 和 DTB。
+
+本编号对齐不改变 G1–G10 顺序、不放宽 G4-P full-supply mapping 的 NO-GO，也不授权 R7-prep 构建之外的设备操作。R7-A platform probe 的 clocks、main-GRF、SWITCH_REG1 regulator enable/可能 rollback 副作用仍须另行审查和明确授权。
