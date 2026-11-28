@@ -1,11 +1,13 @@
-# Panther X2 项目 A — R7-A Platform Probe 准入静态审计（2026-11-28）
+# Panther X2 项目 A — R7-A Platform Probe 预审记录（非阶段放行，2026-11-28）
 
 ## 1. 结论
 
-**R7-A 存在一个可控的 PREPARE-ONLY 候选边界；当前仅通过静态设计审查，不构成实机启动授权。**
+**本报告仅为 R7-A 的初步源码边界研究，不构成 R7-A 准入通过，也不构成 build-only / 实机启动授权。**
 
-建议以已通过 G4-P0 runtime 为唯一输入，下一候选只改变：
-- Kconfig：加入 STMMAC / Rockchip DWMAC platform 所需最小闭包；
+回读原始 R2–R7 计划后发现，本报告原拟从 G4-P0 直接增量加入 STMMAC Kconfig 并修改 GMAC1 DTB。这会使本轮候选同时改变 kernel.config 与 DTB，违反原计划“R7 唯一变量为目标 DTB”的约束。因此不得按本报告原提议直接构建或启动。正确做法是先准备并冻结一个 GMAC/MDIO/PHY 仍 disabled、但 STMMAC/Rockchip glue 最小驱动对象已预编译的 R7-prep 基线；随后 R7-A 只改变 GMAC1 DTB 节点状态。该 R7-prep 构建属于 R7-A 前置准备，不得与 R7-A 硬件变量混在同一轮。
+
+R7-A 实机验收候选的最终单变量边界应为：
+- kernel.config / Image：来自事先冻结的 R7-prep 基线，不在 R7-A 本轮改变；
 - DTB：仅将 GMAC1 父节点 `/ethernet@fe010000/status` 从 disabled 改为 okay；
 - 保持 MDIO 子节点 disabled、RTL8211F PHY 子节点 disabled；
 - IO-domain child 继续 okay，但全部九个 `*-supply` 属性继续缺失；
@@ -100,9 +102,9 @@ R7-A 不调用 `ndo_open`，接口保持 DOWN。按已归档 R5-2：
 
 若 STMMAC probe 在 powerup 后失败，源码的 platform exit callback 会调用 Rockchip powerdown，包含 regulator_disable 与 clock disable；这属于可能的回滚写入，也必须纳入授权范围。该回滚路径尚未在 Panther 实机验证。
 
-## 5. 配置准入清单（仅作为 build-only 审计目标）
+## 5. R7-prep 构建准备（不是 R7-A 本轮变量）
 
-从 G4-P0 frozen config 增量加入，不重建或覆盖 G4-P0：
+当前 G4-P0 kernel.config 未启用 STMMAC。必须先从 G4-P0 派生一个独立 R7-prep build-only 基线，增加以下配置并完成黄金基线对照；GMAC1/MDIO/PHY DT 节点仍保持 disabled。R7-prep 不覆盖 G4-P0，也不触发设备启动：
 - `CONFIG_STMMAC_ETH=y`；
 - `CONFIG_STMMAC_PLATFORM=y`；
 - `CONFIG_DWMAC_ROCKCHIP=y`；
@@ -145,6 +147,6 @@ R7-A 不调用 `ndo_open`，接口保持 DOWN。按已归档 R5-2：
 | MDIO / PHY / link | NOT TESTED |
 | interface open / DMA / TX | NOT TESTED |
 
-**结论：** G4-P0 已完成；可以进入 R7-A 的独立 build-only 候选准备，但不得直接写 SU08G 或启动。R7-A 必须保持 MDIO/PHY disabled、IO-domain 九路 supply 缺失、接口 DOWN。任何实机启动和上述 clocks/main-GRF/SWITCH_REG1 副作用均须另行取得明确授权。
+**结论：** G4-P0 的 binding-only 目标已完成，但 G4-P full-supply mapping 仍 NO-GO。当前报告只能作为 R7-A 的源码预审材料。下一步先按 R2–R7 计划完成 R7-prep 基线和 6.1.65/6.1.116 黄金对照；核实 G5-A/R7-A 前置条件与 IO-domain/PHY supply 风险后，才能决定是否放行 build-only。R7-A 实机阶段只允许 DTB 作为变量，MDIO/PHY 保持 disabled、九路 IO-domain supply 属性缺失、接口 DOWN。任何实机启动和 clocks/main-GRF/SWITCH_REG1 副作用均须另行明确授权。
 
 本报告为固定源码、已有仓库证据和 DTB 结构的只读审计；未访问 Panther X2、未构建新内核/DTB、未写入任何存储、未执行 PMIC/GRF/GPIO/MDIO 操作。
