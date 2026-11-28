@@ -171,3 +171,26 @@ R7-prep 仅是云端软件资产准备。其后不立即进入 GMAC probe，而�
 - **R7-D / G6-B/G7**：最后做 ABCD 同帧 TX 和对端捕获。
 
 R7-A 已知 probe 副作用（clocks、main-GRF RGMII mode/delay、SWITCH_REG1 regulator enable）是 GMAC 最后启用的直接理由。上述顺序不构成任何构建、写卡、启动或硬件操作授权。
+
+## 11. 2026-11-28 G4-P2 runtime 通过后的 R7-prep 输入基线纠正（优先于本文旧表述）
+
+本报告 §1、§2、§5、§6、§8、§9 中将 R7-prep DTB 描述为 G4-P0 binding-only（九路 supply 缺失）的旧内容，现由本节覆盖。原因：用户已完成 G4-P2 full-supply RAM-only 实机验证，IO-domain driver 成功 probe/bind；继续沿用 G4-P0 DTB 会主动丢弃刚刚验证通过的完整供电映射，没有合理性，也会令后续 R7-A 硬件候选的供电前置条件倒退。
+
+**R7-prep 的冻结输入拆分为：**
+
+1. Kernel config / source / compatibility patch：继续从 G4-P0 build artifact 派生，因为 G4-P2 复用同一 G4-P0 Image/config，且 G4-P2 实机已验证该 kernel config 下的完整 IO-domain probe。
+2. DTB：必须从 G4-P2 PREPARE-ONLY artifact 的 boot/dtb/rockchip/rk3566-panther-x2.dtb 复制，固定 SHA256：
+   41253336c0e69b7431e0d095573724c087734bb310143e1848d8da7639a7c9be。
+   不得再从 G4-P0 artifact 取 DTB 作为 R7-prep 的最终 DTB。
+3. R7-prep 的 DTB 必须原样保留 G4-P2 full-supply 状态：IO-domain child okay、九个 supply phandle 全部存在且与 G3 baseline 一致；GMAC1、MDIO、RTL8211F 仍 disabled；eMMC/TF SDMMC0/SDIO/GPU/SARADC 仍 disabled。
+4. R7-prep 只增加 kernel config / built-in 软件对象，不改 DTB。R7-A/G5-A 以后只修改 GMAC1 parent status；九路 supply 和 IO-domain status 均保持 G4-P2 已验证值，不得删除 supply 属性或回退到 G4-P0 binding-only 状态。
+
+因此本轮 build-only workflow 应同时下载 G4-P0 kernel build artifact 与 G4-P2 runtime package artifact，分别验证 Image/config 和 DTB 的哈希；R7-prep 输出的 Image 为新构建，最终 DTB 必须与 G4-P2 DTB 字节级相同。此修正不授权任何设备启动或 GMAC 操作。
+
+### 更新后的状态
+
+- G4-P2 PREPARE-ONLY：PASS。
+- G4-P2 full-supply runtime：PASS-CONDITIONAL（rockchip-iodomain / rk808-regulator 绑定成功，九路 supply 可见；selector register readback 与物理 rail 未验证）。
+- R7-prep static Kconfig/Makefile design：PASS。
+- R7-prep build-only：NOT STARTED。
+- R7-A/G5-A hardware probe：NOT AUTHORIZED / NOT RUN。
