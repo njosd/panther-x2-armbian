@@ -139,3 +139,11 @@ Corrected `scripts/panther-x2-g4-p0-runtime/capture-g4-p0.sh` in commit `2050532
 
 **Validation status:** source-level replacement audit PASS (zero remaining conditional `if [` expressions); target BusyBox ash syntax/build validation is pending the path-filtered GitHub Actions run. No second target-board boot is required or authorized for this correction. Do not use the corrected collector on hardware until the CI syntax/package check succeeds; the existing manual binding evidence remains valid independently.
 
+
+The corrected collector then passed the dedicated packaging workflow:
+- Actions run `46120998151`, job `140905253535`: completed / success.
+- Steps included immutable input verification, BusyBox/initramfs syntax check, PREPARE-ONLY image assembly, manifest/checksum verification, and artifact upload; all completed successfully.
+- Corrected package artifact ID `15253991870`, SHA-256 `d0bbc160b5c67899a8423b8858b016da646ea7dccf7dc57521eec3e039f13c69`.
+- This was a cloud packaging/validation run only; no physical device or media access occurred.
+
+The collector correction is therefore **SOURCE + TARGET-BUSYBOX ASH SYNTAX + PACKAGE CI: PASS**. It does not require or authorize another Panther X2 boot. Use the corrected artifact only for any future separately authorized test; the original successful manual binding observations remain the current hardware evidence.
