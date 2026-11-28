@@ -948,3 +948,10 @@ G4-P0 静态设计审计 PASS 后，已在独立分支 `g4-p0-binding-only-build
 当前状态：**G4-P0 static design PASS；workflow/fragment 已提交到独立分支；Actions 尚未运行；artifact 不存在；runtime probe 未执行且未授权。** 本次没有启动 Panther X2、访问 PMIC/PMU GRF 寄存器或写入 SU08G/SN64G/eMMC。运行环境仍保持 RAM initramfs 设计，云端 CI build 不等于转向持久化 rootfs。
 
 下一步先离线审查 workflow YAML/脚本，再手动触发 build-only；构建和 artifact 完成独立校验后，才评估单独的 SU08G RAM-only 实机验证授权。详见 `PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md` 第 16 节。
+
+
+### 2026-11-28 G4-P0 build CI 诊断与修复（第三轮待完成）
+
+前两轮 G4-P0 Actions（`46080268808`、`46080298570`）均成功完成 G3 基线核验、配置合并和 Linux 6.18.63 Image 编译，但在 object symbol audit 阶段因 workflow 文件名引用错误失败：`nm` 生成 `g4-p0-io-domain-object-symbols.txt`，后续 grep 错误读取旧名称 `io-domain-object-symbols.txt`。这是 CI 脚本路径错误，不是内核构建失败。已在 commit `125982ebdecc5860ae3fd4fa08114207d87b3780` 修复两个 grep 引用，未放宽检查条件或改变 DTB/Kconfig/硬件边界。
+
+修复后的 run `46091254678` 已启动，写入本路线图时仍在 toolchain setup。正式 G4-P0 artifact 仍未产出；前两轮只上传 failed diagnostics。详见 G4 报告第 17 节。继续保持云端 PREPARE-ONLY build，RAM initramfs runtime 架构不变；不启动设备、不写 SU08G/SN64G/eMMC。
