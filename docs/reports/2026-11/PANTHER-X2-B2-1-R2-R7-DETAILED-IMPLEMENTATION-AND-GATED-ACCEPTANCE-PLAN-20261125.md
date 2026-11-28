@@ -209,3 +209,23 @@ G4-P0 frozen config 尚未包含 STMMAC/Rockchip glue，因此必须先完成独
 R7-prep 通过并冻结后，R7-A 的硬件候选只允许改变目标 DTB 中 GMAC1 parent 节点状态；kernel.config、Image、initramfs、bootargs、U-Boot、测试程序和其他 DTB 节点均保持冻结。MDIO/PHY 仍 disabled，接口 DOWN，不 open、不发送帧。
 
 R7-prep 是 R7-A 的必要构建前置，不是额外硬件阶段，也不改变 R2–R7 原门序。任何无法解释的黄金基线差异、provider/consumer 阻塞或未评估的 probe 副作用，都使 R7-A 保持 HOLD，不得以 build 成功替代准入。
+
+## 2026-11-28 执行顺序补充：非 GMAC 组件先行，GMAC 最后启用
+
+本补充优先于本文早期将 R7-prep 后直接进入 R7-A 的简化表述；不改变 R2–R7 的历史编号、静态审计结论或四个 R7 子门定义。
+
+### 前置门
+
+- **R7-prep（build-only）**：从 G4-P0 冻结资产派生，预构建 STMMAC/Rockchip glue/MDIO/PHYLIB/PHYLINK/RTL8211F 完整软件闭包；GMAC1、MDIO、PHY DT 节点保持 disabled。只做云端构建与资产审计。
+- **G4-P1（Pre-GMAC provider readiness）**：GMAC 保持 disabled，复核共享基础设施 provider：clock/CRU、pinctrl/GPIO、GRF/syscon、reset、I2C0、RK809 MFD/regulator、IO-domain。先复用 R2/R3/G4-P0 已有证据，避免重复实机测试；缺口仅通过有明确目标的只读检查补齐。
+- **G4-P2（Pre-GMAC supply/IO-domain safety）**：单独审查 vcc_3v3/SWITCH_REG1 的 PHY supply consumer enable 与 IO-domain supply/selector 风险。G4-P0 binding PASS 不等于 supply 功能 PASS；九路完整 mapping 仍 NO-GO。未解决 partial-write 风险、供电状态和与黄金行为差异之前，GMAC probe 必须 HOLD。
+
+### GMAC 与后续数据面顺序
+
+G4-P1、G4-P2 均通过且取得独立授权后，才进入：
+- **R7-A / G5-A**：最后启用 GMAC1 parent，MDIO/PHY disabled，interface DOWN；仅验收 Rockchip glue/STMMAC probe 与 netdev registration。
+- **R7-B / G5-B**：再启用 MDIO/RTL8211F，验收 PHY ID、绑定与 link。
+- **R7-C / G6-A**：再 open interface，验收 MAC/DMA/ring/IRQ/NAPI。
+- **R7-D / G6-B/G7**：最后执行 ABCD 同帧物理 TX 与对端捕获。
+
+R7-A 的已知副作用包括 clocks enable、main-GRF RGMII mode/delay writes、SWITCH_REG1/vcc_3v3 regulator enable；因此“GMAC 最后”是实质性准入原则，而不是仅调整文档顺序。任何前置门失败或 BLOCKED，不得进入 R7-A。该补充不授权任何构建、写卡、硬件启动或寄存器写入。
