@@ -1,0 +1,37 @@
+#!/bin/sh
+# G4-P0 runtime: RAM-only observation; no persistent storage mounts or writes.
+# RK809 provider probe retains the same initialization side effects as G3.
+# IO-domain child is enabled with all nine supply properties absent.
+PATH=/bin:/sbin
+HOME=/
+PS1='(panther-x2-g4-p0-runtime) # '
+export PATH HOME PS1
+
+echo
+echo "=== Panther X2 Project-A G4-P0 binding-only runtime ==="
+echo "RK809 regulator provider is enabled; expected PMIC initialization writes may occur."
+echo "IO-domain child is enabled; all nine *-supply properties are absent."
+echo "Expected IO-domain behavior: PMUGRF syscon regmap acquisition, no selector register transaction."
+echo "eMMC, TF SDMMC0, SDIO, GPU, SARADC, GMAC1/MDIO/PHY remain disabled in this DTB."
+echo "Linux root is initramfs in RAM; no persistent filesystem is mounted or written."
+echo "This image is PREPARE-ONLY; G4-P0 runtime boot requires separate explicit authorization."
+
+mkdir -p /proc /sys /dev /run
+if ! mount -t proc proc /proc; then
+    echo "WARNING: procfs mount failed"
+fi
+if ! mount -t sysfs sysfs /sys; then
+    echo "WARNING: sysfs mount failed"
+fi
+
+echo
+echo "Initial G4-P0 capture follows."
+/bin/sh /capture-g4-p0.sh
+
+echo
+echo "G4-P0 RAM runtime shell ready."
+echo "Wait at least 12 seconds after this prompt, then run:"
+echo "  /bin/sh /capture-g4-p0.sh"
+echo "The second capture records settled deferred-probe state."
+echo "All capture files remain in RAM under /run/g4-p0."
+exec /bin/sh -i
