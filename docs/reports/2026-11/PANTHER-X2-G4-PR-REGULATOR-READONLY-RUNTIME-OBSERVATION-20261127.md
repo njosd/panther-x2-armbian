@@ -484,3 +484,17 @@ DTB 只允许以下目标节点变更：
 - 设备启动、IO-domain runtime bind、PMUGRF selector access、物理电压：均未执行/未验证。
 
 仍保持 PREPARE-ONLY；没有设备访问或存储写入。RAM initramfs runtime 设计不变。
+
+
+### 17.4 二次静态复核发现的两个潜在 audit 脚本错误
+
+在第三轮运行期间，对整个 object/vmlinux symbol audit 区段做逐行复核，发现两个尚未到达的检查错误，提前修正，避免再进行一次无效完整编译：
+
+1. vmlinux symbols 的生成文件为 `g4-p0-vmlinux-symbols.txt`，grep 原先仍引用 `g4-vmlinux-symbols.txt`。已修正为同一路径。
+2. Linux 6.18.63 RK3568 IO-domain 写回调名称为 `rk3568_iodomain_write`；vmlinux 符号循环原先误检查 `rockchip_iodomain_write`。已修正为实际 handler 名称，与对象符号检查一致。
+
+修订提交：
+- `80ec93aa416964f65e35c77b67d888855159e74c`：修复 vmlinux symbols 文件路径（该次 push run `46091484473` 已被后续提交触发的并发取消）。
+- `34d85d87b9478fd6d3bca996e31d0b7580628e4e`：修正 RK3568 handler symbol 名称。
+
+当前最新 run：`46091519345`，对应包含以上修正的 workflow commit；当时处于 pending。旧 revision run `46091254678` 仍在运行中，但其 workflow 仍含上述第二处旧符号名，不能作为最终验收依据。最终只接受包含 commit `34d85d87b9478fd6d3bca996e31d0b7580628e4e` 的 run 完整通过及 artifact SHA256 核验。
