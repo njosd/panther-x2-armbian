@@ -961,3 +961,23 @@ G4-P0 workflow 在修正对象符号文件路径后，再经全段静态复核�
 
 
 为避免已知存在过期符号审计错误的 CI revision 长时间占用 runner，G4-P0 workflow 并发策略已由 `cancel-in-progress: false` 改为 `true`（commit `ab728a83bd3a13324635c342e167ff39ad728336`）。最新完整修正版 run `46091659151` 已创建，创建时 pending；旧 run `46091254678` 当时仍在构建，取消状态待确认。最终验收只看最新 revision 的 run。详见 G4 报告第 17.5 节。
+
+
+## 2026-11-28 G4-P0 binding-only build-only 验收完成
+
+最新修正版 G4-P0 Actions run `46091659151`（commit `ab728a83bd3a13324635c342e167ff39ad728336`）最终 `completed / success`。G3 冻结输入核验、Linux 6.18.63 Image build、IO-domain object/vmlinux symbol audit、DTB diff allowlist、cache save 与 artifact upload 全部通过。
+
+正式 artifact：
+- ID：`15242113092`
+- 名称：`panther-x2-g4-p0-binding-only-build-only`
+- ZIP SHA256：`2d93855944c3a28b86631e356cdcfa73bc9b75996f48d8409f74ebd69ae4c893`（下载后独立复算与 GitHub digest 一致）
+- 内部 `SHA256SUMS`：12 项全部 PASS。
+- Image：32,381,440 bytes，SHA256 `b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090`。
+- DTB SHA256：`c967aff4bb99748828fdf083a8e1701b915966e47c6828375399bef5e0048ff8`。
+- kernel.config SHA256：`c990c913b283a7042a81be12369886e1faa95bbf5b2cc031fd9e1155a4357be2`。
+
+差异验收：G3→G4-P0 kernel.config 仅增加 `CONFIG_ROCKCHIP_IODOMAIN=y`；DTB 仅将 IO-domain child status 设为 okay 并删除全部九个 supply 属性，diff allowlist PASS。RK809 provider 保留；eMMC、TF SDMMC0、SDIO、GPU、SARADC、GMAC1、MDIO、PHY 均保持 disabled。详细资产和日志见 [G4-P 报告第 18 节](./PANTHER-X2-G4-PR-REGULATOR-READONLY-RUNTIME-OBSERVATION-20261127.md)。
+
+**阶段判定：G4-P0 BUILD / CONFIG / DTB / OBJECT-SYMBOL AUDIT = PASS。** 仅为云端 build-only 与离线 artifact PASS；目标板启动、child enumeration、driver bind、PMUGRF regmap runtime acquisition 均未验证。源码预期无 supply 属性时不执行 voltage read/notifier/selector write，但仍需将 runtime 行为作为独立验证项。
+
+**下一步：** 进行 G4-P0 artifact 启动前审计，制定 SU08G-only、RAM-initramfs、无持久化写入的 runtime 验证步骤与观测项；在取得明确授权前不写卡、不启动、不触发 probe。SN64G 与 eMMC 继续禁止触碰；G4-P full-supply mapping 继续 NO-GO。云端构建不改变 RAM-only runtime 架构，也不代表进入持久化 rootfs。
