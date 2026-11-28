@@ -150,3 +150,17 @@ R7-A 不调用 `ndo_open`，接口保持 DOWN。按已归档 R5-2：
 **结论：** G4-P0 的 binding-only 目标已完成，但 G4-P full-supply mapping 仍 NO-GO。当前报告只能作为 R7-A 的源码预审材料。下一步先按 R2–R7 计划完成 R7-prep 基线和 6.1.65/6.1.116 黄金对照；核实 G5-A/R7-A 前置条件与 IO-domain/PHY supply 风险后，才能决定是否放行 build-only。R7-A 实机阶段只允许 DTB 作为变量，MDIO/PHY 保持 disabled、九路 IO-domain supply 属性缺失、接口 DOWN。任何实机启动和 clocks/main-GRF/SWITCH_REG1 副作用均须另行明确授权。
 
 本报告为固定源码、已有仓库证据和 DTB 结构的只读审计；未访问 Panther X2、未构建新内核/DTB、未写入任何存储、未执行 PMIC/GRF/GPIO/MDIO 操作。
+
+## 2026-11-28 后续顺序修订：本报告不再作为直接进入 R7-A 的执行顺序
+
+本报告 §1、§5、§8 保留原始预审时间点的候选设计和配置讨论，后续执行不得直接照此启动。用户要求将最可能发生问题的 GMAC 留到最后，因此当前有效的前置顺序已调整为：
+
+1. R7-prep build-only：预构建完整软件闭包（包括为 R7-B 预置 REALTEK_PHY built-in），GMAC/MDIO/PHY DT 节点仍全部 disabled；不发生硬件 probe。
+2. G4-P1 / Pre-GMAC provider readiness：复用 R2/R3/G4-P0 既有证据，先确认共享 clock/CRU、pinctrl/GPIO、GRF/syscon、reset、I2C0、RK809 MFD/regulator、IO-domain provider 的就绪状态；已通过项目不重跑，缺口只做最小只读补证。
+3. G4-P2 / Pre-GMAC supply & IO-domain safety：解决 SWITCH_REG1/vcc_3v3 consumer enable 与 IO-domain supply/selector partial-write 风险。当前 full nine-supply mapping NO-GO，未解除前不允许 GMAC probe。
+4. 只有 G4-P1/G4-P2 均通过且取得独立授权，才执行 R7-A/G5-A：GMAC1 parent 单节点启用，MDIO/PHY DT nodes disabled，interface DOWN，不 open、不发帧。
+5. 随后才按 R7-B/G5-B → R7-C/G6-A → R7-D/G6-B/G7 逐层启用 PHY、DMA open、ABCD TX。
+
+本报告中“R7-A one-node DTB boundary STATIC DESIGN PASS”只表示源码与设备树隔离设计可行，不代表供电/IO-domain 前置门 PASS，不代表 R7-A gate-pass。R7-A 硬件状态继续 NOT AUTHORIZED / NOT RUN。R7-prep 的 REALTEK_PHY=y 仅为 built-in 预置；PHY DT 节点 disabled 时不触发 PHY probe。
+
+本顺序不授权切换 regulator、GPIO/reset、PMIC/GRF/MDIO 写入、刷写或启动设备。
