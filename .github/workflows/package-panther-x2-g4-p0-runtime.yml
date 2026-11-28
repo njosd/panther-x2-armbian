@@ -1,0 +1,257 @@
+name: Panther X2 Project-A G4-P0 RAM runtime package (PREPARE ONLY)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-g4-p0-runtime-package
+  cancel-in-progress: false
+
+env:
+  G4_BUILD_RUN_ID: "46091659151"
+  G3_RUNTIME_RUN_ID: "45996817932"
+  G4_IMAGE_SHA256: "b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090"
+  G4_DTB_SHA256: "c967aff4bb99748828fdf083a8e1701b915966e47c6828375399bef5e0048ff8"
+  G4_CONFIG_SHA256: "c990c913b283a7042a81be12369886e1faa95bbf5b2cc031fd9e1155a4357be2"
+  G3_BUSYBOX_SHA256: "2d77cb64f5ab5ca33efae040083abe31912ab02677dd21c1b79ade6ed0e98b15"
+  JP_UBOOT_SHA256: "a1ae35a8522e4353611042e62c3b7b7eaa7e4b6955bae5e5c4f8499500dbfdce"
+
+jobs:
+  package-g4-p0-runtime:
+    name: Assemble G4-P0 SU08G RAM runtime; no physical device access
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y binutils cpio device-tree-compiler e2fsprogs file gdisk gzip qemu-user-static u-boot-tools zstd
+
+      - name: Download frozen G4-P0 build-only artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-g4-p0-binding-only-build-only
+          path: work/g4
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G4_BUILD_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Download frozen G3 runtime support artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-project-a-g3-provider-runtime-PREPARE-ONLY
+          path: work/g3
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G3_RUNTIME_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify immutable inputs and isolation
+        run: |
+          set -euo pipefail
+          G4=work/g4/output
+          G3=work/g3/output
+          for f in "$G4/SHA256SUMS" "$G4/Image" "$G4/kernel.config" "$G4/dtb/rockchip/rk3566-panther-x2.dtb" "$G4/G4-P0-BUILD-MANIFEST.txt" "$G3/SHA256SUMS" "$G3/busybox" "$G3/JP-TvBox-u-boot.itb" "$G3/RUNTIME-MANIFEST.txt"; do
+            test -s "$f" || { echo "::error::Missing frozen input: $f"; exit 1; }
+          done
+          (cd "$G4" && sha256sum --check SHA256SUMS)
+          (cd "$G3" && sha256sum --check SHA256SUMS)
+          test "$(sha256sum "$G4/Image" | awk '{print $1}')" = "$G4_IMAGE_SHA256"
+          test "$(sha256sum "$G4/kernel.config" | awk '{print $1}')" = "$G4_CONFIG_SHA256"
+          test "$(sha256sum "$G4/dtb/rockchip/rk3566-panther-x2.dtb" | awk '{print $1}')" = "$G4_DTB_SHA256"
+          test "$(sha256sum "$G3/busybox" | awk '{print $1}')" = "$G3_BUSYBOX_SHA256"
+          test "$(sha256sum "$G3/JP-TvBox-u-boot.itb" | awk '{print $1}')" = "$JP_UBOOT_SHA256"
+          grep -Fq 'rk809_regulator_provider=built-in' "$G3/RUNTIME-MANIFEST.txt"
+          grep -Fq 'rockchip_iodomain=not-built; io_domains=disabled' "$G3/RUNTIME-MANIFEST.txt"
+          readelf -h "$G3/busybox" | grep -q AArch64
+          if readelf -l "$G3/busybox" | grep -q INTERP; then exit 1; fi
+          MAGIC="$(od -An -tx1 -j56 -N4 "$G4/Image" | tr -d ' \\n')"
+          test "$MAGIC" = "41524d64"
+          DTB="$G4/dtb/rockchip/rk3566-panther-x2.dtb"
+          test "$(fdtget -t s "$DTB" / model)" = "Panther X2"
+          test "$(fdtget -t s "$DTB" /syscon@fdc20000/io-domains status)" = "okay"
+          for prop in pmuio1-supply pmuio2-supply vccio1-supply vccio2-supply vccio3-supply vccio4-supply vccio5-supply vccio6-supply vccio7-supply; do
+            if fdtget -t x "$DTB" /syscon@fdc20000/io-domains "$prop" >/dev/null 2>&1; then
+              echo "::error::Forbidden supply property: $prop"; exit 1
+            fi
+          done
+          test "$(fdtget -t s "$DTB" /i2c@fdd40000/pmic@20 status)" = "okay"
+          for node in /mmc@fe310000 /mmc@fe2b0000 /mmc@fe2c0000 /gpu@fde60000 /saradc@fe720000 /ethernet@fe010000 /ethernet@fe010000/mdio /ethernet@fe010000/mdio/ethernet-phy@0; do
+            test "$(fdtget -t s "$DTB" "$node" status)" = "disabled"
+          done
+          mkdir -p work/boot/dtb/rockchip work/initramfs work/output
+          cp "$G4/Image" work/boot/Image
+          cp "$DTB" work/boot/dtb/rockchip/rk3566-panther-x2.dtb
+          cp "$G4/kernel.config" work/output/kernel.config
+          cp "$G4/G4-P0-BUILD-MANIFEST.txt" work/output/G4-P0-BUILD-MANIFEST.txt
+          cp "$G4/G4-P0-DTB-ISOLATION.txt" work/output/G4-P0-DTB-ISOLATION.txt
+          cp "$G3/busybox" work/initramfs/busybox
+          cp "$G3/busybox" work/output/busybox
+          cp "$G3/busybox.config" work/output/busybox.config
+          cp "$G3/busybox-applets.txt" work/output/busybox-applets.txt
+          cp "$G3/JP-TvBox-u-boot.itb" work/output/JP-TvBox-u-boot.itb
+          cp "$G4/SHA256SUMS" work/output/G4-BUILD-SHA256SUMS.txt
+          cp "$G3/SHA256SUMS" work/output/G3-RUNTIME-SHA256SUMS.txt
+          {
+            echo "g4_build_run_id=$G4_BUILD_RUN_ID"
+            echo "g3_runtime_run_id=$G3_RUNTIME_RUN_ID"
+            echo "g4_image_sha256=$G4_IMAGE_SHA256"
+            echo "g4_dtb_sha256=$G4_DTB_SHA256"
+            echo "g4_config_sha256=$G4_CONFIG_SHA256"
+            echo "busybox_sha256=$G3_BUSYBOX_SHA256"
+            echo "jp_uboot_sha256=$JP_UBOOT_SHA256"
+          } | tee work/output/G4-P0-FROZEN-INPUTS.txt
+
+      - name: Build and syntax-check G4-P0 RAM initramfs
+        run: |
+          set -euo pipefail
+          ROOT=work/initramfs
+          mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/proc" "$ROOT/sys" "$ROOT/run" "$ROOT/etc" "$ROOT/sbin"
+          install -m 0755 "$ROOT/busybox" "$ROOT/bin/busybox"
+          rm "$ROOT/busybox"
+          for applet in ash sh mount mkdir cat uname printf dmesg tail echo ls test; do
+            qemu-aarch64-static "$ROOT/bin/busybox" --list | grep -qx "$applet"
+            ln -s busybox "$ROOT/bin/$applet"
+          done
+          install -m 0755 scripts/panther-x2-g4-p0-runtime/init "$ROOT/init"
+          install -m 0755 scripts/panther-x2-g4-p0-runtime/capture-g4-p0.sh "$ROOT/capture-g4-p0.sh"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/init"
+          qemu-aarch64-static "$ROOT/bin/busybox" ash -n "$ROOT/capture-g4-p0.sh"
+          cp scripts/panther-x2-g4-p0-runtime/init work/output/init
+          cp scripts/panther-x2-g4-p0-runtime/capture-g4-p0.sh work/output/capture-g4-p0.sh
+          cp scripts/panther-x2-g4-p0-runtime/boot.cmd work/output/boot.cmd
+          (cd "$ROOT" && find . -print0 | sort -z | cpio --null -o --format=newc) | gzip -n -9 > work/output/initramfs.cpio.gz
+          mkimage -A arm64 -O linux -T ramdisk -C gzip -n "Panther X2 G4-P0 RAM runtime" -d work/output/initramfs.cpio.gz work/boot/uInitrd
+          mkimage -l work/boot/uInitrd | tee work/output/uinitrd-header.txt
+          grep -qi AArch64 work/output/uinitrd-header.txt
+          mkdir -p work/initramfs-check
+          gzip -dc work/output/initramfs.cpio.gz | (cd work/initramfs-check && cpio -idm --quiet)
+          cmp scripts/panther-x2-g4-p0-runtime/init work/initramfs-check/init
+          cmp scripts/panther-x2-g4-p0-runtime/capture-g4-p0.sh work/initramfs-check/capture-g4-p0.sh
+          cmp work/output/busybox work/initramfs-check/bin/busybox
+          test -x work/initramfs-check/init
+          test -x work/initramfs-check/capture-g4-p0.sh
+          sha256sum work/output/initramfs.cpio.gz work/boot/uInitrd | tee work/output/initramfs-sha256.txt
+
+      - name: Generate boot.scr and SU08G-sized PREPARE-ONLY image on runner
+        run: |
+          set -euo pipefail
+          mkimage -A arm -O linux -T script -C none -n "Panther X2 G4-P0 RAM runtime" -d work/output/boot.cmd work/boot/boot.scr
+          mkimage -l work/boot/boot.scr | tee work/output/bootscr-header.txt
+          IMAGE=work/output/panther-x2-project-a-g4-p0-runtime-PREPARE-ONLY.img
+          IMAGE_ZST="$IMAGE.zst"
+          test "$((15523840 * 512))" -eq 7948206080
+          truncate -s 7948206080 "$IMAGE"
+          sgdisk --clear --new=1:32768:15523806 --typecode=1:8300 --change-name=1:PANTHER_BOOT "$IMAGE"
+          mkdir -p work/tf-mnt
+          LOOP="$(sudo losetup --find --show --partscan "$IMAGE")"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          test -b "$PART"
+          sudo mkfs.ext4 -F -L PANTHER_BOOT "$PART"
+          sudo mount "$PART" work/tf-mnt
+          sudo install -m 0644 work/boot/Image work/tf-mnt/Image
+          sudo install -m 0644 work/boot/uInitrd work/tf-mnt/uInitrd
+          sudo install -m 0644 work/boot/boot.scr work/tf-mnt/boot.scr
+          sudo install -m 0644 work/output/boot.cmd work/tf-mnt/boot.cmd
+          sudo mkdir -p work/tf-mnt/dtb/rockchip
+          sudo install -m 0644 work/boot/dtb/rockchip/rk3566-panther-x2.dtb work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb
+          sudo tee work/tf-mnt/TEST-INFO.txt >/dev/null <<'EOF'
+          Panther X2 Project-A G4-P0 binding-only runtime; PREPARE-ONLY.
+          RK809 provider probe may perform its established PMIC initialization writes.
+          IO-domain child is enabled; all nine supply properties are absent.
+          Expected IO-domain path: PMUGRF syscon regmap mapping only, no selector register transactions.
+          eMMC, TF SDMMC0, SDIO, GPU, SARADC, GMAC1, MDIO and PHY remain disabled.
+          RAM initramfs only; capture files stay in /run. No persistent root filesystem is mounted.
+          Existing eMMC SPL is required; JP-TvBox U-Boot proper is at raw LBA 16384.
+          Target SU08G capacity 7,948,206,080 bytes; GPT PANTHER_BOOT ext4 starts at LBA 32768.
+          Cloud build only. No physical media is written. G4-P0 boot is NOT AUTHORIZED by this artifact.
+          EOF
+          sync
+          sudo umount work/tf-mnt
+          sudo e2fsck -fn "$PART"
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          dd if=work/output/JP-TvBox-u-boot.itb of="$IMAGE" bs=512 seek=16384 conv=notrunc status=none
+          sgdisk -v "$IMAGE"
+          sgdisk -i 1 "$IMAGE" | tee work/output/tf-partition-1.txt
+          grep -q 'Linux filesystem' work/output/tf-partition-1.txt
+          UBOOT_SIZE="$(stat -c %s work/output/JP-TvBox-u-boot.itb)"
+          UBOOT_READBACK="$(dd if="$IMAGE" bs=1 skip=$((16384 * 512)) count="$UBOOT_SIZE" status=none | sha256sum | awk '{print $1}')"
+          test "$UBOOT_READBACK" = "$JP_UBOOT_SHA256"
+          LOOP="$(sudo losetup --find --show --partscan --read-only "$IMAGE")"
+          cleanup() { sudo umount work/tf-mnt 2>/dev/null || true; sudo losetup -d "$LOOP" 2>/dev/null || true; }
+          trap cleanup EXIT
+          sudo partprobe "$LOOP"
+          sleep 2
+          PART="$LOOP"p1
+          sudo mount -o ro "$PART" work/tf-mnt
+          for item in Image uInitrd boot.scr boot.cmd TEST-INFO.txt dtb/rockchip/rk3566-panther-x2.dtb; do test -s "work/tf-mnt/$item"; done
+          test "$(sha256sum work/tf-mnt/Image | awk '{print $1}')" = "$G4_IMAGE_SHA256"
+          test "$(sha256sum work/tf-mnt/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$G4_DTB_SHA256"
+          test "$(sha256sum work/tf-mnt/uInitrd | awk '{print $1}')" = "$(sha256sum work/boot/uInitrd | awk '{print $1}')"
+          (cd work/tf-mnt && find . -path './lost+found' -prune -o -type f -print0 | sort -z | xargs -0 sha256sum) | tee work/output/tf-files.sha256
+          sudo umount work/tf-mnt
+          sudo losetup -d "$LOOP"
+          trap - EXIT
+          sha256sum "$IMAGE" | tee work/output/tf-image-sha256.txt
+          zstd -T0 -10 "$IMAGE" -o "$IMAGE_ZST"
+          zstd -t "$IMAGE_ZST"
+          sha256sum "$IMAGE_ZST" >> work/output/tf-image-sha256.txt
+          rm -f "$IMAGE"
+
+      - name: Create PREPARE-ONLY runtime manifest and checksums
+        run: |
+          set -euo pipefail
+          {
+            echo "status=PASS_PREPARE_ONLY"
+            echo "purpose=G4-P0 binding-only IO-domain RAM runtime; packaging only"
+            echo "g4_build_run_id=$G4_BUILD_RUN_ID"
+            echo "g3_runtime_run_id=$G3_RUNTIME_RUN_ID"
+            echo "g4_image_sha256=$G4_IMAGE_SHA256"
+            echo "g4_dtb_sha256=$G4_DTB_SHA256"
+            echo "g4_config_sha256=$G4_CONFIG_SHA256"
+            echo "busybox_sha256=$G3_BUSYBOX_SHA256"
+            echo "jp_uboot_sha256=$JP_UBOOT_SHA256"
+            echo "kernel_version=6.18.63"
+            echo "kernel_source_commit=aee4e352a15d636cbc484f56819c6e59474dfd9f"
+            echo "rk809_regulator_provider=built-in; PMIC initialization writes may occur at boot"
+            echo "rockchip_iodomain=built-in; io_domains=status_okay; all_nine_supply_properties=absent"
+            echo "selector_transactions=none_expected_by_source_audit_not_runtime_verified"
+            echo "pmugrf_syscon_regmap=expected_mapping_only_no_selector_read_write"
+            echo "eMMC/TF_SDMMC0/SDIO/GPU/SARADC/GMAC1/MDIO/PHY=disabled"
+            echo "rootfs=RAM initramfs; capture_output=/run/g4-p0"
+            echo "bootargs=console=ttyS02,1500000 earlycon loglevel=8 ignore_loglevel printk.time=1 rdinit=/init regulator_ignore_unused"
+            echo "load_addresses=Image:0x00280000;uInitrd:0x0a200000;DTB:0x0a100000"
+            echo "target_media=SU08G; capacity_bytes=7948206080; sectors=15523840"
+            echo "partition=GPT PANTHER_BOOT ext4; start_LBA=32768; end_LBA=15523806"
+            echo "uboot_proper_location=raw_LBA_16384"
+            echo "physical_media_writes=none_during_build; target_device_access=none"
+            echo "runtime_probe=not_executed; runtime_boot_authorization=NOT_GRANTED"
+            echo "G4-P_full_supply_mapping=NO_GO"
+            sha256sum work/output/init work/output/capture-g4-p0.sh work/output/boot.cmd work/output/initramfs.cpio.gz work/boot/uInitrd work/boot/boot.scr
+            cat work/output/tf-image-sha256.txt
+          } | tee work/output/G4-P0-RUNTIME-MANIFEST.txt
+          (cd work/output && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum --check SHA256SUMS)
+
+      - name: Upload G4-P0 runtime package (PREPARE-ONLY; no device access)
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-project-a-g4-p0-runtime-PREPARE-ONLY
+          path: |
+            work/output/
+            work/boot/
+            work-g4-image-file.txt
+          if-no-files-found: error
+          retention-days: 30
