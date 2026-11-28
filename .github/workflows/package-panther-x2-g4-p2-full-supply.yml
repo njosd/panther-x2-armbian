@@ -219,7 +219,7 @@ jobs:
 
           # Explicitly prove all other sensitive consumers remain isolated.
           assert_status() {
-            node="$1"; expected="$2"; actual
+            local node="$1" expected="$2" actual
             actual="$(fdtget -t s "$CANDIDATE" "$node" status 2>/dev/null || true)"
             if [ -z "$actual" ]; then actual="okay"; fi
             test "$actual" = "$expected" || { echo "::error::$node status=$actual expected=$expected"; exit 1; }
