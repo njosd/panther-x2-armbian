@@ -1067,3 +1067,7 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 因此，原先“index 1 VSEL2 写入后 index 2 必然因 SWITCH_REG1 无 getter 失败”的 partial-write 预测已撤销，不能再据此维持 full-supply NO-GO。保留 selector regmap_write 返回值未检查、VSEL readback/物理 rail 未验证等真实限制。G4-P2 修正为 CONDITIONAL PASS（静态供电解析链闭合）；6.18 full-supply runtime 尚未验证。
 
 下一步顺序调整为：G4-P2 full-supply PREPARE-ONLY（仅启用 IO-domain child，九路供电映射保持原样，GMAC/MDIO/PHY disabled）→ 独立授权后 RAM-only 验证 IO-domain voltage lookup/bind → R7-prep build-only → R7-A/G5-A 最后启用 GMAC → R7-B → R7-C → R7-D。PREPARE-ONLY artifact 不构成实机启动授权。
+
+### 2026-11-28 G4-P2 full-supply PREPARE-ONLY 实施计划已归档
+
+新增 `PANTHER-X2-G4-P2-FULL-SUPPLY-PREPARE-ONLY-IMPLEMENTATION-PLAN-20261128.md`。G4-P2 静态供电解析链修正为 CONDITIONAL PASS 后，下一项只做独立 PREPARE-ONLY build/package：复用 G4-P0 已验收 Image/config 与 G3 基础 DTB，只将 IO-domain child status 从 disabled 改为 okay，保留原九路 supply/phandle；PMIC `vcc9-supply -> vcc3v3_sys`、fixed 3.3V upstream 路径保持原样。GMAC/MDIO/PHY 仍 disabled。计划规定 artifact SHA256、DTB 单属性 diff、九路 supply/phandle 精确保持及所有硬件隔离 gate。候选未来启动会执行九路 voltage lookup、notifier registration 和 PMU GRF selector writes，因此必须在 PREPARE-ONLY artifact 独立验收后再申请单独 RAM-only 硬件授权。该 workflow 尚未创建或运行；没有新 artifact，没有设备操作。
