@@ -1,0 +1,390 @@
+name: Panther X2 Project-A R7-prep Ethernet software closure (BUILD ONLY)
+
+on:
+  push:
+    branches:
+      - g4-p0-binding-only-build
+    paths:
+      - "scripts/panther-x2-r7-prep/**"
+      - ".github/workflows/build-panther-x2-r7-prep.yml"
+  workflow_dispatch:
+    inputs:
+      g4_p0_build_run_id:
+        description: "Frozen G4-P0 kernel config/Image build run"
+        required: true
+        type: string
+        default: "46091659151"
+      g4_p2_package_run_id:
+        description: "Successful G4-P2 full-supply PREPARE-ONLY package run"
+        required: true
+        type: string
+        default: "46139238851"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: panther-x2-project-a-r7-prep-build-only
+  cancel-in-progress: false
+
+env:
+  KERNEL_VERSION: "6.18.63"
+  KERNEL_SOURCE_REPO: "https://github.com/ophub/linux-6.18.y.git"
+  KERNEL_SOURCE_COMMIT: "aee4e352a15d636cbc484f56819c6e59474dfd9f"
+  G4_P0_BUILD_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g4_p0_build_run_id || '46091659151' }}
+  G4_P2_PACKAGE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.g4_p2_package_run_id || '46139238851' }}
+  G4_P0_IMAGE_SHA256: "b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090"
+  G4_P0_CONFIG_SHA256: "c990c913b283a7042a81be12369886e1faa95bbf5b2cc031fd9e1155a4357be2"
+  G4_P2_DTB_SHA256: "41253336c0e69b7431e0d095573724c087734bb310143e1848d8da7639a7c9be"
+
+jobs:
+  r7-prep-build:
+    name: Build R7 Ethernet software closure with all hardware nodes disabled
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout exact project revision
+        uses: actions/checkout@v6
+
+      - name: Install isolated kernel build and audit toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential binutils device-tree-compiler \
+            file flex gcc-aarch64-linux-gnu git libelf-dev \
+            libncurses-dev libssl-dev make perl python3 kmod zstd
+
+      - name: Download frozen G4-P0 kernel build artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-g4-p0-binding-only-build-only
+          path: work/g4-p0
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G4_P0_BUILD_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Download G4-P2 full-supply PREPARE-ONLY package
+        uses: actions/download-artifact@v6
+        with:
+          name: panther-x2-project-a-g4-p2-full-supply-PREPARE-ONLY
+          path: work/g4-p2
+          repository: ${{ github.repository }}
+          run-id: ${{ env.G4_P2_PACKAGE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify frozen inputs; use G4-P2 DTB as current hardware baseline
+        id: freeze_inputs
+        run: |
+          set -euo pipefail
+          G4=work/g4-p0/output
+          P2=work/g4-p2
+          P2_OUT="$P2/output"
+          P2_BOOT="$P2/boot"
+          for f in \
+            "$G4/SHA256SUMS" "$G4/Image" "$G4/kernel.config" "$G4/System.map" "$G4/vmlinux" \
+            "$G4/G4-P0-BUILD-MANIFEST.txt" "$G4/dtb/rockchip/rk3566-panther-x2.dtb" \
+            "$P2_OUT/SHA256SUMS" "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt" \
+            "$P2_OUT/G4-P2-SUPPLY-PHANDLE-AUDIT.txt" "$P2_OUT/kernel.config" \
+            "$P2_BOOT/Image" "$P2_BOOT/dtb/rockchip/rk3566-panther-x2.dtb"; do
+            test -s "$f" || { echo "::error::Missing frozen input: $f"; exit 1; }
+          done
+
+          (cd "$G4" && sha256sum --check SHA256SUMS)
+          (cd "$P2_OUT" && sha256sum --check SHA256SUMS)
+
+          test "$(sha256sum "$G4/Image" | awk '{print $1}')" = "$G4_P0_IMAGE_SHA256"
+          test "$(sha256sum "$G4/kernel.config" | awk '{print $1}')" = "$G4_P0_CONFIG_SHA256"
+          test "$(sha256sum "$P2_BOOT/Image" | awk '{print $1}')" = "$G4_P0_IMAGE_SHA256"
+          test "$(sha256sum "$P2_OUT/kernel.config" | awk '{print $1}')" = "$G4_P0_CONFIG_SHA256"
+          test "$(sha256sum "$P2_BOOT/dtb/rockchip/rk3566-panther-x2.dtb" | awk '{print $1}')" = "$G4_P2_DTB_SHA256"
+
+          grep -Fqx 'status=PASS_PREPARE_ONLY' "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt"
+          grep -Fqx 'runtime_probe=not_executed' "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt"
+          grep -Fqx 'hardware_authorization=NOT_GRANTED' "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt"
+          grep -Fqx 'io_domain_status=okay' "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt"
+          grep -Fqx 'io_domain_supply_properties=all_nine_retained_and_phandles_verified' "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt"
+
+          BASE_DTB="$P2_BOOT/dtb/rockchip/rk3566-panther-x2.dtb"
+          IO=/syscon@fdc20000/io-domains
+          test "$(fdtget -t s "$BASE_DTB" / model)" = "Panther X2"
+          test "$(fdtget -t s "$BASE_DTB" "$IO" status)" = "okay"
+          for prop in pmuio1-supply pmuio2-supply vccio1-supply vccio2-supply \
+                      vccio3-supply vccio4-supply vccio5-supply vccio6-supply vccio7-supply; do
+            value="$(fdtget -t x "$BASE_DTB" "$IO" "$prop")"
+            test -n "$value"
+            grep -Fqx "$prop=$value" "$P2_OUT/G4-P2-SUPPLY-PHANDLE-AUDIT.txt"
+          done
+
+          # G4-P2 remains the authoritative pre-GMAC board state.
+          assert_status() {
+            local node="$1" expected="$2" actual
+            actual="$(fdtget -t s "$BASE_DTB" "$node" status 2>/dev/null || true)"
+            if [ -z "$actual" ]; then actual="okay (implicit default)"; fi
+            test "$actual" = "$expected" || {
+              echo "::error::DTB status mismatch: $node expected=$expected actual=$actual"
+              exit 1
+            }
+          }
+          assert_status /i2c@fdd40000/pmic@20 okay
+          assert_status /ethernet@fe010000 disabled
+          assert_status /ethernet@fe010000/mdio disabled
+          assert_status /ethernet@fe010000/mdio/ethernet-phy@0 disabled
+          assert_status /mmc@fe310000 disabled
+          assert_status /mmc@fe2b0000 disabled
+          assert_status /mmc@fe2c0000 disabled
+          assert_status /gpu@fde60000 disabled
+          assert_status /saradc@fe720000 disabled
+
+          mkdir -p work/reference work/logs work/output work/kernel-out
+          cp "$G4/kernel.config" work/reference/g4-p0-kernel.config
+          cp "$G4/Image" work/reference/g4-p0-Image
+          cp "$BASE_DTB" work/reference/g4-p2-panther-x2.dtb
+          cp "$G4/G4-P0-BUILD-MANIFEST.txt" work/reference/G4-P0-BUILD-MANIFEST.txt
+          cp "$P2_OUT/G4-P2-RUNTIME-MANIFEST.txt" work/reference/G4-P2-RUNTIME-MANIFEST.txt
+          cp "$P2_OUT/G4-P2-SUPPLY-PHANDLE-AUDIT.txt" work/reference/G4-P2-SUPPLY-PHANDLE-AUDIT.txt
+          {
+            echo "g4_p0_build_run_id=$G4_P0_BUILD_RUN_ID"
+            echo "g4_p2_package_run_id=$G4_P2_PACKAGE_RUN_ID"
+            echo "g4_p0_image_sha256=$G4_P0_IMAGE_SHA256"
+            echo "g4_p0_config_sha256=$G4_P0_CONFIG_SHA256"
+            echo "g4_p2_dtb_sha256=$G4_P2_DTB_SHA256"
+            echo "base_dtb_source=G4-P2 full-supply PREPARE-ONLY artifact"
+            echo "base_dtb_io_domains=okay; all nine supply phandles retained"
+            echo "base_dtb_gmac1_mdio_phy=disabled"
+          } | tee work/output/R7-PREP-FROZEN-INPUTS.txt
+          echo "g4_p0_config_sha256=$G4_P0_CONFIG_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned Linux source and apply audited compatibility patch
+        run: |
+          set -euo pipefail
+          git init work/linux
+          git -C work/linux remote add origin "$KERNEL_SOURCE_REPO"
+          git -C work/linux fetch --depth=1 origin "$KERNEL_SOURCE_COMMIT"
+          git -C work/linux checkout --detach FETCH_HEAD
+          test "$(git -C work/linux rev-parse HEAD)" = "$KERNEL_SOURCE_COMMIT"
+          grep -qx 'VERSION = 6' work/linux/Makefile
+          grep -qx 'PATCHLEVEL = 18' work/linux/Makefile
+          grep -qx 'SUBLEVEL = 63' work/linux/Makefile
+          PATCH="$GITHUB_WORKSPACE/scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch"
+          test -s "$PATCH"
+          git -C work/linux apply --check "$PATCH"
+          git -C work/linux apply "$PATCH"
+          git -C work/linux diff --check
+          {
+            echo "kernel_source=$KERNEL_SOURCE_REPO"
+            echo "kernel_commit=$KERNEL_SOURCE_COMMIT"
+            echo "kernel_version=$KERNEL_VERSION"
+            echo "r1_compat_patch_sha256=$(sha256sum "$PATCH" | awk '{print $1}')"
+            echo "r7_prep_fragment_sha256=$(sha256sum scripts/panther-x2-r7-prep/r7-prep.fragment | awk '{print $1}')"
+            echo "g4_p0_config_sha256=$G4_P0_CONFIG_SHA256"
+            echo "g4_p2_dtb_sha256=$G4_P2_DTB_SHA256"
+          } | tee work/output/R7-PREP-SOURCE-LOCK.txt
+
+      - name: Restore incremental G4-P0 kernel object cache
+        uses: actions/cache/restore@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-r7-prep-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_inputs.outputs.g4_p0_config_sha256 }}-${{ hashFiles('scripts/panther-x2-r7-prep/r7-prep.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-r7-prep.yml') }}
+          restore-keys: |
+            panther-x2-g4-p0-binding-only-${{ env.KERNEL_SOURCE_COMMIT }}-
+
+      - name: Merge R7-prep Ethernet closure into frozen G4-P0 config
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          BASE="$GITHUB_WORKSPACE/work/reference/g4-p0-kernel.config"
+          FRAGMENT="$GITHUB_WORKSPACE/scripts/panther-x2-r7-prep/r7-prep.fragment"
+          mkdir -p "$OUT"
+          ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            "$SRC/scripts/kconfig/merge_config.sh" -m -r -O "$OUT" "$BASE" "$FRAGMENT" \
+            2>&1 | tee work/logs/r7-prep-config-merge.log
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          cp "$OUT/.config" work/output/kernel.config
+          diff -u "$BASE" work/output/kernel.config > work/logs/r7-prep-config-diff.txt || test "$?" -eq 1
+
+          require_y() {
+            grep -qx "$1=y" work/output/kernel.config || {
+              echo "::error::Expected $1=y"
+              exit 1
+            }
+          }
+          require_off() {
+            if grep -Eq "^$1=[ym]$" work/output/kernel.config; then
+              echo "::error::Forbidden $1 enabled"
+              grep -E "^$1=" work/output/kernel.config
+              exit 1
+            fi
+          }
+
+          for key in \
+            CONFIG_NET CONFIG_NETDEVICES CONFIG_NET_CORE CONFIG_ETHERNET CONFIG_PACKET \
+            CONFIG_NET_VENDOR_STMICRO CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP \
+            CONFIG_REALTEK_PHY CONFIG_ETHTOOL_NETLINK CONFIG_PTP_1588_CLOCK_OPTIONAL \
+            CONFIG_MII CONFIG_PCS_XPCS CONFIG_PAGE_POOL CONFIG_PHYLINK CONFIG_PHYLIB CONFIG_MDIO_BUS \
+            CONFIG_OF_MDIO CONFIG_FIXED_PHY CONFIG_PCS_XPCS_ROCKCHIP CONFIG_MFD_SYSCON \
+            CONFIG_NET_DEVLINK CONFIG_RESET_CONTROLLER CONFIG_CRC32 \
+            CONFIG_OF CONFIG_REGMAP CONFIG_REGMAP_MMIO CONFIG_REGULATOR_RK808 \
+            CONFIG_MFD_RK8XX_I2C CONFIG_ROCKCHIP_IODOMAIN \
+            CONFIG_COMMON_CLK_ROCKCHIP CONFIG_CLK_RK3568 CONFIG_ROCKCHIP_GRF \
+            CONFIG_PINCTRL_ROCKCHIP CONFIG_GPIO_ROCKCHIP; do
+            require_y "$key"
+          done
+
+          for key in \
+            CONFIG_DWMAC_GENERIC CONFIG_STMMAC_SELFTESTS CONFIG_INET CONFIG_IPV6 CONFIG_NETFILTER \
+            CONFIG_NET_VENDOR_REALTEK CONFIG_BT CONFIG_WIRELESS CONFIG_WLAN CONFIG_CFG80211 \
+            CONFIG_MAC80211 CONFIG_RFKILL; do
+            require_off "$key"
+          done
+
+          while IFS='=' read -r key value; do
+            case "$key" in
+              CONFIG_NET_VENDOR_*)
+                if [ "$key" != CONFIG_NET_VENDOR_STMICRO ] && [ "$value" = "y" ]; then
+                  echo "::error::Unexpected network vendor group enabled: $key"
+                  exit 1
+                fi
+                ;;
+            esac
+          done < work/output/kernel.config
+
+          # R7-prep is a built-in kernel closure; no target driver may be a module.
+          for key in CONFIG_STMMAC_ETH CONFIG_STMMAC_PLATFORM CONFIG_DWMAC_ROCKCHIP \
+                     CONFIG_MDIO_BUS CONFIG_PHYLIB CONFIG_PHYLINK CONFIG_OF_MDIO CONFIG_REALTEK_PHY; do
+            require_y "$key"
+          done
+
+          cp "$FRAGMENT" work/output/r7-prep.fragment
+          echo "R7-prep final .config gates: PASS" | tee work/logs/r7-prep-config-gates.txt
+
+      - name: Build Linux Image and generate built-in object inventory
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/work/linux"
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare
+          make -C "$SRC" O="$OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j2 Image \
+            2>&1 | tee work/logs/r7-prep-kernel-build.log
+          install -m 0644 "$OUT/arch/arm64/boot/Image" work/output/Image
+          install -m 0644 "$OUT/System.map" work/output/System.map
+          install -m 0644 "$OUT/vmlinux" work/output/vmlinux
+          test -s "$OUT/modules.builtin"
+          install -m 0644 "$OUT/modules.builtin" work/output/modules.builtin
+          file work/output/Image | tee work/output/kernel-image-file.txt
+          IMAGE_MAGIC="$(od -An -tx1 -j56 -N4 work/output/Image | tr -d ' \\n')"
+          test "$IMAGE_MAGIC" = "41524d64"
+
+      - name: Audit required built-in objects, symbols and unchanged G4-P2 DTB
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/work/kernel-out"
+          OBJECTS=(
+            drivers/net/ethernet/stmicro/stmmac/stmmac.o
+            drivers/net/ethernet/stmicro/stmmac/stmmac-platform.o
+            drivers/net/ethernet/stmicro/stmmac/dwmac-rk.o
+            drivers/net/phy/mdio-bus.o
+            drivers/net/phy/libphy.o
+            drivers/net/phy/phylink.o
+            drivers/net/mdio/of_mdio.o
+            drivers/net/phy/realtek/realtek.o
+            drivers/net/pcs/pcs-xpcs.o
+            drivers/net/pcs/pcs-xpcs-rk.o
+            drivers/regulator/rk808-regulator.o
+            drivers/soc/rockchip/io-domain.o
+          )
+          : > work/output/R7-PREP-OBJECTS-SHA256.txt
+          for object in "${OBJECTS[@]}"; do
+            test -s "$OUT/$object" || {
+              echo "::error::Expected built-in object missing: $object"
+              exit 1
+            }
+            sha256sum "$OUT/$object" >> work/output/R7-PREP-OBJECTS-SHA256.txt
+          done
+
+          nm -a work/output/vmlinux > work/logs/r7-prep-vmlinux-symbols.txt
+          for sym in rk_gmac_probe stmmac_dvr_probe stmmac_xmit stmmac_mdio_register \
+                     phy_probe rtl8211f_config_init; do
+            if ! grep -q "$sym" work/logs/r7-prep-vmlinux-symbols.txt; then
+              echo "::warning::Expected symbol not found in vmlinux: $sym (inspect object symbol table; do not infer hardware failure)"
+            fi
+          done
+          nm -a "$OUT/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.o" > work/logs/r7-prep-dwmac-rk-symbols.txt
+          nm -a "$OUT/drivers/net/ethernet/stmicro/stmmac/stmmac.o" > work/logs/r7-prep-stmmac-symbols.txt
+          nm -a "$OUT/drivers/net/phy/realtek/realtek.o" > work/logs/r7-prep-realtek-symbols.txt
+
+          mkdir -p work/output/dtb/rockchip
+          cp work/reference/g4-p2-panther-x2.dtb work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          test "$(sha256sum work/output/dtb/rockchip/rk3566-panther-x2.dtb | awk '{print $1}')" = "$G4_P2_DTB_SHA256"
+          DTB=work/output/dtb/rockchip/rk3566-panther-x2.dtb
+          IO=/syscon@fdc20000/io-domains
+          test "$(fdtget -t s "$DTB" "$IO" status)" = "okay"
+          for prop in pmuio1-supply pmuio2-supply vccio1-supply vccio2-supply \
+                      vccio3-supply vccio4-supply vccio5-supply vccio6-supply vccio7-supply; do
+            fdtget -t x "$DTB" "$IO" "$prop" >/dev/null
+          done
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000 status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio status)" = "disabled"
+          test "$(fdtget -t s "$DTB" /ethernet@fe010000/mdio/ethernet-phy@0 status)" = "disabled"
+
+          cp work/output/Image work/output/R7-PREP-Image
+          {
+            echo "status=PASS_BUILD_ONLY"
+            echo "purpose=R7-prep complete Ethernet software closure; no hardware access"
+            echo "kernel_version=$KERNEL_VERSION"
+            echo "kernel_source_commit=$KERNEL_SOURCE_COMMIT"
+            echo "g4_p0_build_run_id=$G4_P0_BUILD_RUN_ID"
+            echo "g4_p2_package_run_id=$G4_P2_PACKAGE_RUN_ID"
+            echo "base_config_sha256=$G4_P0_CONFIG_SHA256"
+            echo "base_image_sha256=$G4_P0_IMAGE_SHA256"
+            echo "g4_p2_dtb_sha256=$G4_P2_DTB_SHA256"
+            echo "final_config_sha256=$(sha256sum work/output/kernel.config | awk '{print $1}')"
+            echo "final_image_sha256=$(sha256sum work/output/Image | awk '{print $1}')"
+            echo "final_dtb_sha256=$(sha256sum "$DTB" | awk '{print $1}')"
+            echo "stmmac_eth=built-in"
+            echo "stmmac_platform=built-in"
+            echo "dwmac_rockchip=built-in"
+            echo "mdio_bus_phylib_phylink_of_mdio=built-in"
+            echo "realtek_phy=built-in"
+            echo "rockchip_iodomain=built-in"
+            echo "io_domain_status=okay; all_nine_supply_phandles_retained"
+            echo "gmac1_mdio_phy=disabled"
+            echo "interface=not_opened"
+            echo "mdio_transactions=none"
+            echo "phy_reset=not_executed"
+            echo "clock_enable=not_executed"
+            echo "main_grf_writes=not_executed"
+            echo "regulator_enable=not_executed"
+            echo "tx_rx=not_executed"
+            echo "hardware_access=none"
+            echo "physical_media_writes=none"
+            echo "SN64G=untouched"
+            echo "eMMC=untouched"
+            echo "runtime_authorization=not_requested"
+          } | tee work/output/R7-PREP-BUILD-MANIFEST.txt
+
+          (
+            cd work/output
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Save R7-prep incremental kernel object cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: work/kernel-out
+          key: panther-x2-r7-prep-${{ env.KERNEL_SOURCE_COMMIT }}-${{ steps.freeze_inputs.outputs.g4_p0_config_sha256 }}-${{ hashFiles('scripts/panther-x2-r7-prep/r7-prep.fragment', 'scripts/panther-x2-b1/patches/0001-broadcast-uevent-net-only-api.patch', '.github/workflows/build-panther-x2-r7-prep.yml') }}
+
+      - name: Upload R7-prep build-only artifact
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: panther-x2-r7-prep-build-only
+          path: |
+            work/output/
+            work/logs/
+          if-no-files-found: error
+          retention-days: 30
