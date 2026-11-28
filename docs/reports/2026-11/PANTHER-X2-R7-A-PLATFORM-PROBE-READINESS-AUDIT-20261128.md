@@ -164,3 +164,13 @@ R7-A 不调用 `ndo_open`，接口保持 DOWN。按已归档 R5-2：
 本报告中“R7-A one-node DTB boundary STATIC DESIGN PASS”只表示源码与设备树隔离设计可行，不代表供电/IO-domain 前置门 PASS，不代表 R7-A gate-pass。R7-A 硬件状态继续 NOT AUTHORIZED / NOT RUN。R7-prep 的 REALTEK_PHY=y 仅为 built-in 预置；PHY DT 节点 disabled 时不触发 PHY probe。
 
 本顺序不授权切换 regulator、GPIO/reset、PMIC/GRF/MDIO 写入、刷写或启动设备。
+
+## 9. G4-P2 runtime 通过后的 R7-A DTB 基线修订（优先于 §1/§4/§7 中旧供电边界）
+
+本报告早期设计曾要求 R7-A 继续使用 G4-P0 binding-only DTB，即 IO-domain child okay 但九路 supply 属性缺失。该边界现已被 G4-P2 full-supply runtime 实测结果取代，不再是当前有效基线。
+
+R7-prep 和后续 R7-A 的 DTB 基线必须继承 G4-P2 full-supply DTB（SHA256 41253336c0e69b7431e0d095573724c087734bb310143e1848d8da7639a7c9be）：IO-domain child 保持 okay，九路 supply phandle 全部保留。R7-A 唯一 DTB 变量仍是 GMAC1 parent /ethernet@fe010000/status 从 disabled 改为 okay；MDIO child 和 RTL8211F PHY 节点继续 disabled。除此之外，DTB 每个节点/属性/phandle 均须与 G4-P2 DTB 字节级逻辑相同。
+
+这意味着 R7-A probe 会在已通过 G4-P2 的 full-supply IO-domain 配置上进行；它仍会触发此前 §3/§4 记录的 GMAC clocks enable、main-GRF RGMII mode/delay writes、SWITCH_REG1/vcc_3v3 regulator_enable（以及失败回滚可能产生的 disable）。G4-P2 PASS-CONDITIONAL 不等于这些 GMAC 专属副作用已验证或授权。R7-A 仍需单独审查供电 consumer 影响并取得独立授权。
+
+R7-prep build-only 尚未执行；本节不构成硬件授权。
