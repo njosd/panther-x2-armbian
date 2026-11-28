@@ -83,13 +83,26 @@ This artifact is explicitly **PREPARE-ONLY**:
 - No Panther X2 device was accessed or booted.
 - No physical TF, SN64G or eMMC was written.
 - The image was created and mounted only on the cloud runner.
-- Runtime IO-domain child enumeration, driver binding and PMUGRF syscon regmap acquisition remain unverified.
+- Runtime IO-domain child enumeration and driver binding were subsequently verified in one separately authorized RAM-only boot; see `PANTHER-X2-G4-P0-RUNTIME-BINDING-OBSERVATION-20261128.md`. PMUGRF regmap acquisition is supported by successful IO-domain probe/binding, but no selector register read/write was observed.
 - No physical rail voltage or selector state was measured.
 - Source audit predicts no selector register transaction when all nine supply properties are absent; this is not runtime evidence.
 - RK809 regulator provider remains enabled. If booted, its already-known PMIC initialization writes may occur. G3's prior one-session authorization does not authorize this G4-P0 boot.
-- Runtime boot authorization: **NOT GRANTED**.
+- The separate one-session runtime authorization was subsequently granted and used; no further boot is authorized by that prior approval.
 - G4-P full nine-supply mapping: **NO-GO**.
 
 ## 7. Next gate
 
-Before any physical operation, conduct a final review of the compressed image identity, target SU08G identity/capacity and exact write scope. Then request explicit authorization for a single SU08G-only write and RAM-only boot session. Do not touch SN64G or eMMC. After an authorized boot, collect first and settled observations, assess whether the IO-domain device bound, whether PMUGRF regmap acquisition completed, whether probe emitted any unexpected errors, and whether any selector transaction could have occurred. Do not proceed to full supply mapping or physical voltage testing in this gate.
+The single authorized boot has already been completed. The runtime evidence confirms IO-domain child enumeration and driver binding, RK808 regulator binding and regulator class registration. Do not repeat the boot merely to rerun the collector. Do not proceed to full supply mapping or physical voltage testing in this gate.
+
+
+## 8. Corrected collector package (2026-11-28)
+
+The first target-board session exposed that the collector used `[ ... ]` while the frozen BusyBox build provided `test` but no `[` applet. The collector was corrected in commit `205053232799114ce8ecb15354831900a9db4d0f` by replacing all 14 conditional tests with the existing `test` applet form. No new applet, hardware access, or write operation was introduced.
+
+The path-filtered packaging workflow ran automatically and passed:
+- Actions run `46120998151`, run number 2, event `push`, completed / success.
+- Job `140905253535`: all steps passed, including BusyBox `ash -n` syntax checks, immutable input checks, image assembly, checksum manifest and artifact upload.
+- Corrected PREPARE-ONLY artifact ID `15253991870`, size 26,388,130 bytes, ZIP SHA256 `d0bbc160b5c67899a8423b8858b016da646ea7dccf7dc57521eec3e039f13c69`.
+- This was cloud-runner packaging only; no physical device or media was accessed.
+
+The corrected collector therefore has SOURCE + target BusyBox ash syntax + package CI PASS. The new artifact remains PREPARE-ONLY; it does not authorize another hardware boot. The previous manual observations remain the authoritative runtime evidence.
