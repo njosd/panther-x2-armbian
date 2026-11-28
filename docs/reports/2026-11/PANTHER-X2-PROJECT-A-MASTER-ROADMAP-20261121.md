@@ -981,3 +981,20 @@ G4-P0 workflow 在修正对象符号文件路径后，再经全段静态复核�
 **阶段判定：G4-P0 BUILD / CONFIG / DTB / OBJECT-SYMBOL AUDIT = PASS。** 仅为云端 build-only 与离线 artifact PASS；目标板启动、child enumeration、driver bind、PMUGRF regmap runtime acquisition 均未验证。源码预期无 supply 属性时不执行 voltage read/notifier/selector write，但仍需将 runtime 行为作为独立验证项。
 
 **下一步：** 进行 G4-P0 artifact 启动前审计，制定 SU08G-only、RAM-initramfs、无持久化写入的 runtime 验证步骤与观测项；在取得明确授权前不写卡、不启动、不触发 probe。SN64G 与 eMMC 继续禁止触碰；G4-P full-supply mapping 继续 NO-GO。云端构建不改变 RAM-only runtime 架构，也不代表进入持久化 rootfs。
+
+
+## 2026-11-28 G4-P0 runtime PREPARE-ONLY package completed
+
+G4-P0 has progressed from build-only PASS to a complete, independently checked runtime package (still PREPARE-ONLY). Dedicated workflow `.github/workflows/package-panther-x2-g4-p0-runtime.yml` completed successfully: [run 46116353755](https://github.com/njosd/panther-x2-armbian/actions/runs/46116353755), commit `8079314c0789b45f9f5e6648dac06a0f98312b48`.
+
+Artifact `panther-x2-project-a-g4-p0-runtime-PREPARE-ONLY` ID `15251553200`:
+- ZIP SHA256 `c3ad1ee99a0878d012c63bda060d2d46746d595f26c87e8ce56770f2ac915226`; downloaded and independently checked against GitHub digest.
+- Internal 22-file SHA256 inventory: all PASS.
+- SU08G raw image size: 7,948,206,080 bytes; raw SHA256 `99caff75dd4c49ba229c3453f8bc82a1e904c0b73a3f641bc1ae904e44a501d8`.
+- zstd image SHA256 `d3d61efaa6576a8e53f39f147d8692339c03239e71c5e37376fe89e82194f742`; independent zstd test/decompression confirms exact byte count and raw hash.
+- GPT/ext4 layout: LBA 32768–15523806, JP-TvBox U-Boot proper at LBA 16384. Kernel Image/uInitrd/DTB use the established load addresses. ext4 e2fsck and read-only content/hash verification passed.
+- Dedicated RAM initramfs and collector are syntax-checked; observations are written only to `/run/g4-p0`.
+
+**Stage status: G4-P0 BUILD + RUNTIME-PACKAGE + OFFLINE ARTIFACT AUDIT = PASS.** Runtime boot, child enumeration, driver bind and PMUGRF syscon regmap acquisition remain unverified. No physical media or target hardware was accessed. The RK809 provider remains enabled and may perform known PMIC initialization writes if booted; this is a distinct side effect, not covered by the prior G3 one-session authorization. Runtime boot authorization remains NOT GRANTED. G4-P full supply mapping remains NO-GO.
+
+Next gate: perform final target SU08G identity/capacity and exact write-scope review, then request separate explicit authorization for one SU08G-only write and RAM-only boot session. Do not touch SN64G or eMMC. See [G4-P0 runtime package report](./PANTHER-X2-G4-P0-RUNTIME-PREPARE-ONLY-PACKAGE-20261128.md).
