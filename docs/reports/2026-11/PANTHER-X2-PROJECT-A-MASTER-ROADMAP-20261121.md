@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-27）：G4-S PASS、G4-B PASS；G4-P NO-GO（尚未放行 IO-domain consumer probe/selector 写入），不实施 G4-P-SAFE patch。G3 provider runtime 只读观察已归档：RK809 regulator provider 已绑定；16 个 regulator 名称完成盘点，PMU IO-domain 九路 supply 对应四个对象；四个对象 state 均报告 enabled，其中三路 microvolts 软件回报为 3.3V/1.8V/3.3V，SWITCH_REG1/vcc_3v3 无 microvolts 属性。未读取 PMU GRF VSEL0/1/2，未确认 IO-domain consumer 最终 bind/selector 状态；上述软件回报不等于 rail 物理测量。详见 G4-P-R 只读运行时报告。此前 R1–R6 与 G0 证据边界保持不变。
+- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测，GMAC1/MDIO/RTL8211F 仍 disabled，Ethernet 6.18 对黄金基线等价性未测试。G4-P0 collector 首轮因 BusyBox 无 `[` applet 出错，14 个条件判断已在 commit `205053232799114ce8ecb15354831900a9db4d0f` 改用 `test`；目标 BusyBox ash/CI 验证待完成，不安排第二次实机启动。详见 G4-P0 runtime binding 与 golden deviation 报告。
 
 ## 0. 统一项目定义
 
@@ -998,3 +998,21 @@ Artifact `panther-x2-project-a-g4-p0-runtime-PREPARE-ONLY` ID `15251553200`:
 **Stage status: G4-P0 BUILD + RUNTIME-PACKAGE + OFFLINE ARTIFACT AUDIT = PASS.** Runtime boot, child enumeration, driver bind and PMUGRF syscon regmap acquisition remain unverified. No physical media or target hardware was accessed. The RK809 provider remains enabled and may perform known PMIC initialization writes if booted; this is a distinct side effect, not covered by the prior G3 one-session authorization. Runtime boot authorization remains NOT GRANTED. G4-P full supply mapping remains NO-GO.
 
 Next gate: perform final target SU08G identity/capacity and exact write-scope review, then request separate explicit authorization for one SU08G-only write and RAM-only boot session. Do not touch SN64G or eMMC. See [G4-P0 runtime package report](./PANTHER-X2-G4-P0-RUNTIME-PREPARE-ONLY-PACKAGE-20261128.md).
+
+
+## 2026-11-28 G4-P0 runtime binding verified; collector corrected
+
+G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18.63+ 成功进入 RAM initramfs shell，识别 Panther X2、4GiB RAM、4 CPUs；人工只读检查确认：
+- DT child：`/proc/device-tree/syscon@fdc20000/io-domains` 存在；
+- platform device：`fdc20000.syscon:io-domains` 已创建；
+- `driver` symlink 指向 `rockchip-iodomain`，binding PASS；
+- `rk808-regulator.3.auto` 的 `driver` symlink 指向 `rk808-regulator`，binding PASS；
+- `/sys/class/regulator` 注册 regulator.0–regulator.20 共 21 项；RK809 provider 的 16 个对象已识别，IO-domain map 对应的 `vcc3v3_pmu`、`vcc_3v3`、`vcc_1v8`、`vccio_sd` 均存在。
+
+首轮自动 collector 使用 BusyBox build 未提供的 `[` applet，导致 conditional checks 输出 `[: not found`。该 collector 输出无效；上述人工 sysfs/FDT 观察是本轮权威运行证据。已在 commit `205053232799114ce8ecb15354831900a9db4d0f` 将 14 个条件判断改为 BusyBox 已有的 `test` applet，保持只读采集范围不变。目标 BusyBox ash 语法/打包验证待 path-filtered Actions 确认；无需重复启动硬件。
+
+**阶段边界：** G4-P0 binding-only objective PASS；运行时未独立观测 selector 总线事务，未读 PMUGRF VSEL/PMIC raw registers，未测物理 rail；完整九路 supply mapping NO-GO。GMAC1/MDIO/RTL8211F 仍 disabled，当前没有 6.18 Ethernet 功能验收。详见：
+- `PANTHER-X2-G4-P0-RUNTIME-BINDING-OBSERVATION-20261128.md`
+- `PANTHER-X2-G4-P0-GOLDEN-BASELINE-DEVIATION-20261128.md`
+
+下一步先完成主机侧 BusyBox ash/CI 采集脚本验证，再回读 G4 full-supply 风险与 G0 黄金基线证据，制定不触发 partial-write 的后续 provider/consumer 分层方案。任何新的实机启动、PMIC/selector 操作、TF 写入均须独立授权；SN64G/eMMC 不触碰。
