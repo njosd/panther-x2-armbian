@@ -1018,24 +1018,18 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 下一步先完成主机侧 BusyBox ash/CI 采集脚本验证，再回读 G4 full-supply 风险与 G0 黄金基线证据，制定不触发 partial-write 的后续 provider/consumer 分层方案。任何新的实机启动、PMIC/selector 操作、TF 写入均须独立授权；SN64G/eMMC 不触碰。
 
 
-## 2026-11-28 R7-A Platform Probe 准入静态审计完成
+## 2026-11-28 R7-A / G5-A 路线对齐复核（预审，不放行）
 
-在 G4-P0 binding-only runtime PASS、collector 修复并通过 Actions run `46120998151` 后，回读 R3/R4/R5/R6、G0 provider-consumer matrix 与 R7 gated acceptance plan，完成 R7-A 的只读源码控制流审计。详见 `PANTHER-X2-R7-A-PLATFORM-PROBE-READINESS-AUDIT-20261128.md`。
+初步 R7-A 源码边界研究已记录于 `PANTHER-X2-R7-A-PLATFORM-PROBE-READINESS-AUDIT-20261128.md`。随后回读原始 R2–R7 详细实施计划与 G0–G10 计划，明确两套编号的同层映射：**R2–R7 计划的 R7-A Platform Probe = G0–G10 计划的 G5-A Rockchip glue/STMMAC probe**；R7-B 对应 G5-B MDIO/RTL8211F；R7-C 对应 G6-A interface open/DMA；R7-D 对应 G6-B/G7 ABCD 与物理 TX。它们是同一功能链的交叉编号，不代表跳过 G5 或提前进入物理 TX。
 
-**可控候选边界：**
-- 从 G4-P0 frozen Image/config/DTB 出发，新增 STMMAC / DWMAC Rockchip 最小 Kconfig/object closure；
-- DTB 只把 GMAC1 parent `/ethernet@fe010000/status` 设为 okay；
-- MDIO child 和 RTL8211F PHY child 保持 disabled；
-- IO-domain child 保持 okay，全部九个 supply 属性继续缺失；
-- 保留当前 RAM initramfs、U-Boot、bootargs；不启用接口、不发送帧。
+同时发现初步 R7-A 候选若从 G4-P0 直接增加 STMMAC Kconfig 并修改 GMAC1 DTB，会在同一轮改变 kernel.config 与 DTB，违反 R2–R7 详细实施计划 §3 的“R7 唯一变量为目标 DTB”要求。因此该初步方案不得直接构建或启动，状态降为 **PRELIMINARY REVIEW ONLY / NOT GATE-PASS**。
 
-固定 6.18.63 源码控制流表明：MDIO 子节点 disabled 时，`__of_mdiobus_register()` 在 `__mdiobus_register()` 前返回 `-ENODEV`，STMMAC 将其作为 MDIO disabled 正常处理；因此本门可避免 MDIO bus 注册、PHY reset GPIO callback、PHY device 创建及 RTL8211F probe/config_init。与此同时，Rockchip glue 的 platform init 会 enable GMAC clocks、写 main-GRF RGMII mode/delay，并调用 SWITCH_REG1/`vcc_3v3` 的 `regulator_enable()`；这不是只读 probe，必须纳入未来单独授权。接口保持 DOWN，不进入 DMA ring/open/TX。
+正确的单变量准备顺序：
+1. 先建立独立 R7-prep build-only 基线：在 G4-P0 基础上预先加入并审计 STMMAC/Rockchip glue 最小驱动闭包；GMAC1、MDIO、PHY DT 节点仍保持 disabled；完成 6.1.65/6.1.116 黄金对照、最终 config/object 和 DTB 审计。此步骤不启动硬件。
+2. 冻结 R7-prep Image/config/DTB/initramfs/bootargs/工具链及哈希。
+3. R7-A（即 G5-A）硬件候选只修改 GMAC1 parent DTB status；MDIO/PHY 保持 disabled，IO-domain 九路 supply 继续缺失，接口 DOWN。该门只验证 glue/STMMAC probe、资源获取、bind 和 netdev 注册。
+4. R7-B（即 G5-B）才单独恢复 MDIO/PHY；R7-C（即 G6-A）才 open/DMA；R7-D（G6-B/G7）才执行 ABCD/对端捕获。
 
-阶段状态：
-- R7-A static boundary: PASS；
-- exact Kconfig/object closure and build audit: PENDING；
-- PREPARE-ONLY artifact: NOT BUILT；
-- hardware probe: NOT AUTHORIZED / NOT RUN；
-- MDIO/PHY/link, DMA, TX: NOT TESTED。
+固定 6.18.63 源码审计发现，R7-A/G5-A probe 不是只读：会启用 GMAC clocks、写 main-GRF RGMII mode/delay，并调用 SWITCH_REG1/`vcc_3v3` 的 `regulator_enable()`；可能的 probe 失败回滚还会调用 regulator_disable/clock disable。MDIO child disabled 可隔离外部 MDIO bus 注册与 PHY probe，但 STMMAC 仍可能配置 MAC 内部 MDIO clock divider。所有副作用须纳入独立授权。
 
-下一步只在云端准备独立 R7-A build-only artifact，核验唯一 DTB status diff、最终 config/object closure、manifest 和回滚资产；不写 SU08G、不启动设备、不触碰 SN64G/eMMC。任何实机启动需另行明确授权。
+阶段状态：G4-P0 binding-only runtime PASS；G4-P full-supply mapping NO-GO；R7-prep build-only NOT STARTED；R7-A/G5-A NOT AUTHORIZED / NOT RUN；R7-B/C/D NOT STARTED。详见 R7-A 预审报告和原始 R2–R7/G0–G10 计划。
