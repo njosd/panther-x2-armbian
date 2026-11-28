@@ -87,8 +87,8 @@ Makefile 将核心聚合为 `stmmac.o`，含 `stmmac_main.o`、`stmmac_mdio.o`�
 - `CONFIG_STMMAC_ETH=y`
 - `CONFIG_STMMAC_PLATFORM=y`
 - `CONFIG_DWMAC_ROCKCHIP=y`
-- `CONFIG_REALTEK_PHY=y)
-- 显式关闭 `CONFIG_DWMAC_GENERIC` 与 `CONFIG_STMMAC_SELFTESTS)。
+- `CONFIG_REALTEK_PHY=y`
+- 显式关闭 `CONFIG_DWMAC_GENERIC` 与 `CONFIG_STMMAC_SELFTESTS`。
 
 其余依赖由固定 6.18.63 Kconfig 收敛，但 build workflow 必须核验最终 `.config`，不能仅凭 fragment 通过。若 `ETHTOOL_NETLINK`、`PTP_1588_CLOCK_OPTIONAL`、`MDIO_BUS`、`PHYLIB`、`PHYLINK`、`OF_MDIO`、`PCS_XPCS_ROCKCHIP` 或所需 provider 最终值不符，构建门失败并停留在 build-only，不允许手工掩盖差异。
 
@@ -158,3 +158,16 @@ Makefile 将核心聚合为 `stmmac.o`，含 `stmmac_main.o`、`stmmac_mdio.o`�
 静态依赖研究已完成，下一步是新增独立 R7-prep build-only workflow：从 G4-P0 frozen artifact 恢复输入、使用独立 fragment、增量复用 G4-P0 object cache、编译 Image 并完成 final .config/object/symbol/DTB/hash audit。构建成功后还须独立审查完整 runtime package（Image、DTB、initramfs、bootargs、U-Boot、sender、观测配置）并冻结哈希，才可提出 R7-A/G5-A 实机操作授权。
 
 **本报告与 fragment 的新增/提交不构成 R7-A 硬件 probe 授权。** 当前没有访问 Panther X2、写 TF、触碰 SN64G/eMMC、执行 PMIC/GRF/GPIO/MDIO 操作或发送网络帧。
+
+## 10. 2026-11-28 执行顺序修订：GMAC 最后启用
+
+R7-prep 仅是云端软件资产准备。其后不立即进入 GMAC probe，而增加两个明确的 Pre-GMAC 硬件准入门：
+
+- **G4-P1 / 非 GMAC 共享基础组件就绪**：GMAC/MDIO/PHY 继续 disabled。按 R2/R3 既有证据逐项复核 clock/CRU、pinctrl/GPIO、GRF/syscon、reset、I2C0、RK809 MFD/regulator、IO-domain provider 的注册、绑定与可安全观察状态。G4-P0 已完成的 regulator provider 与 IO-domain binding 证据直接复用，不重复启动设备。仅对明确缺失的证据设计最小只读补证；不得为凑齐清单而切换 regulator、翻转未知 GPIO、触发 reset 或写 PMIC/GRF。
+- **G4-P2 / 供电与 IO-domain 安全准入**：单独解决 SWITCH_REG1/vcc_3v3 PHY supply consumer enable、九路 IO-domain supply/selector 与 partial-write 风险。G4-P0 binding PASS 不代表这些功能已通过；full nine-supply mapping 仍 NO-GO。未能证明安全且与黄金基线差异可解释时，G4-P2 保持 HOLD，GMAC 不启动。
+- **R7-A / G5-A**：仅在 G4-P1、G4-P2 均通过且取得独立授权后，最后启用 GMAC1 parent。MDIO/PHY disabled、interface DOWN，不 open、不发送帧。
+- **R7-B / G5-B**：随后才启用 MDIO/RTL8211F。
+- **R7-C / G6-A**：随后才 open interface 并验证 DMA。
+- **R7-D / G6-B/G7**：最后做 ABCD 同帧 TX 和对端捕获。
+
+R7-A 已知 probe 副作用（clocks、main-GRF RGMII mode/delay、SWITCH_REG1 regulator enable）是 GMAC 最后启用的直接理由。上述顺序不构成任何构建、写卡、启动或硬件操作授权。
