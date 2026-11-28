@@ -210,3 +210,29 @@ K4 与 K3/K4、K2/K3 的跨层接口是优先审计对象；K1/K2 的初始风�
 执行时以 R2–R7 详细计划 §3 的单变量约束为准：R7-A 硬件轮次唯一变量是 GMAC1 DTB 状态。由于 G4-P0 冻结 kernel.config 尚未包含 STMMAC/Rockchip glue，必须先完成一个独立 R7-prep build-only 基线（驱动对象预编译、GMAC1/MDIO/PHY DT 节点仍保持 disabled），并完成 6.1.65/6.1.116 黄金对照；冻结该基线后，R7-A 才只改 GMAC1 parent status。不得在同一 R7-A 轮次同时改变 kernel.config 和 DTB。
 
 本编号对齐不改变 G1–G10 顺序、不放宽 G4-P full-supply mapping 的 NO-GO，也不授权 R7-prep 构建之外的设备操作。R7-A platform probe 的 clocks、main-GRF、SWITCH_REG1 regulator enable/可能 rollback 副作用仍须另行审查和明确授权。
+
+## 2026-11-28 执行顺序再修订：先完成非 GMAC 前置组件，GMAC 最后启用
+
+用户确认采用“先启动/验证其他必要组件，GMAC 最后启动”的风险控制顺序。此项是执行顺序修订，不改变历史 G0–G10 编号，也不把构建通过等同于硬件通过。
+
+### 新的硬件准入顺序
+
+1. **R7-prep（build-only）**：先在云端准备完整的 6.18.63 Ethernet 软件闭包（STMMAC、Rockchip glue、MDIO/PHYLIB/PHYLINK、RTL8211F），但 GMAC1/MDIO/PHY 的 DT 节点全部 disabled。此阶段不访问设备。
+2. **Pre-GMAC / G4-P1：非 GMAC 共享基础组件就绪门**：在 GMAC 仍 disabled 时，先复核/验证 SoC clock/CRU、pinctrl/GPIO、GRF/syscon、reset controller、I2C0、RK809 MFD/regulator、IO-domain provider。优先复用既有 R2/R3/G4-P0 证据；只有存在明确缺口时才提出最小只读补证。不得为了“启动组件”而翻转未知 GPIO、切换 regulator、触发 reset、写 PMIC/GRF 或重复 G4-P0 实机启动。
+3. **Pre-GMAC / G4-P2：供电与 IO-domain 安全准入门**：单独解决 PHY supply vcc_3v3 / SWITCH_REG1 consumer enable 与 IO-domain supply/selector 的安全边界。G4-P0 仅证明 RK809 regulator provider 与 IO-domain driver binding；九路 supply/selector 功能、VSEL 状态、实际 rail 电压仍未验证。G4-P full nine-supply mapping 当前 NO-GO，不得为了赶进度恢复九路属性或触发已知可能“先写 VSEL2、后在 SWITCH_REG1 voltage read 失败”的 partial-write 路径。若无法形成与黄金基线一致且无部分写入风险的安全方案，G4-P2 保持 HOLD，GMAC 不启动。
+4. **R7-A / G5-A：GMAC 最后启用**：只有 G4-P1 与 G4-P2 均有明确 PASS/批准的边界后，才考虑单独启用 GMAC1 parent 节点。kernel.config、Image、initramfs、bootargs、U-Boot、测试程序保持 R7-prep 冻结；MDIO/PHY 仍 disabled，接口 DOWN，不 open、不发送帧。该门验证 Rockchip glue/STMMAC probe、资源获取、bind、netdev 注册。
+5. **R7-B / G5-B**：再单独恢复 MDIO bus 与 RTL8211F，验证 PHY ID、driver bind、link。
+6. **R7-C / G6-A**：再单独 open interface，验证 MAC/DMA/ring/IRQ/NAPI。
+7. **R7-D / G6-B/G7**：最后执行 ABCD 同帧 TX 与独立对端捕获；对端捕获正确帧才是 TX PASS-LINE。
+
+### 当前已知基础组件证据，不重复测试
+
+- R2 的 clock/CRU、pinctrl/GPIO、GRF/syscon、reset 与 I2C 基础设施审计成果应回读原报告，不从零重跑。
+- G4-P0 已在一次获授权 RAM-only session 中证明 rk808-regulator 与 rockchip-iodomain driver binding，以及相关 regulator class 对象注册；不得重复启动来“再确认”。
+- G4-P0 不证明九路 IO-domain supply consumer、selector transaction、PHY supply enable 或物理 rail 电压。
+- vcc_3v3 对应 SWITCH_REG1，R7-A 的 Rockchip glue probe 会调用该 supply 的 regulator enable；这是 GMAC 启用前必须单独评估的副作用，不能把 provider 已 bind 当作 supply 已安全。
+- 不引入与板载 Ethernet 无关的 USB、GPU、显示、无线、蓝牙或其他外设作为“前置组件”。
+
+### 状态与停止条件
+
+当前 R7-prep build-only 尚未完成；G4-P1 尚待既有证据映射/缺口审查；G4-P2 受 full-supply mapping NO-GO 阻塞；R7-A/G5-A 继续 NOT AUTHORIZED / NOT RUN。上述顺序不授权新构建、写卡、启动、PMIC/GRF/PHY 写入或网络发送。任何前置门未通过，停止在该门，不绕过进入 GMAC。
