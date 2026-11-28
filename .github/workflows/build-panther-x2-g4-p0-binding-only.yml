@@ -201,8 +201,8 @@ jobs:
           test -s "$OUT/drivers/soc/rockchip/io-domain.o"
           test -s "$OUT/drivers/mfd/syscon.o"
           nm -a "$OUT/drivers/soc/rockchip/io-domain.o" > work/logs/g4-p0-io-domain-object-symbols.txt
-          grep -q 'rockchip_iodomain_probe' work/logs/io-domain-object-symbols.txt
-          grep -q 'rk3568_iodomain_write' work/logs/io-domain-object-symbols.txt
+          grep -q 'rockchip_iodomain_probe' work/logs/g4-p0-io-domain-object-symbols.txt
+          grep -q 'rk3568_iodomain_write' work/logs/g4-p0-io-domain-object-symbols.txt
 
           nm -a work/output/vmlinux > work/logs/g4-p0-vmlinux-symbols.txt
           for sym in rockchip_iodomain_probe rockchip_iodomain_write rk808_regulator_probe syscon_node_to_regmap; do
