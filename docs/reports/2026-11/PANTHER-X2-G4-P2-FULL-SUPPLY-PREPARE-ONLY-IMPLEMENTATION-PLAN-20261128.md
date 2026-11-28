@@ -1,6 +1,6 @@
 # Panther X2 Project A — G4-P2 Full-Supply IO-domain PREPARE-ONLY 实施计划（2026-11-28）
 
-- 状态：**DESIGN READY FOR BUILD-WORKFLOW REVIEW；尚未创建/运行 workflow，尚无 artifact**
+- 状态：**PASS_PREPARE_ONLY（Actions run 46139238851；artifact 15260906859）；runtime NOT VERIFIED / hardware authorization NOT GRANTED**
 - 当前阶段：静态供电解析链已闭合；准备一份只改变 IO-domain child status 的 PREPARE-ONLY runtime 候选
 - 目的：在 GMAC1/MDIO/RTL8211F 仍全部 disabled 时，单独验证 Linux 6.18.63 的真实九路 IO-domain supply lookup / notifier / selector 路径
 - 重要边界：PREPARE-ONLY 只允许云端构建和封装；不能自动授权写入 SU08G 或启动 Panther X2
@@ -94,3 +94,69 @@ G4-P1 provider readiness（CONDITIONAL PASS）
 ## 8. 本报告安全边界
 
 本报告仅依据已归档源码、DTS、G3/G4-P0 build artifact 清单和历史日志制定。没有访问 Panther X2，没有创建或启动候选 artifact，没有刷写 SU08G，没有访问 SN64G/eMMC，没有执行 PMIC/GRF/GPIO/clock/reset/MDIO 操作，没有发送网络帧。
+
+## 9. 2026-11-28 PREPARE-ONLY workflow 实际构建结果
+
+### 9.1 Workflow 结果
+
+- Workflow：`.github/workflows/package-panther-x2-g4-p2-full-supply.yml`
+- Actions run：`46139238851`
+- 结果：**SUCCESS**
+- Artifact：`panther-x2-project-a-g4-p2-full-supply-PREPARE-ONLY`
+- Artifact ID：`15260906859`
+- Artifact 大小：224,182,789 bytes
+- 关键提交：workflow 初版 `ffd06c063bb7d23a197bbe75724caa93575aca27`；shell assertion 修正 `f1fe25b420f1b04e8049b6c1a26821d7d6b2eb2e`
+
+### 9.2 已通过的构建门
+
+| Gate | 结果 | 证据 |
+|---|---|---|
+| G4-P0 / G3 build / G3 runtime 三份冻结 artifact 下载与 SHA256SUMS 校验 | PASS | workflow verification step |
+| G3 build DTB 与 G3 runtime DTB 完全一致 | PASS | 两份 DTB SHA256 相同 |
+| G4-P0 Image/config 哈希与冻结值一致 | PASS | Image `b34b8f...`；config `c990c9...` |
+| IO-domain 九个 supply 属性均存在 | PASS | `G4-P2-SUPPLY-PHANDLE-AUDIT.txt` |
+| 九个 supply phandle 与 G3 baseline 完全一致 | PASS | 逐项比较 |
+| RK809 PMIC `vcc9-supply` 指向 root `vcc3v3-sys-regulator` phandle | PASS | DTB fdtget 比较 |
+| `vcc3v3_sys` 为 fixed regulator 且 min/max 均为 3,300,000 µV | PASS | DTB fdtget 比较 |
+| DTB logical diff 只有 IO-domain status disabled → okay | PASS | canonical DTS 完整字符串比较 |
+| GMAC1 / MDIO / RTL8211F 仍 disabled | PASS | DTB status gates |
+| eMMC / TF SDMMC0 / SDIO / GPU / SARADC 仍 disabled | PASS | DTB status gates |
+| G4-P0 Image 中 IO-domain built-in、RK809 provider built-in、STMMAC/MDIO/PHY 关闭 | PASS | frozen kernel.config gates |
+| initramfs BusyBox applet / shell syntax / unpacked file equality | PASS | qemu-aarch64-static + cpio round-trip |
+| SU08G-sized image GPT/ext4 / U-Boot LBA / boot files read-only remount verification | PASS | runner-only image packaging step |
+| 最终 artifact SHA256SUMS | PASS | 25 entries |
+
+### 9.3 独立下载后的 artifact 复核
+
+已通过 GitHub artifact download 取得 ZIP，并在本地对 ZIP 内部内容独立核验：
+
+- `output/SHA256SUMS`：25 个文件条目全部匹配，0 mismatch；
+- canonical DTS 再次归一化后与 G3 baseline 完全一致，唯一差异为 IO-domain status；
+- 压缩 TF image 的 zstd integrity test 通过；
+- 独立解压流 SHA256 与构建时 manifest 中原始 7,948,206,080-byte image SHA256 完全一致。
+
+核心哈希：
+- G4-P2 DTB：`41253336c0e69b7431e0d095573724c087734bb310143e1848d8da7639a7c9be`
+- G4-P2 Image：`b34b8faaa34bcb843d82f11423489b434c1e2f329fedab1d81754fd192723090`
+- G4-P2 initramfs cpio.gz：`ee83fc75af6a8a2772a87c8df00390b4cc81163795ccb31af9df0572f7a36aa5`
+- 7,948,206,080-byte TF image：`5917c0af1905ec06da0cd9a06b6169986a6e7c705280b7ac02fe3d9098c0ce15`
+- compressed image zst：`3c626264c0ddf28518373b0e0441156355073c44ffd1c161525413ced421f145`
+
+### 9.4 最终判定与边界
+
+**G4-P2 PREPARE-ONLY = PASS。G4-P2 full-supply runtime = NOT VERIFIED。**
+
+本轮 workflow 只在 GitHub runner 上构建和封装文件。artifact manifest 明确记录：
+- `runtime_probe=not_executed`
+- `selector_writes=not_executed_during_build`
+- `physical_media_writes=none`
+- `hardware_authorization=NOT_GRANTED`
+- `target_media=SU08G only`
+- `SN64G=untouched`
+- `eMMC=untouched`
+
+该 artifact 的 DTB 已启用 IO-domain child 并保留九路供电映射。未来启动它会执行真实 regulator voltage lookup、notifier registration 和 PMU GRF selector writes；不能把 build PASS 当成 runtime PASS，也不能据此自动刷写或启动。
+
+### 9.5 下一步唯一任务
+
+提交单独的 G4-P2 RAM-only hardware authorization request。只有用户明确授权后，才可使用 Etcher 将 PREPARE-ONLY image 写入 **SU08G**，执行一次 RAM-only boot session；不得触碰 SN64G/eMMC。启动后只做预先定义的只读 dmesg/sysfs/deferred-probe 收集，不访问 raw PMIC/GRF，不启用 GMAC/MDIO/PHY，不 open netdev，不发送帧。若 IO-domain probe 失败或 deferred，立即停止并回到静态证据分析。
