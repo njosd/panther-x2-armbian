@@ -4,7 +4,7 @@
 - 项目统一名称：**项目 A（Panther X2 最小系统与基础网络验证）**
 - 文档角色：唯一权威总路线图
 - 配套执行文档：[项目 A 分阶段实施计划](PANTHER-X2-PROJECT-A-IMPLEMENTATION-PLAN-20261121.md)
-- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测，GMAC1/MDIO/RTL8211F 仍 disabled，Ethernet 6.18 对黄金基线等价性未测试。G4-P0 collector 首轮因 BusyBox 无 `[` applet 出错，14 个条件判断已在 commit `205053232799114ce8ecb15354831900a9db4d0f` 改用 `test`；目标 BusyBox ash/CI 验证待完成，不安排第二次实机启动。详见 G4-P0 runtime binding 与 golden deviation 报告。
+- 当前状态（2026-11-28）：G4-P0 binding-only runtime PASS：Linux 6.18.63+ 在 Panther X2 上进入 RAM initramfs；`rockchip-iodomain` 已绑定 `fdc20000.syscon:io-domains`，RK808 regulator provider 已绑定，21 个 regulator class 对象注册，关键四路 supply regulator 对象可识别。G4-P full nine-supply mapping 继续 NO-GO；selector transaction 未运行时实测，物理 rail 未测，GMAC1/MDIO/RTL8211F 仍 disabled，Ethernet 6.18 对黄金基线等价性未测试。G4-P0 collector 首轮因 BusyBox 无 `[` applet 出错，14 个条件判断已在 commit `205053232799114ce8ecb15354831900a9db4d0f` 改用 `test`；目标 BusyBox ash/CI 验证已 PASS（Actions run `46120998151`，artifact `15253991870`），不安排第二次实机启动。详见 G4-P0 runtime binding 与 golden deviation 报告。
 
 ## 0. 统一项目定义
 
