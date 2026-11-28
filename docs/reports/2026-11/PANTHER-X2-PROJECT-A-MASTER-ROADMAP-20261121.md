@@ -1082,3 +1082,13 @@ G4-P2 full-supply PREPARE-ONLY workflow `46139238851` 成功，artifact `1526090
 ### G4-P2 硬件验证授权状态（2026-11-28）
 
 用户已明确授权一次 SU08G Etcher 写卡及 RAM-only boot session。授权范围严格限于 G4-P2 full-supply IO-domain 只读观察；不包括 SN64G/eMMC、持久存储写入、raw PMIC/GRF、GMAC/MDIO/PHY 或任何 TX 操作。物理操作待用户执行，runtime 仍 NOT VERIFIED。
+
+### 2026-11-28 G4-P2 full-supply runtime 实机结果：PASS-CONDITIONAL
+
+用户完成授权的 SU08G RAM-only boot 并提交完整串口/运行采集日志（2,065 行，55,979 bytes，SHA256 8cfba60483e94eb4fb27d1b06e6432f13c6d7a790c81cedc5cb5e51e69ca2272）。Linux 6.18.63+ 正常进入 RAM initramfs，识别 Panther X2、4GiB、4 CPUs；IO-domain platform device fdc20000.syscon:io-domains 的 driver symlink 指向 rockchip-iodomain，RK809 rk808-regulator.3.auto 绑定 rk808-regulator。运行时设备树中九路 supply 属性全部存在；相关 regulator class entries 可见，vcc3v3_pmu 3.3V、vcc_1v8 1.8V、vccio_sd 3.3V、vcc3v3_sys 3.3V 等软件状态/电压值已记录。settled deferred-probe list 不包含 IO-domain，只有 USB 与视频 codec power-domain 相关 pending 项。
+
+**G4-P2 full-supply IO-domain probe/binding = PASS；G4-P2 runtime = PASS-CONDITIONAL。** 这关闭了“full nine-supply mapping 尚未实机 probe”的阻塞点。仍未验证 PMUGRF selector write 的总线事务/寄存器 readback，也未测物理 IO rail；驱动对 selector regmap_write 返回值检查不充分，因此不能声称 selector 硬件结果或物理电压已验证。vcc_3v3 无本地 microvolts sysfs 属性，但 RK809 SWITCH_REG1 的 upstream vcc9-supply -> vcc3v3_sys 路径已闭合，且 IO-domain probe 成功绑定；不能将该 sysfs 属性缺失单独判为失败。
+
+本次未启用 GMAC/MDIO/PHY、未 open netdev、未发送帧；没有挂载持久文件系统或写入 eMMC/SN64G。SU08G 用于本次授权测试。详见 PANTHER-X2-G4-P2-FULL-SUPPLY-RUNTIME-RESULT-20261128.md。
+
+**下一阶段：R7-prep build-only。** 先云端构建/审计 STMMAC + Rockchip DWMAC 软件闭包，GMAC1/MDIO/PHY DT 仍 disabled；完成并冻结后，才进入 R7-A/G5-A（只改 GMAC parent DT status）。GMAC 继续留到最后启用。R7-A/B/C/D 均未运行、未获硬件授权。
