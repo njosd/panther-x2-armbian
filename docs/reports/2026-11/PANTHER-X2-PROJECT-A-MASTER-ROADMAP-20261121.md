@@ -1057,3 +1057,13 @@ G4-P0 已完成一次经明确授权的 SU08G RAM-only 实机启动。Linux 6.18
 新增 `PANTHER-X2-G4-P2-PRE-GMAC-SUPPLY-IODOMAIN-SAFETY-AUDIT-20261128.md`。本轮从 Dropbox 归档的 `kernel-config-evidence.zip` 只读提取 6.1.65 config，确认 CONFIG_MFD_RK808=y、CONFIG_REGULATOR_RK808=y、CONFIG_ROCKCHIP_IODOMAIN=y。固定源码比较进一步确认 6.1.65 与 6.1.116 的 rk808-regulator.c、io-domain.c、Panther X2 DTS 逐字节相同；6.1.65 与 6.18.63 的关键 supply index、SWITCH_REG1 无 voltage getter、IO-domain probe 顺序与 index 1 selector write 路径一致。因此现有 partial-write 风险并非已证实的 6.18 新增 regression。
 
 黄金系统 Ethernet 正常并不能证明 IO-domain child 曾成功 probe；6.1.65 原始 DTB 的 PMIC/IO-domain 子树 binary diff、6.1.116 实际 DTB 的 IO-domain status/supply 解码及黄金运行日志中的 IO-domain probe 证据仍缺。G4-P2 维持 HOLD，full nine-supply mapping 继续 NO-GO；不改 driver、不伪造 fixed regulator、不启动 GMAC。下一步只补齐既有黄金 DTB/config/log 资产证据。
+
+### 2026-11-28 G4-P2 供电链路关键纠正（以专项报告 §7 为准）
+
+撤销此前将 SWITCH_REG1 无本地 voltage getter 等同于 regulator_get_voltage 必然失败的推断。遗漏的关键链路为：RK809 SWITCH_REG1 descriptor `supply_name="vcc9"` → RK809 PMIC parent node `vcc9-supply = <&vcc3v3_sys>` → fixed regulator `vcc3v3_sys`（3.3V，always-on/boot-on）。Linux regulator core 在 provider parent OF node 上解析该上游 supply；当 SWITCH_REG1 本地没有 voltage getter 时，`regulator_get_voltage_rdev()` 可递归读取已解析的 upstream regulator。
+
+两份既有 6.12.81 历史 UART 日志（Project B 仅复用非 GMAC 部分）均打印 IO-domain 九路供电电压，包括 vccio1/vccio5/vccio6/vccio7 为 3.3V，说明历史运行中对应 voltage lookup 成功。此证据不是 6.1.65/6.1.116 黄金日志，也不是当前 6.18 runtime 证明；不重开 Project B TX 调查。
+
+因此，原先“index 1 VSEL2 写入后 index 2 必然因 SWITCH_REG1 无 getter 失败”的 partial-write 预测已撤销，不能再据此维持 full-supply NO-GO。保留 selector regmap_write 返回值未检查、VSEL readback/物理 rail 未验证等真实限制。G4-P2 修正为 CONDITIONAL PASS（静态供电解析链闭合）；6.18 full-supply runtime 尚未验证。
+
+下一步顺序调整为：G4-P2 full-supply PREPARE-ONLY（仅启用 IO-domain child，九路供电映射保持原样，GMAC/MDIO/PHY disabled）→ 独立授权后 RAM-only 验证 IO-domain voltage lookup/bind → R7-prep build-only → R7-A/G5-A 最后启用 GMAC → R7-B → R7-C → R7-D。PREPARE-ONLY artifact 不构成实机启动授权。
