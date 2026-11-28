@@ -9,14 +9,14 @@ export PATH HOME
 OUT=/run/g4-p0
 mkdir -p "$OUT"
 
-if [ ! -r /proc/cmdline ]; then
+if ! test -r /proc/cmdline; then
     mount -t proc proc /proc
 fi
-if [ ! -d /sys/bus/platform/devices ]; then
+if ! test -d /sys/bus/platform/devices; then
     mount -t sysfs sysfs /sys
 fi
 mkdir -p /sys/kernel/debug
-if [ ! -r /sys/kernel/debug/devices_deferred ]; then
+if ! test -r /sys/kernel/debug/devices_deferred; then
     mount -t debugfs debugfs /sys/kernel/debug
 fi
 
@@ -41,9 +41,9 @@ fi
 {
     echo "=== IO-domain DT node and supply-property absence ==="
     NODE=/proc/device-tree/syscon@fdc20000/io-domains
-    if [ -d "$NODE" ]; then
+    if test -d "$NODE"; then
         echo "IO-domain node: present"
-        if [ -r "$NODE/status" ]; then
+        if test -r "$NODE/status"; then
             echo "status:"
             cat "$NODE/status"
             echo
@@ -52,7 +52,7 @@ fi
         fi
         for prop in pmuio1-supply pmuio2-supply vccio1-supply vccio2-supply \
                     vccio3-supply vccio4-supply vccio5-supply vccio6-supply vccio7-supply; do
-            if [ -e "$NODE/$prop" ]; then
+            if test -e "$NODE/$prop"; then
                 echo "ERROR: unexpected supply property present: $prop"
             else
                 echo "ABSENT as designed: $prop"
@@ -75,8 +75,8 @@ fi
         /proc/device-tree/ethernet@fe010000/mdio/ethernet-phy@0; do
         echo
         echo "[$node]"
-        if [ -d "$node" ]; then
-            if [ -r "$node/status" ]; then
+        if test -d "$node"; then
+            if test -r "$node/status"; then
                 cat "$node/status"
                 echo
             else
@@ -93,9 +93,9 @@ fi
     DEV=/sys/bus/platform/devices/fdc20000.syscon:io-domains
     DRIVER=/sys/bus/platform/drivers/rockchip-iodomain
     echo "platform device:"
-    if [ -e "$DEV" ]; then
+    if test -e "$DEV"; then
         ls -l "$DEV"
-        if [ -e "$DEV/driver" ]; then
+        if test -e "$DEV/driver"; then
             echo "driver link: PRESENT (driver bound)"
             ls -l "$DEV/driver"
         else
@@ -106,21 +106,21 @@ fi
     fi
     echo
     echo "driver directory:"
-    if [ -d "$DRIVER" ]; then
+    if test -d "$DRIVER"; then
         ls -l "$DRIVER"
     else
         echo "rockchip-iodomain driver directory: ABSENT"
     fi
     echo
     echo "parent PMUGRF platform device:"
-    if [ -e /sys/bus/platform/devices/fdc20000.syscon ]; then
+    if test -e /sys/bus/platform/devices/fdc20000.syscon; then
         ls -l /sys/bus/platform/devices/fdc20000.syscon
     else
         echo "parent platform device path absent; syscon regmap may still be consumer-created"
     fi
     echo
     echo "regmap debugfs directory listing only (no register files are read):"
-    if [ -d /sys/kernel/debug/regmap ]; then
+    if test -d /sys/kernel/debug/regmap; then
         ls -l /sys/kernel/debug/regmap
     else
         echo "regmap debugfs directory unavailable"
@@ -129,7 +129,7 @@ fi
 
 {
     echo "=== Deferred probe state ==="
-    if [ -r /sys/kernel/debug/devices_deferred ]; then
+    if test -r /sys/kernel/debug/devices_deferred; then
         cat /sys/kernel/debug/devices_deferred
     else
         echo "devices_deferred unavailable"
